@@ -3,13 +3,13 @@ package daemon
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/AliyunContainerService/terway/deviceplugin"
+	"github.com/AliyunContainerService/terway/types"
 	"github.com/d2g/dhcp4"
 	"github.com/denverdino/aliyungo/common"
 	"github.com/denverdino/aliyungo/ecs"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
-	"gitlab.alibaba-inc.com/cos/terway/types"
-	"gitlab.alibaba-inc.com/cos/terway/deviceplugin"
 	"io/ioutil"
 	"math/rand"
 	"net"
@@ -20,14 +20,14 @@ import (
 )
 
 const (
-	eniNamePrefix  = "eni-cni-"
-	eniDescription = "interface create by eni-cni-plugin"
-	eniTimeout     = 60
-	metadataBase   = "http://100.100.100.200/latest/meta-data/"
-	mainEniPath    = "mac"
-	enisPath       = "network/interfaces/macs/"
-	eniIDPath      = "network/interfaces/macs/%s/network-interface-id"
-	eniIPPath      = "network/interfaces/macs/%s/primary-ip-address"
+	eniNamePrefix    = "eni-cni-"
+	eniDescription   = "interface create by eni-cni-plugin"
+	eniTimeout       = 60
+	metadataBase     = "http://100.100.100.200/latest/meta-data/"
+	mainEniPath      = "mac"
+	enisPath         = "network/interfaces/macs/"
+	eniIDPath        = "network/interfaces/macs/%s/network-interface-id"
+	eniIPPath        = "network/interfaces/macs/%s/primary-ip-address"
 	instanceTypePath = "instance/instance-type"
 )
 
@@ -184,7 +184,7 @@ func (rl *ratelimit) Take() {
 
 func NewRateLimiter(thro int) *ratelimit {
 	rl := &ratelimit{
-		ticker: time.NewTicker(30 * time.Second),
+		ticker:   time.NewTicker(30 * time.Second),
 		throttle: make(chan time.Time, 3),
 	}
 	go func() {
@@ -377,7 +377,6 @@ func (p *Pool) getMainMacFromMetadata() (string, error) {
 	return eniMainMac, nil
 }
 
-
 // to avoid ecs metadata wrong mac address bug
 func (p *Pool) getMainMacFromEth0() (string, error) {
 	inf, err := net.InterfaceByName("eth0")
@@ -433,7 +432,7 @@ func newPool(cfg *types.PoolConfig) (*Pool, error) {
 	pool := &Pool{
 		min:        cfg.MinPoolSize,
 		max:        cfg.MaxPoolSize,
-		rl:			NewRateLimiter(3),
+		rl:         NewRateLimiter(3),
 		poolConfig: cfg,
 		hotPlug:    cfg.HotPlug,
 	}

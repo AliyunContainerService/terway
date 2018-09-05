@@ -5,7 +5,7 @@ import (
 	"os/exec"
 
 	"fmt"
-	"gitlab.alibaba-inc.com/cos/terway/types"
+	"github.com/AliyunContainerService/terway/types"
 	"os"
 )
 

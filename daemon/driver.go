@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"github.com/AliyunContainerService/terway/types"
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ip"
@@ -11,7 +12,6 @@ import (
 	"github.com/j-keck/arping"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
-	"gitlab.alibaba-inc.com/cos/terway/types"
 	"net"
 	"os"
 

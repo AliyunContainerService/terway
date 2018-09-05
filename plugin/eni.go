@@ -1,9 +1,9 @@
 package main
 
 import (
+	"github.com/AliyunContainerService/terway/version"
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types/current"
-	"gitlab.alibaba-inc.com/cos/terway/version"
 
 	"fmt"
 	"github.com/containernetworking/cni/pkg/types"

@@ -4,14 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"github.com/AliyunContainerService/terway/tc"
+	"github.com/AliyunContainerService/terway/types"
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/denverdino/aliyungo/metadata"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
-	"gitlab.alibaba-inc.com/cos/terway/tc"
-	"gitlab.alibaba-inc.com/cos/terway/types"
 	"io/ioutil"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -280,7 +280,7 @@ func createPool(cfg *types.Configure) (*Pool, error) {
 		MinPoolSize:   cfg.MinPoolSize,
 		AccessId:      cfg.AccessId,
 		AccessSecret:  cfg.AccessSecret,
-		HotPlug:       cfg.HotPlug=="true",
+		HotPlug:       cfg.HotPlug == "true",
 	}
 	meta := metadata.NewMetaData(nil)
 	zone, err := meta.Zone()

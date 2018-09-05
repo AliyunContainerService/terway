@@ -2,12 +2,12 @@ package daemon
 
 import (
 	"fmt"
+	"github.com/AliyunContainerService/terway/deviceplugin"
 	"gopkg.in/yaml.v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"net"
 	"os"
 	"strings"
-	"gitlab.alibaba-inc.com/cos/terway/deviceplugin"
 )
 
 const K8S_POD_NAME_ARGS = "K8S_POD_NAME"

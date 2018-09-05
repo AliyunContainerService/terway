@@ -2,9 +2,9 @@ package tc
 
 import (
 	"fmt"
+	"github.com/AliyunContainerService/terway/idm"
+	"github.com/AliyunContainerService/terway/types"
 	log "github.com/sirupsen/logrus"
-	"gitlab.alibaba-inc.com/cos/terway/idm"
-	"gitlab.alibaba-inc.com/cos/terway/types"
 	"net"
 	"regexp"
 	"strconv"

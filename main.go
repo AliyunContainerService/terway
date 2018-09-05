@@ -1,8 +1,8 @@
 package main
 
 import (
+	"github.com/AliyunContainerService/terway/daemon"
 	log "github.com/sirupsen/logrus"
-	"gitlab.alibaba-inc.com/cos/terway/daemon"
 )
 
 const DEFAULT_CONFIG_PATH = "/etc/eni/eni.json"
