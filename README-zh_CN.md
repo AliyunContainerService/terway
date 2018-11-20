@@ -1,25 +1,25 @@
-# Terway CNI Network Plugin
+# Terway 网络插件
 
-English | [简体中文](./README-zh_CN.md)
+[English](./README.md) | 简体中文
 
-## Install Kubernetes
-Install Kubernetes via Kubeadm: https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
+## 安装Kubernetes
+使用kubeadm的指导文档 https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/ 来创建集群
 
-After setup kubernetes cluster. Change `iptables` `Forward` default policy to `ACCEPT` on every node of cluster: `iptables -P FORWARD ACCEPT`.
+安装好了之后要将iptables的policy换成ACCEPT，`iptables -P FORWARD ACCEPT`
 
-Make sure cluster up and healthy by `kubectl get cs`.
+通过`kubectl get cs`验证集群安装完成
 
-## Install Terway network plugin
+## 安装terway插件
 
-Replace `Network` and `AccessKey/AccessKeySecret` in [terway.yml](./terway.yml) with your cluster pod subnet and aliyun openapi credentials. Then use `kubectl apply -f terway.yml` to install Terway into kubernetes cluster.
+修改[terway.yml](./terway.yml)文件中的eni.conf的配置中的授权和网段配置，以及Network的网段配置，然后通过`kubectl apply -f terway.conf`来安装terway插件。
 
-Using `kubectl get ds terway -n kube-system` to watch plugin launching. Plugin install completed while terway daemonset available pods equal to nodes.
+使用`kubectl get ds terway`看到插件在每个节点上都运行起来后，表明插件安装成功。
 
-## Terway network plugin usage:
+## 验证terway的功能
 
-### Vpc network container:
-
-Terway will config pod's address using node's `podCidr` when pod not have any especial config. eg:
+### 一般VPC网络的容器
+在容器没有做任何特殊配置时，terway会通过在节点上的podCidr中去分配地址然后配置给容器。
+例如：
 
 ```
 [root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl run -it --rm --image busybox busybox
@@ -44,8 +44,9 @@ If you don't see a command prompt, try pressing enter.
        valid_lft forever preferred_lft forever
 ```   
 
-### Using ENI network interface to get the performance equivalent to the underlying network.
-Config `eni` request `aliyun/eni: 1` in one container of pod. The following example will create an Nginx Pod and assign an ENI:
+### 使用ENI弹性网卡获得等同于底层网络的性能
+
+在Pod的其中一个container的`requests`中增加对eni的需求： `aliyun/eni: 1`， 下面的例子将创建一个Nginx Pod，并分配一个ENI
 
 ```
 Kind: Pod
@@ -62,6 +63,8 @@ spec:
       limits:
         aliyun/eni: 1
 ```
+
+然后我们exec到这个容器中就可以看到terway创建并绑定了一个ECS的弹性网卡：
 
 ```
 [root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl exec -it nginx sh
@@ -84,11 +87,11 @@ spec:
        valid_lft forever preferred_lft forever
 ```
 
-### Using network policy to limit accessible between containers.
+### 使用NetworkPolicy来限制容器间访问
 
-The Terway plugin is compatible with NetworkPolicy in the standard K8S to control access between containers, for example:
+Terway插件兼容标准的K8S中的NetworkPolicy来控制容器间的访问，例如：
 
-1. Create and expose an deployment for test
+1. 启动一个用于测试的服务
 	
 	```
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run nginx --image=nginx --replicas=2
@@ -96,7 +99,7 @@ The Terway plugin is compatible with NetworkPolicy in the standard K8S to contro
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl expose deployment nginx --port=80
 	service "nginx" exposed
 	```
-2. Run busybox to test connection to deployment:
+2. 验证到这个服务是可以访问的
 	
 	```
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --image=busybox /bin/sh
@@ -106,7 +109,7 @@ The Terway plugin is compatible with NetworkPolicy in the standard K8S to contro
 	/ #
 	```
 
-3. Config network policy，only allow pod access which have `run: nginx` label:
+3. 配置network policy规则，只允许某些标签的服务访问
 	
 	```
 	kind: NetworkPolicy
@@ -124,7 +127,7 @@ The Terway plugin is compatible with NetworkPolicy in the standard K8S to contro
 	          access: "true"
 	  ```
 
-4. The Pod access service without the specified label is rejected, and the container of the specified label can be accessed normally.
+4. 测试没有指定标签的Pod访问服务被拒绝了，而指定标签的容器能够正常的访问
 
 	```
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --image=busybox /bin/sh
@@ -142,9 +145,9 @@ The Terway plugin is compatible with NetworkPolicy in the standard K8S to contro
 	```  
 	
 
-### Limit container in/out bandwidth
+### 限制容器的出入带宽
 
-The Terway network plugin can limit the container's traffic via limit policy in pod's annotations. For example:
+Terway插件通过配置容器网卡上的限流规则来实现对容器的流量控制，避免由于单个容器的流量占满整个节点的流量，通过配置Pod上的`k8s.aliyun.com/ingress-bandwidth`和`k8s.aliyun.com/egress-bandwidth`分别来配置容器上的进入的和出去的带宽，例如：
 
 ```
 apiVersion: v1
