@@ -1,6 +1,8 @@
 # Terway 网络插件
 CNI plugin for alibaba cloud VPC/ENI 
 
+[![CircleCI](https://circleci.com/gh/AliyunContainerService/terway.svg?style=svg)](https://circleci.com/gh/AliyunContainerService/terway)
+
 [English](./README.md) | 简体中文
 
 ## 安装Kubernetes

@@ -1,6 +1,8 @@
 # Terway CNI Network Plugin
 CNI plugin for alibaba cloud VPC/ENI 
 
+[![CircleCI](https://circleci.com/gh/AliyunContainerService/terway.svg?style=svg)](https://circleci.com/gh/AliyunContainerService/terway)
+
 English | [简体中文](./README-zh_CN.md)
 
 ## Try It:
