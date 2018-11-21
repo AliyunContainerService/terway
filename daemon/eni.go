@@ -256,7 +256,11 @@ func setDefault(cfg *types.Configure) error {
 		cfg.MaxPoolSize = 5
 	}
 
-	if cfg.HotPlug == "" || cfg.HotPlug == "false" || cfg.HotPlug == "0" {
+	if cfg.HotPlug == "" {
+		cfg.HotPlug = "true"
+	}
+
+	if cfg.HotPlug == "false" || cfg.HotPlug == "0" {
 		cfg.HotPlug = "false"
 	}
 

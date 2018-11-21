@@ -36,6 +36,7 @@ type VETHPlugin struct {
 	Subnet         *net.IPNet
 	ifName         string
 	ipam           string
+	containerId    string
 }
 
 type CmdArgs struct {
@@ -241,6 +242,7 @@ func (vp *VETHPlugin) Add(args *CmdArgs, result *current.Result) error {
 	} else {
 		vp.ifName = vethName
 	}
+	vp.containerId = args.ContainerID
 	if err := vp.addVeth(args.Netns, args.PodNS, args.PodName, result); err != nil {
 		return err
 	}
@@ -326,6 +328,7 @@ func (vp *VETHPlugin) addVeth(netns ns.NetNS, namespace, podname string, result 
 		os.Setenv("CNI_PATH", "/opt/cni/bin/")
 		os.Setenv("CNI_NETNS", netns.Path())
 		os.Setenv("CNI_IFNAME", vethName)
+		os.Setenv("CNI_CONTAINERID", vp.containerId)
 
 		r, err := ipam.ExecAdd(DELEGATE_PLUGIN, []byte(fmt.Sprintf(DELEGATE_CONF, vp.Subnet.String())))
 		log.Infof("delegate result: %+v, %v", r, err)
@@ -366,6 +369,7 @@ func (vp *VETHPlugin) Del(args *skel.CmdArgs, result *current.Result) error {
 	os.Setenv("CNI_PATH", "/opt/cni/bin/")
 	os.Setenv("CNI_NETNS", netns.Path())
 	os.Setenv("CNI_IFNAME", vethName)
+	os.Setenv("CNI_CONTAINERID", args.ContainerID)
 
 	err = ipam.ExecDel(DELEGATE_PLUGIN, []byte(fmt.Sprintf(DELEGATE_CONF, vp.Subnet.String())))
 	if err != nil {

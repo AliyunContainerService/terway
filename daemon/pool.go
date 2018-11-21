@@ -486,7 +486,7 @@ func newPool(cfg *types.PoolConfig) (*Pool, error) {
 			return nil, err
 		}
 		instanceType, _ := itVal.(string)
-		eniCap, err = deviceplugin.GetEniCapByInstanceType(instanceType)
+		eniCap, err = deviceplugin.GetEniCapByInstanceType(instanceType, pool.aliClientMgr.ecs, 1, 0)
 		if err != nil {
 			return nil, err
 		}
