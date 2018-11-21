@@ -1,4 +1,5 @@
 # Terway 网络插件
+CNI plugin for alibaba cloud VPC/ENI 
 
 [English](./README.md) | 简体中文
 

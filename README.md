@@ -1,23 +1,25 @@
 # Terway CNI Network Plugin
+CNI plugin for alibaba cloud VPC/ENI 
 
 English | [简体中文](./README-zh_CN.md)
 
-## Install Kubernetes
+## Try It:
+### Install Kubernetes
 Install Kubernetes via Kubeadm: https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
 
 After setup kubernetes cluster. Change `iptables` `Forward` default policy to `ACCEPT` on every node of cluster: `iptables -P FORWARD ACCEPT`.
 
 Make sure cluster up and healthy by `kubectl get cs`.
 
-## Install Terway network plugin
+### Install Terway network plugin
 
 Replace `Network` and `AccessKey/AccessKeySecret` in [terway.yml](./terway.yml) with your cluster pod subnet and aliyun openapi credentials. Then use `kubectl apply -f terway.yml` to install Terway into kubernetes cluster.
 
 Using `kubectl get ds terway -n kube-system` to watch plugin launching. Plugin install completed while terway daemonset available pods equal to nodes.
 
-## Terway network plugin usage:
+### Terway network plugin usage:
 
-### Vpc network container:
+#### Vpc network container:
 
 Terway will config pod's address using node's `podCidr` when pod not have any especial config. eg:
 
@@ -44,7 +46,7 @@ If you don't see a command prompt, try pressing enter.
        valid_lft forever preferred_lft forever
 ```   
 
-### Using ENI network interface to get the performance equivalent to the underlying network.
+#### Using ENI network interface to get the performance equivalent to the underlying network.
 Config `eni` request `aliyun/eni: 1` in one container of pod. The following example will create an Nginx Pod and assign an ENI:
 
 ```
@@ -84,7 +86,7 @@ spec:
        valid_lft forever preferred_lft forever
 ```
 
-### Using network policy to limit accessible between containers.
+#### Using network policy to limit accessible between containers.
 
 The Terway plugin is compatible with NetworkPolicy in the standard K8S to control access between containers, for example:
 
@@ -142,7 +144,7 @@ The Terway plugin is compatible with NetworkPolicy in the standard K8S to contro
 	```  
 	
 
-### Limit container in/out bandwidth
+#### Limit container in/out bandwidth
 
 The Terway network plugin can limit the container's traffic via limit policy in pod's annotations. For example:
 
@@ -163,3 +165,20 @@ spec:
     ports:
     - containerPort: 80
 ```	
+
+## Build Terway
+Prerequisites:
+
+* Go >= 1.10
+
+```
+go get github.com/AliyunContainerService/terway
+cd $GOPATH/github.com/AliyunContainerService/terway/ci
+# This will create a new docker image named acs/terway:<version>
+./build.sh
+```
+
+## Contribute
+
+You are welcome to make new issues and pull reuqests.
+
