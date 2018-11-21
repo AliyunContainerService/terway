@@ -9,11 +9,11 @@ cd ../ci
 cp -r ../script .
 
 cat > Dockerfile <<EOF
-FROM registry.aliyuncs.com/wangbs/netdia:latest
+FROM alpine:3.8
 COPY script/ /bin/
-RUN apk --update add ipset bash && chmod +x /bin/traffic && chmod +x /bin/policyinit.sh && rm -f /var/cache/apk/*
+RUN apk --update add curl ipset bash iproute2 ethtool bridge-utils && chmod +x /bin/traffic && chmod +x /bin/policyinit.sh && rm -f /var/cache/apk/*
 RUN curl -sSL -o /bin/calico-felix https://docker-plugin.oss-cn-shanghai.aliyuncs.com/calico-felix && chmod +x /bin/calico-felix
 COPY terwayd terway /usr/bin/
 ENTRYPOINT ["/usr/bin/terwayd"]
 EOF
-docker build --no-cache -t acs/terway:1.0-$GIT_SHA . 
+docker build --no-cache -t acs/terway:v0.1.0-$GIT_SHA . 

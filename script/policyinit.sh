@@ -1,6 +1,6 @@
 #!/bin/sh
 export DATASTORE_TYPE=kubernetes
-export FELIX_LOGSEVERITYSYS=info
+export FELIX_LOGSEVERITYSYS=none
 export CALICO_NETWORKING_BACKEND=none
 export CLUSTER_TYPE=k8s,canal
 export CALICO_DISABLE_FILE_LOGGING=true
@@ -11,6 +11,7 @@ export WAIT_FOR_DATASTORE=true
 export IP=""
 export FELIX_DEFAULTENDPOINTTOHOSTACTION=ACCEPT
 export FELIX_HEALTHENABLED=true
+export FELIX_LOGFILEPATH=/dev/null
 exec 2>&1
 if [ ! -z $NODENAME ]; then
     export FELIX_FELIXHOSTNAME=$NODENAME

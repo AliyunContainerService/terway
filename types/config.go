@@ -10,7 +10,7 @@ type Configure struct {
 	MinPoolSize   int    `yaml:"min_pool_size" json:"min_pool_size"`
 	Prefix        string `yaml:"prefix" json:"prefix"`
 	SecurityGroup string `yaml:"security_group" json:"security_group"`
-	HotPlug       string   `yaml:"hot_plug" json:"hot_plug"`
+	HotPlug       string `yaml:"hot_plug" json:"hot_plug"`
 }
 
 type PoolConfig struct {

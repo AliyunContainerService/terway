@@ -30,7 +30,7 @@ type EniDevicePlugin struct {
 	socket string
 	server *grpc.Server
 	count  int
-	stop chan struct{}
+	stop   chan struct{}
 	sync.Locker
 }
 
@@ -77,7 +77,6 @@ func (m *EniDevicePlugin) Start() error {
 
 	m.server = grpc.NewServer([]grpc.ServerOption{}...)
 	pluginapi.RegisterDevicePluginServer(m.server, m)
-
 
 	m.stop = make(chan struct{}, 1)
 	go m.server.Serve(sock)
@@ -178,7 +177,7 @@ func (m *EniDevicePlugin) cleanup() error {
 
 	for _, preSock := range preSocks {
 		log.Debugf("device plugin file info: %+v", preSock)
-		if eniServerSockRegex.Match([]byte(preSock.Name())) && preSock.Mode() & os.ModeSocket != 0 {
+		if eniServerSockRegex.Match([]byte(preSock.Name())) && preSock.Mode()&os.ModeSocket != 0 {
 			if err = syscall.Unlink(path.Join(pluginapi.DevicePluginPath, preSock.Name())); err != nil {
 				log.Errorf("error on clean up previous device plugin listens, %+v", err)
 			}
@@ -228,8 +227,8 @@ func (m *EniDevicePlugin) watchKubeletRestart() {
 			}
 			err = m.Register(
 				pluginapi.RegisterRequest{
-					Version: pluginapi.Version,
-					Endpoint: path.Base(m.socket),
+					Version:      pluginapi.Version,
+					Endpoint:     path.Base(m.socket),
 					ResourceName: DefaultResourceName,
 				},
 			)
@@ -239,7 +238,7 @@ func (m *EniDevicePlugin) watchKubeletRestart() {
 			return
 		}
 		log.Fatalf("error stat socket: %+v", err)
-	}, time.Second * 30, make(chan struct{}, 1), )
+	}, time.Second*30, make(chan struct{}, 1))
 }
 
 // Serve starts the gRPC server and register the device plugin to Kubelet
@@ -253,12 +252,12 @@ func (m *EniDevicePlugin) Serve(resourceName string) error {
 	log.Infof("Starting to serve on %s", m.socket)
 
 	err = m.Register(
-			pluginapi.RegisterRequest{
-				Version: pluginapi.Version,
-				Endpoint: path.Base(m.socket),
-				ResourceName: resourceName,
-			},
-		)
+		pluginapi.RegisterRequest{
+			Version:      pluginapi.Version,
+			Endpoint:     path.Base(m.socket),
+			ResourceName: resourceName,
+		},
+	)
 	if err != nil {
 		log.Errorf("Could not register device plugin: %v", err)
 		m.Stop()

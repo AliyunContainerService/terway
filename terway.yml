@@ -113,7 +113,7 @@ spec:
       hostNetwork: true
       initContainers:
       - name: terway-init
-        image: registry.cn-hangzhou.aliyuncs.com/wangbs/terway:latest
+        image: registry.aliyuncs.com/acs/terway:v0.1.0
         imagePullPolicy: Always
         securityContext:
           privileged: true
@@ -129,7 +129,7 @@ spec:
           name: lib-modules
       containers:
       - name: terway
-        image: registry.cn-hangzhou.aliyuncs.com/wangbs/terway:latest
+        image: registry.aliyuncs.com/acs/terway:v0.1.0
         imagePullPolicy: Always
         securityContext:
           privileged: true
@@ -152,7 +152,7 @@ spec:
         - mountPath: /var/lib/kubelet/device-plugins
           name: device-plugin-path
       - name: policy
-        image: registry.aliyuncs.com/wangbs/terway
+        image: registry.aliyuncs.com/acs/terway:v0.1.0
         command: ["/bin/policyinit.sh"]
         env:
           - name: NODENAME
