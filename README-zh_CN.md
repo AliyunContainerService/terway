@@ -52,16 +52,14 @@ If you don't see a command prompt, try pressing enter.
 在Pod的其中一个container的`requests`中增加对eni的需求： `aliyun/eni: 1`， 下面的例子将创建一个Nginx Pod，并分配一个ENI
 
 ```
-Kind: Pod
+apiVersion: v1
+kind: Pod
 metadata:
-  labels:
-    app: nginx
+  name: nginx
 spec:
   containers:
   - name: nginx
     image: nginx
-    ports:
-    - containerPort: 80
     resources:
       limits:
         aliyun/eni: 1

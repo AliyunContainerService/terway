@@ -52,16 +52,14 @@ If you don't see a command prompt, try pressing enter.
 Config `eni` request `aliyun/eni: 1` in one container of pod. The following example will create an Nginx Pod and assign an ENI:
 
 ```
-Kind: Pod
+apiVersion: v1
+kind: Pod
 metadata:
-  labels:
-    app: nginx
+  name: nginx
 spec:
   containers:
   - name: nginx
     image: nginx
-    ports:
-    - containerPort: 80
     resources:
       limits:
         aliyun/eni: 1
