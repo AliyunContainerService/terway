@@ -1,0 +1,114 @@
+# Test tomcat page on every node with command:
+# "kubectl get node -o yaml | grep 'address:' | awk '{print $3}' | xargs -n1 -I {} curl -I {}:30080"
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tomcat-deploy
+  labels:
+    app: vpc-samehost-tomcat
+spec:
+  selector:
+    matchLabels:
+      app: vpc-samehost-tomcat
+  template:
+    metadata:
+      labels:
+        app: vpc-samehost-tomcat
+    spec:
+      containers:
+      - image: nginx
+        name: nginx
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomcat-service
+spec:
+  selector:
+    app: vpc-samehost-tomcat
+  ports:
+  - port: 8080
+    protocol: TCP
+  clusterIP: None
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-configmap
+data:
+  nginx.conf: |
+    worker_processes auto;
+    events {
+    }
+    http {
+      server {
+        server_name nginx;
+        listen 80 default_server;
+        location /_healthz {
+          add_header Content-Type text/plain;
+          return 200 'ok';
+        }
+        location / {
+          proxy_pass http://tomcat-service:80;
+        }
+      }
+    }
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpc-samehost-nginx
+  labels:
+    app: vpc-samehost-nginx
+spec:
+  selector:
+    matchLabels:
+      app: vpc-samehost-nginx
+  template:
+    metadata:
+      labels:
+        app: vpc-samehost-nginx
+    spec:
+      volumes:
+      - name: nginx
+        configMap:
+          name: nginx-configmap
+      containers:
+      - name: nginx
+        image: nginx
+        volumeMounts:
+        - name: nginx
+          mountPath: /etc/nginx
+          readOnly: true
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - vpc-samehost-tomcat
+            topologyKey: kubernetes.io/hostname
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  type: NodePort
+  selector:
+    app: vpc-samehost-nginx
+  ports:
+  - protocol: TCP
+    nodePort: 30080
+    port: 80
+

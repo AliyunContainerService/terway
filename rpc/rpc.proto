@@ -1,0 +1,110 @@
+syntax = "proto3";
+package rpc;
+
+service TerwayBackend {
+    rpc AllocIP (AllocIPRequest) returns (AllocIPReply) {
+    }
+    rpc ReleaseIP (ReleaseIPRequest) returns (ReleaseIPReply) {
+    }
+    rpc GetIPInfo(GetInfoRequest) returns (GetInfoReply) {
+    }
+}
+
+message AllocIPRequest {
+    string K8sPodName = 1;
+    string K8sPodNamespace = 2;
+    string K8sPodInfraContainerId = 3;
+    string Netns = 4;
+    string IfName = 5;
+}
+
+
+enum IPType {
+    TypeVPCIP = 0;
+    TypeVPCENI = 1;
+    TypeManagedK8S = 2;
+    TypeENIMultiIP = 3;
+}
+
+// VETH Basic
+message Pod {
+    uint64 Ingress = 1;
+    uint64 Egress = 2;
+}
+
+// VPC route veth
+message VPCIP {
+    Pod PodConfig = 1;
+    string NodeCidr = 2;
+}
+
+// ENI Basic
+message ENI {
+    string IPv4Addr = 1;
+    string IPv4Subnet = 2;
+    string MacAddr = 3;
+    string Gateway = 4;
+    int32 DeviceNumber = 5;
+}
+
+// Dedicated ENI
+message VPCENI {
+    ENI EniConfig = 1;
+    Pod PodConfig = 2;
+    string ServiceCidr = 3;
+}
+
+// Managed k8s ENI
+message ManagedK8SENI {
+    ENI EniConfig = 1;
+    Pod PodConfig = 2;
+    string PodCidr = 3;
+    string VpcCidr = 4;
+    string NodeCidr = 5;
+    string ServiceCidr = 6;
+}
+
+// ENI Multiple IP
+message ENIMultiIP {
+    ENI EniConfig = 1;
+    Pod PodConfig = 2;
+}
+
+message AllocIPReply {
+    bool Success = 1;
+    IPType IPType = 2;
+    oneof NetworkInfo {
+        VPCIP VpcIp = 3;
+        VPCENI VpcEni = 4;
+        ManagedK8SENI ManagedK8S = 5;
+        ENIMultiIP ENIMultiIP = 6;
+    }
+}
+
+message ReleaseIPRequest {
+    string K8sPodName = 1;
+    string K8sPodNamespace = 2;
+    string K8sPodInfraContainerId = 3;
+    IPType IPType = 4;
+    string IPv4Addr = 5;
+    string MacAddr = 6;
+    string Reason = 7;
+}
+
+message ReleaseIPReply {
+    bool Success = 1;
+    string IPv4Addr = 2;
+    int32 DeviceNumber = 3;
+}
+
+message GetInfoRequest {
+    string K8sPodName = 1;
+    string K8sPodNamespace = 2;
+    string K8sPodInfraContainerId = 3;
+}
+
+message GetInfoReply {
+    IPType IPType = 1;
+    Pod PodConfig = 2;
+    string NodeCidr = 3;
+}

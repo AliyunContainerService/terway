@@ -69,6 +69,15 @@
   name = "k8s.io/client-go"
   version = "kubernetes-1.10.2"
 
+[[constraint]]
+  name = "github.com/docker/docker"
+  source = "github.com/docker/engine"
+  branch = "18.06"
+
+[[override]]
+  name = "github.com/docker/distribution"
+  branch = "master"
+
 [prune]
   go-tests = true
   unused-packages = true

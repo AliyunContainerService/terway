@@ -1,372 +1,120 @@
 package daemon
 
 import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"github.com/AliyunContainerService/terway/tc"
+	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/types"
-	"github.com/containernetworking/cni/pkg/skel"
-	"github.com/containernetworking/cni/pkg/types/current"
-	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/denverdino/aliyungo/metadata"
-	log "github.com/sirupsen/logrus"
-	"github.com/vishvananda/netlink"
-	"io/ioutil"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"net"
-	"os"
+
+	_ "github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/AliyunContainerService/terway/pkg/pool"
+	//"github.com/AliyunContainerService/terway/pkg/storage"
+	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/pkg/errors"
 )
 
-type ENIService struct {
-	pool        *Pool
-	client      *kubernetes.Clientset
-	podCidr     *net.IPNet
-	serviceCidr *net.IPNet
-	tcEgress    tc.TC
-	tcIngress   map[string]tc.TC
+type ENIResourceManager struct {
+	pool pool.ObjectPool
+	ecs  aliyun.ECS
 }
 
-func (eni *ENIService) initialize() error {
-	var err error
-	//todo egress interface be configurable
-	eni.tcEgress, err = tc.NewSystem("eth0", tc.DIRECTION_EGRESS)
+func NewENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedIPs []string) (ResourceManager, error) {
+	factory, err := NewENIFactory(poolConfig, ecs)
 	if err != nil {
-		return err
+		return nil, errors.Wrapf(err, "error create eni factory")
 	}
 
-	eni.tcIngress = make(map[string]tc.TC)
-	return nil //setupIPMasq()
-}
-
-func newCmdArgs(args *skel.CmdArgs) (*CmdArgs, error) {
-	netns, err := ns.GetNS(args.Netns)
+	capacity, err := ecs.GetInstanceMaxENI(poolConfig.InstanceID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open netns %q: %v", args.Netns, err)
+		return nil, errors.Wrapf(err, "error get eni max capacity for eni factory")
 	}
-	return &CmdArgs{
-		ContainerID: args.ContainerID,
-		IfName:      args.IfName,
-		Args:        args.Args,
-		Path:        args.Path,
-		Netns:       netns,
-		PodName:     getPodArgsFromArgs(args.Args)[K8S_POD_NAME_ARGS],
-		PodNS:       getPodArgsFromArgs(args.Args)[K8S_POD_NAMESPACE_ARGS],
+
+	capacity = int(float64(capacity) * poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
+	if poolConfig.MaxPoolSize > capacity {
+		poolConfig.MaxPoolSize = capacity
+	}
+	poolCfg := pool.PoolConfig{
+		MaxIdle:  poolConfig.MaxPoolSize,
+		MinIdle:  poolConfig.MinPoolSize,
+		Capacity: capacity,
+		Factory:  factory,
+		Initializer: func(holder pool.ResourceHolder) error {
+			enis, err := ecs.GetAttachedENIs(poolConfig.InstanceID, false)
+			if err != nil {
+				return errors.Wrapf(err, "error get attach eni on pool init")
+			}
+			allocatedMap := make(map[string]bool)
+			for _, allocated := range allocatedIPs {
+				allocatedMap[allocated] = true
+			}
+			for _, e := range enis {
+				if _, ok := allocatedMap[e.Address.IP.String()]; ok {
+					holder.AddInuse(e)
+				} else {
+					holder.AddIdle(e)
+				}
+			}
+			return nil
+		},
+	}
+
+	//init deviceplugin for eni
+	dp := deviceplugin.NewEniDevicePlugin(capacity)
+	err = dp.Serve(deviceplugin.DefaultResourceName)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error set deviceplugin on node")
+	}
+
+	pool, err := pool.NewSimpleObjectPool(poolCfg)
+	if err != nil {
+		return nil, err
+	}
+	return &ENIResourceManager{
+		pool: pool,
+		ecs:  ecs,
 	}, nil
 }
 
-func (eni *ENIService) Allocate(skelArgs *skel.CmdArgs, result *current.Result) error {
-	args, err := newCmdArgs(skelArgs)
-	if err != nil {
-		return err
-	}
-	defer args.Netns.Close()
+func (m *ENIResourceManager) Allocate(ctx *NetworkContext, prefer string) (types.NetworkResource, error) {
+	return m.pool.Acquire(ctx, prefer)
+}
 
-	log.Infof("get cni create request: %+v, %+v", skelArgs, args)
+func (m *ENIResourceManager) Release(context *NetworkContext, resId string) error {
+	return m.pool.Release(resId)
+}
 
-	podArgs := getPodArgsFromArgs(args.Args)
-
-	podID, ok := podArgs[K8S_POD_NAME_ARGS]
-	if !ok {
-		return fmt.Errorf("error get pod id from cni args: %s", args)
-	}
-
-	podNs, ok := podArgs[K8S_POD_NAMESPACE_ARGS]
-	if !ok {
-		return fmt.Errorf("error get pod namespace from cni args: %s", args)
-	}
-
-	podInfo, err := eni.getPodInfo(podNs, podID)
-	if err != nil {
-		return err
-	}
-
-	if podInfo.useENI {
-		if eni.pool == nil {
-			return fmt.Errorf("eci pool disable due to pool initial failed")
-		}
-		nic, err := eni.pool.Allocate()
-		if err != nil {
-			return err
-		}
-		eniPlugin := &ENIPlugin{ENI: nic}
-		if err := eniPlugin.Add(args, result); err != nil {
-			return err
-		}
-
-		args.IfName = "veth1" //TODO 改成常量
-		vethPlugin := &VETHPlugin{
-			ENI:            nic,
-			ServiceAddress: eni.serviceCidr,
-			Subnet:         eni.podCidr,
-		}
-		if err := vethPlugin.Add(args, result); err != nil {
-			return err
-		}
-	} else {
-		vethPlugin := &VETHPlugin{
-			ServiceAddress: eni.serviceCidr,
-			Subnet:         eni.podCidr,
-		}
-		if err := vethPlugin.Add(args, result); err != nil {
-			return err
-		}
-
-		log.Debugf("veth add result:%+v", result)
-
-		if podInfo.tcEgress != "" {
-			tcEgressRule := tc.BuildRule(result.IPs[0].Address.IP, tc.GenerateRuleID(tc.DIRECTION_EGRESS,
-				normalizePodID(args.PodNS, args.PodName)), podInfo.tcEgress)
-			tc.Addrule(tcEgressRule, eni.tcEgress)
-		}
-
-		if podInfo.tcIngress != "" {
-			podInterface := VethNameForWorkload(normalizePodID(args.PodNS, args.PodName))
-			tcCtr, ok := eni.tcIngress[podInterface]
-			if !ok {
-				tcCtr, err = tc.NewSystem(podInterface, tc.DIRECTION_INGRESS)
-				if err != nil {
-					return err
-				}
-				eni.tcIngress[podInterface] = tcCtr
-			}
-			tcIngressRule := tc.BuildRule(result.IPs[0].Address.IP, tc.GenerateRuleID(tc.DIRECTION_INGRESS,
-				normalizePodID(args.PodNS, args.PodName)), podInfo.tcIngress)
-			err := tcCtr.AddRule(tcIngressRule)
+func (m *ENIResourceManager) GarbageCollection(inUseResList []string, expireResList []string) error {
+	for _, expireRes := range expireResList {
+		if err := m.pool.Stat(expireRes); err == nil {
+			err = m.Release(nil, expireRes)
 			if err != nil {
 				return err
 			}
 		}
 	}
-
 	return nil
 }
 
-type podInfo struct {
-	ip        string
-	useENI    bool
-	tcIngress string
-	tcEgress  string
+type ENIFactory struct {
+	switches      []string
+	securityGroup string
+	instanceId    string
+	ecs           aliyun.ECS
 }
 
-func (eni *ENIService) randomVethName() (string, error) {
-	entropy := make([]byte, 4)
-	_, err := rand.Reader.Read(entropy)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate random veth name: %v", err)
-	}
-
-	return fmt.Sprintf("eni%x", entropy), nil
+func NewENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*ENIFactory, error) {
+	return &ENIFactory{
+		switches:      poolConfig.VSwitch,
+		securityGroup: poolConfig.SecurityGroup,
+		instanceId:    poolConfig.InstanceID,
+		ecs:           ecs,
+	}, nil
 }
 
-func GetMacAddress(ifName string, netns ns.NetNS) (string, error) {
-	var mac string
-	err := netns.Do(func(_ ns.NetNS) error {
-		link, err := netlink.LinkByName(ifName)
-		if err != nil {
-			return fmt.Errorf("failed to get interface by name %s: %v", ifName, err)
-		}
-		mac = link.Attrs().HardwareAddr.String()
-		return nil
-	})
-	return mac, err
-
+func (f *ENIFactory) Create() (types.NetworkResource, error) {
+	//TODO 支持多个交换机
+	return f.ecs.AllocateENI(f.switches[0], f.securityGroup, f.instanceId)
 }
 
-func (eni *ENIService) Release(skelArgs *skel.CmdArgs, result *current.Result) error {
-	if skelArgs.Netns == "" {
-		return nil
-	}
-	args, err := newCmdArgs(skelArgs)
-	log.Infof("get cni remove request: %+v, %+v", skelArgs, string(skelArgs.StdinData))
-	if err != nil {
-		return err
-	}
-	defer args.Netns.Close()
-
-	podArgs := getPodArgsFromArgs(args.Args)
-
-	podID, ok := podArgs[K8S_POD_NAME_ARGS]
-	if !ok {
-		return fmt.Errorf("error get pod id from cni args: %s", args)
-	}
-
-	podNs, ok := podArgs[K8S_POD_NAMESPACE_ARGS]
-	if !ok {
-		return fmt.Errorf("error get pod namespace from cni args: %s", args)
-	}
-
-	podInfo, err := eni.getPodInfo(podNs, podID)
-	if err != nil {
-		return err
-	}
-
-	if podInfo.useENI {
-		if eni.pool == nil {
-			return fmt.Errorf("eci pool disable due to pool initial failed")
-		}
-
-		eniName, err := eni.randomVethName()
-		if err != nil {
-			return err
-		}
-
-		mac, err := GetMacAddress(args.IfName, args.Netns)
-		if err != nil {
-			return err
-		}
-		eniPlugin := &ENIPlugin{
-			ENI: &types.ENI{
-				Name: eniName,
-			},
-		}
-
-		if err := eniPlugin.Del(args, result); err != nil {
-			return err
-		}
-
-		if err := eni.pool.Release(mac); err != nil {
-			return err
-		}
-	} else {
-
-		vethPlugin := &VETHPlugin{
-			Subnet: eni.podCidr,
-		}
-		if err := vethPlugin.Del(skelArgs, result); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-//对于configure里没有配置的，填充对应的默认值
-func setDefault(cfg *types.Configure) error {
-	if cfg.Prefix == "" {
-		cfg.Prefix = "eth"
-	}
-
-	//if cfg.MinPoolSize == 0 {
-	//	cfg.MinPoolSize = 2
-	//}
-
-	if cfg.MaxPoolSize == 0 {
-		cfg.MaxPoolSize = 5
-	}
-
-	if cfg.HotPlug == "" {
-		cfg.HotPlug = "true"
-	}
-
-	if cfg.HotPlug == "false" || cfg.HotPlug == "0" {
-		cfg.HotPlug = "false"
-	}
-
-	//cfg.AccessId = os.Getenv("AK_ID")
-	//cfg.AccessSecret = os.Getenv("AK_SECRET")
-	//if cfg.AccessSecret == "" || cfg.AccessId == "" {
-	//	return errors.New("AK_ID & AK_SECRET can not be empty")
-	//}
-
-	return nil
-}
-
-func validateConfig(cfg *types.Configure) error {
-	return nil
-}
-
-func createPool(cfg *types.Configure) (*Pool, error) {
-	pc := &types.PoolConfig{
-		SecurityGroup: cfg.SecurityGroup,
-		MaxPoolSize:   cfg.MaxPoolSize,
-		MinPoolSize:   cfg.MinPoolSize,
-		AccessId:      cfg.AccessId,
-		AccessSecret:  cfg.AccessSecret,
-		HotPlug:       cfg.HotPlug == "true",
-	}
-	meta := metadata.NewMetaData(nil)
-	zone, err := meta.Zone()
-	if err != nil {
-		return nil, err
-	}
-	if cfg.VSwitches != nil {
-		pc.VSwitch = cfg.VSwitches[zone]
-	}
-	if pc.VSwitch == "" {
-		if pc.VSwitch, err = meta.VswitchID(); err != nil {
-			return nil, err
-		}
-	}
-
-	if pc.Region, err = meta.Region(); err != nil {
-		return nil, err
-	}
-
-	if pc.VPC, err = meta.VpcID(); err != nil {
-		return nil, err
-	}
-
-	if pc.InstanceID, err = meta.InstanceID(); err != nil {
-		return nil, err
-	}
-
-	return newPool(pc)
-}
-
-func newENIService(configFilePath string) (*ENIService, error) {
-	f, err := os.Open(configFilePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed open file %s: %v", configFilePath, err)
-	}
-	defer f.Close()
-
-	eni := &ENIService{}
-
-	data, err := ioutil.ReadAll(f)
-	if err != nil {
-		return nil, fmt.Errorf("failed read file %s: %v", configFilePath, err)
-	}
-	cfg := &types.Configure{}
-	if err := json.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("failed parse config: %v", err)
-	}
-
-	log.Debugf("got eni config: %+v from: %+v", cfg, configFilePath)
-
-	if err := validateConfig(cfg); err != nil {
-		return nil, err
-	}
-
-	if err := setDefault(cfg); err != nil {
-		return nil, err
-	}
-
-	if eni.pool, err = createPool(cfg); err != nil {
-		log.Errorf("error initial eni pool, eni pool will be disabled, error: %v", err)
-	}
-
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, err
-	}
-	if eni.client, err = kubernetes.NewForConfig(config); err != nil {
-		return nil, err
-	}
-
-	if eni.podCidr, err = eni.podCIDR(); err != nil {
-		return nil, err
-	}
-
-	if cfg.ServiceCIDR == "" {
-		if cfg.ServiceCIDR, err = eni.getSvcCidr(); err != nil {
-			return nil, err
-		}
-	}
-	if _, eni.serviceCidr, err = net.ParseCIDR(cfg.ServiceCIDR); err != nil {
-		return nil, err
-	}
-
-	return eni, nil
+func (f *ENIFactory) Dispose(resource types.NetworkResource) error {
+	eni := resource.(*types.ENI)
+	return f.ecs.FreeENI(eni.ID, f.instanceId)
 }

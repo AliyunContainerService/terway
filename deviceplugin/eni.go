@@ -115,10 +115,10 @@ func (m *EniDevicePlugin) Stop() error {
 // Register registers the device plugin for the given resourceName with Kubelet.
 func (m *EniDevicePlugin) Register(request pluginapi.RegisterRequest) error {
 	conn, err := dial(pluginapi.KubeletSocket, 5*time.Second)
-	defer conn.Close()
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
 
 	client := pluginapi.NewRegistrationClient(conn)
 
@@ -176,7 +176,7 @@ func (m *EniDevicePlugin) cleanup() error {
 	}
 
 	for _, preSock := range preSocks {
-		log.Debugf("device plugin file info: %+v", preSock)
+		log.Infof("device plugin file info: %+v", preSock)
 		if eniServerSockRegex.Match([]byte(preSock.Name())) && preSock.Mode()&os.ModeSocket != 0 {
 			if err = syscall.Unlink(path.Join(pluginapi.DevicePluginPath, preSock.Name())); err != nil {
 				log.Errorf("error on clean up previous device plugin listens, %+v", err)
