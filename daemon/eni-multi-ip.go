@@ -177,7 +177,7 @@ type ENIIPResourceManager struct {
 	pool pool.ObjectPool
 }
 
-func NewENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedIPs []string) (ResourceManager, error) {
+func NewENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []string) (ResourceManager, error) {
 	eniFactory, err := NewENIFactory(poolConfig, ecs)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get eni factory for eniip factory")
@@ -209,7 +209,7 @@ func NewENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 				return errors.Wrapf(err, "error get attach eni on pool init")
 			}
 			stubMap := make(map[string]bool)
-			for _, allocated := range allocatedIPs {
+			for _, allocated := range allocatedResources {
 				stubMap[allocated] = true
 			}
 
@@ -230,7 +230,7 @@ func NewENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 						Eni: eni,
 						SecAddress: ip,
 					}
-					_, ok := stubMap[ip.String()]
+					_, ok := stubMap[eniIP.GetResourceId()]
 
 					poolENI.ips = append(poolENI.ips, &ENIIP{
 						ENIIP: eniIP,
@@ -263,8 +263,8 @@ func (m *ENIIPResourceManager) Release(context *NetworkContext, resId string) er
 	return m.pool.Release(resId)
 }
 
-func (m *ENIIPResourceManager) GarbageCollection(inUseResList []string, expireResList []string) error {
-	for _, expireRes := range expireResList {
+func (m *ENIIPResourceManager) GarbageCollection(inUseSet map[string]interface{}, expireResSet map[string]interface{}) error {
+	for expireRes := range expireResSet {
 		if err := m.pool.Stat(expireRes); err == nil {
 			err = m.Release(nil, expireRes)
 			if err != nil {

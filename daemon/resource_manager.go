@@ -40,5 +40,5 @@ func (p PodResources) GetResourceItemByType(resType string) []ResourceItem {
 type ResourceManager interface {
 	Allocate(context *NetworkContext, prefer string) (types.NetworkResource, error)
 	Release(context *NetworkContext, resId string) error
-	GarbageCollection(inUseResList []string, expireResList []string) error
+	GarbageCollection(inUseResList map[string]interface{}, expireResList map[string]interface{}) error
 }

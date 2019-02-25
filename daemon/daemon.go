@@ -25,7 +25,7 @@ const (
 	DaemonModeVPC        = "VPC"
 	DaemonModeENIMultiIP = "ENIMultiIP"
 
-	gcPeriod = 5 * time.Second
+	gcPeriod = 5 * time.Minute
 )
 
 type networkService struct {
@@ -424,6 +424,7 @@ func (networkService networkService) startGarbageCollectionLoop() {
 	gcTicker := time.NewTicker(gcPeriod)
 	go func() {
 		for range gcTicker.C {
+			log.Debugf("do resource gc on node")
 			networkService.Lock()
 			pods, err := networkService.k8s.GetLocalPods()
 			if err != nil {
@@ -438,8 +439,8 @@ func (networkService networkService) startGarbageCollectionLoop() {
 			}
 
 			var (
-				inUseList = make(map[string][]string)
-				expireList = make(map[string][]string)
+				inUseSet         = make(map[string]map[string]interface{})
+				expireSet        = make(map[string]map[string]interface{})
 				relateExpireList = make([]string, 0)
 			)
 
@@ -451,30 +452,34 @@ func (networkService networkService) startGarbageCollectionLoop() {
 			}
 
 			for _, resRelateObj := range resRelateList {
-				resRelate := resRelateObj.(*PodResources)
+				resRelate := resRelateObj.(PodResources)
 				_, podExist := podKeyMap[podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name)]
 				if !podExist {
 					relateExpireList = append(relateExpireList, podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name))
 				}
 				for _, res := range resRelate.Resources {
-					if _, ok := inUseList[res.Type]; !ok {
-						inUseList[res.Type] = make([]string, 0)
-						expireList[res.Type] = make([]string, 0)
+					if _, ok := inUseSet[res.Type]; !ok {
+						inUseSet[res.Type] = make(map[string]interface{}, 0)
+						expireSet[res.Type] = make(map[string]interface{}, 0)
+					}
+					// already in use by others
+					if _, ok := inUseSet[res.Type][res.ID]; ok {
+						continue
 					}
 					if podExist {
-						inUseList[res.Type] = append(inUseList[res.Type], res.ID)
+						inUseSet[res.Type][res.ID] = struct {}{}
 					} else {
-						expireList[res.Type] = append(expireList[res.Type], res.ID)
+						expireSet[res.Type][res.ID] = struct {}{}
 					}
 				}
 			}
 			gcDone := true
-			for mgrType := range inUseList {
+			for mgrType := range inUseSet {
 				mgr, ok := networkService.mgrForResource[mgrType]
 				if ok {
-					err = mgr.GarbageCollection(inUseList[mgrType], expireList[mgrType])
+					err = mgr.GarbageCollection(inUseSet[mgrType], expireSet[mgrType])
 					if err != nil {
-						log.Warnf("error do garbage collection for %+v, inuse: %v, expire: %v", mgrType, inUseList, expireList)
+						log.Warnf("error do garbage collection for %+v, inuse: %v, expire: %v, err: %v", mgrType, inUseSet, expireSet, err)
 						gcDone = false
 					}
 				}
@@ -560,14 +565,30 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 		return nil, errors.Wrapf(err, "error init k8s service")
 	}
 
-	localPods, err := netSrv.k8s.GetLocalPods()
+	netSrv.resourceDB, err = storage.NewDiskStorage(
+		ResDBName, ResDBPath, json.Marshal, func(bytes []byte) (interface{}, error) {
+			resourceRel := &PodResources{}
+			err = json.Unmarshal(bytes, resourceRel)
+			if err != nil {
+				return nil, errors.Wrapf(err, "error unmarshal pod relate resource")
+			}
+			return *resourceRel, nil
+		})
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get local pods")
+		return nil, errors.Wrapf(err, "error init resource manager storage")
 	}
-	localIPs := make([]string, 0)
-	for _, pod := range localPods {
-		if pod.PodIP != "" {
-			localIPs = append(localIPs, pod.PodIP)
+	localResource := make(map[string][]string)
+	resObjList, err := netSrv.resourceDB.List()
+	if err != nil {
+		return nil, errors.Wrapf(err, "error list resource relation db")
+	}
+	for _, resObj := range resObjList {
+		podRes := resObj.(PodResources)
+		for _, res := range podRes.Resources {
+			if localResource[res.Type] == nil {
+				localResource[res.Type] = make([]string, 0)
+			}
+			localResource[res.Type] = append(localResource[res.Type], res.ID)
 		}
 	}
 
@@ -581,7 +602,7 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 	switch daemonMode {
 	case DaemonModeVPC:
 		//init eni
-		netSrv.eniResMgr, err = NewENIResourceManager(poolConfig, ecs, localIPs)
+		netSrv.eniResMgr, err = NewENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI])
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init eni resource manager")
 		}
@@ -598,7 +619,7 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 
 	case DaemonModeENIMultiIP:
 		//init eni multi ip
-		netSrv.eniIpResMgr, err = NewENIIPResourceManager(poolConfig, ecs, localIPs)
+		netSrv.eniIpResMgr, err = NewENIIPResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENIIP])
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init eni ip resource manager")
 		}
@@ -609,18 +630,9 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 		panic("unsupported daemon mode" + daemonMode)
 	}
 
-	netSrv.resourceDB, err = storage.NewDiskStorage(
-		ResDBName, ResDBPath, json.Marshal, func(bytes []byte) (interface{}, error) {
-			resourceRel := &PodResources{}
-			err = json.Unmarshal(bytes, resourceRel)
-			if err != nil {
-				return nil, errors.Wrapf(err, "error unmarshal pod relate resource")
-			}
-			return *resourceRel, nil
-		})
-	if err != nil {
-		return nil, errors.Wrapf(err, "error init resource manager storage")
-	}
+	//start gc loop
+	netSrv.startGarbageCollectionLoop()
+
 	return netSrv, nil
 }
 

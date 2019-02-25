@@ -37,7 +37,7 @@ func (*VethResourceManager) Release(context *NetworkContext, resId string) error
 	return nil
 }
 
-func (f *VethResourceManager) GarbageCollection(inUseResList []string, expireResList []string) error {
+func (f *VethResourceManager) GarbageCollection(inUseSet map[string]interface{}, expireResSet map[string]interface{}) error {
 	// fixme do gc on cni binary
 	lock, err := disk.NewFileLock(defaultIpamPath)
 	if err != nil {
