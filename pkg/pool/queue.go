@@ -80,7 +80,7 @@ func (q *PriorityQeueu) Peek() *poolItem {
 func (q *PriorityQeueu) Rob(id string) *poolItem {
 	for i := 0; i < q.size; i++ {
 		item := q.slots[i]
-		if item.GetResourceId() == id {
+		if item.res.GetResourceId() == id {
 			q.slots[i] = q.slots[q.size-1]
 			q.size--
 			q.bubbleDown(i)
@@ -93,7 +93,7 @@ func (q *PriorityQeueu) Rob(id string) *poolItem {
 
 func (q *PriorityQeueu) Find(id string) *poolItem {
 	for i := 0; i < q.size; i++ {
-		if q.slots[i].GetResourceId() == id {
+		if q.slots[i].res.GetResourceId() == id {
 			return q.slots[i]
 		}
 	}

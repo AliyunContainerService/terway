@@ -64,7 +64,7 @@ type PoolConfig struct {
 }
 
 type poolItem struct {
-	types.NetworkResource
+	res     types.NetworkResource
 	reverse time.Time
 }
 
@@ -150,7 +150,7 @@ func mapKeys(m map[string]types.NetworkResource) string {
 func queueKeys(q *PriorityQeueu) string {
 	var keys []string
 	for i := 0; i < q.size; i++ {
-		keys = append(keys, q.slots[i].GetResourceId())
+		keys = append(keys, q.slots[i].res.GetResourceId())
 	}
 	return strings.Join(keys, ", ")
 }
@@ -184,7 +184,7 @@ func (p *SimpleObjectPool) checkIdle() {
 		}
 		item = p.idle.Pop()
 		p.lock.Unlock()
-		res := item.NetworkResource
+		res := item.res
 		log.Infof("try dispose res %+v", res)
 		err := p.factory.Dispose(res)
 		if err == nil {
@@ -239,8 +239,8 @@ func (p *SimpleObjectPool) Acquire(ctx context.Context, resId string) (types.Net
 	p.lock.Lock()
 	//defer p.lock.Unlock()
 	if p.idle.Size() > 0 {
-		res := p.getOneLocked(resId)
-		p.inuse[res.GetResourceId()] = res.NetworkResource
+		res := p.getOneLocked(resId).res
+		p.inuse[res.GetResourceId()] = res
 		p.lock.Unlock()
 		log.Infof("acquire (expect %s): return idle %s", resId, res.GetResourceId())
 		return res, nil
@@ -312,7 +312,7 @@ func (p *SimpleObjectPool) ReleaseWithReverse(resId string, reverse time.Duratio
 	if reverse > 0 {
 		reverseTo = reverseTo.Add(reverse)
 	}
-	p.idle.Push(&poolItem{NetworkResource: res, reverse: reverseTo})
+	p.idle.Push(&poolItem{res: res, reverse: reverseTo})
 	p.notify()
 	return nil
 }
@@ -323,11 +323,11 @@ func (p *SimpleObjectPool) Release(resId string) error {
 func (p *SimpleObjectPool) AddIdle(resource types.NetworkResource) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.idle.Push(&poolItem{NetworkResource: resource, reverse: time.Now()})
+	p.idle.Push(&poolItem{res: resource, reverse: time.Now()})
 }
 
-func (p *SimpleObjectPool) AddInuse(resource types.NetworkResource) {
+func (p *SimpleObjectPool) AddInuse(res types.NetworkResource) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.inuse[resource.GetResourceId()] = poolItem{NetworkResource: resource}
+	p.inuse[res.GetResourceId()] = res
 }
