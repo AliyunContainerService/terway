@@ -32,7 +32,9 @@ type ecsImpl struct {
 	privateIpMutex sync.RWMutex
 	clientSet      *ClientMgr
 	eniInfoGetter  ENIInfoGetter
-	region         common.Region
+	// avoid conflict on ecs
+	openapiInfoGetter ENIInfoGetter
+	region            common.Region
 }
 
 func NewECS(ak, sk string, region common.Region) (ECS, error) {
@@ -49,11 +51,17 @@ func NewECS(ak, sk string, region common.Region) (ECS, error) {
 		//RegionId = region
 	}
 
-	return &ecsImpl{
-		privateIpMutex: sync.RWMutex{},
+	openapiENIInfoGetter := ENIOpenAPI{
 		clientSet: clientSet,
-		eniInfoGetter: &ENIMetadata{},
-		region: region,
+		region:    region,
+	}
+
+	return &ecsImpl{
+		privateIpMutex:    sync.RWMutex{},
+		clientSet:         clientSet,
+		eniInfoGetter:     &ENIMetadata{},
+		openapiInfoGetter: &openapiENIInfoGetter,
+		region:            region,
 	}, nil
 }
 
@@ -90,7 +98,7 @@ func (e ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceId st
 	start = time.Now()
 	err = e.clientSet.ecs.WaitForNetworkInterface(createNetworkInterfaceArgs.RegionId,
 		createNetworkInterfaceResponse.NetworkInterfaceId, eniStatusAvailable, eniCreateTimeout)
-	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceCreate/" + eniStatusAvailable, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceCreate/"+eniStatusAvailable, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +118,7 @@ func (e ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceId st
 	start = time.Now()
 	err = e.clientSet.ecs.WaitForNetworkInterface(createNetworkInterfaceArgs.RegionId,
 		createNetworkInterfaceResponse.NetworkInterfaceId, eniStatusInUse, eniBindTimeout)
-	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceBind/" + eniStatusInUse, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceBind/"+eniStatusInUse, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 	if err != nil {
 		return nil, err
@@ -235,7 +243,7 @@ func (e ecsImpl) destroyInterface(eniId string, instanceId string, force bool) e
 }
 
 func (e ecsImpl) GetAttachedENIs(instanceId string, containsMainENI bool) ([]*types.ENI, error) {
-	enis, err := e.eniInfoGetter.GetAttachedENIs(containsMainENI)
+	enis, err := e.eniInfoGetter.GetAttachedENIs(instanceId, containsMainENI)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get eni config by mac")
 	}
@@ -262,7 +270,7 @@ func (e ecsImpl) GetENIIPs(eniId string) ([]net.IP, error) {
 func (e ecsImpl) AssignIPForENI(eniId string) (net.IP, error) {
 	e.privateIpMutex.Lock()
 	defer e.privateIpMutex.Unlock()
-	addressesBefore, err := e.eniInfoGetter.GetENIPrivateAddresses(eniId)
+	addressesBefore, err := e.openapiInfoGetter.GetENIPrivateAddresses(eniId)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get before address for eniId: %v", eniId)
 	}
@@ -290,7 +298,7 @@ func (e ecsImpl) AssignIPForENI(eniId string) (net.IP, error) {
 			Steps:    5,
 		},
 		func() (done bool, err error) {
-			addressesAfter, err = e.eniInfoGetter.GetENIPrivateAddresses(eniId)
+			addressesAfter, err = e.openapiInfoGetter.GetENIPrivateAddresses(eniId)
 			if err != nil {
 				return false, errors.Wrapf(err, "error get after eni private address for %s", eniId)
 			}
@@ -324,9 +332,20 @@ func (e ecsImpl) UnAssignIPForENI(eniId string, ip net.IP) error {
 	e.privateIpMutex.Lock()
 	defer e.privateIpMutex.Unlock()
 
-	addressesBefore, err := e.eniInfoGetter.GetENIPrivateAddresses(eniId)
+	addressesBefore, err := e.openapiInfoGetter.GetENIPrivateAddresses(eniId)
 	if err != nil {
 		return errors.Wrapf(err, "error get before address for eniId: %v", eniId)
+	}
+
+	found := false
+	for _, addr := range addressesBefore {
+		if addr.Equal(ip) {
+			found = true
+		}
+	}
+	// ip not exist on eni
+	if !found {
+		return nil
 	}
 
 	unAssignPrivateIpAddressesArgs := &ecs.UnassignPrivateIpAddressesArgs{
@@ -352,7 +371,7 @@ func (e ecsImpl) UnAssignIPForENI(eniId string, ip net.IP) error {
 			Steps:    5,
 		},
 		func() (done bool, err error) {
-			addressesAfter, err = e.eniInfoGetter.GetENIPrivateAddresses(eniId)
+			addressesAfter, err = e.openapiInfoGetter.GetENIPrivateAddresses(eniId)
 			if err != nil {
 				return false, errors.Wrapf(err, "error get after eni private address for %s", eniId)
 			}
