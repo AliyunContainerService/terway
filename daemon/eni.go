@@ -27,7 +27,7 @@ func NewENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 		return nil, errors.Wrapf(err, "error get eni max capacity for eni factory")
 	}
 
-	capacity = int(float64(capacity) * poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
+	capacity = int(float64(capacity)*poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
 	if poolConfig.MaxPoolSize > capacity {
 		poolConfig.MaxPoolSize = capacity
 	}
@@ -78,6 +78,9 @@ func (m *ENIResourceManager) Allocate(ctx *NetworkContext, prefer string) (types
 }
 
 func (m *ENIResourceManager) Release(context *NetworkContext, resId string) error {
+	if context != nil && context.pod != nil {
+		return m.pool.ReleaseWithReverse(resId, context.pod.IpStickTime)
+	}
 	return m.pool.Release(resId)
 }
 

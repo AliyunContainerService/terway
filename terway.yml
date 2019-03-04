@@ -101,13 +101,7 @@ spec:
       nodeSelector:
         beta.kubernetes.io/arch: amd64
       tolerations:
-        - key: node.cloudprovider.kubernetes.io/uninitialized
-          value: "true"
-          effect: NoSchedule
-        - key: node-role.kubernetes.io/master
-          effect: NoSchedule
-        - key: "CriticalAddonsOnly"
-          operator: "Exists"
+      - operator: "Exists"
       terminationGracePeriodSeconds: 0
       serviceAccountName: terway
       hostNetwork: true

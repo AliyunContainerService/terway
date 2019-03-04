@@ -307,7 +307,7 @@ func (p *SimpleObjectPool) ReleaseWithReverse(resId string, reverse time.Duratio
 		return ErrInvalidState
 	}
 
-	log.Infof("release %s: return success", resId)
+	log.Infof("release %s, reverse %v: return success", resId, reverse)
 	delete(p.inuse, resId)
 	reverseTo := time.Now()
 	if reverse > 0 {

@@ -13,9 +13,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"net"
 	"os"
-	"time"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -35,6 +35,7 @@ type podInfo struct {
 	TcEgress       uint64
 	PodNetworkType string
 	PodIP          string
+	IpStickTime    time.Duration
 }
 
 type Kubernetes interface {
@@ -172,6 +173,8 @@ const POD_NEED_ENI = "k8s.aliyun.com/eni"
 const POD_INGRESS_BANDWIDTH = "k8s.aliyun.com/ingress-bandwidth"
 const POD_EGRESS_BANDWIDTH = "k8s.aliyun.com/egress-bandwidth"
 
+const defaultStickTimeForSts = 5 * time.Minute
+
 var StorageCleanPeriod = 1 * time.Hour
 
 func podNetworkType(daemonMode string, pod *corev1.Pod) string {
@@ -225,11 +228,20 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 			pi.TcEgress = egress
 		}
 	}
+
+	if len(pod.OwnerReferences) != 0 {
+		switch strings.ToLower(pod.OwnerReferences[0].Kind) {
+		case "statefulset":
+			pi.IpStickTime = defaultStickTimeForSts
+			break
+		}
+	}
+
 	return pi
 }
 
 const (
-	BYTE     = 1 << (10 * iota)
+	BYTE = 1 << (10 * iota)
 	KILOBYTE
 	MEGABYTE
 	GIGABYTE
