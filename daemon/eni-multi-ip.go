@@ -18,7 +18,6 @@ type ENIIPFactory struct {
 
 type ENIIP struct {
 	*types.ENIIP
-	idle bool
 }
 
 type ENI struct {
@@ -28,18 +27,11 @@ type ENI struct {
 	ecs  aliyun.ECS
 }
 
-// 返回一个空闲的IP，将idle设置为false
-// 如果没有空闲的，先尝试绑一个
+// 尝试绑一个
 // 如果满了，返回nil
-func (e *ENI) getIdle() *ENIIP {
+func (e *ENI) allocateExistENIsIP() *ENIIP {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	for _, ip := range e.ips {
-		if ip.idle {
-			ip.idle = false
-			return ip
-		}
-	}
 
 	if len(e.ips) < e.ENI.MaxIPs {
 		ip, err := e.ecs.AssignIPForENI(e.ENI.ID)
@@ -52,7 +44,6 @@ func (e *ENI) getIdle() *ENIIP {
 				Eni: e.ENI,
 				SecAddress: ip,
 			},
-			idle: false,
 		}
 		e.ips = append(e.ips, ipNew)
 		return ipNew
@@ -63,7 +54,7 @@ func (e *ENI) getIdle() *ENIIP {
 func (f *ENIIPFactory) Create() (types.NetworkResource, error) {
 	f.RLock()
 	for _, eni := range f.enis {
-		ip := eni.getIdle()
+		ip := eni.allocateExistENIsIP()
 		if ip != nil {
 			f.RUnlock()
 			return ip.ENIIP, nil
@@ -86,23 +77,20 @@ func (f *ENIIPFactory) Create() (types.NetworkResource, error) {
 		ecs: f.eniFactory.ecs,
 	}
 
+	mainENIIP := &types.ENIIP{
+		Eni: eni.ENI,
+		SecAddress: eni.ENI.Address.IP,
+	}
+
 	eni.ips = append(eni.ips, &ENIIP{
-		ENIIP: &types.ENIIP{
-			Eni: eni.ENI,
-			SecAddress: eni.ENI.Address.IP,
-		},
-		idle: true,
+		ENIIP: mainENIIP,
 	})
 
 	f.Lock()
 	f.enis = append(f.enis, eni)
 	f.Unlock()
 
-	ip := eni.getIdle()
-	if ip == nil {
-		return nil, fmt.Errorf("can not get idle ip from newly created eni %s", eni.ID)
-	}
-	return ip.ENIIP, nil
+	return mainENIIP, nil
 }
 
 func (f *ENIIPFactory) Dispose(res types.NetworkResource) error {
@@ -126,7 +114,6 @@ func (f *ENIIPFactory) Dispose(res types.NetworkResource) error {
 	if eni == nil || eniip == nil {
 		return fmt.Errorf("invalid resource to dispose")
 	}
-	eniip.idle = true
 
 	ips, err := f.eniFactory.ecs.GetENIIPs(ip.Eni.ID)
 
@@ -150,6 +137,11 @@ func (f *ENIIPFactory) Dispose(res types.NetworkResource) error {
 		}
 		f.Unlock()
 		return nil
+	}
+
+	// main ip of eni, raise put_it_back error
+	if ip.Eni.Address.IP.Equal(ip.SecAddress) {
+		return fmt.Errorf("ip tobe release is primary ip of eni")
 	}
 
 	err = f.eniFactory.ecs.UnAssignIPForENI(ip.Eni.ID, ip.SecAddress)
@@ -177,7 +169,7 @@ type ENIIPResourceManager struct {
 	pool pool.ObjectPool
 }
 
-func NewENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedIPs []string) (ResourceManager, error) {
+func NewENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []string) (ResourceManager, error) {
 	eniFactory, err := NewENIFactory(poolConfig, ecs)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get eni factory for eniip factory")
@@ -209,7 +201,7 @@ func NewENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 				return errors.Wrapf(err, "error get attach eni on pool init")
 			}
 			stubMap := make(map[string]bool)
-			for _, allocated := range allocatedIPs {
+			for _, allocated := range allocatedResources {
 				stubMap[allocated] = true
 			}
 
@@ -230,11 +222,10 @@ func NewENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 						Eni: eni,
 						SecAddress: ip,
 					}
-					_, ok := stubMap[ip.String()]
+					_, ok := stubMap[eniIP.GetResourceId()]
 
 					poolENI.ips = append(poolENI.ips, &ENIIP{
 						ENIIP: eniIP,
-						idle: !ok,
 					})
 					if !ok {
 						holder.AddIdle(eniIP)
@@ -263,8 +254,8 @@ func (m *ENIIPResourceManager) Release(context *NetworkContext, resId string) er
 	return m.pool.Release(resId)
 }
 
-func (m *ENIIPResourceManager) GarbageCollection(inUseResList []string, expireResList []string) error {
-	for _, expireRes := range expireResList {
+func (m *ENIIPResourceManager) GarbageCollection(inUseSet map[string]interface{}, expireResSet map[string]interface{}) error {
+	for expireRes := range expireResSet {
 		if err := m.pool.Stat(expireRes); err == nil {
 			err = m.Release(nil, expireRes)
 			if err != nil {

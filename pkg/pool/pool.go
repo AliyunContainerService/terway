@@ -190,6 +190,7 @@ func (p *SimpleObjectPool) checkIdle() {
 		if err == nil {
 			p.tokenCh <- struct{}{}
 		} else {
+			log.Warnf("error dispose res: %+v", err)
 			p.AddIdle(res)
 		}
 	}
