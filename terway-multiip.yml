@@ -13,8 +13,15 @@ metadata:
   namespace: kube-system
 rules:
 - apiGroups: [""]
-  resources: ["pods", "nodes", "namespaces", "configmaps"]
+  resources: ["pods", "nodes", "namespaces", "configmaps", "serviceaccounts"]
   verbs: ["get", "watch", "list", "update"]
+- apiGroups: ["networking.k8s.io"]
+  resources:
+  - networkpolicies
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups: ["extensions"]
   resources:
   - networkpolicies
@@ -28,18 +35,8 @@ rules:
   verbs:
   - update
 - apiGroups: ["crd.projectcalico.org"]
-  resources:
-  - globalfelixconfigs
-  - bgppeers
-  - globalbgpconfigs
-  - ippools
-  - globalnetworkpolicies
-  verbs:
-  - create
-  - get
-  - list
-  - update
-  - watch
+  resources: ["*"]
+  verbs: ["*"]
 
 ---
 
@@ -161,6 +158,7 @@ spec:
           name: device-plugin-path
       - name: policy
         image: registry.aliyuncs.com/wangbs/terway
+        imagePullPolicy: Always
         command: ["/bin/policyinit.sh"]
         env:
         - name: NODENAME
@@ -176,6 +174,7 @@ spec:
           httpGet:
             path: /liveness
             port: 9099
+            host: localhost
           periodSeconds: 10
           initialDelaySeconds: 10
           failureThreshold: 6
@@ -183,6 +182,7 @@ spec:
           httpGet:
             path: /readiness
             port: 9099
+            host: localhost
           periodSeconds: 10
         volumeMounts:
         - mountPath: /lib/modules
@@ -232,16 +232,30 @@ spec:
 apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
-  name: globalfelixconfigs.crd.projectcalico.org
-  namespace: kube-system
+  name: felixconfigurations.crd.projectcalico.org
 spec:
   scope: Cluster
   group: crd.projectcalico.org
   version: v1
   names:
-    kind: GlobalFelixConfig
-    plural: globalfelixconfigs
-    singular: globalfelixconfig
+    kind: FelixConfiguration
+    plural: felixconfigurations
+    singular: felixconfiguration
+
+---
+
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: bgpconfigurations.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: BGPConfiguration
+    plural: bgpconfigurations
+    singular: bgpconfiguration
 
 ---
 
@@ -249,7 +263,6 @@ apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
   name: ippools.crd.projectcalico.org
-  namespace: kube-system
 spec:
   scope: Cluster
   group: crd.projectcalico.org
@@ -264,8 +277,37 @@ spec:
 apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
+  name: hostendpoints.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: HostEndpoint
+    plural: hostendpoints
+    singular: hostendpoint
+
+---
+
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: clusterinformations.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: ClusterInformation
+    plural: clusterinformations
+    singular: clusterinformation
+
+---
+
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
   name: globalnetworkpolicies.crd.projectcalico.org
-  namespace: kube-system
 spec:
   scope: Cluster
   group: crd.projectcalico.org
@@ -274,3 +316,33 @@ spec:
     kind: GlobalNetworkPolicy
     plural: globalnetworkpolicies
     singular: globalnetworkpolicy
+
+---
+
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: globalnetworksets.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: GlobalNetworkSet
+    plural: globalnetworksets
+    singular: globalnetworkset
+
+---
+
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: networkpolicies.crd.projectcalico.org
+spec:
+  scope: Namespaced
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: NetworkPolicy
+    plural: networkpolicies
+    singular: networkpolicy

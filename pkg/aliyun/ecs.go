@@ -288,6 +288,7 @@ func (e ecsImpl) AssignIPForENI(eniId string) (net.IP, error) {
 		return nil, errors.Wrapf(err, "error assign address for eniId: %v", eniId)
 	}
 
+	start = time.Now()
 	var addressesAfter []net.IP
 	// backoff get interface addresses
 	err = wait.ExponentialBackoff(
@@ -310,6 +311,7 @@ func (e ecsImpl) AssignIPForENI(eniId string) (net.IP, error) {
 			}
 		},
 	)
+	metric.OpenAPILatency.WithLabelValues("AssignPrivateIpAddressesAsync", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 	if err != nil {
 		return nil, errors.Wrapf(err, "error allocate eni private address for %s", eniId)
@@ -361,6 +363,7 @@ func (e ecsImpl) UnAssignIPForENI(eniId string, ip net.IP) error {
 		return errors.Wrapf(err, "error unassign address for eniId: %v", eniId)
 	}
 
+	start = time.Now()
 	var addressesAfter []net.IP
 	// backoff get interface addresses
 	err = wait.ExponentialBackoff(
@@ -383,6 +386,7 @@ func (e ecsImpl) UnAssignIPForENI(eniId string, ip net.IP) error {
 			}
 		},
 	)
+	metric.OpenAPILatency.WithLabelValues("UnassignPrivateIpAddressesAsync", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	return errors.Wrapf(err, "error unassign eni private address for %s", eniId)
 }
 

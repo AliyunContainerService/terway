@@ -42,6 +42,11 @@ func metadataValue(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		return "", fmt.Errorf("error get url: %s from metaserver, code: %v", url, resp.StatusCode)
+	}
+
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
@@ -67,6 +72,11 @@ func metadataArray(url string) ([]string, error) {
 	if err != nil {
 		return []string{}, err
 	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		return []string{}, fmt.Errorf("error get url: %s from metaserver, code: %v", url, resp.StatusCode)
+	}
+
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return []string{}, err

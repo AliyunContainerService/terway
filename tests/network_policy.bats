@@ -9,6 +9,7 @@ function setup() {
 @test "network policy" {
 	kubectl apply -f templates/testcases/network_policy/network-policy.yml
     retry 5 20 bash -c "kubectl get pod -n network-test policy-cli | grep Completed"
+    retry 5 20 bash -c "kubectl get pod -n network-test non-policy-cli | grep Completed"
     result=`kubectl get pod -n network-test -o jsonpath='{range .status.containerStatuses[*]}{.state.terminated.reason}{end}' policy-cli`
     [ "$result" = "CompletedCompleted" ]
     result=`kubectl get pod -n network-test -o jsonpath='{range .status.containerStatuses[*]}{.state.terminated.reason}{end}' non-policy-cli`
