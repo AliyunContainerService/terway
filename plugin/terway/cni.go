@@ -98,6 +98,10 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return errors.Wrap(err, "add cmd: failed to load k8s config from args")
 	}
 
+	if err := driver.EnsureHostNsConfig(); err != nil {
+		return errors.Wrapf(err, "add cmd: failed setup host namespace configs")
+	}
+
 	terwayBackendClient, closeConn, err := getNetworkClient()
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("add cmd: create grpc client, pod: %s-%s",
