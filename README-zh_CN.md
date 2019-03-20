@@ -8,20 +8,33 @@ CNI plugin for alibaba cloud VPC/ENI
 ## 安装Kubernetes
 使用kubeadm的指导文档 https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/ 来创建集群
 
-安装好了之后要将iptables的policy换成ACCEPT，`iptables -P FORWARD ACCEPT`
+安装好了之后要:
+* 将iptables的policy换成ACCEPT，`iptables -P FORWARD ACCEPT`。
+* 检查节点上的"rp_filter"内核参数，并在每个节点上将其设置为"0"。
 
 通过`kubectl get cs`验证集群安装完成
 
 ## 安装terway插件
 
-修改[terway.yml](./terway.yml)文件中的eni.conf的配置中的授权和网段配置，以及Network的网段配置，然后通过`kubectl apply -f terway.conf`来安装terway插件。
+Terway有两种安装模式：
+
+* VPC模式
+
+	VPC模式，使用Aliyun VPC路由来打通网络，可以使用独立ENI给Pod，安装方式：<br />
+	修改[terway.yml](./terway.yml)文件中的eni.conf的配置中的授权和网段配置，以及Network的网段配置，然后通过`kubectl apply -f terway.conf`来安装terway插件。
+
+* ENI多IP模式
+
+	ENI多IP模式，使用Aliyun ENI的辅助IP来打通网络，不受VPC的路由条目限制，安装方式：<br />
+	修改[terway-multiip.yml](./terway-multiip.yml)文件中的eni.conf的配置中的授权和网段配置，以及Network的网段配置，然后通过`kubectl apply -f terway.conf`来安装terway插件。
+
 
 使用`kubectl get ds terway`看到插件在每个节点上都运行起来后，表明插件安装成功。
 
 ## 验证terway的功能
 
 ### 一般VPC网络的容器
-在容器没有做任何特殊配置时，terway会通过在节点上的podCidr中去分配地址然后配置给容器。
+在VPC安装模式下，在容器没有做任何特殊配置时，terway会通过在节点上的podCidr中去分配地址然后配置给容器。
 例如：
 
 ```
@@ -47,9 +60,9 @@ If you don't see a command prompt, try pressing enter.
        valid_lft forever preferred_lft forever
 ```   
 
-### 使用ENI弹性网卡获得等同于底层网络的性能
+#### 使用ENI弹性网卡获得等同于底层网络的性能
 
-在Pod的其中一个container的`requests`中增加对eni的需求： `aliyun/eni: 1`， 下面的例子将创建一个Nginx Pod，并分配一个ENI
+在VPC安装模式下，在Pod的其中一个container的`requests`中增加对eni的需求： `aliyun/eni: 1`， 下面的例子将创建一个Nginx Pod，并分配一个ENI
 
 ```
 apiVersion: v1
@@ -85,6 +98,29 @@ spec:
 4: veth1@if8: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue state UP
     link/ether 1e:60:c7:cb:1e:0e brd ff:ff:ff:ff:ff:ff
     inet6 fe80::1c60:c7ff:fecb:1e0e/64 scope link
+       valid_lft forever preferred_lft forever
+```
+
+#### ENI辅助IP的容器：
+
+在ENI多IP安装模式下，Terway会通过创建和分配ENI和ENI网卡上的辅助IP地址给Pod使用，Pod上的IP地址将和VPC和VSwitch的IP地址相同段，例如：
+
+```
+[root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl get pod -o wide
+NAME                     READY   STATUS    RESTARTS   AGE   IP              NODE                                 NOMINATED NODE
+nginx-64f497f8fd-ckpdm   1/1     Running   0          4d    192.168.0.191   cn-hangzhou.i-j6c86lmr8k9rk78ju0nc   <none>
+[root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl get node -o wide cn-hangzhou.i-j6c86lmr8k9rk78ju0nc
+NAME                                 STATUS   ROLES    AGE   VERSION   INTERNAL-IP     EXTERNAL-IP   OS-IMAGE                KERNEL-VERSION              CONTAINER-RUNTIME
+cn-hangzhou.i-j6c86lmr8k9rk78ju0nc   Ready    <none>   12d   v1.11.5   192.168.0.154   <none>        CentOS Linux 7 (Core)   3.10.0-693.2.2.el7.x86_64   docker://17.6.2
+[root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl exec -it nginx-64f497f8fd-ckpdm bash
+root@nginx-64f497f8fd-ckpdm:/# ip addr show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+3: eth0@if106: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default
+    link/ether 4a:60:eb:97:f4:07 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 192.168.0.191/32 brd 192.168.0.191 scope global eth0
        valid_lft forever preferred_lft forever
 ```
 

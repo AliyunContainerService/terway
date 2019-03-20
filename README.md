@@ -9,13 +9,27 @@ English | [简体中文](./README-zh_CN.md)
 ### Install Kubernetes
 Install Kubernetes via Kubeadm: https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
 
-After setup kubernetes cluster. Change `iptables` `Forward` default policy to `ACCEPT` on every node of cluster: `iptables -P FORWARD ACCEPT`.
+After setup kubernetes cluster.
+* Change `iptables` `Forward` default policy to `ACCEPT` on every node of cluster: `iptables -P FORWARD ACCEPT`.
+* Check the `rp_filter` in sysctl parameters, set them to "0" on every node of cluster.
 
 Make sure cluster up and healthy by `kubectl get cs`.
 
 ### Install Terway network plugin
 
-Replace `Network` and `AccessKey/AccessKeySecret` in [terway.yml](./terway.yml) with your cluster pod subnet and aliyun openapi credentials. Then use `kubectl apply -f terway.yml` to install Terway into kubernetes cluster.
+<br />
+Terway plugin have two installation modes
+
+* VPC Mode
+
+	VPC Mode, Using `Aliyun VPC` route table to connect the pods. Can assign dedicated ENI to Pod. Install method: <br />
+	Replace `Network` and `AccessKey/AccessKeySecret` in [terway.yml](./terway.yml) with your cluster pod subnet and aliyun openapi credentials. Then use `kubectl apply -f terway.yml` to install Terway into kubernetes cluster.
+
+* ENI Secondary IP Mode
+
+	ENI Secondary IP Mode, Using `Aliyun ENI's secondary ip` to connect the pods. This mode not limited by VPC route tables quotation. Install method: <br />
+	Replace `Network` and `AccessKey/AccessKeySecret` in [terway-multiip.yml](./terway-multiip.yml) with your cluster pod subnet and aliyun openapi credentials. Then use `kubectl apply -f terway.yml` to install Terway into kubernetes cluster.
+
 
 Using `kubectl get ds terway -n kube-system` to watch plugin launching. Plugin install completed while terway daemonset available pods equal to nodes.
 
@@ -23,7 +37,7 @@ Using `kubectl get ds terway -n kube-system` to watch plugin launching. Plugin i
 
 #### Vpc network container:
 
-Terway will config pod's address using node's `podCidr` when pod not have any especial config. eg:
+On VPC installation mode, Terway will config pod's address using node's `podCidr` when pod not have any especial config. eg:
 
 ```
 [root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl run -it --rm --image busybox busybox
@@ -49,7 +63,7 @@ If you don't see a command prompt, try pressing enter.
 ```   
 
 #### Using ENI network interface to get the performance equivalent to the underlying network.
-Config `eni` request `aliyun/eni: 1` in one container of pod. The following example will create an Nginx Pod and assign an ENI:
+On VPC installation mode, Config `eni` request `aliyun/eni: 1` in one container of pod. The following example will create an Nginx Pod and assign an ENI:
 
 ```
 apiVersion: v1
@@ -83,6 +97,29 @@ spec:
 4: veth1@if8: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue state UP
     link/ether 1e:60:c7:cb:1e:0e brd ff:ff:ff:ff:ff:ff
     inet6 fe80::1c60:c7ff:fecb:1e0e/64 scope link
+       valid_lft forever preferred_lft forever
+```
+
+#### ENI Secondary IP Pod：
+
+On ENI secondary IP installation mode, Terway will create & allocate ENI secondary IP for pod. The IP of pod will in same IP Range:
+
+```
+[root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl get pod -o wide
+NAME                     READY   STATUS    RESTARTS   AGE   IP              NODE                                 NOMINATED NODE
+nginx-64f497f8fd-ckpdm   1/1     Running   0          4d    192.168.0.191   cn-hangzhou.i-j6c86lmr8k9rk78ju0nc   <none>
+[root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl get node -o wide cn-hangzhou.i-j6c86lmr8k9rk78ju0nc
+NAME                                 STATUS   ROLES    AGE   VERSION   INTERNAL-IP     EXTERNAL-IP   OS-IMAGE                KERNEL-VERSION              CONTAINER-RUNTIME
+cn-hangzhou.i-j6c86lmr8k9rk78ju0nc   Ready    <none>   12d   v1.11.5   192.168.0.154   <none>        CentOS Linux 7 (Core)   3.10.0-693.2.2.el7.x86_64   docker://17.6.2
+[root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl exec -it nginx-64f497f8fd-ckpdm bash
+root@nginx-64f497f8fd-ckpdm:/# ip addr show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+3: eth0@if106: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default
+    link/ether 4a:60:eb:97:f4:07 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 192.168.0.191/32 brd 192.168.0.191 scope global eth0
        valid_lft forever preferred_lft forever
 ```
 
