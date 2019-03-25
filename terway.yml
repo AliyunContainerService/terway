@@ -140,6 +140,8 @@ spec:
           name: lib-modules
         - mountPath: /var/lib/cni/networks
           name: cni-networks
+        - mountPath: /var/lib/cni/terway
+          name: cni-terway
         - mountPath: /var/lib/kubelet/device-plugins
           name: device-plugin-path
       - name: policy
@@ -202,6 +204,9 @@ spec:
       - name: cni-networks
         hostPath:
           path: /var/lib/cni/networks
+      - name: cni-terway
+        hostPath:
+          path: /var/lib/cni/terway
       - name: device-plugin-path
         hostPath:
           path: /var/lib/kubelet/device-plugins
