@@ -206,13 +206,10 @@ spec:
 ## Build Terway
 Prerequisites:
 
-* Go >= 1.10
+* Docker >= 17.05 with multi-stage build
 
 ```
-go get github.com/AliyunContainerService/terway
-cd $GOPATH/github.com/AliyunContainerService/terway/ci
-# This will create a new docker image named acs/terway:<version>
-./build.sh
+docker build -t acs/terway:latest .
 ```
 
 ## Contribute
