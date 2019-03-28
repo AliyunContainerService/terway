@@ -161,16 +161,14 @@ spec:
           requests:
             cpu: 250m
         livenessProbe:
-          httpGet:
-            path: /liveness
+          tcpSocket:
             port: 9099
             host: localhost
           periodSeconds: 10
           initialDelaySeconds: 10
           failureThreshold: 6
         readinessProbe:
-          httpGet:
-            path: /readiness
+          tcpSocket:
             port: 9099
             host: localhost
           periodSeconds: 10

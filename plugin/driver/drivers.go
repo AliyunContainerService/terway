@@ -39,6 +39,8 @@ const (
 	MTU = 1500
 	// mainRouteTable the system "main" route table id
 	mainRouteTable = 254
+	toContainerPriority   = 512
+	fromContainerPriority = 2048
 )
 
 var (
@@ -229,7 +231,8 @@ func (d *vethDriver) Setup(
 		// to container rule
 		toContainerRule := netlink.NewRule()
 		toContainerRule.Dst = containerDst
-		toContainerRule.Table = tableID
+		toContainerRule.Table = mainRouteTable
+		toContainerRule.Priority = toContainerPriority
 
 		err = netlink.RuleAdd(toContainerRule)
 		if err != nil {
@@ -238,40 +241,13 @@ func (d *vethDriver) Setup(
 
 		// from container rule
 		fromContainerRule := netlink.NewRule()
+		fromContainerRule.IifName = hostIfName
 		fromContainerRule.Src = containerDst
 		fromContainerRule.Table = tableID
+		fromContainerRule.Priority = fromContainerPriority
 		err = netlink.RuleAdd(fromContainerRule)
 		if err != nil {
 			return errors.Wrapf(err, "vethDriver, fail add container add rule")
-		}
-
-		routeList, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
-			Table: tableID,
-			Dst:   containerDst,
-		}, netlink.RT_FILTER_DST|netlink.RT_FILTER_TABLE)
-
-		if err != nil {
-			return errors.Wrapf(err, "vethDriver, fail list route for container in route table")
-		}
-
-		for _, route := range routeList {
-			if ipNetEqual(route.Dst, containerDst) && route.Table == tableID {
-				err = netlink.RouteDel(&route)
-				if err != nil {
-					return errors.Wrapf(err, "vethDriver, fail cleanup previous route for container in route table")
-				}
-			}
-		}
-
-		// add route to table
-		err = netlink.RouteAdd(&netlink.Route{
-			LinkIndex: hostLink.Attrs().Index,
-			Scope:     netlink.SCOPE_LINK,
-			Dst:       containerDst,
-			Table:     tableID,
-		})
-		if err != nil {
-			return errors.Wrapf(err, "vethDriver, fail add route to eni table")
 		}
 	}
 
@@ -406,11 +382,6 @@ func (d *vethDriver) Teardown(hostIfName string, containerVeth string, netNS ns.
 		}
 	}
 
-	tableID := -1
-	if fromContainerRule != nil {
-		tableID = fromContainerRule.Table
-	}
-
 	// 4. cleanup policy route of route tables of containerip
 	if toContainerRule != nil {
 		err = netlink.RuleDel(toContainerRule)
@@ -423,43 +394,6 @@ func (d *vethDriver) Teardown(hostIfName string, containerVeth string, netNS ns.
 		err = netlink.RuleDel(fromContainerRule)
 		if err != nil {
 			return errors.Wrapf(err, "VethDriver, error clean up policy rule for container")
-		}
-	}
-
-	if tableID != -1 && tableID != 0 {
-		var (
-			routeList   []netlink.Route
-			routeDelete = 0
-		)
-
-		routeList, err = netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
-			Table: tableID,
-		}, netlink.RT_FILTER_TABLE)
-
-		if err != nil {
-			return errors.Wrapf(err, "failed list conflict routes in route table： %v", tableID)
-		}
-
-		for _, route := range routeList {
-			if route.Dst != nil && route.Dst.IP.Equal(containerIP) {
-				err = netlink.RouteDel(&route)
-				if err != nil {
-					return errors.Wrapf(err, "VethDriver, error routeDelete route for container ip")
-				}
-				routeDelete++
-			}
-		}
-		// clean up route table when table only remain default route
-		if len(routeList)-routeDelete == 1 {
-			for _, route := range routeList {
-				if route.Dst != nil && route.Dst.IP.Equal(defaultRoute.IP) {
-					err = netlink.RouteDel(&route)
-					if err != nil {
-						return errors.Wrapf(err, "VethDriver, error cleanup default route for eni table: %v", tableID)
-					}
-					break
-				}
-			}
 		}
 	}
 

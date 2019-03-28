@@ -172,6 +172,11 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 		return nil, errors.Wrapf(err, "error get pod resources from db for pod %+v", podinfo)
 	}
 
+	if !networkService.verifyPodNetworkType(podinfo.PodNetworkType) {
+		networkContext.Log().Warnf("unexpect pod network type allocate, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
+		return nil, fmt.Errorf("unexpect pod network type allocate, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
+	}
+
 	// 3. Allocate network resource for pod
 	switch podinfo.PodNetworkType {
 	case podNetworkTypeENIMultiIP:
@@ -337,6 +342,11 @@ func (networkService *networkService) ReleaseIP(grpcContext context.Context, r *
 		return nil, err
 	}
 
+	if !networkService.verifyPodNetworkType(podinfo.PodNetworkType) {
+		networkContext.Log().Warnf("unexpect pod network type release, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
+		return releaseReply, nil
+	}
+
 	for _, res := range oldRes.Resources {
 		//record old resource for pod
 		networkContext.resources = append(networkContext.resources, res)
@@ -417,6 +427,13 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 	default:
 		return getIPInfoResult, errors.Errorf("unknown or unsupport network type for: %v", r)
 	}
+}
+
+func (networkService networkService) verifyPodNetworkType(podNetworkMode string) bool {
+	return (networkService.daemonMode == DaemonModeVPC && //vpc
+		(podNetworkMode == PodNetworkTypeVPCENI || podNetworkMode == PodNetworkTypeVPCIP)) ||
+		// eni-multi-ip
+		(networkService.daemonMode == DaemonModeENIMultiIP && podNetworkMode == PodNetworkTypeENIMultiIP)
 }
 
 func (networkService *networkService) startGarbageCollectionLoop() {
