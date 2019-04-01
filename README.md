@@ -216,3 +216,9 @@ docker build -t acs/terway:latest .
 
 You are welcome to make new issues and pull reuqests.
 
+## Community
+
+### DingTalk
+
+Join `DingTalk` group by the QR code below:  
+<img src="./docs/images/ding_group_qrcode.jpg" width="300" height="400" />
