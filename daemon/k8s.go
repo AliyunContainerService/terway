@@ -6,6 +6,7 @@ import (
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -84,14 +85,25 @@ func newK8S(client kubernetes.Interface, svcCidr *net.IPNet, daemonMode string) 
 		return nil, errors.Wrapf(err, "failed init db storage with path %s and bucket %s", dbPath, dbName)
 	}
 
-	return &k8s{
+	k8sObj := &k8s{
 		client:   client,
 		mode:     daemonMode,
 		nodeName: nodeName,
 		nodeCidr: nodeCidr,
 		svcCidr:  svcCidr,
 		storage:  storage,
-	}, nil
+	}
+
+	go func() {
+		for range time.Tick(storageCleanPeriod) {
+			err := k8sObj.clean()
+			if err != nil {
+				log.Errorf("error cleanup k8s pod local storage, %v", err)
+			}
+		}
+	}()
+
+	return k8sObj, nil
 }
 
 func getNodeName(client kubernetes.Interface) (string, error) {
@@ -177,7 +189,10 @@ const podEgressBandwidth = "k8s.aliyun.com/egress-bandwidth"
 
 const defaultStickTimeForSts = 5 * time.Minute
 
-var storageCleanPeriod = 1 * time.Hour
+var (
+	storageCleanTimeout = 1 * time.Hour
+	storageCleanPeriod  = 5 * time.Minute
+)
 
 func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 	switch daemonMode {
@@ -300,20 +315,35 @@ func deserialize(data []byte) (interface{}, error) {
 	return item, nil
 }
 
+func (k *k8s) podExist(namespace, name string) (bool, error) {
+	podList, err := k.client.CoreV1().Pods(namespace).List(metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", name).String(),
+	})
+	if err != nil {
+		return false, errors.Wrapf(err, "error list pod: %v-%v", namespace, name)
+	}
+	return len(podList.Items) > 0, nil
+}
+
 func (k *k8s) GetPod(namespace, name string) (*podInfo, error) {
-	key := podInfoKey(namespace, name)
-	obj, err := k.storage.Get(key)
-	if err == nil {
-		item := obj.(*storageItem)
-		return item.Pod, nil
-	}
-
-	if err != storage.ErrNotFound {
-		return nil, err
-	}
-
 	pod, err := k.client.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
+		exist, err1 := k.podExist(namespace, name)
+		if err1 != nil {
+			log.Warnf("exist pod failed: %v", err1)
+		}
+		if err1 == nil && !exist {
+			key := podInfoKey(namespace, name)
+			obj, err := k.storage.Get(key)
+			if err == nil {
+				item := obj.(*storageItem)
+				return item.Pod, nil
+			}
+
+			if err != storage.ErrNotFound {
+				return nil, err
+			}
+		}
 		return nil, err
 	}
 	podInfo := convertPod(k.mode, pod)
@@ -399,7 +429,7 @@ func (k *k8s) clean() error {
 			continue
 		}
 
-		if time.Now().Sub(*item.deletionTime) > storageCleanPeriod {
+		if time.Now().Sub(*item.deletionTime) > storageCleanTimeout {
 			if err := k.storage.Delete(key); err != nil {
 				return errors.Wrap(err, "error delete storage")
 			}

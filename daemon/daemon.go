@@ -429,11 +429,11 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 	}
 }
 
-func (networkService networkService) verifyPodNetworkType(podNetworkMode string) bool {
-	return (networkService.daemonMode == DaemonModeVPC && //vpc
-		(podNetworkMode == PodNetworkTypeVPCENI || podNetworkMode == PodNetworkTypeVPCIP)) ||
+func (networkService *networkService) verifyPodNetworkType(podNetworkMode string) bool {
+	return (networkService.daemonMode == daemonModeVPC && //vpc
+		(podNetworkMode == podNetworkTypeVPCENI || podNetworkMode == podNetworkTypeVPCIP)) ||
 		// eni-multi-ip
-		(networkService.daemonMode == DaemonModeENIMultiIP && podNetworkMode == PodNetworkTypeENIMultiIP)
+		(networkService.daemonMode == daemonModeENIMultiIP && podNetworkMode == podNetworkTypeENIMultiIP)
 }
 
 func (networkService *networkService) startGarbageCollectionLoop() {
