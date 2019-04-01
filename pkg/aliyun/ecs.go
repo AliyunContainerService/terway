@@ -27,6 +27,7 @@ type ECS interface {
 	GetInstanceMaxENI(instanceID string) (int, error)
 	GetInstanceMaxPrivateIP(intanceID string) (int, error)
 	GetENIMaxIP(instanceID string, eniID string) (int, error)
+	GetAttachedSecurityGroup(instanceID string) (string, error)
 }
 
 type ecsImpl struct {
@@ -523,4 +524,15 @@ func (e *ecsImpl) GetENIByMac(instanceID, mac string) (*types.ENI, error) {
 		return nil, errors.Wrapf(err, "error get eni max ip")
 	}
 	return eni, nil
+}
+
+func (e *ecsImpl) GetAttachedSecurityGroup(instanceID string) (string, error) {
+	ins, err := e.clientSet.ecs.DescribeInstanceAttribute(instanceID)
+	if err != nil {
+		return "", errors.Wrapf(err, "error describe instance attribute for security group: %s", instanceID)
+	}
+	if len(ins.SecurityGroupIds.SecurityGroupId) > 0 {
+		return ins.SecurityGroupIds.SecurityGroupId[0], nil
+	}
+	return "", fmt.Errorf("error get instance security groups: %s", instanceID)
 }

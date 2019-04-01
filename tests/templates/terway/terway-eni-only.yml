@@ -163,8 +163,6 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: spec.nodeName
-          - name: Network
-            value: POD_CIDR
         securityContext:
           privileged: true
         resources:

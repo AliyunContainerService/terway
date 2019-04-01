@@ -45,6 +45,7 @@ func ipNetEqual(ipn1 *net.IPNet, ipn2 *net.IPNet) bool {
 }
 
 const rpFilterSysctl = "net.ipv4.conf.%s.rp_filter"
+
 // EnsureHostNsConfig setup host namespace configs
 func EnsureHostNsConfig() error {
 	existInterfaces, err := net.Interfaces()

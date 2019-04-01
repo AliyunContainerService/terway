@@ -409,7 +409,7 @@ func (k *k8s) clean() error {
 	}
 
 	for _, obj := range list {
-		item := obj.(storageItem)
+		item := obj.(*storageItem)
 		key := podInfoKey(item.Pod.Namespace, item.Pod.Name)
 
 		if _, exists := podsMap[key]; exists {

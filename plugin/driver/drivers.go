@@ -38,7 +38,7 @@ const (
 	// MTU to config interfaces
 	MTU = 1500
 	// mainRouteTable the system "main" route table id
-	mainRouteTable = 254
+	mainRouteTable        = 254
 	toContainerPriority   = 512
 	fromContainerPriority = 2048
 )

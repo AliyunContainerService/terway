@@ -52,6 +52,6 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println(maxPrivateIP-1)
+		fmt.Println(maxPrivateIP - 1)
 	}
 }
