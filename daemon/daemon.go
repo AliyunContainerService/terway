@@ -24,6 +24,7 @@ import (
 const (
 	daemonModeVPC        = "VPC"
 	daemonModeENIMultiIP = "ENIMultiIP"
+	daemonModeENIOnly    = "ENIOnly"
 
 	gcPeriod = 5 * time.Minute
 )
@@ -433,7 +434,9 @@ func (networkService *networkService) verifyPodNetworkType(podNetworkMode string
 	return (networkService.daemonMode == daemonModeVPC && //vpc
 		(podNetworkMode == podNetworkTypeVPCENI || podNetworkMode == podNetworkTypeVPCIP)) ||
 		// eni-multi-ip
-		(networkService.daemonMode == daemonModeENIMultiIP && podNetworkMode == podNetworkTypeENIMultiIP)
+		(networkService.daemonMode == daemonModeENIMultiIP && podNetworkMode == podNetworkTypeENIMultiIP) ||
+		// eni-only
+		(networkService.daemonMode == daemonModeENIOnly && podNetworkMode == podNetworkTypeVPCENI)
 }
 
 func (networkService *networkService) startGarbageCollectionLoop() {
@@ -517,7 +520,7 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServer, error) {
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
 	netSrv := &networkService{}
-	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC {
+	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC || daemonMode == daemonModeENIOnly {
 		netSrv.daemonMode = daemonMode
 	} else {
 		return nil, fmt.Errorf("unsupport daemon mode")
@@ -641,6 +644,15 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 		}
 		netSrv.mgrForResource = map[string]ResourceManager{
 			types.ResourceTypeENIIP: netSrv.eniIPResMgr,
+		}
+	case daemonModeENIOnly:
+		//init eni
+		netSrv.eniResMgr, err = newENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI])
+		if err != nil {
+			return nil, errors.Wrapf(err, "error init eni resource manager")
+		}
+		netSrv.mgrForResource = map[string]ResourceManager{
+			types.ResourceTypeENI: netSrv.eniResMgr,
 		}
 	default:
 		panic("unsupported daemon mode" + daemonMode)

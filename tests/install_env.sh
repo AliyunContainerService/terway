@@ -54,6 +54,9 @@ install_terway() {
 		eni-multi-ip)
 			terway_template='terway-multiip.yml'
 			;;
+		eni-only)
+			terway_template='terway-eni-only.yml'
+			;;
 		*)
 			echo "invaild category "${category}
 			exit 1;

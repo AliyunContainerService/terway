@@ -216,6 +216,8 @@ func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 			return podNetworkTypeVPCENI
 		}
 		return podNetworkTypeVPCIP
+	case daemonModeENIOnly:
+		return podNetworkTypeVPCENI
 	}
 
 	panic(fmt.Errorf("unknown daemon mode %s", daemonMode))
