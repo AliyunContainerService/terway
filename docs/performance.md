@@ -48,3 +48,15 @@ ecs.sn1ne.2xlarge | 8 | 16.0 | 2.0 | 100 | 是 | 4 | 4 |
 | terway-eni | 2.06 Gbits/sec | 2.06 Gbits/sec | 2.07 Gbits/sec |
 | terway | 2.06 Gbits/sec | 2.06 Gbits/sec | 2.06 Gbits/sec |
 | host | 2.06 Gbits/sec | 2.07 Gbits/sec | 2.06 Gbits/sec |
+
+PPS | terway-eni | terway | host
+-|-|-|-
+terway-eni | 193K | 170K | 130K
+terway | 127K | 100K | 128.4K
+host | 163K | 130k | 132K |
+			
+延时 | terway-eni | terway | host
+-|-|-|-
+terway-eni | 0.205 ms | 0.250 ms | 0.211 ms
+terway | 0.258 ms | 0.287 ms | 0.282 ms
+host | 0.170 ms | 0.219 ms | 0.208 ms
