@@ -67,3 +67,32 @@ host | 0.170 ms | 0.219 ms | 0.208 ms
 - 各种模式下均可将网卡带宽打满，从吞吐量上看结果无明显区别
 - 从流量流入容器角度看数据，流向terway-eni模式在各项指标均接近甚至超过流向宿主机的性能
 - 从流量流出容器角度看数据，从terway-eni模式性能接近但略低于宿主机流量流出性能，但明显高于terway默认网络
+
+### 跨可用区网络性能测试
+测试机型选用ecs.sn1ne.8xlarge，规格详情如下
+
+实例规格 | vCPU |  内存（GiB） | 网络带宽能力（出/入）（Gbit/s） | 网络收发包能力（出/入）（万PPS） | 多队列**** | 弹性网卡（包括一块主网卡）
+-|-|-|-|-|-|-
+ecs.sn1ne.8xlarge | 32 | 64.0 | 6.0 | 250 | 是 | 8 | 8 |
+
+#### 测试结果
+
+| 吞吐量 | terway-eni | terway | host |
+| ------ | ------ | ------ | ------ |
+| terway-eni | 5.94 Gbits/sec | 4.21 Gbits/sec | 4.58 Gbits/sec |
+| terway | 5.94 Gbits/sec | 3.61 Gbits/sec | 3.77 Gbits/sec |
+| host | 5.92 Gbits/sec | 4.16 Gbits/sec | 3.71 Gbits/sec |
+
+PPS | terway-eni | terway | host
+-|-|-|-
+terway-eni | 154K | 158K | 140K
+terway | 136K | 118K | 136K
+host | 190K | 136K | 172K |
+			
+延时 | terway-eni | terway | host
+-|-|-|-
+terway-eni | 0.65 ms | 0.723 ms | 0.858 ms
+terway | 0.886 ms | 0.484 ms | 0.804 ms
+host | 0.825 ms | 0.626 ms | 0.621 ms
+			
+
