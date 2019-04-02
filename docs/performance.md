@@ -10,7 +10,8 @@
 - PPS（Packet Per Second）
 - 延时（ms）
 ### 测试方法
-吞吐量，PPS测试使用iperf3版本如下：
+吞吐量，PPS测试使用iperf3 
+版本信息如下：
 ```
 iperf 3.6 (cJSON 1.5.2)
 Linux iperf3-terway-57b5fd565-bwc28 3.10.0-957.5.1.el7.x86_64 #1 SMP Fri Feb 1 14:54:57 UTC 2019 x86_64
