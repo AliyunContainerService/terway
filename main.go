@@ -12,9 +12,9 @@ const DEFAULT_SOCKET_PATH = "/var/run/eni/eni.socket"
 const DEBUG_SOCKET_PATH = "unix:///var/run/eni/eni_debug.socket"
 
 var (
-	gitVer string
-	logLevel string
-	daemonMode string
+	gitVer         string
+	logLevel       string
+	daemonMode     string
 	readonlyListen string
 )
 

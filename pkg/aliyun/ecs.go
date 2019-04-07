@@ -65,7 +65,7 @@ func NewECS(ak, sk string, region common.Region) (ECS, error) {
 	}, nil
 }
 
-func (e ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceId string) (*types.ENI, error) {
+func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceId string) (*types.ENI, error) {
 	if vSwitch == "" || len(securityGroup) == 0 || instanceId == "" {
 		return nil, errors.Errorf("invalid eni args for allocate")
 	}
@@ -167,7 +167,7 @@ func (e ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceId st
 	return eni, err
 }
 
-func (e ecsImpl) destroyInterface(eniId string, instanceId string, force bool) error {
+func (e *ecsImpl) destroyInterface(eniId string, instanceId string, force bool) error {
 	var (
 		retryErr error
 	)
@@ -242,7 +242,7 @@ func (e ecsImpl) destroyInterface(eniId string, instanceId string, force bool) e
 	return errors.Wrapf(err, "cannot detach eni: %v", retryErr)
 }
 
-func (e ecsImpl) GetAttachedENIs(instanceId string, containsMainENI bool) ([]*types.ENI, error) {
+func (e *ecsImpl) GetAttachedENIs(instanceId string, containsMainENI bool) ([]*types.ENI, error) {
 	enis, err := e.eniInfoGetter.GetAttachedENIs(instanceId, containsMainENI)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get eni config by mac")
@@ -250,24 +250,24 @@ func (e ecsImpl) GetAttachedENIs(instanceId string, containsMainENI bool) ([]*ty
 	for _, eni := range enis {
 		eni.MaxIPs, err = e.GetENIMaxIP(instanceId, eni.ID)
 		if err != nil {
-			logrus.Warnf("error get eni max ips", err)
+			logrus.Warnf("error get eni max ips %v", err)
 			return nil, errors.Wrapf(err, "error get eni max ip")
 		}
 	}
 	return enis, nil
 }
 
-func (e ecsImpl) FreeENI(eniId, instanceId string) error {
+func (e *ecsImpl) FreeENI(eniId, instanceId string) error {
 	return e.destroyInterface(eniId, instanceId, true)
 }
 
-func (e ecsImpl) GetENIIPs(eniId string) ([]net.IP, error) {
+func (e *ecsImpl) GetENIIPs(eniId string) ([]net.IP, error) {
 	e.privateIpMutex.RLock()
 	defer e.privateIpMutex.RUnlock()
 	return e.eniInfoGetter.GetENIPrivateAddresses(eniId)
 }
 
-func (e ecsImpl) AssignIPForENI(eniId string) (net.IP, error) {
+func (e *ecsImpl) AssignIPForENI(eniId string) (net.IP, error) {
 	e.privateIpMutex.Lock()
 	defer e.privateIpMutex.Unlock()
 	addressesBefore, err := e.openapiInfoGetter.GetENIPrivateAddresses(eniId)
@@ -330,7 +330,7 @@ func (e ecsImpl) AssignIPForENI(eniId string) (net.IP, error) {
 	return newIP, err
 }
 
-func (e ecsImpl) UnAssignIPForENI(eniId string, ip net.IP) error {
+func (e *ecsImpl) UnAssignIPForENI(eniId string, ip net.IP) error {
 	e.privateIpMutex.Lock()
 	defer e.privateIpMutex.Unlock()
 
@@ -390,7 +390,7 @@ func (e ecsImpl) UnAssignIPForENI(eniId string, ip net.IP) error {
 	return errors.Wrapf(err, "error unassign eni private address for %s", eniId)
 }
 
-func (e ecsImpl) GetInstanceMaxENI(instanceId string) (int, error) {
+func (e *ecsImpl) GetInstanceMaxENI(instanceId string) (int, error) {
 	eniCap := 0
 	err := wait.ExponentialBackoff(
 		wait.Backoff{
@@ -435,7 +435,7 @@ func (e ecsImpl) GetInstanceMaxENI(instanceId string) (int, error) {
 	return eniCap, errors.Wrapf(err, "error get instance max eni: %v", instanceId)
 }
 
-func (e ecsImpl) GetInstanceMaxPrivateIP(instanceId string) (int, error) {
+func (e *ecsImpl) GetInstanceMaxPrivateIP(instanceId string) (int, error) {
 	maxEni, err := e.GetInstanceMaxENI(instanceId)
 	if err != nil {
 		return 0, errors.Wrapf(err, "error get instance max eni: %v", instanceId)
@@ -451,7 +451,7 @@ func (e ecsImpl) GetInstanceMaxPrivateIP(instanceId string) (int, error) {
 	return maxIPForInstance, nil
 }
 
-func (e ecsImpl) GetENIMaxIP(instanceId string, eniId string) (int, error) {
+func (e *ecsImpl) GetENIMaxIP(instanceId string, eniId string) (int, error) {
 	// fixme: the eniid must bind on specified instanceId
 	eniIPCap := 0
 	err := wait.ExponentialBackoff(
@@ -496,27 +496,27 @@ func (e ecsImpl) GetENIMaxIP(instanceId string, eniId string) (int, error) {
 	return eniIPCap, errors.Wrapf(err, "error get instance max eni ip: %v", instanceId)
 }
 
-func (e ecsImpl) GetENIById(instanceId, eniId string) (*types.ENI, error) {
+func (e *ecsImpl) GetENIById(instanceId, eniId string) (*types.ENI, error) {
 	eni, err := e.eniInfoGetter.GetENIConfigById(eniId)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get eni config by mac")
 	}
 	eni.MaxIPs, err = e.GetENIMaxIP(instanceId, eni.ID)
 	if err != nil {
-		logrus.Warnf("error get eni max ips", err)
+		logrus.Warnf("error get eni max ips %v", err)
 		return nil, errors.Wrapf(err, "error get eni max ip")
 	}
 	return eni, nil
 }
 
-func (e ecsImpl) GetENIByMac(instanceId, mac string) (*types.ENI, error) {
+func (e *ecsImpl) GetENIByMac(instanceId, mac string) (*types.ENI, error) {
 	eni, err := e.eniInfoGetter.GetENIConfigByMac(mac)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get eni config by mac")
 	}
 	eni.MaxIPs, err = e.GetENIMaxIP(instanceId, eni.ID)
 	if err != nil {
-		logrus.Warnf("error get eni max ips", err)
+		logrus.Warnf("error get eni max ips %v", err)
 		return nil, errors.Wrapf(err, "error get eni max ip")
 	}
 	return eni, nil

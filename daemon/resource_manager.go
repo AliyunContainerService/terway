@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"github.com/AliyunContainerService/terway/types"
-	"sync"
 )
 
 const (
@@ -18,14 +17,11 @@ type ResourceItem struct {
 }
 
 type PodResources struct {
-	lock      sync.Mutex
 	Resources []ResourceItem
 	PodInfo   *podInfo
 }
 
 func (p PodResources) GetResourceItemByType(resType string) []ResourceItem {
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	var ret []ResourceItem
 	for _, r := range p.Resources {
 		if resType == r.Type {

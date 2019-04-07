@@ -1,11 +1,11 @@
 package tc
 
 import (
-	"github.com/vishvananda/netlink"
 	"fmt"
 	"github.com/pkg/errors"
-	"math"
 	log "github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
+	"math"
 )
 
 type TrafficShappingRule struct {

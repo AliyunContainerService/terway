@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	defaultPrefix = "cali"
+	defaultPrefix   = "cali"
 	defaultIpamPath = "/var/lib/cni/networks/"
 )
 
@@ -55,7 +55,7 @@ func (f *VethResourceManager) GarbageCollection(inUseSet map[string]interface{},
 
 	sandboxStubSet := make(map[string]interface{})
 	for _, sandbox := range sandboxList {
-		sandboxStubSet[sandbox] = struct {}{}
+		sandboxStubSet[sandbox] = struct{}{}
 	}
 
 	files, err := ioutil.ReadDir(defaultIpamPath)
@@ -101,7 +101,7 @@ type containerRuntime interface {
 	GetRunningSandbox() ([]string, error)
 }
 
-type dockerRuntime struct {}
+type dockerRuntime struct{}
 
 func (dockerRuntime) GetRunningSandbox() ([]string, error) {
 	var containerList []string

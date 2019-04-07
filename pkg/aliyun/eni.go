@@ -123,7 +123,7 @@ func (e *ENIMetadata) getAttachMACList() ([]string, error) {
 	return macs, errors.Wrapf(err, "error get eni list from metadata")
 }
 
-func (e *ENIMetadata) GetAttachedENIs(instanceId string, containsMainENI bool)  ([]*types.ENI, error) {
+func (e *ENIMetadata) GetAttachedENIs(instanceId string, containsMainENI bool) ([]*types.ENI, error) {
 	var enis []*types.ENI
 
 	mainENIMac, err := metadataValue(metadataBase + mainEniPath)
@@ -151,8 +151,8 @@ func (e *ENIMetadata) GetAttachedENIs(instanceId string, containsMainENI bool)  
 }
 
 type ENIOpenAPI struct {
-	clientSet      *ClientMgr
-	region         common.Region
+	clientSet *ClientMgr
+	region    common.Region
 }
 
 func (*ENIOpenAPI) GetAttachedENIs(instanceId string, containsMainENI bool) ([]*types.ENI, error) {
@@ -161,7 +161,7 @@ func (*ENIOpenAPI) GetAttachedENIs(instanceId string, containsMainENI bool) ([]*
 
 func (eoa *ENIOpenAPI) GetENIPrivateAddresses(eniId string) ([]net.IP, error) {
 	describeNetworkInterfacesArgs := &ecs.DescribeNetworkInterfacesArgs{
-		RegionId: eoa.region,
+		RegionId:           eoa.region,
 		NetworkInterfaceId: []string{eniId},
 	}
 	resp, err := eoa.clientSet.ecs.DescribeNetworkInterfaces(describeNetworkInterfacesArgs)
