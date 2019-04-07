@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// Errors of pool
 var (
 	ErrNoAvailableResource = errors.New("no available resource")
 	ErrInvalidState        = errors.New("invalid state")
@@ -20,30 +21,34 @@ var (
 )
 
 const (
+	// CheckIdleInterval the interval of check and process idle eni
 	CheckIdleInterval = 2 * time.Minute
 )
 
+// ObjectPool object pool interface
 type ObjectPool interface {
-	Acquire(ctx context.Context, resid string) (types.NetworkResource, error)
-	ReleaseWithReverse(resId string, reverse time.Duration) error
-	Release(resId string) error
+	Acquire(ctx context.Context, resID string) (types.NetworkResource, error)
+	ReleaseWithReverse(resID string, reverse time.Duration) error
+	Release(resID string) error
 	AcquireAny(ctx context.Context) (types.NetworkResource, error)
-	Stat(resId string) error
+	Stat(resID string) error
 }
 
+// ResourceHolder interface to initialize pool
 type ResourceHolder interface {
 	AddIdle(resource types.NetworkResource)
 	AddInuse(resource types.NetworkResource)
 }
 
+// ObjectFactory interface of network resource object factory
 type ObjectFactory interface {
 	Create() (types.NetworkResource, error)
 	Dispose(types.NetworkResource) error
 }
 
-type SimpleObjectPool struct {
+type simpleObjectPool struct {
 	inuse      map[string]types.NetworkResource
-	idle       *PriorityQeueu
+	idle       *priorityQeueu
 	lock       sync.Mutex
 	factory    ObjectFactory
 	maxIdle    int
@@ -55,7 +60,8 @@ type SimpleObjectPool struct {
 	tokenCh chan struct{}
 }
 
-type PoolConfig struct {
+// Config configuration of pool
+type Config struct {
 	Factory     ObjectFactory
 	Initializer Initializer
 	MinIdle     int
@@ -72,12 +78,14 @@ func (i *poolItem) lessThan(other *poolItem) bool {
 	return i.reverse.Before(other.reverse)
 }
 
-const DefaultMaxIdle = 20
-const DefaultCapacity = 50
+const defaultMaxIdle = 20
+const defaultCapacity = 50
 
+// Initializer of pool
 type Initializer func(holder ResourceHolder) error
 
-func NewSimpleObjectPool(cfg PoolConfig) (ObjectPool, error) {
+// NewSimpleObjectPool return an object pool implement
+func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 	if cfg.MinIdle > cfg.MaxIdle {
 		return nil, ErrInvalidArguments
 	}
@@ -87,16 +95,16 @@ func NewSimpleObjectPool(cfg PoolConfig) (ObjectPool, error) {
 	}
 
 	if cfg.MaxIdle == 0 {
-		cfg.MaxIdle = DefaultMaxIdle
+		cfg.MaxIdle = defaultMaxIdle
 	}
 	if cfg.Capacity == 0 {
-		cfg.Capacity = DefaultCapacity
+		cfg.Capacity = defaultCapacity
 	}
 
-	pool := &SimpleObjectPool{
+	pool := &simpleObjectPool{
 		factory:  cfg.Factory,
 		inuse:    make(map[string]types.NetworkResource),
-		idle:     NewPriorityQueue(),
+		idle:     newPriorityQueue(),
 		maxIdle:  cfg.MaxIdle,
 		minIdle:  cfg.MinIdle,
 		capacity: cfg.Capacity,
@@ -126,7 +134,7 @@ func NewSimpleObjectPool(cfg PoolConfig) (ObjectPool, error) {
 	return pool, nil
 }
 
-func (p *SimpleObjectPool) startCheckIdleTicker() {
+func (p *simpleObjectPool) startCheckIdleTicker() {
 	p.checkIdle()
 	ticker := time.NewTicker(CheckIdleInterval)
 	for {
@@ -147,31 +155,31 @@ func mapKeys(m map[string]types.NetworkResource) string {
 	return strings.Join(keys, ", ")
 }
 
-func queueKeys(q *PriorityQeueu) string {
+func queueKeys(q *priorityQeueu) string {
 	var keys []string
 	for i := 0; i < q.size; i++ {
-		keys = append(keys, q.slots[i].res.GetResourceId())
+		keys = append(keys, q.slots[i].res.GetResourceID())
 	}
 	return strings.Join(keys, ", ")
 }
 
-func (p *SimpleObjectPool) dispose(res types.NetworkResource) {
+func (p *simpleObjectPool) dispose(res types.NetworkResource) {
 	log.Infof("try dispose res %+v", res)
 	if err := p.factory.Dispose(res); err != nil {
 		//put it back on dispose fail
-		log.Warnf("failed dispose %s: %v, put it back to idle", res.GetResourceId(), err)
+		log.Warnf("failed dispose %s: %v, put it back to idle", res.GetResourceID(), err)
 	} else {
 		p.tokenCh <- struct{}{}
 	}
 }
 
-func (p *SimpleObjectPool) tooManyIdle() bool {
+func (p *simpleObjectPool) tooManyIdle() bool {
 	return p.idle.Size() > p.maxIdle || (p.idle.Size() > 0 && p.size() > p.capacity)
 }
 
 //found resources that can be disposed, put them into dispose channel
 //must in lock
-func (p *SimpleObjectPool) checkIdle() {
+func (p *simpleObjectPool) checkIdle() {
 	for p.tooManyIdle() {
 		p.lock.Lock()
 		item := p.idle.Peek()
@@ -196,7 +204,7 @@ func (p *SimpleObjectPool) checkIdle() {
 	}
 }
 
-func (p *SimpleObjectPool) preload() error {
+func (p *simpleObjectPool) preload() error {
 	for {
 		// init resource sequential to avoid huge creating request on startup
 		if p.idle.Size() >= p.minIdle {
@@ -222,13 +230,13 @@ func (p *SimpleObjectPool) preload() error {
 	return nil
 }
 
-func (p *SimpleObjectPool) size() int {
+func (p *simpleObjectPool) size() int {
 	return p.idle.Size() + len(p.inuse)
 }
 
-func (p *SimpleObjectPool) getOneLocked(resId string) *poolItem {
-	if len(resId) > 0 {
-		item := p.idle.Rob(resId)
+func (p *simpleObjectPool) getOneLocked(resID string) *poolItem {
+	if len(resID) > 0 {
+		item := p.idle.Rob(resID)
 		if item != nil {
 			return item
 		}
@@ -236,20 +244,20 @@ func (p *SimpleObjectPool) getOneLocked(resId string) *poolItem {
 	return p.idle.Pop()
 }
 
-func (p *SimpleObjectPool) Acquire(ctx context.Context, resId string) (types.NetworkResource, error) {
+func (p *simpleObjectPool) Acquire(ctx context.Context, resID string) (types.NetworkResource, error) {
 	p.lock.Lock()
 	//defer p.lock.Unlock()
 	if p.idle.Size() > 0 {
-		res := p.getOneLocked(resId).res
-		p.inuse[res.GetResourceId()] = res
+		res := p.getOneLocked(resID).res
+		p.inuse[res.GetResourceID()] = res
 		p.lock.Unlock()
-		log.Infof("acquire (expect %s): return idle %s", resId, res.GetResourceId())
+		log.Infof("acquire (expect %s): return idle %s", resID, res.GetResourceID())
 		return res, nil
 	}
 	size := p.size()
 	if size >= p.capacity {
 		p.lock.Unlock()
-		log.Infof("acquire (expect %s), size %d, capacity %d: return err %v", resId, size, p.capacity, ErrNoAvailableResource)
+		log.Infof("acquire (expect %s), size %d, capacity %d: return err %v", resID, size, p.capacity, ErrNoAvailableResource)
 		return nil, ErrNoAvailableResource
 	}
 
@@ -263,52 +271,52 @@ func (p *SimpleObjectPool) Acquire(ctx context.Context, resId string) (types.Net
 			p.tokenCh <- struct{}{}
 			return nil, fmt.Errorf("error create from factory: %v", err)
 		}
-		log.Infof("acquire (expect %s): return newly %s", resId, res.GetResourceId())
+		log.Infof("acquire (expect %s): return newly %s", resID, res.GetResourceID())
 		p.AddInuse(res)
 		return res, nil
 	case <-ctx.Done():
-		log.Infof("acquire (expect %s): return err %v", resId, ErrContextDone)
+		log.Infof("acquire (expect %s): return err %v", resID, ErrContextDone)
 		return nil, ErrContextDone
 	}
 }
 
-func (p *SimpleObjectPool) AcquireAny(ctx context.Context) (types.NetworkResource, error) {
+func (p *simpleObjectPool) AcquireAny(ctx context.Context) (types.NetworkResource, error) {
 	return p.Acquire(ctx, "")
 }
 
-func (p *SimpleObjectPool) Stat(resId string) error {
+func (p *simpleObjectPool) Stat(resID string) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	_, ok := p.inuse[resId]
+	_, ok := p.inuse[resID]
 	if ok {
 		return nil
 	}
 
-	if p.idle.Find(resId) != nil {
+	if p.idle.Find(resID) != nil {
 		return nil
 	}
 
 	return ErrNotFound
 }
 
-func (p *SimpleObjectPool) notify() {
+func (p *simpleObjectPool) notify() {
 	select {
 	case p.notifyCh <- true:
 	default:
 	}
 }
 
-func (p *SimpleObjectPool) ReleaseWithReverse(resId string, reverse time.Duration) error {
+func (p *simpleObjectPool) ReleaseWithReverse(resID string, reverse time.Duration) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	res, ok := p.inuse[resId]
+	res, ok := p.inuse[resID]
 	if !ok {
-		log.Infof("release %s: return err %v", resId, ErrInvalidState)
+		log.Infof("release %s: return err %v", resID, ErrInvalidState)
 		return ErrInvalidState
 	}
 
-	log.Infof("release %s, reverse %v: return success", resId, reverse)
-	delete(p.inuse, resId)
+	log.Infof("release %s, reverse %v: return success", resID, reverse)
+	delete(p.inuse, resID)
 	reverseTo := time.Now()
 	if reverse > 0 {
 		reverseTo = reverseTo.Add(reverse)
@@ -317,18 +325,18 @@ func (p *SimpleObjectPool) ReleaseWithReverse(resId string, reverse time.Duratio
 	p.notify()
 	return nil
 }
-func (p *SimpleObjectPool) Release(resId string) error {
-	return p.ReleaseWithReverse(resId, time.Duration(0))
+func (p *simpleObjectPool) Release(resID string) error {
+	return p.ReleaseWithReverse(resID, time.Duration(0))
 }
 
-func (p *SimpleObjectPool) AddIdle(resource types.NetworkResource) {
+func (p *simpleObjectPool) AddIdle(resource types.NetworkResource) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.idle.Push(&poolItem{res: resource, reverse: time.Now()})
 }
 
-func (p *SimpleObjectPool) AddInuse(res types.NetworkResource) {
+func (p *simpleObjectPool) AddInuse(res types.NetworkResource) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.inuse[res.GetResourceId()] = res
+	p.inuse[res.GetResourceID()] = res
 }

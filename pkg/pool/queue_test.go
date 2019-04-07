@@ -9,7 +9,7 @@ import (
 )
 
 func TestInit(t *testing.T) {
-	queue := NewPriorityQueue()
+	queue := newPriorityQueue()
 	assert.Zero(t, queue.Size())
 }
 
@@ -22,7 +22,7 @@ func createPoolItem(id int) *poolItem {
 }
 
 func TestPop(t *testing.T) {
-	queue := NewPriorityQueue()
+	queue := newPriorityQueue()
 	for i := 0; i < 100; i++ {
 		item := createPoolItem(i)
 		queue.Push(item)
@@ -33,14 +33,14 @@ func TestPop(t *testing.T) {
 		if item == nil {
 			break
 		}
-		assert.Equal(t, fmt.Sprintf("%d", i), item.res.GetResourceId())
+		assert.Equal(t, fmt.Sprintf("%d", i), item.res.GetResourceID())
 		i++
 	}
 	assert.Equal(t, 100, i)
 }
 
 func TestPush(t *testing.T) {
-	queue := NewPriorityQueue()
+	queue := newPriorityQueue()
 	for i := 0; i < 10; i += 2 {
 		item := createPoolItem(i)
 		queue.Push(item)
@@ -56,14 +56,14 @@ func TestPush(t *testing.T) {
 		if item == nil {
 			break
 		}
-		assert.Equal(t, fmt.Sprintf("%d", i), item.res.GetResourceId())
+		assert.Equal(t, fmt.Sprintf("%d", i), item.res.GetResourceID())
 		i++
 	}
 	assert.Equal(t, 10, i)
 }
 
 func TestRob(t *testing.T) {
-	queue := NewPriorityQueue()
+	queue := newPriorityQueue()
 	for i := 0; i < 100; i += 2 {
 		item := createPoolItem(i)
 		queue.Push(item)
@@ -71,12 +71,12 @@ func TestRob(t *testing.T) {
 	assert.Nil(t, queue.Rob("5"))
 	item := queue.Rob("6")
 
-	assert.Equal(t, "6", item.res.GetResourceId())
+	assert.Equal(t, "6", item.res.GetResourceID())
 	assert.Equal(t, 49, queue.Size())
 }
 
 func TestFind(t *testing.T) {
-	queue := NewPriorityQueue()
+	queue := newPriorityQueue()
 	for i := 0; i < 100; i += 2 {
 		item := createPoolItem(i)
 		queue.Push(item)
@@ -84,6 +84,6 @@ func TestFind(t *testing.T) {
 	assert.Nil(t, queue.Find("5"))
 	item := queue.Find("6")
 
-	assert.Equal(t, "6", item.res.GetResourceId())
+	assert.Equal(t, "6", item.res.GetResourceID())
 	assert.Equal(t, 50, queue.Size())
 }

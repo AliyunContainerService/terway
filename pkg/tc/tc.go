@@ -8,7 +8,8 @@ import (
 	"math"
 )
 
-type TrafficShappingRule struct {
+// TrafficShapingRule the interface traffic shaping rule
+type TrafficShapingRule struct {
 	// rate in bytes
 	Rate uint64
 }
@@ -35,7 +36,8 @@ func latencyInUsec(latencyInMillis float64) float64 {
 
 const latencyInMillis = 25
 
-func SetRule(dev netlink.Link, rule *TrafficShappingRule) error {
+// SetRule set the traffic rule on interface
+func SetRule(dev netlink.Link, rule *TrafficShapingRule) error {
 	if rule.Rate < 0 {
 		return fmt.Errorf("invalid rate %d", rule.Rate)
 	}

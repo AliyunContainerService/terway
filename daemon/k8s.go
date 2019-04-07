@@ -20,11 +20,11 @@ import (
 )
 
 const (
-	PodNetworkTypeVPCIP      = "VPCIP"
-	PodNetworkTypeVPCENI     = "VPCENI"
-	PodNetworkTypeENIMultiIP = "ENIMultiIP"
-	DBPath                   = "/var/lib/cni/terway/pod.db"
-	DBName                   = "pods"
+	podNetworkTypeVPCIP      = "VPCIP"
+	podNetworkTypeVPCENI     = "VPCENI"
+	podNetworkTypeENIMultiIP = "ENIMultiIP"
+	dbPath                   = "/var/lib/cni/terway/pod.db"
+	dbName                   = "pods"
 )
 
 type podInfo struct {
@@ -35,9 +35,10 @@ type podInfo struct {
 	TcEgress       uint64
 	PodNetworkType string
 	PodIP          string
-	IpStickTime    time.Duration
+	IPStickTime    time.Duration
 }
 
+// Kubernetes operation set
 type Kubernetes interface {
 	GetLocalPods() ([]*podInfo, error)
 	GetPod(namespace, name string) (*podInfo, error)
@@ -64,7 +65,7 @@ func newK8S(client kubernetes.Interface, svcCidr *net.IPNet, daemonMode string) 
 	}
 
 	var nodeCidr *net.IPNet
-	if daemonMode == DaemonModeVPC {
+	if daemonMode == daemonModeVPC {
 		nodeCidr, err = nodeCidrFromAPIServer(client, nodeName)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed getting node cidr")
@@ -78,9 +79,9 @@ func newK8S(client kubernetes.Interface, svcCidr *net.IPNet, daemonMode string) 
 		}
 	}
 
-	storage, err := storage.NewDiskStorage(DBName, DBPath, serialize, deserialize)
+	storage, err := storage.NewDiskStorage(dbName, dbPath, serialize, deserialize)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed init db storage with path %s and bucket %s", DBPath, DBName)
+		return nil, errors.Wrapf(err, "failed init db storage with path %s and bucket %s", dbPath, dbName)
 	}
 
 	return &k8s{
@@ -133,14 +134,14 @@ func parseCidr(cidrString string) (*net.IPNet, error) {
 }
 
 func serviceCidrFromAPIServer(client kubernetes.Interface) (*net.IPNet, error) {
-	kubeadmConfigMap, err := client.CoreV1().ConfigMaps(K8S_SYSTEM_NAMESPACE).Get(K8S_KUBEADM_CONFIGMAP, metav1.GetOptions{})
+	kubeadmConfigMap, err := client.CoreV1().ConfigMaps(k8sSystemNamespace).Get(k8sKubeadmConfigmap, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
 
-	kubeNetworkingConfig, ok := kubeadmConfigMap.Data[K8S_KUBEADM_CONFIGMAP_NETWORKING]
+	kubeNetworkingConfig, ok := kubeadmConfigMap.Data[k8sKubeadmConfigmapNetworking]
 	if !ok {
-		kubeNetworkingConfig, ok = kubeadmConfigMap.Data[K8S_KUBEADM_CONFIGMAP_ClusterConfiguration]
+		kubeNetworkingConfig, ok = kubeadmConfigMap.Data[k8sKubeadmConfigmapClusterconfiguration]
 		if !ok {
 			return nil, fmt.Errorf("cannot found kubeproxy config for svc cidr")
 		}
@@ -149,6 +150,9 @@ func serviceCidrFromAPIServer(client kubernetes.Interface) (*net.IPNet, error) {
 	configMap := make(map[interface{}]interface{})
 
 	err = yaml.Unmarshal([]byte(kubeNetworkingConfig), &configMap)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error get networking config from configmap")
+	}
 
 	if networkingObj, ok := configMap["networking"]; ok {
 		if networkingMap, ok := networkingObj.(map[interface{}]interface{}); ok {
@@ -162,29 +166,27 @@ func serviceCidrFromAPIServer(client kubernetes.Interface) (*net.IPNet, error) {
 	return nil, fmt.Errorf("cannot found kubeproxy config for svc cidr")
 }
 
-const K8S_POD_NAME_ARGS = "K8S_POD_NAME"
-const K8S_POD_NAMESPACE_ARGS = "K8S_POD_NAMESPACE"
-const K8S_SYSTEM_NAMESPACE = "kube-system"
-const K8S_KUBEADM_CONFIGMAP = "kubeadm-config"
-const K8S_KUBEADM_CONFIGMAP_NETWORKING = "MasterConfiguration"
-const K8S_KUBEADM_CONFIGMAP_ClusterConfiguration = "ClusterConfiguration"
+const k8sSystemNamespace = "kube-system"
+const k8sKubeadmConfigmap = "kubeadm-config"
+const k8sKubeadmConfigmapNetworking = "MasterConfiguration"
+const k8sKubeadmConfigmapClusterconfiguration = "ClusterConfiguration"
 
-const POD_NEED_ENI = "k8s.aliyun.com/eni"
-const POD_INGRESS_BANDWIDTH = "k8s.aliyun.com/ingress-bandwidth"
-const POD_EGRESS_BANDWIDTH = "k8s.aliyun.com/egress-bandwidth"
+const podNeedEni = "k8s.aliyun.com/ENI"
+const podIngressBandwidth = "k8s.aliyun.com/ingress-bandwidth"
+const podEgressBandwidth = "k8s.aliyun.com/egress-bandwidth"
 
 const defaultStickTimeForSts = 5 * time.Minute
 
-var StorageCleanPeriod = 1 * time.Hour
+var storageCleanPeriod = 1 * time.Hour
 
 func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 	switch daemonMode {
-	case DaemonModeENIMultiIP:
-		return PodNetworkTypeENIMultiIP
-	case DaemonModeVPC:
+	case daemonModeENIMultiIP:
+		return podNetworkTypeENIMultiIP
+	case daemonModeVPC:
 		podAnnotation := pod.GetAnnotations()
 		useENI := false
-		if needEni, ok := podAnnotation[POD_NEED_ENI]; ok && (needEni != "" && needEni != "false" && needEni != "0") {
+		if needEni, ok := podAnnotation[podNeedEni]; ok && (needEni != "" && needEni != "false" && needEni != "0") {
 			useENI = true
 		}
 
@@ -196,10 +198,9 @@ func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 		}
 
 		if useENI {
-			return PodNetworkTypeVPCENI
-		} else {
-			return PodNetworkTypeVPCIP
+			return podNetworkTypeVPCENI
 		}
+		return podNetworkTypeVPCIP
 	}
 
 	panic(fmt.Errorf("unknown daemon mode %s", daemonMode))
@@ -217,13 +218,13 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 	pi.PodIP = pod.Status.PodIP
 
 	podAnnotation := pod.GetAnnotations()
-	if ingressBandwidth, ok := podAnnotation[POD_INGRESS_BANDWIDTH]; ok {
+	if ingressBandwidth, ok := podAnnotation[podIngressBandwidth]; ok {
 		if ingress, err := parseBandwidth(ingressBandwidth); err == nil {
 			pi.TcIngress = ingress
 		}
 		//TODO write event on pod if parse bandwidth fail
 	}
-	if egressBandwidth, ok := podAnnotation[POD_EGRESS_BANDWIDTH]; ok {
+	if egressBandwidth, ok := podAnnotation[podEgressBandwidth]; ok {
 		if egress, err := parseBandwidth(egressBandwidth); err == nil {
 			pi.TcEgress = egress
 		}
@@ -232,7 +233,7 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 	if len(pod.OwnerReferences) != 0 {
 		switch strings.ToLower(pod.OwnerReferences[0].Kind) {
 		case "statefulset":
-			pi.IpStickTime = defaultStickTimeForSts
+			pi.IPStickTime = defaultStickTimeForSts
 			break
 		}
 	}
@@ -240,6 +241,7 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 	return pi
 }
 
+// bandwidth limit unit
 const (
 	BYTE = 1 << (10 * iota)
 	KILOBYTE
@@ -397,7 +399,7 @@ func (k *k8s) clean() error {
 			continue
 		}
 
-		if time.Now().Sub(*item.deletionTime) > StorageCleanPeriod {
+		if time.Now().Sub(*item.deletionTime) > storageCleanPeriod {
 			if err := k.storage.Delete(key); err != nil {
 				return errors.Wrap(err, "error delete storage")
 			}

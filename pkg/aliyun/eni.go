@@ -12,17 +12,18 @@ import (
 	"net"
 )
 
+// ENIInfoGetter interface to get eni information
 type ENIInfoGetter interface {
 	GetENIConfigByMac(mac string) (*types.ENI, error)
-	GetENIConfigById(eniId string) (*types.ENI, error)
-	GetENIPrivateAddresses(eniId string) ([]net.IP, error)
-	GetAttachedENIs(instanceId string, containsMainENI bool) ([]*types.ENI, error)
+	GetENIConfigByID(eniID string) (*types.ENI, error)
+	GetENIPrivateAddresses(eniID string) ([]net.IP, error)
+	GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error)
 }
 
-type ENIMetadata struct {
+type eniMetadata struct {
 }
 
-func (e *ENIMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
+func (e *eniMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
 	var (
 		eni types.ENI
 		err error
@@ -78,7 +79,7 @@ func (e *ENIMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
 	return &eni, nil
 }
 
-func (e *ENIMetadata) GetENIConfigById(eniId string) (*types.ENI, error) {
+func (e *eniMetadata) GetENIConfigByID(eniID string) (*types.ENI, error) {
 	macs, err := e.getAttachMACList()
 	if err != nil {
 		return nil, err
@@ -88,25 +89,28 @@ func (e *ENIMetadata) GetENIConfigById(eniId string) (*types.ENI, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "error get eni id for mac: %s from metadata", mac)
 		}
-		if eniId == id {
+		if eniID == id {
 			return e.GetENIConfigByMac(mac)
 		}
 	}
-	return nil, errors.Errorf("not found eni id: %s", eniId)
+	return nil, errors.Errorf("not found eni id: %s", eniID)
 }
 
-func (e *ENIMetadata) GetENIPrivateAddresses(eniId string) ([]net.IP, error) {
+func (e *eniMetadata) GetENIPrivateAddresses(eniID string) ([]net.IP, error) {
 	var addressList []net.IP
-	eni, err := e.GetENIConfigById(eniId)
+	eni, err := e.GetENIConfigByID(eniID)
 	if err != nil {
 		return addressList, err
 	}
 
 	addressStrList := &[]string{}
 	ipsStr, err := metadataValue(fmt.Sprintf(metadataBase+eniPrivateIPs, eni.MAC))
+	if err != nil {
+		return nil, errors.Wrapf(err, "error get private ips from metadata")
+	}
 	err = json.Unmarshal([]byte(ipsStr), addressStrList)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get eni private address for eni: %s from metadata", eniId)
+		return nil, errors.Wrapf(err, "error get eni private address for eni: %s from metadata", eniID)
 	}
 	for _, ipStr := range *addressStrList {
 		ip := net.ParseIP(ipStr)
@@ -118,12 +122,12 @@ func (e *ENIMetadata) GetENIPrivateAddresses(eniId string) ([]net.IP, error) {
 	return addressList, err
 }
 
-func (e *ENIMetadata) getAttachMACList() ([]string, error) {
+func (e *eniMetadata) getAttachMACList() ([]string, error) {
 	macs, err := metadataArray(metadataBase + enisPath)
 	return macs, errors.Wrapf(err, "error get eni list from metadata")
 }
 
-func (e *ENIMetadata) GetAttachedENIs(instanceId string, containsMainENI bool) ([]*types.ENI, error) {
+func (e *eniMetadata) GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error) {
 	var enis []*types.ENI
 
 	mainENIMac, err := metadataValue(metadataBase + mainEniPath)
@@ -150,44 +154,44 @@ func (e *ENIMetadata) GetAttachedENIs(instanceId string, containsMainENI bool) (
 	return enis, nil
 }
 
-type ENIOpenAPI struct {
+type eniOpenAPI struct {
 	clientSet *ClientMgr
 	region    common.Region
 }
 
-func (*ENIOpenAPI) GetAttachedENIs(instanceId string, containsMainENI bool) ([]*types.ENI, error) {
+func (*eniOpenAPI) GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error) {
 	panic("implement me")
 }
 
-func (eoa *ENIOpenAPI) GetENIPrivateAddresses(eniId string) ([]net.IP, error) {
+func (eoa *eniOpenAPI) GetENIPrivateAddresses(eniID string) ([]net.IP, error) {
 	describeNetworkInterfacesArgs := &ecs.DescribeNetworkInterfacesArgs{
 		RegionId:           eoa.region,
-		NetworkInterfaceId: []string{eniId},
+		NetworkInterfaceId: []string{eniID},
 	}
 	resp, err := eoa.clientSet.ecs.DescribeNetworkInterfaces(describeNetworkInterfacesArgs)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get info from openapi: eniid: %s", eniId)
+		return nil, errors.Wrapf(err, "error get info from openapi: eniid: %s", eniID)
 	}
 
 	if len(resp.NetworkInterfaceSets.NetworkInterfaceSet) != 1 {
-		return nil, fmt.Errorf("unexpect number of eni of id: %s", eniId)
+		return nil, fmt.Errorf("unexpect number of eni of id: %s", eniID)
 	}
 
 	eni := resp.NetworkInterfaceSets.NetworkInterfaceSet[0]
-	privateIpList := make([]net.IP, 0)
+	privateIPList := make([]net.IP, 0)
 	for _, ipStr := range eni.PrivateIpSets.PrivateIpSet {
 		ip := net.ParseIP(ipStr.PrivateIpAddress)
 		if ip != nil {
-			privateIpList = append(privateIpList, ip)
+			privateIPList = append(privateIPList, ip)
 		}
 	}
-	return privateIpList, nil
+	return privateIPList, nil
 }
 
-func (*ENIOpenAPI) GetENIConfigByMac(mac string) (*types.ENI, error) {
+func (*eniOpenAPI) GetENIConfigByMac(mac string) (*types.ENI, error) {
 	panic("implement me")
 }
 
-func (*ENIOpenAPI) GetENIConfigById(eniId string) (*types.ENI, error) {
+func (*eniOpenAPI) GetENIConfigByID(eniID string) (*types.ENI, error) {
 	panic("implement me")
 }

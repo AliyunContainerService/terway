@@ -5,14 +5,14 @@ import (
 	"golang.org/x/net/context"
 )
 
-type NetworkContext struct {
+type networkContext struct {
 	context.Context
 	resources  []ResourceItem
 	pod        *podInfo
 	k8sService Kubernetes
 }
 
-func (networkContext *NetworkContext) Log() *logrus.Entry {
+func (networkContext *networkContext) Log() *logrus.Entry {
 	return logrus.StandardLogger().
 		WithField("podName", networkContext.pod.Name).
 		WithField("podNs", networkContext.pod.Namespace).

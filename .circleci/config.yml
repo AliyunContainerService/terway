@@ -11,4 +11,10 @@ jobs:
     - checkout
     - setup_remote_docker:
           docker_layer_caching: true
+    - run:
+        name: run tests
+        command: |
+          go fmt ./...
+          go vet ./...
+          go test -v ./...
     - run: docker build -t acs/terway:$CIRCLE_BUILD_NUM .

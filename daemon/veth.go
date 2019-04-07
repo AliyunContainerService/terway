@@ -23,21 +23,21 @@ const (
 	defaultIpamPath = "/var/lib/cni/networks/"
 )
 
-type VethResourceManager struct {
+type vethResourceManager struct {
 	runtimeAPI containerRuntime
 }
 
-func (*VethResourceManager) Allocate(context *NetworkContext, prefer string) (types.NetworkResource, error) {
+func (*vethResourceManager) Allocate(context *networkContext, prefer string) (types.NetworkResource, error) {
 	return &types.Veth{
 		HostVeth: link.VethNameForPod(context.pod.Name, context.pod.Namespace, defaultPrefix),
 	}, nil
 }
 
-func (*VethResourceManager) Release(context *NetworkContext, resId string) error {
+func (*vethResourceManager) Release(context *networkContext, resID string) error {
 	return nil
 }
 
-func (f *VethResourceManager) GarbageCollection(inUseSet map[string]interface{}, expireResSet map[string]interface{}) error {
+func (f *vethResourceManager) GarbageCollection(inUseSet map[string]interface{}, expireResSet map[string]interface{}) error {
 	// fixme do gc on cni binary
 	lock, err := disk.NewFileLock(defaultIpamPath)
 	if err != nil {
@@ -65,7 +65,7 @@ func (f *VethResourceManager) GarbageCollection(inUseSet map[string]interface{},
 	}
 
 	// gather containerIDs for allocated ips
-	ipContainerIdMap := make(map[string]string)
+	ipContainerIDMap := make(map[string]string)
 	for _, file := range files {
 		// skip non checkpoint file
 		if ip := net.ParseIP(file.Name()); ip == nil {
@@ -76,11 +76,11 @@ func (f *VethResourceManager) GarbageCollection(inUseSet map[string]interface{},
 		if err != nil {
 			log.Errorf("Failed to read file %v: %v", file, err)
 		}
-		ipContainerIdMap[file.Name()] = strings.TrimSpace(string(content))
+		ipContainerIDMap[file.Name()] = strings.TrimSpace(string(content))
 	}
 
-	for ip, containerId := range ipContainerIdMap {
-		if _, ok := sandboxStubSet[containerId]; !ok && containerId != "" {
+	for ip, containerID := range ipContainerIDMap {
+		if _, ok := sandboxStubSet[containerID]; !ok && containerID != "" {
 			log.Warnf("detect ip address leak: %s, removing", ip)
 			err := os.Remove(filepath.Join(defaultIpamPath, ip))
 			if err != nil {
@@ -91,8 +91,8 @@ func (f *VethResourceManager) GarbageCollection(inUseSet map[string]interface{},
 	return nil
 }
 
-func NewVPCResourceManager() (ResourceManager, error) {
-	return &VethResourceManager{
+func newVPCResourceManager() (ResourceManager, error) {
+	return &vethResourceManager{
 		runtimeAPI: dockerRuntime{},
 	}, nil
 }
@@ -113,7 +113,8 @@ func (dockerRuntime) GetRunningSandbox() ([]string, error) {
 	}
 	defer dockerCli.Close()
 
-	timeoutContext, _ := context.WithTimeout(context.Background(), time.Minute)
+	timeoutContext, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
 	listFilter := filters.NewArgs()
 	listFilter.Add("label", fmt.Sprintf("%s=%s", "io.kubernetes.docker.type", "podsandbox"))
 	sandboxContainer, err := dockerCli.ContainerList(timeoutContext,
@@ -126,8 +127,9 @@ func (dockerRuntime) GetRunningSandbox() ([]string, error) {
 	}
 
 	for _, container := range sandboxContainer {
-		timeoutContext, _ := context.WithTimeout(context.Background(), time.Minute)
+		timeoutContext, cancel := context.WithTimeout(context.Background(), time.Minute)
 		containerInfo, err := dockerCli.ContainerInspect(timeoutContext, container.ID)
+		cancel()
 		if err != nil {
 			return containerList, fmt.Errorf("error get container info to cleanup: %+v", err)
 		}

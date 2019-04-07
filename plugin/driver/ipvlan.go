@@ -5,10 +5,10 @@ import "net"
 type ipvlanDriver struct {
 }
 
-func (*ipvlanDriver) Setup(namespace, pod, containerId string, ipv4Addr *net.IPNet, tableId int) error {
+func (*ipvlanDriver) Setup(namespace, pod, containerID string, ipv4Addr *net.IPNet, tableID int) error {
 	panic("implement me")
 }
 
-func (*ipvlanDriver) Teardown(containerId string, ipv4Addr *net.IPNet, tableId int) error {
+func (*ipvlanDriver) Teardown(containerID string, ipv4Addr *net.IPNet, tableID int) error {
 	panic("implement me")
 }

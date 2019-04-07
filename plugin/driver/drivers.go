@@ -11,8 +11,11 @@ import (
 	"syscall"
 )
 
-var VethDriver NetnsDriver = &vethDriver{}
-var NicDriver NetnsDriver = &rawNicDriver{}
+// drivers implement objects
+var (
+	VethDriver NetnsDriver = &vethDriver{}
+	NicDriver  NetnsDriver = &rawNicDriver{}
+)
 
 // NetnsDriver to config container netns interface and routes
 type NetnsDriver interface {
@@ -21,7 +24,7 @@ type NetnsDriver interface {
 		ipv4Addr *net.IPNet,
 		gateway net.IP,
 		extraRoutes []*types.Route,
-		deviceId int,
+		deviceID int,
 		ingress uint64,
 		egress uint64,
 		netNS ns.NetNS) error
@@ -32,13 +35,15 @@ type vethDriver struct {
 }
 
 const (
-	MTU            = 1500
+	// MTU to config interfaces
+	MTU = 1500
+	// mainRouteTable the system "main" route table id
 	mainRouteTable = 254
 )
 
 var (
 	_, defaultRoute, _ = net.ParseCIDR("0.0.0.0/0")
-	LINK_IP            = &net.IPNet{
+	linkIP             = &net.IPNet{
 		IP:   net.IPv4(169, 254, 1, 1),
 		Mask: net.CIDRMask(32, 32),
 	}
@@ -50,7 +55,7 @@ func (d *vethDriver) Setup(
 	ipv4Addr *net.IPNet,
 	gateway net.IP,
 	extraRoutes []*types.Route,
-	deviceId int,
+	deviceID int,
 	ingress uint64,
 	egress uint64,
 	netNS ns.NetNS) error {
@@ -75,7 +80,7 @@ func (d *vethDriver) Setup(
 	// config in container netns
 	err = netNS.Do(func(_ ns.NetNS) error {
 		// 1. create veth pair
-		hostVeth, contVeth, err = SetupVethPair(containerVeth, hostIfName, MTU, hostNs)
+		hostVeth, contVeth, err = setupVethPair(containerVeth, hostIfName, MTU, hostNs)
 		if err != nil {
 			return errors.Wrap(err, "vethDriver, error create veth pair for container")
 		}
@@ -102,14 +107,14 @@ func (d *vethDriver) Setup(
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Flags:     int(netlink.FLAG_ONLINK),
 			Dst:       defaultRoute,
-			Gw:        LINK_IP.IP,
+			Gw:        linkIP.IP,
 		})
 		if err != nil {
 			return errors.Wrap(err, "error add route for container veth")
 		}
 		err = netlink.NeighAdd(&netlink.Neigh{
 			LinkIndex:    contLink.Attrs().Index,
-			IP:           LINK_IP.IP,
+			IP:           linkIP.IP,
 			HardwareAddr: hostVeth.HardwareAddr,
 			State:        netlink.NUD_PERMANENT,
 			Family:       syscall.AF_INET,
@@ -122,7 +127,7 @@ func (d *vethDriver) Setup(
 			err = netlink.RouteAdd(&netlink.Route{
 				LinkIndex: contLink.Attrs().Index,
 				Scope:     netlink.SCOPE_LINK,
-				Dst:       LINK_IP,
+				Dst:       linkIP,
 			})
 			if err != nil {
 				return errors.Wrap(err, "error add route for container veth")
@@ -135,7 +140,7 @@ func (d *vethDriver) Setup(
 				Scope:     netlink.SCOPE_UNIVERSE,
 				Flags:     int(netlink.FLAG_ONLINK),
 				Dst:       &extraRoute.Dst,
-				Gw:        LINK_IP.IP,
+				Gw:        linkIP.IP,
 			})
 			if err != nil {
 				return errors.Wrapf(err, "error add extra route for container veth")
@@ -183,7 +188,7 @@ func (d *vethDriver) Setup(
 
 	if len(extraRoutes) != 0 {
 		err = netlink.AddrAdd(hostLink, &netlink.Addr{
-			IPNet: LINK_IP,
+			IPNet: linkIP,
 		})
 		if err != nil {
 			return errors.Wrap(err, "error add extra addr for host veth")
@@ -191,17 +196,17 @@ func (d *vethDriver) Setup(
 	}
 
 	// 2. config from container routes
-	if deviceId != 0 && deviceId != mainRouteTable {
+	if deviceID != 0 && deviceID != mainRouteTable {
 		var parentLink netlink.Link
-		parentLink, err = netlink.LinkByIndex(deviceId)
+		parentLink, err = netlink.LinkByIndex(deviceID)
 		if err != nil {
-			return errors.Wrapf(err, "vethDriver, error get eni parent Link, deviceId: %v", deviceId)
+			return errors.Wrapf(err, "vethDriver, error get eni parent Link, deviceID: %v", deviceID)
 		}
 
-		tableId := getRouteTableId(parentLink.Attrs().Index)
+		tableID := getRouteTableID(parentLink.Attrs().Index)
 
 		// ensure eni config
-		err = d.ensureEniConfig(parentLink, tableId, gateway)
+		err = d.ensureEniConfig(parentLink, tableID, gateway)
 		if err != nil {
 			return errors.Wrapf(err, "vethDriver, fail ensure eni config")
 		}
@@ -224,7 +229,7 @@ func (d *vethDriver) Setup(
 		// to container rule
 		toContainerRule := netlink.NewRule()
 		toContainerRule.Dst = containerDst
-		toContainerRule.Table = tableId
+		toContainerRule.Table = tableID
 
 		err = netlink.RuleAdd(toContainerRule)
 		if err != nil {
@@ -234,14 +239,14 @@ func (d *vethDriver) Setup(
 		// from container rule
 		fromContainerRule := netlink.NewRule()
 		fromContainerRule.Src = containerDst
-		fromContainerRule.Table = tableId
+		fromContainerRule.Table = tableID
 		err = netlink.RuleAdd(fromContainerRule)
 		if err != nil {
 			return errors.Wrapf(err, "vethDriver, fail add container add rule")
 		}
 
 		routeList, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
-			Table: tableId,
+			Table: tableID,
 			Dst:   containerDst,
 		}, netlink.RT_FILTER_DST|netlink.RT_FILTER_TABLE)
 
@@ -250,7 +255,7 @@ func (d *vethDriver) Setup(
 		}
 
 		for _, route := range routeList {
-			if ipNetEqual(route.Dst, containerDst) && route.Table == tableId {
+			if ipNetEqual(route.Dst, containerDst) && route.Table == tableID {
 				err = netlink.RouteDel(&route)
 				if err != nil {
 					return errors.Wrapf(err, "vethDriver, fail cleanup previous route for container in route table")
@@ -263,7 +268,7 @@ func (d *vethDriver) Setup(
 			LinkIndex: hostLink.Attrs().Index,
 			Scope:     netlink.SCOPE_LINK,
 			Dst:       containerDst,
-			Table:     tableId,
+			Table:     tableID,
 		})
 		if err != nil {
 			return errors.Wrapf(err, "vethDriver, fail add route to eni table")
@@ -278,13 +283,13 @@ func (d *vethDriver) Setup(
 }
 
 func (d *vethDriver) setupTC(dev netlink.Link, bandwidthInBytes uint64) error {
-	rule := &tc.TrafficShappingRule{
+	rule := &tc.TrafficShapingRule{
 		Rate: bandwidthInBytes,
 	}
 	return tc.SetRule(dev, rule)
 }
 
-func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableId int, gw net.IP) error {
+func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableID int, gw net.IP) error {
 	var err error
 	// set link up
 	if eni.Attrs().OperState != netlink.OperUp {
@@ -301,7 +306,7 @@ func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableId int, gw net.IP) e
 		return fmt.Errorf("error list address for eni: %v", err)
 	}
 	for _, addr := range addrs {
-		if !addr.IP.Equal(LINK_IP.IP) {
+		if !addr.IP.Equal(linkIP.IP) {
 			err = netlink.AddrDel(eni, &addr)
 			if err != nil {
 				return fmt.Errorf("error remove extra address for eni: %v", err)
@@ -312,7 +317,7 @@ func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableId int, gw net.IP) e
 
 	if addrDel == len(addrs) {
 		err = netlink.AddrAdd(eni, &netlink.Addr{
-			IPNet: LINK_IP,
+			IPNet: linkIP,
 		})
 		if err != nil {
 			return fmt.Errorf("error set address for eni: %v", err)
@@ -322,7 +327,7 @@ func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableId int, gw net.IP) e
 	// ensure default route
 	eniDefaultRoute, err := netlink.RouteListFiltered(netlink.FAMILY_ALL,
 		&netlink.Route{
-			Table: tableId,
+			Table: tableID,
 			Dst:   nil,
 		}, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_DST)
 	if err != nil {
@@ -345,7 +350,7 @@ func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableId int, gw net.IP) e
 				LinkIndex: eni.Attrs().Index,
 				Scope:     netlink.SCOPE_UNIVERSE,
 				Dst:       defaultRoute,
-				Table:     tableId,
+				Table:     tableID,
 				Flags:     int(netlink.FLAG_ONLINK),
 				Gw:        gw,
 			},
@@ -376,6 +381,10 @@ func (d *vethDriver) Teardown(hostIfName string, containerVeth string, netNS ns.
 
 	// found table for container
 	ruleList, err := netlink.RuleList(netlink.FAMILY_ALL)
+	if err != nil {
+		return errors.Wrapf(err, "failed list ip rule from netlink")
+	}
+
 	var toContainerRule *netlink.Rule
 	var fromContainerRule *netlink.Rule
 
@@ -397,9 +406,9 @@ func (d *vethDriver) Teardown(hostIfName string, containerVeth string, netNS ns.
 		}
 	}
 
-	tableId := -1
+	tableID := -1
 	if fromContainerRule != nil {
-		tableId = fromContainerRule.Table
+		tableID = fromContainerRule.Table
 	}
 
 	// 4. cleanup policy route of route tables of containerip
@@ -417,15 +426,19 @@ func (d *vethDriver) Teardown(hostIfName string, containerVeth string, netNS ns.
 		}
 	}
 
-	if tableId != -1 && tableId != 0 {
+	if tableID != -1 && tableID != 0 {
 		var (
 			routeList   []netlink.Route
 			routeDelete = 0
 		)
 
 		routeList, err = netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
-			Table: tableId,
+			Table: tableID,
 		}, netlink.RT_FILTER_TABLE)
+
+		if err != nil {
+			return errors.Wrapf(err, "failed list conflict routes in route table： %v", tableID)
+		}
 
 		for _, route := range routeList {
 			if route.Dst != nil && route.Dst.IP.Equal(containerIP) {
@@ -442,7 +455,7 @@ func (d *vethDriver) Teardown(hostIfName string, containerVeth string, netNS ns.
 				if route.Dst != nil && route.Dst.IP.Equal(defaultRoute.IP) {
 					err = netlink.RouteDel(&route)
 					if err != nil {
-						return errors.Wrapf(err, "VethDriver, error cleanup default route for eni table: %v", tableId)
+						return errors.Wrapf(err, "VethDriver, error cleanup default route for eni table: %v", tableID)
 					}
 					break
 				}
@@ -454,7 +467,7 @@ func (d *vethDriver) Teardown(hostIfName string, containerVeth string, netNS ns.
 	return netlink.LinkDel(hostVeth)
 }
 
-func SetupVethPair(contVethName, pairName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
+func setupVethPair(contVethName, pairName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
 	contVeth, err := makeVethPair(contVethName, pairName, mtu)
 	if err != nil {
 		return net.Interface{}, net.Interface{}, err
@@ -518,7 +531,7 @@ func ifaceFromNetlinkLink(l netlink.Link) net.Interface {
 }
 
 func getNSIP(ifName string, nsHandler ns.NetNS) (net.IP, error) {
-	var nsIp net.IP
+	var nsIP net.IP
 	err := nsHandler.Do(func(netNS ns.NetNS) error {
 		link, err := netlink.LinkByName(ifName)
 		if err != nil {
@@ -530,10 +543,10 @@ func getNSIP(ifName string, nsHandler ns.NetNS) (net.IP, error) {
 		} else if len(addr) != 1 {
 			return fmt.Errorf("error get ip from link: %v", ifName)
 		}
-		nsIp = addr[0].IP
+		nsIP = addr[0].IP
 		return nil
 	})
-	return nsIp, err
+	return nsIP, err
 }
 
 func getNSHw(ifName string, nsHandler ns.NetNS) (net.HardwareAddr, error) {

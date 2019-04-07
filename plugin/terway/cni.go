@@ -23,12 +23,12 @@ import (
 )
 
 const (
-	DEFAULT_SOCKET_PATH = "/var/run/eni/eni.socket"
-	defaultVethPrefix   = "cali"
-	defaultCniTimeout   = 120
-	defaultVethForENI   = "veth1"
-	delegateIpam        = "host-local"
-	delegateConf        = `
+	defaultSocketPath = "/var/run/eni/eni.socket"
+	defaultVethPrefix = "cali"
+	defaultCniTimeout = 120
+	defaultVethForENI = "veth1"
+	delegateIpam      = "host-local"
+	delegateConf      = `
 {
 	"ipam": {
 		"type": "host-local",
@@ -49,7 +49,7 @@ func main() {
 	skel.PluginMain(cmdAdd, cmdDel, version.GetSpecVersionSupported())
 }
 
-// NetConfig is the cni network config
+// NetConf is the cni network config
 type NetConf struct {
 	// CNIVersion is the plugin version
 	CNIVersion string `json:"cniVersion,omitempty"`
@@ -106,7 +106,8 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	defer closeConn()
 
-	timeoutContext, _ := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	defer cancel()
 
 	allocResult, err := terwayBackendClient.AllocIP(
 		timeoutContext,
@@ -155,7 +156,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		ipAddrStr := allocResult.GetENIMultiIP().GetEniConfig().GetIPv4Addr()
 		subnetStr := allocResult.GetENIMultiIP().GetEniConfig().GetIPv4Subnet()
 		gatewayStr := allocResult.GetENIMultiIP().GetEniConfig().GetGateway()
-		deviceId := allocResult.GetENIMultiIP().GetEniConfig().GetDeviceNumber()
+		deviceID := allocResult.GetENIMultiIP().GetEniConfig().GetDeviceNumber()
 		ingress := allocResult.GetENIMultiIP().GetPodConfig().GetIngress()
 		egress := allocResult.GetENIMultiIP().GetPodConfig().GetEgress()
 
@@ -175,7 +176,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return fmt.Errorf("eni multi ip return gateway is not vaild: %v", ipAddrStr)
 		}
 
-		err = networkDriver.Setup(hostVethName, args.IfName, subnet, gw, nil, int(deviceId), ingress, egress, cniNetns)
+		err = networkDriver.Setup(hostVethName, args.IfName, subnet, gw, nil, int(deviceID), ingress, egress, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network failed: %v", err)
 		}
@@ -348,7 +349,8 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 	defer closeConn()
 
-	timeoutContext, _ := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	defer cancel()
 
 	infoResult, err := terwayBackendClient.GetIPInfo(
 		timeoutContext,
@@ -429,9 +431,9 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func getNetworkClient() (rpc.TerwayBackendClient, func(), error) {
-	grpcConn, err := grpc.Dial(DEFAULT_SOCKET_PATH, grpc.WithInsecure(), grpc.WithDialer(
+	grpcConn, err := grpc.Dial(defaultSocketPath, grpc.WithInsecure(), grpc.WithDialer(
 		func(s string, duration time.Duration) (net.Conn, error) {
-			unixAddr, err := net.ResolveUnixAddr("unix", DEFAULT_SOCKET_PATH)
+			unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
 			if err != nil {
 				return nil, nil
 			}

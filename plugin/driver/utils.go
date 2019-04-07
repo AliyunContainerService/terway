@@ -6,10 +6,10 @@ import (
 	"net"
 )
 
-func deleteRoutesForAddr(addr *net.IPNet, tableId int) error {
+func deleteRoutesForAddr(addr *net.IPNet, tableID int) error {
 	routeList, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
 		Dst:   addr,
-		Table: tableId,
+		Table: tableID,
 	}, netlink.RT_FILTER_DST|netlink.RT_FILTER_TABLE)
 	if err != nil {
 		return errors.Wrapf(err, "error get route list")
@@ -25,7 +25,7 @@ func deleteRoutesForAddr(addr *net.IPNet, tableId int) error {
 }
 
 // add 1000 to link index to avoid route table conflict
-func getRouteTableId(linkIndex int) int {
+func getRouteTableID(linkIndex int) int {
 	return 1000 + linkIndex
 }
 
