@@ -2,9 +2,10 @@ package types
 
 import "github.com/denverdino/aliyungo/common"
 
+// Configure configuration of terway daemon
 type Configure struct {
 	Version       string              `yaml:"version" json:"version"`
-	AccessId      string              `yaml:"access_key" json:"access_key"`
+	AccessID      string              `yaml:"access_key" json:"access_key"`
 	AccessSecret  string              `yaml:"access_secret" json:"access_secret"`
 	ServiceCIDR   string              `yaml:"service_cidr" json:"service_cidr"`
 	VSwitches     map[string][]string `yaml:"vswitches" json:"vswitches"`
@@ -17,6 +18,7 @@ type Configure struct {
 	EniCapShift   int                 `yaml:"eni_cap_shift" json:"eni_cap_shift"`
 }
 
+// PoolConfig configuration of pool and resource factory
 type PoolConfig struct {
 	MaxPoolSize   int
 	MinPoolSize   int
@@ -26,7 +28,7 @@ type PoolConfig struct {
 	Region        common.Region
 	SecurityGroup string
 	InstanceID    string
-	AccessId      string
+	AccessID      string
 	AccessSecret  string
 	HotPlug       bool
 	EniCapRatio   float64

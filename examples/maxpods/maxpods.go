@@ -13,25 +13,25 @@ func debug(format string, args ...interface{}) {
 }
 
 var (
-	accessKeyId     string
+	accessKeyID     string
 	accessKeySecret string
 	region          string
 )
 
 func init() {
-	flag.StringVar(&accessKeyId, "access-key-id", "", "AlibabaCloud Access Key ID")
+	flag.StringVar(&accessKeyID, "access-key-id", "", "AlibabaCloud Access Key ID")
 	flag.StringVar(&accessKeySecret, "access-key-secret", "", "AlibabaCloud Access Key Secret")
 	flag.StringVar(&region, "region", "", "AlibabaCloud Access Key Secret")
 }
 
 func main() {
 	flag.Parse()
-	ecs, err := aliyun.NewECS(accessKeyId, accessKeySecret, common.Region(region))
+	ecs, err := aliyun.NewECS(accessKeyID, accessKeySecret, common.Region(region))
 	if err != nil {
 		panic(err)
 	}
 
-	instanceID, err := aliyun.GetLocalInstanceId()
+	instanceID, err := aliyun.GetLocalInstanceID()
 	if err != nil {
 		panic(err)
 	}

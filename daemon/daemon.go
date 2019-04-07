@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	DaemonModeVPC        = "VPC"
-	DaemonModeENIMultiIP = "ENIMultiIP"
+	daemonModeVPC        = "VPC"
+	daemonModeENIMultiIP = "ENIMultiIP"
 
 	gcPeriod = 5 * time.Minute
 )
@@ -34,7 +34,7 @@ type networkService struct {
 	resourceDB  storage.Storage
 	vethResMgr  ResourceManager
 	eniResMgr   ResourceManager
-	eniIpResMgr ResourceManager
+	eniIPResMgr ResourceManager
 	//networkResourceMgr ResourceManager
 	mgrForResource map[string]ResourceManager
 	sync.RWMutex
@@ -62,60 +62,60 @@ func (networkService *networkService) deletePodResource(info *podInfo) error {
 	return networkService.resourceDB.Delete(key)
 }
 
-func (networkService *networkService) allocateVeth(ctx *NetworkContext, old *PodResources) (*types.Veth, error) {
+func (networkService *networkService) allocateVeth(ctx *networkContext, old *PodResources) (*types.Veth, error) {
 	oldVethRes := old.GetResourceItemByType(types.ResourceTypeVeth)
-	oldVethId := ""
+	oldVethID := ""
 	if old.PodInfo != nil {
 		if len(oldVethRes) == 0 {
 			ctx.Log().Debugf("veth for pod %s is zero", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else if len(oldVethRes) > 1 {
 			ctx.Log().Warnf("veth for pod %s is zero", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else {
-			oldVethId = oldVethRes[0].ID
+			oldVethID = oldVethRes[0].ID
 		}
 	}
 
-	res, err := networkService.vethResMgr.Allocate(ctx, oldVethId)
+	res, err := networkService.vethResMgr.Allocate(ctx, oldVethID)
 	if err != nil {
 		return nil, err
 	}
 	return res.(*types.Veth), nil
 }
 
-func (networkService *networkService) allocateENI(ctx *NetworkContext, old *PodResources) (*types.ENI, error) {
+func (networkService *networkService) allocateENI(ctx *networkContext, old *PodResources) (*types.ENI, error) {
 	oldENIRes := old.GetResourceItemByType(types.ResourceTypeENI)
-	oldENIId := ""
+	oldENIID := ""
 	if old.PodInfo != nil {
 		if len(oldENIRes) == 0 {
 			ctx.Log().Debugf("eniip for pod %s is zero", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else if len(oldENIRes) > 1 {
 			ctx.Log().Warnf("eniip for pod %s more than one", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else {
-			oldENIId = oldENIRes[0].ID
+			oldENIID = oldENIRes[0].ID
 		}
 	}
 
-	res, err := networkService.eniResMgr.Allocate(ctx, oldENIId)
+	res, err := networkService.eniResMgr.Allocate(ctx, oldENIID)
 	if err != nil {
 		return nil, err
 	}
 	return res.(*types.ENI), nil
 }
 
-func (networkService *networkService) allocateENIMultiIP(ctx *NetworkContext, old *PodResources) (*types.ENIIP, error) {
+func (networkService *networkService) allocateENIMultiIP(ctx *networkContext, old *PodResources) (*types.ENIIP, error) {
 	oldVethRes := old.GetResourceItemByType(types.ResourceTypeENIIP)
-	oldVethId := ""
+	oldVethID := ""
 	if old.PodInfo != nil {
 		if len(oldVethRes) == 0 {
 			ctx.Log().Debugf("eniip for pod %s is zero", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else if len(oldVethRes) > 1 {
 			ctx.Log().Warnf("eniip for pod %s more than one", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else {
-			oldVethId = oldVethRes[0].ID
+			oldVethID = oldVethRes[0].ID
 		}
 	}
 
-	res, err := networkService.eniIpResMgr.Allocate(ctx, oldVethId)
+	res, err := networkService.eniIPResMgr.Allocate(ctx, oldVethID)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 	}
 
 	// 1. Init Context
-	networkContext := &NetworkContext{
+	networkContext := &networkContext{
 		Context:    grpcContext,
 		resources:  []ResourceItem{},
 		pod:        podinfo,
@@ -174,7 +174,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 
 	// 3. Allocate network resource for pod
 	switch podinfo.PodNetworkType {
-	case PodNetworkTypeENIMultiIP:
+	case podNetworkTypeENIMultiIP:
 		var eniMultiIP *types.ENIIP
 		eniMultiIP, err = networkService.allocateENIMultiIP(networkContext, &oldRes)
 		if err != nil {
@@ -184,7 +184,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 			PodInfo: podinfo,
 			Resources: []ResourceItem{
 				{
-					ID:   eniMultiIP.GetResourceId(),
+					ID:   eniMultiIP.GetResourceID(),
 					Type: eniMultiIP.GetType(),
 				},
 			},
@@ -212,17 +212,17 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 				},
 			},
 		}
-	case PodNetworkTypeVPCENI:
+	case podNetworkTypeVPCENI:
 		var vpcEni *types.ENI
 		vpcEni, err = networkService.allocateENI(networkContext, &oldRes)
 		if err != nil {
-			return nil, fmt.Errorf("error get allocated vpc eni ip for: %+v, result: %+v", podinfo, err)
+			return nil, fmt.Errorf("error get allocated vpc ENI ip for: %+v, result: %+v", podinfo, err)
 		}
 		newRes := PodResources{
 			PodInfo: podinfo,
 			Resources: []ResourceItem{
 				{
-					ID:   vpcEni.GetResourceId(),
+					ID:   vpcEni.GetResourceID(),
 					Type: vpcEni.GetType(),
 				},
 			},
@@ -250,7 +250,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 				ServiceCidr: networkService.k8s.GetServiceCidr().String(),
 			},
 		}
-	case PodNetworkTypeVPCIP:
+	case podNetworkTypeVPCIP:
 		var vpcVeth *types.Veth
 		vpcVeth, err = networkService.allocateVeth(networkContext, &oldRes)
 		if err != nil {
@@ -260,7 +260,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 			PodInfo: podinfo,
 			Resources: []ResourceItem{
 				{
-					ID:   vpcVeth.GetResourceId(),
+					ID:   vpcVeth.GetResourceID(),
 					Type: vpcVeth.GetType(),
 				},
 			},
@@ -315,7 +315,7 @@ func (networkService *networkService) ReleaseIP(grpcContext context.Context, r *
 	}
 
 	// 1. Init Context
-	networkContext := &NetworkContext{
+	networkContext := &networkContext{
 		Context:    grpcContext,
 		resources:  []ResourceItem{},
 		pod:        podinfo,
@@ -371,7 +371,7 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 	}
 
 	// 1. Init Context
-	networkContext := &NetworkContext{
+	networkContext := &networkContext{
 		Context:    ctx,
 		resources:  []ResourceItem{},
 		pod:        podinfo,
@@ -386,7 +386,7 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 
 	// 2. return network info for pod
 	switch podinfo.PodNetworkType {
-	case PodNetworkTypeENIMultiIP:
+	case podNetworkTypeENIMultiIP:
 		getIPInfoResult = &rpc.GetInfoReply{
 			IPType: rpc.IPType_TypeENIMultiIP,
 			PodConfig: &rpc.Pod{
@@ -395,7 +395,7 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 			},
 		}
 		return getIPInfoResult, nil
-	case PodNetworkTypeVPCIP:
+	case podNetworkTypeVPCIP:
 		getIPInfoResult = &rpc.GetInfoReply{
 			IPType: rpc.IPType_TypeVPCIP,
 			PodConfig: &rpc.Pod{
@@ -405,7 +405,7 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 			NodeCidr: networkService.k8s.GetNodeCidr().String(),
 		}
 		return getIPInfoResult, nil
-	case PodNetworkTypeVPCENI:
+	case podNetworkTypeVPCENI:
 		getIPInfoResult = &rpc.GetInfoReply{
 			IPType: rpc.IPType_TypeVPCENI,
 			PodConfig: &rpc.Pod{
@@ -500,7 +500,7 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServer, error) {
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
 	netSrv := &networkService{}
-	if daemonMode == DaemonModeENIMultiIP || daemonMode == DaemonModeVPC {
+	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC {
 		netSrv.daemonMode = daemonMode
 	} else {
 		return nil, fmt.Errorf("unsupport daemon mode")
@@ -532,12 +532,12 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 		return nil, err
 	}
 
-	regionId, err := aliyun.GetLocalRegion()
+	regionID, err := aliyun.GetLocalRegion()
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get region-id")
 	}
 
-	ecs, err := aliyun.NewECS(config.AccessId, config.AccessSecret, regionId)
+	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, regionID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get region-id")
 	}
@@ -565,7 +565,7 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 	}
 
 	netSrv.resourceDB, err = storage.NewDiskStorage(
-		ResDBName, ResDBPath, json.Marshal, func(bytes []byte) (interface{}, error) {
+		resDBName, resDBPath, json.Marshal, func(bytes []byte) (interface{}, error) {
 			resourceRel := &PodResources{}
 			err = json.Unmarshal(bytes, resourceRel)
 			if err != nil {
@@ -599,14 +599,14 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 	log.Infof("init pool config: %+v", poolConfig)
 
 	switch daemonMode {
-	case DaemonModeVPC:
-		//init eni
-		netSrv.eniResMgr, err = NewENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI])
+	case daemonModeVPC:
+		//init ENI
+		netSrv.eniResMgr, err = newENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI])
 		if err != nil {
-			return nil, errors.Wrapf(err, "error init eni resource manager")
+			return nil, errors.Wrapf(err, "error init ENI resource manager")
 		}
 
-		netSrv.vethResMgr, err = NewVPCResourceManager()
+		netSrv.vethResMgr, err = newVPCResourceManager()
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init vpc resource manager")
 		}
@@ -616,14 +616,14 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 			types.ResourceTypeVeth: netSrv.vethResMgr,
 		}
 
-	case DaemonModeENIMultiIP:
-		//init eni multi ip
-		netSrv.eniIpResMgr, err = NewENIIPResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENIIP])
+	case daemonModeENIMultiIP:
+		//init ENI multi ip
+		netSrv.eniIPResMgr, err = newENIIPResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENIIP])
 		if err != nil {
-			return nil, errors.Wrapf(err, "error init eni ip resource manager")
+			return nil, errors.Wrapf(err, "error init ENI ip resource manager")
 		}
 		netSrv.mgrForResource = map[string]ResourceManager{
-			types.ResourceTypeENIIP: netSrv.eniIpResMgr,
+			types.ResourceTypeENIIP: netSrv.eniIPResMgr,
 		}
 	default:
 		panic("unsupported daemon mode" + daemonMode)
@@ -660,7 +660,7 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 	poolConfig := &types.PoolConfig{
 		MaxPoolSize:   cfg.MaxPoolSize,
 		MinPoolSize:   cfg.MinPoolSize,
-		AccessId:      cfg.AccessId,
+		AccessID:      cfg.AccessID,
 		AccessSecret:  cfg.AccessSecret,
 		HotPlug:       cfg.HotPlug == "true",
 		EniCapRatio:   cfg.EniCapRatio,
@@ -679,11 +679,11 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 		}
 	}
 	if len(poolConfig.VSwitch) == 0 {
-		if vSwitch, err := aliyun.GetLocalVswitch(); err != nil {
+		vSwitch, err := aliyun.GetLocalVswitch()
+		if err != nil {
 			return nil, err
-		} else {
-			poolConfig.VSwitch = []string{vSwitch}
 		}
+		poolConfig.VSwitch = []string{vSwitch}
 	}
 
 	if poolConfig.Region, err = aliyun.GetLocalRegion(); err != nil {
@@ -694,7 +694,7 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 		return nil, err
 	}
 
-	if poolConfig.InstanceID, err = aliyun.GetLocalInstanceId(); err != nil {
+	if poolConfig.InstanceID, err = aliyun.GetLocalInstanceID(); err != nil {
 		return nil, err
 	}
 

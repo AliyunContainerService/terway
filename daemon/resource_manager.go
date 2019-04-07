@@ -5,22 +5,23 @@ import (
 )
 
 const (
-	ResDBPath             = "/var/lib/cni/terway/ResRelation.db"
-	ResDBName             = "relation"
-	resourceStateBound    = "bound"
-	resourceStateReleased = "released"
+	resDBPath = "/var/lib/cni/terway/ResRelation.db"
+	resDBName = "relation"
 )
 
+// ResourceItem to be store
 type ResourceItem struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`
 }
 
+// PodResources pod resources related
 type PodResources struct {
 	Resources []ResourceItem
 	PodInfo   *podInfo
 }
 
+// GetResourceItemByType get pod resource by resource type
 func (p PodResources) GetResourceItemByType(resType string) []ResourceItem {
 	var ret []ResourceItem
 	for _, r := range p.Resources {
@@ -34,7 +35,7 @@ func (p PodResources) GetResourceItemByType(resType string) []ResourceItem {
 // ResourceManager Allocate/Release/Pool/Stick/GC pod resource
 // managed pod and resource relationship
 type ResourceManager interface {
-	Allocate(context *NetworkContext, prefer string) (types.NetworkResource, error)
-	Release(context *NetworkContext, resId string) error
+	Allocate(context *networkContext, prefer string) (types.NetworkResource, error)
+	Release(context *networkContext, resID string) error
 	GarbageCollection(inUseResList map[string]interface{}, expireResList map[string]interface{}) error
 }

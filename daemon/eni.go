@@ -2,36 +2,34 @@ package daemon
 
 import (
 	"github.com/AliyunContainerService/terway/deviceplugin"
-	"github.com/AliyunContainerService/terway/types"
-
-	_ "github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/pool"
+	"github.com/AliyunContainerService/terway/types"
 	//"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/pkg/errors"
 )
 
-type ENIResourceManager struct {
+type eniResourceManager struct {
 	pool pool.ObjectPool
 	ecs  aliyun.ECS
 }
 
-func NewENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResource []string) (ResourceManager, error) {
-	factory, err := NewENIFactory(poolConfig, ecs)
+func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResource []string) (ResourceManager, error) {
+	factory, err := newENIFactory(poolConfig, ecs)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error create eni factory")
+		return nil, errors.Wrapf(err, "error create ENI factory")
 	}
 
 	capacity, err := ecs.GetInstanceMaxENI(poolConfig.InstanceID)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get eni max capacity for eni factory")
+		return nil, errors.Wrapf(err, "error get ENI max capacity for ENI factory")
 	}
 
 	capacity = int(float64(capacity)*poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
 	if poolConfig.MaxPoolSize > capacity {
 		poolConfig.MaxPoolSize = capacity
 	}
-	poolCfg := pool.PoolConfig{
+	poolCfg := pool.Config{
 		MaxIdle:  poolConfig.MaxPoolSize,
 		MinIdle:  poolConfig.MinPoolSize,
 		Capacity: capacity,
@@ -39,7 +37,7 @@ func NewENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 		Initializer: func(holder pool.ResourceHolder) error {
 			enis, err := ecs.GetAttachedENIs(poolConfig.InstanceID, false)
 			if err != nil {
-				return errors.Wrapf(err, "error get attach eni on pool init")
+				return errors.Wrapf(err, "error get attach ENI on pool init")
 			}
 			allocatedMap := make(map[string]bool)
 			for _, allocated := range allocatedResource {
@@ -56,7 +54,7 @@ func NewENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 		},
 	}
 
-	//init deviceplugin for eni
+	//init deviceplugin for ENI
 	dp := deviceplugin.NewEniDevicePlugin(capacity)
 	err = dp.Serve(deviceplugin.DefaultResourceName)
 	if err != nil {
@@ -67,24 +65,24 @@ func NewENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 	if err != nil {
 		return nil, err
 	}
-	return &ENIResourceManager{
+	return &eniResourceManager{
 		pool: pool,
 		ecs:  ecs,
 	}, nil
 }
 
-func (m *ENIResourceManager) Allocate(ctx *NetworkContext, prefer string) (types.NetworkResource, error) {
+func (m *eniResourceManager) Allocate(ctx *networkContext, prefer string) (types.NetworkResource, error) {
 	return m.pool.Acquire(ctx, prefer)
 }
 
-func (m *ENIResourceManager) Release(context *NetworkContext, resId string) error {
+func (m *eniResourceManager) Release(context *networkContext, resID string) error {
 	if context != nil && context.pod != nil {
-		return m.pool.ReleaseWithReverse(resId, context.pod.IpStickTime)
+		return m.pool.ReleaseWithReverse(resID, context.pod.IPStickTime)
 	}
-	return m.pool.Release(resId)
+	return m.pool.Release(resID)
 }
 
-func (m *ENIResourceManager) GarbageCollection(inUseSet map[string]interface{}, expireResSet map[string]interface{}) error {
+func (m *eniResourceManager) GarbageCollection(inUseSet map[string]interface{}, expireResSet map[string]interface{}) error {
 	for expireRes := range expireResSet {
 		if err := m.pool.Stat(expireRes); err == nil {
 			err = m.Release(nil, expireRes)
@@ -96,28 +94,28 @@ func (m *ENIResourceManager) GarbageCollection(inUseSet map[string]interface{}, 
 	return nil
 }
 
-type ENIFactory struct {
+type eniFactory struct {
 	switches      []string
 	securityGroup string
-	instanceId    string
+	instanceID    string
 	ecs           aliyun.ECS
 }
 
-func NewENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*ENIFactory, error) {
-	return &ENIFactory{
+func newENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*eniFactory, error) {
+	return &eniFactory{
 		switches:      poolConfig.VSwitch,
 		securityGroup: poolConfig.SecurityGroup,
-		instanceId:    poolConfig.InstanceID,
+		instanceID:    poolConfig.InstanceID,
 		ecs:           ecs,
 	}, nil
 }
 
-func (f *ENIFactory) Create() (types.NetworkResource, error) {
+func (f *eniFactory) Create() (types.NetworkResource, error) {
 	//TODO 支持多个交换机
-	return f.ecs.AllocateENI(f.switches[0], f.securityGroup, f.instanceId)
+	return f.ecs.AllocateENI(f.switches[0], f.securityGroup, f.instanceID)
 }
 
-func (f *ENIFactory) Dispose(resource types.NetworkResource) error {
+func (f *eniFactory) Dispose(resource types.NetworkResource) error {
 	eni := resource.(*types.ENI)
-	return f.ecs.FreeENI(eni.ID, f.instanceId)
+	return f.ecs.FreeENI(eni.ID, f.instanceID)
 }

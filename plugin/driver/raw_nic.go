@@ -19,12 +19,12 @@ func (r *rawNicDriver) Setup(hostVeth string,
 	ipv4Addr *net.IPNet,
 	gateway net.IP,
 	extraRoutes []*types.Route,
-	deviceId int,
+	deviceID int,
 	ingress uint64,
 	egress uint64,
 	netNS ns.NetNS) error {
 	// 1. move link in
-	nicLink, err := netlink.LinkByIndex(deviceId)
+	nicLink, err := netlink.LinkByIndex(deviceID)
 	if err != nil {
 		return errors.Wrapf(err, "NicDriver, cannot found spec nic link")
 	}
@@ -61,9 +61,8 @@ func (r *rawNicDriver) Setup(hostVeth string,
 				if err == nil {
 					netlink.LinkSetDown(nicLink)
 					return netlink.LinkSetNsFd(nicLink, int(hostCurrentNs.Fd()))
-				} else {
-					return err
 				}
+				return err
 			})
 		}
 	}()
@@ -73,20 +72,20 @@ func (r *rawNicDriver) Setup(hostVeth string,
 		var linkList []netlink.Link
 		linkList, err = netlink.LinkList()
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "error list netns links")
 		}
 
 		for _, link := range linkList {
 			var addrList []netlink.Addr
 			addrList, err = netlink.AddrList(link, netlink.FAMILY_ALL)
 			if err != nil {
-				return err
+				return errors.Wrapf(err, "error list addrs in netns")
 			}
 			for _, addr := range addrList {
 				if ipNetEqual(addr.IPNet, ipv4Addr) {
 					err = netlink.AddrDel(link, &netlink.Addr{IPNet: ipv4Addr})
 					if err != nil {
-						return err
+						return errors.Wrapf(err, "error delete conflict addr in netns")
 					}
 				}
 			}
@@ -95,7 +94,7 @@ func (r *rawNicDriver) Setup(hostVeth string,
 		// 2.1 setup addr
 		nicLink, err = netlink.LinkByName(nicLink.Attrs().Name)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "error get link by name: %s", nicLink.Attrs().Name)
 		}
 
 		err = netlink.LinkSetName(nicLink, containerVeth)
@@ -137,7 +136,7 @@ func (r *rawNicDriver) Setup(hostVeth string,
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Flags:     int(netlink.FLAG_ONLINK),
 			Dst:       defaultRoute,
-			Gw:        LINK_IP.IP,
+			Gw:        linkIP.IP,
 		})
 		if err != nil {
 			return errors.Wrap(err, "error add route for nic")
@@ -175,9 +174,8 @@ func (r *rawNicDriver) Teardown(hostVeth string, containerVeth string, netNS ns.
 				return errors.Wrapf(err, "error set link name: %v", nicName)
 			}
 			return netlink.LinkSetNsFd(nicLink, int(hostCurrentNs.Fd()))
-		} else {
-			return errors.Wrapf(err, "error get link from namespace")
 		}
+		return errors.Wrapf(err, "error get link from namespace")
 	})
 	if err != nil {
 		return errors.Wrapf(err, "NicDriver, error move nic out")

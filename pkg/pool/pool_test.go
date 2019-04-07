@@ -24,7 +24,7 @@ type mockNetworkResource struct {
 	id string
 }
 
-func (n mockNetworkResource) GetResourceId() string {
+func (n mockNetworkResource) GetResourceID() string {
 	return n.id
 }
 
@@ -77,7 +77,7 @@ func TestInitializerWithAutoCreate(t *testing.T) {
 
 func createPool(factory ObjectFactory, initIdle, initInuse int) ObjectPool {
 	id := 0
-	cfg := PoolConfig{
+	cfg := Config{
 		Factory: factory,
 		Initializer: func(holder ResourceHolder) error {
 			for i := 0; i < initIdle; i++ {
@@ -138,7 +138,7 @@ func TestAcquireExists(t *testing.T) {
 	res, err := pool.Acquire(context.Background(), "2")
 	assert.Nil(t, err)
 	assert.Equal(t, 0, factory.totalCreated)
-	assert.Equal(t, "2", res.GetResourceId())
+	assert.Equal(t, "2", res.GetResourceID())
 }
 
 func TestConcurrencyAcquireNoMoreThanCapacity(t *testing.T) {
@@ -191,16 +191,16 @@ func TestRelease(t *testing.T) {
 	n5, _ := pool.Acquire(context.Background(), "")
 	n6, _ := pool.Acquire(context.Background(), "")
 	assert.Equal(t, 3, factory.totalCreated)
-	pool.Release(n1.GetResourceId())
-	pool.Release(n2.GetResourceId())
-	pool.Release(n3.GetResourceId())
+	pool.Release(n1.GetResourceID())
+	pool.Release(n2.GetResourceID())
+	pool.Release(n3.GetResourceID())
 	time.Sleep(1 * time.Second)
 	assert.Equal(t, 0, factory.totalDisplosed)
-	pool.Release(n4.GetResourceId())
-	pool.Release(n5.GetResourceId())
+	pool.Release(n4.GetResourceID())
+	pool.Release(n5.GetResourceID())
 	time.Sleep(1 * time.Second)
 	assert.Equal(t, 0, factory.totalDisplosed)
-	pool.Release(n6.GetResourceId())
+	pool.Release(n6.GetResourceID())
 	time.Sleep(1 * time.Second)
 	assert.Equal(t, 1, factory.totalDisplosed)
 }

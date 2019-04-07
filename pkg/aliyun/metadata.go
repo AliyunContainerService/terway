@@ -20,11 +20,11 @@ const (
 	eniGatewayPath   = "network/interfaces/macs/%s/gateway"
 	eniPrivateIPs    = "network/interfaces/macs/%s/private-ipv4s"
 	instanceTypePath = "instance/instance-type"
-	instanceIdPath   = "instance-id"
-	regionIdPath     = "region-id"
-	zoneIdPath       = "zone-id"
-	vswitchIdPath    = "vswitch-id"
-	vpcIdPath        = "vpc-id"
+	instanceIDPath   = "instance-id"
+	regionIDPath     = "region-id"
+	zoneIDPath       = "zone-id"
+	vswitchIDPath    = "vswitch-id"
+	vpcIDPath        = "vpc-id"
 )
 
 func metadataValue(url string) (string, error) {
@@ -88,23 +88,28 @@ func metadataArray(url string) ([]string, error) {
 	return result, nil
 }
 
-func GetLocalInstanceId() (string, error) {
-	return metadataValue(instanceIdPath)
+// GetLocalInstanceID get instance id of this node
+func GetLocalInstanceID() (string, error) {
+	return metadataValue(instanceIDPath)
 }
 
+// GetLocalRegion get region id of this node
 func GetLocalRegion() (common.Region, error) {
-	region, err := metadataValue(regionIdPath)
+	region, err := metadataValue(regionIDPath)
 	return common.Region(region), err
 }
 
+// GetLocalZone get zone of this node
 func GetLocalZone() (string, error) {
-	return metadataValue(zoneIdPath)
+	return metadataValue(zoneIDPath)
 }
 
+// GetLocalVswitch get vswitch id of this node
 func GetLocalVswitch() (string, error) {
-	return metadataValue(vswitchIdPath)
+	return metadataValue(vswitchIDPath)
 }
 
+// GetLocalVPC get vpc id of this node
 func GetLocalVPC() (string, error) {
-	return metadataValue(vpcIdPath)
+	return metadataValue(vpcIDPath)
 }

@@ -45,6 +45,7 @@ func stackTriger() {
 	signal.Notify(sigchain, syscall.SIGUSR1)
 }
 
+// Run terway daemon
 func Run(pidFilePath string, socketFilePath string, debugSocketListen string, configFilePath string, daemonMode string, logLevel string) error {
 	level, err := log.ParseLevel(logLevel)
 	if err != nil {
@@ -98,7 +99,7 @@ func Run(pidFilePath string, socketFilePath string, debugSocketListen string, co
 	}()
 
 	stackTriger()
-	err = RunDebugServer(debugSocketListen)
+	err = runDebugServer(debugSocketListen)
 	if err != nil {
 		return err
 	}
@@ -116,7 +117,7 @@ func Run(pidFilePath string, socketFilePath string, debugSocketListen string, co
 	return nil
 }
 
-func RunDebugServer(debugSocketListen string) error {
+func runDebugServer(debugSocketListen string) error {
 	var (
 		l   net.Listener
 		err error

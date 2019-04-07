@@ -7,9 +7,10 @@ import (
 	"sync"
 )
 
+// ErrNotFound key not found in store
 var ErrNotFound = errors.New("not found")
 
-//可靠存储，数据一旦存储之后就不会丢失
+// Storage 可靠存储，数据一旦存储之后就不会丢失
 type Storage interface {
 	Put(key string, value interface{}) error
 	Get(key string) (interface{}, error)
@@ -17,17 +18,20 @@ type Storage interface {
 	Delete(key string) error
 }
 
+// MemoryStorage is in memory storage
 type MemoryStorage struct {
 	lock  sync.RWMutex
 	store map[string]interface{}
 }
 
+// NewMemoryStorage return new in memory storage
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
 		store: make(map[string]interface{}),
 	}
 }
 
+// Put somethings into memory storage
 func (m *MemoryStorage) Put(key string, value interface{}) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -35,6 +39,7 @@ func (m *MemoryStorage) Put(key string, value interface{}) error {
 	return nil
 }
 
+// Get value in memory storage
 func (m *MemoryStorage) Get(key string) (interface{}, error) {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
@@ -45,6 +50,7 @@ func (m *MemoryStorage) Get(key string) (interface{}, error) {
 	return value, nil
 }
 
+// List values in memory storage
 func (m *MemoryStorage) List() ([]interface{}, error) {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
@@ -55,6 +61,7 @@ func (m *MemoryStorage) List() ([]interface{}, error) {
 	return ret, nil
 }
 
+//Delete key in memory storage
 func (m *MemoryStorage) Delete(key string) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -62,9 +69,13 @@ func (m *MemoryStorage) Delete(key string) error {
 	return nil
 }
 
+// Serializer interface to tell storage how to serialize object
 type Serializer func(interface{}) ([]byte, error)
+
+// Deserializer interface to tell storage how to deserialize
 type Deserializer func([]byte) (interface{}, error)
 
+// DiskStorage persistence storage on disk
 type DiskStorage struct {
 	db           *bolt.DB
 	name         string
@@ -73,6 +84,7 @@ type DiskStorage struct {
 	deserializer Deserializer
 }
 
+// NewDiskStorage return new disk storage
 func NewDiskStorage(name string, path string, serializer Serializer, deserializer Deserializer) (Storage, error) {
 	db, err := bolt.Open(path, 0600, nil)
 	if err != nil {
@@ -95,6 +107,7 @@ func NewDiskStorage(name string, path string, serializer Serializer, deserialize
 	return diskstorage, nil
 }
 
+// Put somethings into disk storage
 func (d *DiskStorage) Put(key string, value interface{}) error {
 	data, err := d.serializer(value)
 	if err != nil {
@@ -137,14 +150,17 @@ func (d *DiskStorage) load() error {
 	return err
 }
 
+// Get value in disk storage
 func (d *DiskStorage) Get(key string) (interface{}, error) {
 	return d.memory.Get(key)
 }
 
+// List values in disk storage
 func (d *DiskStorage) List() ([]interface{}, error) {
 	return d.memory.List()
 }
 
+// Delete key in disk storage
 func (d *DiskStorage) Delete(key string) error {
 	err := d.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(d.name))

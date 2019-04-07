@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	// DefaultResourceName aliyun eni resource name in kubernetes container resource
 	DefaultResourceName = "aliyun/eni"
 	serverSock          = pluginapi.DevicePluginPath + "%d-" + "eni.sock"
 )
@@ -91,10 +92,12 @@ func (m *EniDevicePlugin) Start() error {
 	return nil
 }
 
+// GetDevicePluginOptions return device plugin options
 func (m *EniDevicePlugin) GetDevicePluginOptions(context.Context, *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
 	return &pluginapi.DevicePluginOptions{}, nil
 }
 
+// PreStartContainer return container prestart hook
 func (m *EniDevicePlugin) PreStartContainer(context.Context, *pluginapi.PreStartContainerRequest) (*pluginapi.PreStartContainerResponse, error) {
 	return &pluginapi.PreStartContainerResponse{}, nil
 }

@@ -1,32 +1,18 @@
 package types
 
 import (
-	"encoding/json"
 	"fmt"
-	"github.com/containernetworking/cni/pkg/skel"
-	"github.com/containernetworking/cni/pkg/types"
 	"net"
 )
 
+// network resource type
 const (
 	ResourceTypeVeth  = "veth"
 	ResourceTypeENI   = "eni"
 	ResourceTypeENIIP = "eniIp"
 )
 
-type NetConf struct {
-	types.NetConf
-	IP string `ip:"ip"` //占位，暂不支持。考虑使用pod annotation
-}
-
-func NewConf(args *skel.CmdArgs) (*NetConf, error) {
-	var cfg NetConf
-	if err := json.Unmarshal(args.StdinData, &cfg); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
-}
-
+// ENI aliyun ENI resource
 type ENI struct {
 	ID           string
 	Name         string
@@ -37,59 +23,49 @@ type ENI struct {
 	MaxIPs       int
 }
 
-func (eni *ENI) GetResourceId() string {
+// GetResourceID return mac address of eni
+func (eni *ENI) GetResourceID() string {
 	return eni.MAC
 }
 
+// GetType return type name
 func (eni *ENI) GetType() string {
 	return ResourceTypeENI
 }
 
+// ENIIP aliyun secondary IP resource
 type ENIIP struct {
 	Eni        *ENI
 	SecAddress net.IP
 }
 
-func (eniIP *ENIIP) GetResourceId() string {
-	return fmt.Sprintf("%s.%s", eniIP.Eni.GetResourceId(), eniIP.SecAddress)
+// GetResourceID return mac address of eni and secondary ip address
+func (eniIP *ENIIP) GetResourceID() string {
+	return fmt.Sprintf("%s.%s", eniIP.Eni.GetResourceID(), eniIP.SecAddress)
 }
 
+// GetType return type name
 func (eniIP *ENIIP) GetType() string {
 	return ResourceTypeENIIP
 }
 
+// Veth veth pair resource on system
 type Veth struct {
 	HostVeth string
 }
 
-func (veth *Veth) GetResourceId() string {
+// GetResourceID return host veth name of veth resource
+func (veth *Veth) GetResourceID() string {
 	return veth.HostVeth
 }
 
+// GetType return type name
 func (veth *Veth) GetType() string {
 	return ResourceTypeVeth
 }
 
-type TrafficShappingRule struct {
-	ID        string
-	Source    string
-	Bandwidth string
-	Classify  int
-}
-
+// NetworkResource interface of network resources
 type NetworkResource interface {
-	GetResourceId() string
+	GetResourceID() string
 	GetType() string
-}
-
-type VethCreateArgs struct {
-	PodName      string
-	PodNamespace string
-}
-
-type ResourceCreateArgs struct {
-	VethCreateArgs *VethCreateArgs
-}
-
-type ResourceDestroyArgs struct {
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
+// GetDeviceNumber get interface device number by mac address
 func GetDeviceNumber(mac string) (int32, error) {
 	linkList, err := netlink.LinkList()
 	if err != nil {
@@ -21,6 +22,7 @@ func GetDeviceNumber(mac string) (int32, error) {
 	return 0, errors.Errorf("cannot found mac address: %s", mac)
 }
 
+// GetDeviceName get interface device name by mac address
 func GetDeviceName(mac string) (string, error) {
 	linkList, err := netlink.LinkList()
 	if err != nil {

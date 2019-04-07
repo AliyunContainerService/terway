@@ -11,19 +11,19 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-var ROLE_NAME = "KubernetesMasterRole"
+var (
+	roleName                   = "KubernetesMasterRole"
+	tokenResyncPeriod          = 5 * time.Minute
+	kubernetesAlicloudIdentity = "Kubernetes.Alicloud"
+)
 
-var TOKEN_RESYNC_PERIOD = 5 * time.Minute
-
-var KUBERNETES_ALICLOUD_IDENTITY = "Kubernetes.Alicloud"
-
-type TokenAuth struct {
+type tokenAuth struct {
 	lock   sync.RWMutex
 	auth   metadata.RoleAuth
 	active bool
 }
 
-func (token *TokenAuth) authid() (string, string, string) {
+func (token *tokenAuth) authid() (string, string, string) {
 	token.lock.RLock()
 	defer token.lock.RUnlock()
 
@@ -32,18 +32,20 @@ func (token *TokenAuth) authid() (string, string, string) {
 		token.auth.SecurityToken
 }
 
+// ClientMgr manager of aliyun openapi clientset
 type ClientMgr struct {
 	stop <-chan struct{}
 
-	token *TokenAuth
+	token *tokenAuth
 
 	meta *metadata.MetaData
 	ecs  *ecs.Client
 	vpc  *ecs.Client
 }
 
+// NewClientMgr return new aliyun client manager
 func NewClientMgr(key, secret string) (*ClientMgr, error) {
-	token := &TokenAuth{
+	token := &tokenAuth{
 		auth: metadata.RoleAuth{
 			AccessKeyId:     key,
 			AccessKeySecret: secret,
@@ -53,29 +55,28 @@ func NewClientMgr(key, secret string) (*ClientMgr, error) {
 	m := metadata.NewMetaData(nil)
 
 	if key == "" || secret == "" {
-		if rolename, err := m.RoleName(); err != nil {
+		roleName, err := m.RoleName()
+		if err != nil {
 			return nil, err
-		} else {
-			ROLE_NAME = rolename
-			role, err := m.RamRoleToken(ROLE_NAME)
-			if err != nil {
-				return nil, err
-			}
-			log.Debugf("alicloud: clientmgr, using role=[%s] with initial token=[%+v]", ROLE_NAME, role)
-			token.auth = role
-			token.active = true
 		}
+		role, err := m.RamRoleToken(roleName)
+		if err != nil {
+			return nil, err
+		}
+		log.Debugf("alicloud: clientmgr, using role=[%s] with initial token=[%+v]", roleName, role)
+		token.auth = role
+		token.active = true
 	}
 
 	metaRegion, err := m.Region()
 	if err != nil {
 		return nil, err
 	}
-	regionId := common.Region(metaRegion)
+	regionID := common.Region(metaRegion)
 	keyid, sec, tok := token.authid()
-	ecsclient := ecs.NewECSClientWithSecurityToken(keyid, sec, tok, regionId)
-	ecsclient.SetUserAgent(KUBERNETES_ALICLOUD_IDENTITY)
-	vpcclient := ecs.NewVPCClientWithSecurityToken(keyid, sec, tok, regionId)
+	ecsclient := ecs.NewECSClientWithSecurityToken(keyid, sec, tok, regionID)
+	ecsclient.SetUserAgent(kubernetesAlicloudIdentity)
+	vpcclient := ecs.NewVPCClientWithSecurityToken(keyid, sec, tok, regionID)
 
 	mgr := &ClientMgr{
 		stop:  make(<-chan struct{}, 1),
@@ -93,7 +94,7 @@ func NewClientMgr(key, secret string) (*ClientMgr, error) {
 		// refresh client token periodically
 		token.lock.Lock()
 		defer token.lock.Unlock()
-		role, err := mgr.meta.RamRoleToken(ROLE_NAME)
+		role, err := mgr.meta.RamRoleToken(roleName)
 		if err != nil {
 			log.Errorf("alicloud: clientmgr, error get ram role token [%s]\n", err.Error())
 			return
@@ -105,11 +106,12 @@ func NewClientMgr(key, secret string) (*ClientMgr, error) {
 		vpcclient.WithSecurityToken(role.SecurityToken).
 			WithAccessKeyId(role.AccessKeyId).
 			WithAccessKeySecret(role.AccessKeySecret)
-	}, time.Duration(TOKEN_RESYNC_PERIOD), mgr.stop)
+	}, time.Duration(tokenResyncPeriod), mgr.stop)
 
 	return mgr, nil
 }
 
+// MetaData return aliyun metadata client
 func (c *ClientMgr) MetaData() *metadata.MetaData {
 	return c.meta
 }
