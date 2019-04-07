@@ -1,14 +1,14 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"flag"
+	"fmt"
+	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/denverdino/aliyungo/common"
+	"os"
 )
 
-func debug(format string, args ... interface{}) {
+func debug(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, format, args)
 }
 

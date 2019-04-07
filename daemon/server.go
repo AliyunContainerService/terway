@@ -118,7 +118,7 @@ func Run(pidFilePath string, socketFilePath string, debugSocketListen string, co
 
 func RunDebugServer(debugSocketListen string) error {
 	var (
-		l net.Listener
+		l   net.Listener
 		err error
 	)
 	if strings.HasPrefix(debugSocketListen, "unix://") {

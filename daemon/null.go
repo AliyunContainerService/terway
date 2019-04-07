@@ -1,8 +1,8 @@
 package daemon
 
 import (
-	"github.com/AliyunContainerService/terway/types"
 	"fmt"
+	"github.com/AliyunContainerService/terway/types"
 )
 
 type NullResourceManager struct {

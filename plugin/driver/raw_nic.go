@@ -1,12 +1,12 @@
 package driver
 
 import (
-	"math/rand"
 	"encoding/hex"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
+	"math/rand"
 	"net"
 	"time"
 )

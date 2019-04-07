@@ -70,7 +70,6 @@ func (veth *Veth) GetType() string {
 	return ResourceTypeVeth
 }
 
-
 type TrafficShappingRule struct {
 	ID        string
 	Source    string

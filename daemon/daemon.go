@@ -345,11 +345,11 @@ func (networkService *networkService) ReleaseIP(grpcContext context.Context, r *
 			networkContext.Log().Warnf("error cleanup allocated network resource %s, %s: %v", res.ID, res.Type, err)
 			continue
 		}
-		if err = mgr.Release(networkContext, res.ID); err != nil && err != pool.ErrInvalidState{
+		if err = mgr.Release(networkContext, res.ID); err != nil && err != pool.ErrInvalidState {
 			return nil, errors.Wrapf(err, "error release request network resource for: %+v", r)
 		}
 
-		if err = networkService.deletePodResource(podinfo); err != nil{
+		if err = networkService.deletePodResource(podinfo); err != nil {
 			return nil, errors.Wrapf(err, "error delete resource from db: %+v", r)
 		}
 	}
@@ -362,7 +362,7 @@ func (networkService *networkService) ReleaseIP(grpcContext context.Context, r *
 	return releaseReply, nil
 }
 
-func (networkService networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (*rpc.GetInfoReply, error) {
+func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (*rpc.GetInfoReply, error) {
 	log.Infof("GetIPInfo request: %+v", r)
 	// 0. Get pod Info
 	podinfo, err := networkService.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName)
@@ -419,7 +419,7 @@ func (networkService networkService) GetIPInfo(ctx context.Context, r *rpc.GetIn
 	}
 }
 
-func (networkService networkService) startGarbageCollectionLoop() {
+func (networkService *networkService) startGarbageCollectionLoop() {
 	// period do network resource gc
 	gcTicker := time.NewTicker(gcPeriod)
 	go func() {
@@ -467,9 +467,9 @@ func (networkService networkService) startGarbageCollectionLoop() {
 						continue
 					}
 					if podExist {
-						inUseSet[res.Type][res.ID] = struct {}{}
+						inUseSet[res.Type][res.ID] = struct{}{}
 					} else {
-						expireSet[res.Type][res.ID] = struct {}{}
+						expireSet[res.Type][res.ID] = struct{}{}
 					}
 				}
 			}
@@ -499,8 +499,7 @@ func (networkService networkService) startGarbageCollectionLoop() {
 
 func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServer, error) {
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
-	netSrv := &networkService{
-	}
+	netSrv := &networkService{}
 	if daemonMode == DaemonModeENIMultiIP || daemonMode == DaemonModeVPC {
 		netSrv.daemonMode = daemonMode
 	} else {
@@ -613,7 +612,7 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 		}
 
 		netSrv.mgrForResource = map[string]ResourceManager{
-			types.ResourceTypeENI: netSrv.eniResMgr,
+			types.ResourceTypeENI:  netSrv.eniResMgr,
 			types.ResourceTypeVeth: netSrv.vethResMgr,
 		}
 

@@ -149,8 +149,6 @@ func (m *EniDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlu
 			return nil
 		}
 	}
-
-	return nil
 }
 
 // Allocate which return list of devices.

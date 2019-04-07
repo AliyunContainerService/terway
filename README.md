@@ -1,13 +1,15 @@
 # Terway CNI Network Plugin
-CNI plugin for alibaba cloud VPC/ENI 
+CNI plugin for Alibaba Cloud VPC/ENI 
 
 [![CircleCI](https://circleci.com/gh/AliyunContainerService/terway.svg?style=svg)](https://circleci.com/gh/AliyunContainerService/terway)
+[![Go Report Card](https://goreportcard.com/badge/github.com/AliyunContainerService/terway)](https://goreportcard.com/report/github.com/AliyunContainerService/terway)
+
 
 English | [简体中文](./README-zh_CN.md)
 
 ## Try It:
 ### Install Kubernetes
-Install Kubernetes via Kubeadm: https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
+Install Kubernetes via kubeadm: https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
 
 After setup kubernetes cluster.
 * Change `iptables` `Forward` default policy to `ACCEPT` on every node of cluster: `iptables -P FORWARD ACCEPT`.

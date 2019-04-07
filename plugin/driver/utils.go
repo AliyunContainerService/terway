@@ -8,9 +8,9 @@ import (
 
 func deleteRoutesForAddr(addr *net.IPNet, tableId int) error {
 	routeList, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
-		Dst: addr,
+		Dst:   addr,
 		Table: tableId,
-	}, netlink.RT_FILTER_DST | netlink.RT_FILTER_TABLE)
+	}, netlink.RT_FILTER_DST|netlink.RT_FILTER_TABLE)
 	if err != nil {
 		return errors.Wrapf(err, "error get route list")
 	}
