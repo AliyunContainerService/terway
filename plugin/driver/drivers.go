@@ -376,6 +376,10 @@ func (d *vethDriver) Teardown(hostIfName string, containerVeth string, netNS ns.
 
 	// found table for container
 	ruleList, err := netlink.RuleList(netlink.FAMILY_ALL)
+	if err != nil {
+		return errors.Wrapf(err, "failed list ip rule from netlink")
+	}
+
 	var toContainerRule *netlink.Rule
 	var fromContainerRule *netlink.Rule
 
@@ -426,6 +430,10 @@ func (d *vethDriver) Teardown(hostIfName string, containerVeth string, netNS ns.
 		routeList, err = netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
 			Table: tableId,
 		}, netlink.RT_FILTER_TABLE)
+
+		if err != nil {
+			return errors.Wrapf(err, "failed list conflict routes in route table： %v", tableId)
+		}
 
 		for _, route := range routeList {
 			if route.Dst != nil && route.Dst.IP.Equal(containerIP) {

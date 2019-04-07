@@ -104,6 +104,9 @@ func (e *ENIMetadata) GetENIPrivateAddresses(eniId string) ([]net.IP, error) {
 
 	addressStrList := &[]string{}
 	ipsStr, err := metadataValue(fmt.Sprintf(metadataBase+eniPrivateIPs, eni.MAC))
+	if err != nil {
+		return nil, errors.Wrapf(err, "error get private ips from metadata")
+	}
 	err = json.Unmarshal([]byte(ipsStr), addressStrList)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get eni private address for eni: %s from metadata", eniId)

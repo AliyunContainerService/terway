@@ -9,7 +9,7 @@ import (
 )
 
 func debug(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, format, args)
+	fmt.Fprintf(os.Stderr, format, args...)
 }
 
 var (

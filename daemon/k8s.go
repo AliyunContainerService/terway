@@ -149,6 +149,9 @@ func serviceCidrFromAPIServer(client kubernetes.Interface) (*net.IPNet, error) {
 	configMap := make(map[interface{}]interface{})
 
 	err = yaml.Unmarshal([]byte(kubeNetworkingConfig), &configMap)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error get networking config from configmap")
+	}
 
 	if networkingObj, ok := configMap["networking"]; ok {
 		if networkingMap, ok := networkingObj.(map[interface{}]interface{}); ok {

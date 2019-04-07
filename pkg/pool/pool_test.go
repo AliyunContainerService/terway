@@ -149,9 +149,10 @@ func TestConcurrencyAcquireNoMoreThanCapacity(t *testing.T) {
 	wg := sync.WaitGroup{}
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
-		ctx, _ := context.WithTimeout(context.Background(), 1*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		go func() {
 			_, err := pool.Acquire(ctx, "")
+			cancel()
 			assert.Nil(t, err)
 			wg.Done()
 		}()
@@ -167,9 +168,10 @@ func TestConcurrencyAcquireMoreThanCapacity(t *testing.T) {
 	wg := sync.WaitGroup{}
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
-		ctx, _ := context.WithTimeout(context.Background(), 1*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		go func() {
 			pool.Acquire(ctx, "")
+			cancel()
 			wg.Done()
 		}()
 	}

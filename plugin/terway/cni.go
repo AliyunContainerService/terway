@@ -106,7 +106,8 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	defer closeConn()
 
-	timeoutContext, _ := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	defer cancel()
 
 	allocResult, err := terwayBackendClient.AllocIP(
 		timeoutContext,
@@ -348,7 +349,8 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 	defer closeConn()
 
-	timeoutContext, _ := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	defer cancel()
 
 	infoResult, err := terwayBackendClient.GetIPInfo(
 		timeoutContext,

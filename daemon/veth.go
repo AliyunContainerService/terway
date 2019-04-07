@@ -113,7 +113,8 @@ func (dockerRuntime) GetRunningSandbox() ([]string, error) {
 	}
 	defer dockerCli.Close()
 
-	timeoutContext, _ := context.WithTimeout(context.Background(), time.Minute)
+	timeoutContext, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
 	listFilter := filters.NewArgs()
 	listFilter.Add("label", fmt.Sprintf("%s=%s", "io.kubernetes.docker.type", "podsandbox"))
 	sandboxContainer, err := dockerCli.ContainerList(timeoutContext,
@@ -126,8 +127,9 @@ func (dockerRuntime) GetRunningSandbox() ([]string, error) {
 	}
 
 	for _, container := range sandboxContainer {
-		timeoutContext, _ := context.WithTimeout(context.Background(), time.Minute)
+		timeoutContext, cancel := context.WithTimeout(context.Background(), time.Minute)
 		containerInfo, err := dockerCli.ContainerInspect(timeoutContext, container.ID)
+		cancel()
 		if err != nil {
 			return containerList, fmt.Errorf("error get container info to cleanup: %+v", err)
 		}
