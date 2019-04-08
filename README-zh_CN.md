@@ -26,7 +26,7 @@ Terway有两种安装模式：
 * ENI多IP模式
 
 	ENI多IP模式，使用Aliyun ENI的辅助IP来打通网络，不受VPC的路由条目限制，安装方式：<br />
-	修改[terway-multiip.yml](./terway-multiip.yml)文件中的eni.conf的配置中的授权和网段配置，以及Network的网段配置，然后通过`kubectl apply -f terway-multiip.yml`来安装terway插件。
+	修改[terway-multiip.yml](./terway-multiip.yml)文件中的eni.conf的配置中的授权和资源配置，然后通过`kubectl apply -f terway-multiip.yml`来安装terway插件。
 
 
 使用`kubectl get ds terway`看到插件在每个节点上都运行起来后，表明插件安装成功。
