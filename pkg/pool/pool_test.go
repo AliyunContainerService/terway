@@ -11,13 +11,13 @@ import (
 )
 
 type mockObjectFactory struct {
-	createDelay    time.Duration
-	disposeDeplay  time.Duration
-	err            error
-	totalCreated   int
-	totalDisplosed int
-	idGenerator    int
-	lock           sync.Mutex
+	createDelay   time.Duration
+	disposeDeplay time.Duration
+	err           error
+	totalCreated  int
+	totalDisposed int
+	idGenerator   int
+	lock          sync.Mutex
 }
 
 type mockNetworkResource struct {
@@ -55,24 +55,36 @@ func (f *mockObjectFactory) Dispose(types.NetworkResource) error {
 	time.Sleep(f.disposeDeplay)
 	f.lock.Lock()
 	defer f.lock.Unlock()
-	f.totalDisplosed++
+	f.totalDisposed++
 	return f.err
+}
+
+func (f *mockObjectFactory) getTotalDisposed() int {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	return f.totalDisposed
+}
+
+func (f *mockObjectFactory) getTotalCreated() int {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	return f.totalCreated
 }
 
 func TestInitializerWithoutAutoCreate(t *testing.T) {
 	factory := &mockObjectFactory{}
 	createPool(factory, 3, 0)
 	time.Sleep(time.Second)
-	assert.Equal(t, 0, factory.totalCreated)
-	assert.Equal(t, 0, factory.totalDisplosed)
+	assert.Equal(t, 0, factory.getTotalCreated())
+	assert.Equal(t, 0, factory.getTotalDisposed())
 }
 
 func TestInitializerWithAutoCreate(t *testing.T) {
 	factory := &mockObjectFactory{}
 	createPool(factory, 0, 0)
 	time.Sleep(time.Second)
-	assert.Equal(t, 3, factory.totalCreated)
-	assert.Equal(t, 0, factory.totalDisplosed)
+	assert.Equal(t, 3, factory.getTotalCreated())
+	assert.Equal(t, 0, factory.getTotalDisposed())
 }
 
 func createPool(factory ObjectFactory, initIdle, initInuse int) ObjectPool {
@@ -105,16 +117,16 @@ func TestInitializerExceedMaxIdle(t *testing.T) {
 	factory := &mockObjectFactory{}
 	createPool(factory, 6, 0)
 	time.Sleep(1 * time.Second)
-	assert.Equal(t, 0, factory.totalCreated)
-	assert.Equal(t, 1, factory.totalDisplosed)
+	assert.Equal(t, 0, factory.getTotalCreated())
+	assert.Equal(t, 1, factory.getTotalDisposed())
 }
 
 func TestInitializerExceedCapacity(t *testing.T) {
 	factory := &mockObjectFactory{}
 	createPool(factory, 1, 10)
 	time.Sleep(time.Second)
-	assert.Equal(t, 0, factory.totalCreated)
-	assert.Equal(t, 1, factory.totalDisplosed)
+	assert.Equal(t, 0, factory.getTotalCreated())
+	assert.Equal(t, 1, factory.getTotalDisposed())
 }
 
 func TestAcquireIdle(t *testing.T) {
@@ -122,14 +134,14 @@ func TestAcquireIdle(t *testing.T) {
 	pool := createPool(factory, 3, 0)
 	_, err := pool.Acquire(context.Background(), "")
 	assert.Nil(t, err)
-	assert.Equal(t, 0, factory.totalCreated)
+	assert.Equal(t, 0, factory.getTotalCreated())
 }
 func TestAcquireNonExists(t *testing.T) {
 	factory := &mockObjectFactory{}
 	pool := createPool(factory, 3, 0)
 	_, err := pool.Acquire(context.Background(), "1000")
 	assert.Nil(t, err)
-	assert.Equal(t, 0, factory.totalCreated)
+	assert.Equal(t, 0, factory.getTotalCreated())
 }
 
 func TestAcquireExists(t *testing.T) {
@@ -137,7 +149,7 @@ func TestAcquireExists(t *testing.T) {
 	pool := createPool(factory, 3, 0)
 	res, err := pool.Acquire(context.Background(), "2")
 	assert.Nil(t, err)
-	assert.Equal(t, 0, factory.totalCreated)
+	assert.Equal(t, 0, factory.getTotalCreated())
 	assert.Equal(t, "2", res.GetResourceID())
 }
 
@@ -176,7 +188,7 @@ func TestConcurrencyAcquireMoreThanCapacity(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	assert.Equal(t, 7, factory.totalCreated)
+	assert.Equal(t, 7, factory.getTotalCreated())
 }
 
 func TestRelease(t *testing.T) {
@@ -190,19 +202,19 @@ func TestRelease(t *testing.T) {
 	n4, _ := pool.Acquire(context.Background(), "")
 	n5, _ := pool.Acquire(context.Background(), "")
 	n6, _ := pool.Acquire(context.Background(), "")
-	assert.Equal(t, 3, factory.totalCreated)
+	assert.Equal(t, 3, factory.getTotalCreated())
 	pool.Release(n1.GetResourceID())
 	pool.Release(n2.GetResourceID())
 	pool.Release(n3.GetResourceID())
 	time.Sleep(1 * time.Second)
-	assert.Equal(t, 0, factory.totalDisplosed)
+	assert.Equal(t, 0, factory.getTotalDisposed())
 	pool.Release(n4.GetResourceID())
 	pool.Release(n5.GetResourceID())
 	time.Sleep(1 * time.Second)
-	assert.Equal(t, 0, factory.totalDisplosed)
+	assert.Equal(t, 0, factory.getTotalDisposed())
 	pool.Release(n6.GetResourceID())
 	time.Sleep(1 * time.Second)
-	assert.Equal(t, 1, factory.totalDisplosed)
+	assert.Equal(t, 1, factory.getTotalDisposed())
 }
 
 func TestReleaseInvalid(t *testing.T) {

@@ -173,25 +173,37 @@ func (p *simpleObjectPool) dispose(res types.NetworkResource) {
 	}
 }
 
-func (p *simpleObjectPool) tooManyIdle() bool {
-	return p.idle.Size() > p.maxIdle || (p.idle.Size() > 0 && p.size() > p.capacity)
+func (p *simpleObjectPool) tooManyIdleLocked() bool {
+	return p.idle.Size() > p.maxIdle || (p.idle.Size() > 0 && p.sizeLocked() > p.capacity)
+}
+
+func (p *simpleObjectPool) peekOverfullIdle() *poolItem {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	if !p.tooManyIdleLocked() {
+		return nil
+	}
+
+	item := p.idle.Peek()
+	if item == nil {
+		return nil
+	}
+
+	if item.reverse.After(time.Now()) {
+		return nil
+	}
+	return p.idle.Pop()
 }
 
 //found resources that can be disposed, put them into dispose channel
-//must in lock
 func (p *simpleObjectPool) checkIdle() {
-	for p.tooManyIdle() {
-		p.lock.Lock()
-		item := p.idle.Peek()
+	for {
+		item := p.peekOverfullIdle()
 		if item == nil {
-			//impossible
 			break
 		}
-		if item.reverse.After(time.Now()) {
-			break
-		}
-		item = p.idle.Pop()
-		p.lock.Unlock()
+
 		res := item.res
 		log.Infof("try dispose res %+v", res)
 		err := p.factory.Dispose(res)
@@ -201,17 +213,20 @@ func (p *simpleObjectPool) checkIdle() {
 			log.Warnf("error dispose res: %+v", err)
 			p.AddIdle(res)
 		}
+
 	}
 }
 
 func (p *simpleObjectPool) preload() error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
 	for {
 		// init resource sequential to avoid huge creating request on startup
 		if p.idle.Size() >= p.minIdle {
 			break
 		}
 
-		if p.size() >= p.capacity {
+		if p.sizeLocked() >= p.capacity {
 			break
 		}
 
@@ -219,10 +234,10 @@ func (p *simpleObjectPool) preload() error {
 		if err != nil {
 			return err
 		}
-		p.AddIdle(res)
+		p.idle.Push(&poolItem{res: res, reverse: time.Now()})
 	}
 
-	tokenCount := p.capacity - p.size()
+	tokenCount := p.capacity - p.sizeLocked()
 	for i := 0; i < tokenCount; i++ {
 		p.tokenCh <- struct{}{}
 	}
@@ -230,7 +245,7 @@ func (p *simpleObjectPool) preload() error {
 	return nil
 }
 
-func (p *simpleObjectPool) size() int {
+func (p *simpleObjectPool) sizeLocked() int {
 	return p.idle.Size() + len(p.inuse)
 }
 
@@ -254,7 +269,7 @@ func (p *simpleObjectPool) Acquire(ctx context.Context, resID string) (types.Net
 		log.Infof("acquire (expect %s): return idle %s", resID, res.GetResourceID())
 		return res, nil
 	}
-	size := p.size()
+	size := p.sizeLocked()
 	if size >= p.capacity {
 		p.lock.Unlock()
 		log.Infof("acquire (expect %s), size %d, capacity %d: return err %v", resID, size, p.capacity, ErrNoAvailableResource)
