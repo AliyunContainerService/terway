@@ -17,6 +17,7 @@ type rawNicDriver struct {
 func (r *rawNicDriver) Setup(hostVeth string,
 	containerVeth string,
 	ipv4Addr *net.IPNet,
+	primaryIpv4Addr *net.IPNet,
 	gateway net.IP,
 	extraRoutes []*types.Route,
 	deviceID int,

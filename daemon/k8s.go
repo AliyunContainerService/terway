@@ -332,6 +332,7 @@ func (k *k8s) GetPod(namespace, name string) (*podInfo, error) {
 		exist, err1 := k.podExist(namespace, name)
 		if err1 != nil {
 			log.Warnf("exist pod failed: %v", err1)
+			return nil, err
 		}
 		if err1 == nil && !exist {
 			key := podInfoKey(namespace, name)
@@ -430,7 +431,7 @@ func (k *k8s) clean() error {
 			continue
 		}
 
-		if time.Now().Sub(*item.deletionTime) > storageCleanTimeout {
+		if time.Since(*item.deletionTime) > storageCleanTimeout {
 			if err := k.storage.Delete(key); err != nil {
 				return errors.Wrap(err, "error delete storage")
 			}

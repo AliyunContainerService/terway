@@ -174,7 +174,6 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 	}
 
 	if !networkService.verifyPodNetworkType(podinfo.PodNetworkType) {
-		networkContext.Log().Warnf("unexpect pod network type allocate, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
 		return nil, fmt.Errorf("unexpect pod network type allocate, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
 	}
 
@@ -206,11 +205,12 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 		allocIPReply.NetworkInfo = &rpc.AllocIPReply_ENIMultiIP{
 			ENIMultiIP: &rpc.ENIMultiIP{
 				EniConfig: &rpc.ENI{
-					IPv4Addr:     eniMultiIP.SecAddress.String(),
-					IPv4Subnet:   eniMultiIP.Eni.Address.String(),
-					MacAddr:      eniMultiIP.Eni.MAC,
-					Gateway:      eniMultiIP.Eni.Gateway.String(),
-					DeviceNumber: eniMultiIP.Eni.DeviceNumber,
+					IPv4Addr:        eniMultiIP.SecAddress.String(),
+					IPv4Subnet:      eniMultiIP.Eni.Address.String(),
+					MacAddr:         eniMultiIP.Eni.MAC,
+					Gateway:         eniMultiIP.Eni.Gateway.String(),
+					DeviceNumber:    eniMultiIP.Eni.DeviceNumber,
+					PrimaryIPv4Addr: eniMultiIP.Eni.Address.IP.String(),
 				},
 				PodConfig: &rpc.Pod{
 					Ingress: podinfo.TcIngress,
@@ -243,11 +243,12 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 		allocIPReply.NetworkInfo = &rpc.AllocIPReply_VpcEni{
 			VpcEni: &rpc.VPCENI{
 				EniConfig: &rpc.ENI{
-					IPv4Addr:     vpcEni.Address.IP.String(),
-					IPv4Subnet:   vpcEni.Address.String(),
-					MacAddr:      vpcEni.MAC,
-					Gateway:      vpcEni.Gateway.String(),
-					DeviceNumber: vpcEni.DeviceNumber,
+					IPv4Addr:        vpcEni.Address.IP.String(),
+					IPv4Subnet:      vpcEni.Address.String(),
+					MacAddr:         vpcEni.MAC,
+					Gateway:         vpcEni.Gateway.String(),
+					DeviceNumber:    vpcEni.DeviceNumber,
+					PrimaryIPv4Addr: vpcEni.Address.IP.String(),
 				},
 				PodConfig: &rpc.Pod{
 					Ingress: podinfo.TcIngress,

@@ -14,8 +14,9 @@ import (
 
 // drivers implement objects
 var (
-	VethDriver NetnsDriver = &vethDriver{}
-	NicDriver  NetnsDriver = &rawNicDriver{}
+	VethDriver   NetnsDriver = &vethDriver{}
+	NicDriver    NetnsDriver = &rawNicDriver{}
+	IPVlanDriver NetnsDriver = &ipvlanDriver{}
 )
 
 // NetnsDriver to config container netns interface and routes
@@ -23,6 +24,7 @@ type NetnsDriver interface {
 	Setup(hostVeth string,
 		containerVeth string,
 		ipv4Addr *net.IPNet,
+		primaryIpv4Addr *net.IPNet,
 		gateway net.IP,
 		extraRoutes []*types.Route,
 		deviceID int,
@@ -56,6 +58,7 @@ func (d *vethDriver) Setup(
 	hostIfName string,
 	containerVeth string,
 	ipv4Addr *net.IPNet,
+	primaryIpv4Addr *net.IPNet,
 	gateway net.IP,
 	extraRoutes []*types.Route,
 	deviceID int,
