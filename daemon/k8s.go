@@ -71,12 +71,11 @@ func newK8S(client kubernetes.Interface, svcCidr *net.IPNet, daemonMode string) 
 		if err != nil {
 			return nil, errors.Wrap(err, "failed getting node cidr")
 		}
-	}
-
-	if svcCidr == nil {
-		svcCidr, err = serviceCidrFromAPIServer(client)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed getting service cidr")
+		if svcCidr == nil {
+			svcCidr, err = serviceCidrFromAPIServer(client)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed getting service cidr")
+			}
 		}
 	}
 

@@ -76,29 +76,33 @@ type K8SArgs struct {
 var networkDriver = driver.VethDriver
 var nicDriver = driver.NicDriver
 
-func cmdAdd(args *skel.CmdArgs) error {
+func cmdAdd(args *skel.CmdArgs) (err error) {
 	versionDecoder := &cniversion.ConfigDecoder{}
-	confVersion, err := versionDecoder.Decode(args.StdinData)
+	var (
+		confVersion string
+		cniNetns ns.NetNS
+	)
+	confVersion, err = versionDecoder.Decode(args.StdinData)
 	if err != nil {
 		return err
 	}
 
-	cniNetns, err := ns.GetNS(args.Netns)
+	cniNetns, err = ns.GetNS(args.Netns)
 	if err != nil {
 		return err
 	}
 
 	conf := NetConf{}
-	if err := json.Unmarshal(args.StdinData, &conf); err != nil {
+	if err = json.Unmarshal(args.StdinData, &conf); err != nil {
 		return errors.Wrap(err, "add cmd: error loading config from args")
 	}
 
 	k8sConfig := K8SArgs{}
-	if err := types.LoadArgs(args.Args, &k8sConfig); err != nil {
+	if err = types.LoadArgs(args.Args, &k8sConfig); err != nil {
 		return errors.Wrap(err, "add cmd: failed to load k8s config from args")
 	}
 
-	if err := driver.EnsureHostNsConfig(); err != nil {
+	if err = driver.EnsureHostNsConfig(); err != nil {
 		return errors.Wrapf(err, "add cmd: failed setup host namespace configs")
 	}
 
