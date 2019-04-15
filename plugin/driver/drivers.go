@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 	"net"
+	"os"
 	"syscall"
 )
 
@@ -104,16 +105,6 @@ func (d *vethDriver) Setup(
 		}
 
 		// 3. add route and neigh for container
-		err = netlink.RouteAdd(&netlink.Route{
-			LinkIndex: contLink.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Flags:     int(netlink.FLAG_ONLINK),
-			Dst:       defaultRoute,
-			Gw:        linkIP.IP,
-		})
-		if err != nil {
-			return errors.Wrap(err, "error add route for container veth")
-		}
 		err = netlink.NeighAdd(&netlink.Neigh{
 			LinkIndex:    contLink.Attrs().Index,
 			IP:           linkIP.IP,
@@ -123,6 +114,17 @@ func (d *vethDriver) Setup(
 		})
 		if err != nil {
 			return errors.Wrap(err, "error add permanent arp for container veth")
+		}
+
+		err = netlink.RouteAdd(&netlink.Route{
+			LinkIndex: contLink.Attrs().Index,
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Flags:     int(netlink.FLAG_ONLINK),
+			Dst:       defaultRoute,
+			Gw:        linkIP.IP,
+		})
+		if err != nil {
+			return errors.Wrap(err, "error add route for container veth")
 		}
 
 		if len(extraRoutes) != 0 {
@@ -222,8 +224,15 @@ func (d *vethDriver) Setup(
 		for _, rule := range ruleList {
 			if ipNetEqual(containerDst, rule.Src) || ipNetEqual(containerDst, rule.Dst) {
 				err = netlink.RuleDel(&rule)
-				if err != nil {
-					return errors.Wrapf(err, "vethDriver, error clean up exist rule")
+				if os.IsNotExist(err) {
+					// remove orphan rule with veth interface detached
+					rule.IifName = ""
+					err = netlink.RuleDel(&rule)
+					if err != nil {
+						return errors.Wrapf(err, "vethDriver, error clean up exist rule remove veth name not exist: %+v", rule)
+					}
+				} else if err != nil {
+					return errors.Wrapf(err, "vethDriver, error clean up exist rule: %+v", rule)
 				}
 			}
 		}
