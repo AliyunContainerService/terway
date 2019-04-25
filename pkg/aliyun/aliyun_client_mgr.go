@@ -55,7 +55,8 @@ func NewClientMgr(key, secret string) (*ClientMgr, error) {
 	m := metadata.NewMetaData(nil)
 
 	if key == "" || secret == "" {
-		roleName, err := m.RoleName()
+		var err error
+		roleName, err = m.RoleName()
 		if err != nil {
 			return nil, err
 		}
