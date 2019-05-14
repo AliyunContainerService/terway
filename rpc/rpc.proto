@@ -45,6 +45,7 @@ message ENI {
     string MacAddr = 3;
     string Gateway = 4;
     int32 DeviceNumber = 5;
+    string PrimaryIPv4Addr = 6;
 }
 
 // Dedicated ENI

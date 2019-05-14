@@ -78,9 +78,6 @@ func (i *poolItem) lessThan(other *poolItem) bool {
 	return i.reverse.Before(other.reverse)
 }
 
-const defaultMaxIdle = 20
-const defaultCapacity = 50
-
 // Initializer of pool
 type Initializer func(holder ResourceHolder) error
 
@@ -92,13 +89,6 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 
 	if cfg.MaxIdle > cfg.Capacity {
 		return nil, ErrInvalidArguments
-	}
-
-	if cfg.MaxIdle == 0 {
-		cfg.MaxIdle = defaultMaxIdle
-	}
-	if cfg.Capacity == 0 {
-		cfg.Capacity = defaultCapacity
 	}
 
 	pool := &simpleObjectPool{

@@ -23,7 +23,10 @@ function teardown() {
 }
 
 @test "test loadbalancer service traffic local" {
-	ip_addr=$(kubectl get svc loadbalancerlocal -o jsonpath='{range .status.loadBalancer.ingress[*]}{.ip}{end}')
-	retry 5 5 curl $ip_addr
-	[ "$status" -eq 0 ]
+	# eni not support local traffic policy
+	if [ "$category" != "eni-only" ]; then
+		ip_addr=$(kubectl get svc loadbalancerlocal -o jsonpath='{range .status.loadBalancer.ingress[*]}{.ip}{end}')
+		retry 5 5 curl $ip_addr
+		[ "$status" -eq 0 ]
+	fi
 }

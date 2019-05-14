@@ -102,6 +102,13 @@ type eniFactory struct {
 }
 
 func newENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*eniFactory, error) {
+	if poolConfig.SecurityGroup == "" {
+		securityGroup, err := ecs.GetAttachedSecurityGroup(poolConfig.InstanceID)
+		if err != nil {
+			return nil, errors.Wrapf(err, "error get security group on factory init")
+		}
+		poolConfig.SecurityGroup = securityGroup
+	}
 	return &eniFactory{
 		switches:      poolConfig.VSwitch,
 		securityGroup: poolConfig.SecurityGroup,

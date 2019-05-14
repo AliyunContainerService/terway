@@ -1,6 +1,8 @@
 package driver
 
 import (
+	"fmt"
+	"github.com/containernetworking/plugins/pkg/utils/sysctl"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 	"net"
@@ -40,4 +42,35 @@ func ipNetEqual(ipn1 *net.IPNet, ipn2 *net.IPNet) bool {
 	m1, _ := ipn1.Mask.Size()
 	m2, _ := ipn2.Mask.Size()
 	return m1 == m2 && ipn1.IP.Equal(ipn2.IP)
+}
+
+const rpFilterSysctl = "net.ipv4.conf.%s.rp_filter"
+
+// EnsureHostNsConfig setup host namespace configs
+func EnsureHostNsConfig() error {
+	existInterfaces, err := net.Interfaces()
+	if err != nil {
+		return errors.Wrapf(err, "error get exist interfaces on system")
+	}
+
+	for _, key := range []string{"default", "all"} {
+		sysctlName := fmt.Sprintf(rpFilterSysctl, key)
+		if _, err = sysctl.Sysctl(sysctlName, "0"); err != nil {
+			return errors.Wrapf(err, "error set: %s sysctl value to 0", sysctlName)
+		}
+	}
+
+	for _, existIf := range existInterfaces {
+		sysctlName := fmt.Sprintf(rpFilterSysctl, existIf.Name)
+		sysctlValue, err := sysctl.Sysctl(sysctlName)
+		if err != nil {
+			continue
+		}
+		if sysctlValue != "0" {
+			if _, err = sysctl.Sysctl(sysctlName, "0"); err != nil {
+				return errors.Wrapf(err, "error set: %s sysctl value to 0", sysctlName)
+			}
+		}
+	}
+	return nil
 }

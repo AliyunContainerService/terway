@@ -24,6 +24,7 @@ import (
 const (
 	daemonModeVPC        = "VPC"
 	daemonModeENIMultiIP = "ENIMultiIP"
+	daemonModeENIOnly    = "ENIOnly"
 
 	gcPeriod = 5 * time.Minute
 )
@@ -172,6 +173,10 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 		return nil, errors.Wrapf(err, "error get pod resources from db for pod %+v", podinfo)
 	}
 
+	if !networkService.verifyPodNetworkType(podinfo.PodNetworkType) {
+		return nil, fmt.Errorf("unexpect pod network type allocate, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
+	}
+
 	// 3. Allocate network resource for pod
 	switch podinfo.PodNetworkType {
 	case podNetworkTypeENIMultiIP:
@@ -200,11 +205,12 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 		allocIPReply.NetworkInfo = &rpc.AllocIPReply_ENIMultiIP{
 			ENIMultiIP: &rpc.ENIMultiIP{
 				EniConfig: &rpc.ENI{
-					IPv4Addr:     eniMultiIP.SecAddress.String(),
-					IPv4Subnet:   eniMultiIP.Eni.Address.String(),
-					MacAddr:      eniMultiIP.Eni.MAC,
-					Gateway:      eniMultiIP.Eni.Gateway.String(),
-					DeviceNumber: eniMultiIP.Eni.DeviceNumber,
+					IPv4Addr:        eniMultiIP.SecAddress.String(),
+					IPv4Subnet:      eniMultiIP.Eni.Address.String(),
+					MacAddr:         eniMultiIP.Eni.MAC,
+					Gateway:         eniMultiIP.Eni.Gateway.String(),
+					DeviceNumber:    eniMultiIP.Eni.DeviceNumber,
+					PrimaryIPv4Addr: eniMultiIP.Eni.Address.IP.String(),
 				},
 				PodConfig: &rpc.Pod{
 					Ingress: podinfo.TcIngress,
@@ -237,11 +243,12 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 		allocIPReply.NetworkInfo = &rpc.AllocIPReply_VpcEni{
 			VpcEni: &rpc.VPCENI{
 				EniConfig: &rpc.ENI{
-					IPv4Addr:     vpcEni.Address.IP.String(),
-					IPv4Subnet:   vpcEni.Address.String(),
-					MacAddr:      vpcEni.MAC,
-					Gateway:      vpcEni.Gateway.String(),
-					DeviceNumber: vpcEni.DeviceNumber,
+					IPv4Addr:        vpcEni.Address.IP.String(),
+					IPv4Subnet:      vpcEni.Address.String(),
+					MacAddr:         vpcEni.MAC,
+					Gateway:         vpcEni.Gateway.String(),
+					DeviceNumber:    vpcEni.DeviceNumber,
+					PrimaryIPv4Addr: vpcEni.Address.IP.String(),
 				},
 				PodConfig: &rpc.Pod{
 					Ingress: podinfo.TcIngress,
@@ -337,6 +344,11 @@ func (networkService *networkService) ReleaseIP(grpcContext context.Context, r *
 		return nil, err
 	}
 
+	if !networkService.verifyPodNetworkType(podinfo.PodNetworkType) {
+		networkContext.Log().Warnf("unexpect pod network type release, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
+		return releaseReply, nil
+	}
+
 	for _, res := range oldRes.Resources {
 		//record old resource for pod
 		networkContext.resources = append(networkContext.resources, res)
@@ -417,6 +429,15 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 	default:
 		return getIPInfoResult, errors.Errorf("unknown or unsupport network type for: %v", r)
 	}
+}
+
+func (networkService *networkService) verifyPodNetworkType(podNetworkMode string) bool {
+	return (networkService.daemonMode == daemonModeVPC && //vpc
+		(podNetworkMode == podNetworkTypeVPCENI || podNetworkMode == podNetworkTypeVPCIP)) ||
+		// eni-multi-ip
+		(networkService.daemonMode == daemonModeENIMultiIP && podNetworkMode == podNetworkTypeENIMultiIP) ||
+		// eni-only
+		(networkService.daemonMode == daemonModeENIOnly && podNetworkMode == podNetworkTypeVPCENI)
 }
 
 func (networkService *networkService) startGarbageCollectionLoop() {
@@ -500,7 +521,7 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServer, error) {
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
 	netSrv := &networkService{}
-	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC {
+	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC || daemonMode == daemonModeENIOnly {
 		netSrv.daemonMode = daemonMode
 	} else {
 		return nil, fmt.Errorf("unsupport daemon mode")
@@ -624,6 +645,15 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 		}
 		netSrv.mgrForResource = map[string]ResourceManager{
 			types.ResourceTypeENIIP: netSrv.eniIPResMgr,
+		}
+	case daemonModeENIOnly:
+		//init eni
+		netSrv.eniResMgr, err = newENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI])
+		if err != nil {
+			return nil, errors.Wrapf(err, "error init eni resource manager")
+		}
+		netSrv.mgrForResource = map[string]ResourceManager{
+			types.ResourceTypeENI: netSrv.eniResMgr,
 		}
 	default:
 		panic("unsupported daemon mode" + daemonMode)

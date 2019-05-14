@@ -65,10 +65,13 @@ data:
   eni_conf: |
     {
       "version": "1",
-      "access_key": "ak",
-      "access_secret": "sk",
-      "service_cidr": "10.96.0.0/12",
-      "security_group": "sg-xxxxxxxxxxx",
+      "access_key": "ACCESS_KEY",
+      "access_secret": "ACCESS_SECRET",
+      "service_cidr": "SERVICE_CIDR",
+      "security_group": "SECURITY_GROUP",
+      "vswitches": {
+        "cn-hongkong-b": ["VSWITCH"]
+      },
       "max_pool_size": 5,
       "min_pool_size": 0
     }
@@ -98,13 +101,19 @@ spec:
       nodeSelector:
         beta.kubernetes.io/arch: amd64
       tolerations:
-      - operator: "Exists"
+        - key: node.cloudprovider.kubernetes.io/uninitialized
+          value: "true"
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
       terminationGracePeriodSeconds: 0
       serviceAccountName: terway
       hostNetwork: true
       initContainers:
       - name: terway-init
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.0-g7da5160-aliyun
+        image: TERWAY_IMAGE
         imagePullPolicy: Always
         securityContext:
           privileged: true
@@ -120,7 +129,8 @@ spec:
           name: lib-modules
       containers:
       - name: terway
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.0-g7da5160-aliyun
+        image: TERWAY_IMAGE
+        command: ['/usr/bin/terwayd', '-log-level', 'debug', '-daemon-mode', 'ENIOnly']
         imagePullPolicy: Always
         securityContext:
           privileged: true
@@ -140,12 +150,12 @@ spec:
           name: lib-modules
         - mountPath: /var/lib/cni/networks
           name: cni-networks
-        - mountPath: /var/lib/cni/terway
-          name: cni-terway
         - mountPath: /var/lib/kubelet/device-plugins
           name: device-plugin-path
+        - mountPath: /var/lib/cni/terway
+          name: cni-terway
       - name: policy
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.0-g7da5160-aliyun
+        image: TERWAY_IMAGE
         command: ["/bin/policyinit.sh"]
         imagePullPolicy: Always
         env:
@@ -153,22 +163,22 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: spec.nodeName
-          - name: Network
-            value: 172.16.0.0/16
         securityContext:
           privileged: true
         resources:
           requests:
             cpu: 250m
         livenessProbe:
-          tcpSocket:
+          httpGet:
+            path: /liveness
             port: 9099
             host: localhost
           periodSeconds: 10
           initialDelaySeconds: 10
           failureThreshold: 6
         readinessProbe:
-          tcpSocket:
+          httpGet:
+            path: /readiness
             port: 9099
             host: localhost
           periodSeconds: 10
@@ -202,13 +212,13 @@ spec:
       - name: cni-networks
         hostPath:
           path: /var/lib/cni/networks
-      - name: cni-terway
-        hostPath:
-          path: /var/lib/cni/terway
       - name: device-plugin-path
         hostPath:
           path: /var/lib/kubelet/device-plugins
           type: "Directory"
+      - name: cni-terway
+        hostPath:
+          path: /var/lib/cni/terway
 
 ---
 

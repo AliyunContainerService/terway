@@ -17,6 +17,7 @@ type rawNicDriver struct {
 func (r *rawNicDriver) Setup(hostVeth string,
 	containerVeth string,
 	ipv4Addr *net.IPNet,
+	primaryIpv4Addr *net.IPNet,
 	gateway net.IP,
 	extraRoutes []*types.Route,
 	deviceID int,
@@ -136,7 +137,7 @@ func (r *rawNicDriver) Setup(hostVeth string,
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Flags:     int(netlink.FLAG_ONLINK),
 			Dst:       defaultRoute,
-			Gw:        linkIP.IP,
+			Gw:        gateway,
 		})
 		if err != nil {
 			return errors.Wrap(err, "error add route for nic")
