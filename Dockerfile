@@ -13,9 +13,9 @@ ENV GIT_COMMIT=1e59bb818c35b96e5de6e882fcb07510f81b50da
 RUN mkdir -p /go/src/github.com/projectcalico/ && cd /go/src/github.com/projectcalico/ && \
     git clone -b ${GIT_BRANCH} https://github.com/projectcalico/felix.git && \
     cd felix && [ "`git rev-parse HEAD`" = "${GIT_COMMIT}" ]
-RUN cd /go/src/github.com/projectcalico/felix && glide up --strip-vendor || glide up --strip-vendor || glide up --strip-vendor # retry 3 times
 COPY policy /terway_patch
-RUN cd /go/src/github.com/projectcalico/felix && git apply /terway_patch/*.patch && \
+RUN cd /go/src/github.com/projectcalico/felix && git apply /terway_patch/*.patch && glide up --strip-vendor || glide install --strip-vendor
+RUN cd /go/src/github.com/projectcalico/felix && \
     go build -v -i -o bin/calico-felix-amd64 -v -ldflags \
     "-X github.com/projectcalico/felix/buildinfo.GitVersion=${GIT_BRANCH} \
     -X github.com/projectcalico/felix/buildinfo.BuildDate=$(date -u +'%FT%T%z') \
