@@ -1,4 +1,4 @@
-From 141592dcdaa3018cb23d86f16f90e6b64a0f0f87 Mon Sep 17 00:00:00 2001
+From d78ba5e0af829e1c44414b48484d2285790b9e8d Mon Sep 17 00:00:00 2001
 From: "bingshen.wbs" <bingshen.wbs@alibaba-inc.com>
 Date: Mon, 11 Mar 2019 14:36:25 +0800
 Subject: [PATCH] terway
@@ -9,7 +9,8 @@ Subject: [PATCH] terway
  dataplane/linux/endpoint_mgr.go  | 18 +++++++++---------
  dataplane/linux/int_dataplane.go |  4 ++--
  dataplane/linux/masq_mgr.go      |  8 +++++++-
- 5 files changed, 39 insertions(+), 32 deletions(-)
+ glide.yaml                       |  5 +++++
+ 6 files changed, 44 insertions(+), 32 deletions(-)
 
 diff --git a/calc/calc_graph.go b/calc/calc_graph.go
 index 0eaa6890..4127acfd 100644
@@ -165,6 +166,22 @@ index 402a4507..09a451a4 100644
  	m.natTable.UpdateChain(chain)
  	m.dirty = false
 
+diff --git a/glide.yaml b/glide.yaml
+index bf21eb42..d5ed26f6 100644
+--- a/glide.yaml
++++ b/glide.yaml
+@@ -22,6 +22,11 @@ import:
+   version: b4deda0973fb4c70b50d226b1af49f3da59f5265
+   subpackages:
+   - proto
++- name: google.golang.org/genproto
++  version: 09f6ed296fc66555a25fe4ce95173148778dfa85
++  repo: https://github.com/google/go-genproto
++  subpackages:
++  - googleapis/rpc/status
+ - package: github.com/jbenet/go-reuseport
+ # go-reuseport pulls in go-log without a pin and master is now incompatible with the
+ # version of gogo/protobuf that we are using.  Pin to most recent working master revision.
 -- 
 2.15.1
 
