@@ -1,5 +1,11 @@
 #!/bin/sh
 export DATASTORE_TYPE=kubernetes
+if [ "$DATASTORE_TYPE" == "kubernetes" ]; then
+    if [ -z "$KUBERNETES_SERVICE_HOST" ]; then
+       echo "can not found k8s apiserver service env, exiting"
+       exit 1
+    fi
+fi
 export FELIX_LOGSEVERITYSYS=none
 export FELIX_LOGSEVERITYSCREEN=info
 export CALICO_NETWORKING_BACKEND=none
