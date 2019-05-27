@@ -32,7 +32,7 @@ type ipvlanDriver struct {
 //}
 
 const (
-	ipvlanRouteMetric = 2048
+	ipvlanRouteMetric = 2000
 )
 
 func (driver *ipvlanDriver) Setup(
@@ -50,12 +50,12 @@ func (driver *ipvlanDriver) Setup(
 
 	parentLink, err := netlink.LinkByIndex(deviceID)
 	if err != nil {
-		return errors.Wrapf(err, "IPVLAN get parent Link error.")
+		return errors.Wrapf(err, "IPVLAN get parent Link[%+v] error.", deviceID)
 	}
 
 	err = driver.ensureParent(parentLink, primaryIpv4Addr, gateway)
 	if err != nil {
-		return errors.Wrapf(err, "IPVLAN configure parent Link error.")
+		return errors.Wrapf(err, "IPVLAN configure parent Link[%+v] error.", deviceID)
 	}
 
 	slaveIPVlan := netlink.IPVlan{
@@ -228,7 +228,7 @@ func (driver *ipvlanDriver) ensureParent(link netlink.Link,
 	}
 	//delete link old default route
 	var defaultRoutes []netlink.Route
-	metric := int(ipvlanRouteMetric)
+	metric := int(ipvlanRouteMetric) + link.Attrs().Index
 
 	defaultRoutes, err = netlink.RouteListFiltered(netlink.FAMILY_ALL,
 		&netlink.Route{
@@ -240,17 +240,20 @@ func (driver *ipvlanDriver) ensureParent(link netlink.Link,
 	foundRoute := false
 	for _, route := range defaultRoutes {
 		if route.LinkIndex == link.Attrs().Index && route.Priority != metric {
-			route.Priority = metric
-			if err = netlink.RouteReplace(&route); err != nil {
-				return errors.Wrapf(err, "error replace route priority for ipvlan parent")
+			var metricRoute netlink.Route = route
+			if err = netlink.RouteDel(&route); err != nil {
+				return errors.Wrapf(err, "error del route priority for ipvlan parent: %+v", route)
+			}
+			metricRoute.Priority = metric
+			if err = netlink.RouteAdd(&metricRoute); err != nil {
+				return errors.Wrapf(err, "error add route priority for ipvlan parent: %+v", metricRoute)
 			}
 		}
 		if route.LinkIndex == link.Attrs().Index &&
 			(ipNetEqual(route.Dst, defaultRoute) || route.Dst == nil) {
 			foundRoute = true
 		}
-	}
-	//set master route
+	} //set master route
 	if !foundRoute {
 		err = netlink.RouteAdd(&netlink.Route{
 			LinkIndex: link.Attrs().Index,
@@ -261,7 +264,8 @@ func (driver *ipvlanDriver) ensureParent(link netlink.Link,
 			Priority:  metric,
 		})
 		if err != nil {
-			return errors.Wrap(err, "error add route for master nic")
+			return errors.Wrapf(err, "error add route for master nic %+v,%+v",
+				link.Attrs().Index, defaultRoutes)
 		}
 	}
 	return nil
