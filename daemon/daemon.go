@@ -602,7 +602,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	if err != nil {
 		return nil, errors.Wrapf(err, "error init resource manager storage")
 	}
-	localResource := make(map[string][]string)
+	localResource := make(map[string][]resourceManagerInitItem)
 	resObjList, err := netSrv.resourceDB.List()
 	if err != nil {
 		return nil, errors.Wrapf(err, "error list resource relation db")
@@ -611,9 +611,9 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		podRes := resObj.(PodResources)
 		for _, res := range podRes.Resources {
 			if localResource[res.Type] == nil {
-				localResource[res.Type] = make([]string, 0)
+				localResource[res.Type] = make([]resourceManagerInitItem, 0)
 			}
-			localResource[res.Type] = append(localResource[res.Type], res.ID)
+			localResource[res.Type] = append(localResource[res.Type], resourceManagerInitItem{resourceID: res.ID, podInfo: podRes.PodInfo})
 		}
 	}
 

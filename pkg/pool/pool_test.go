@@ -99,7 +99,7 @@ func createPool(factory ObjectFactory, initIdle, initInuse int) ObjectPool {
 			}
 			for i := 0; i < initInuse; i++ {
 				id++
-				holder.AddInuse(mockNetworkResource{fmt.Sprintf("%d", id)})
+				holder.AddInuse(mockNetworkResource{fmt.Sprintf("%d", id)}, "")
 			}
 			return nil
 		},
@@ -133,14 +133,14 @@ func TestInitializerExceedCapacity(t *testing.T) {
 func TestAcquireIdle(t *testing.T) {
 	factory := &mockObjectFactory{}
 	pool := createPool(factory, 3, 0)
-	_, err := pool.Acquire(context.Background(), "")
+	_, err := pool.Acquire(context.Background(), "", "")
 	assert.Nil(t, err)
 	assert.Equal(t, 0, factory.getTotalCreated())
 }
 func TestAcquireNonExists(t *testing.T) {
 	factory := &mockObjectFactory{}
 	pool := createPool(factory, 3, 0)
-	_, err := pool.Acquire(context.Background(), "1000")
+	_, err := pool.Acquire(context.Background(), "1000", "")
 	assert.Nil(t, err)
 	assert.Equal(t, 0, factory.getTotalCreated())
 }
@@ -148,7 +148,7 @@ func TestAcquireNonExists(t *testing.T) {
 func TestAcquireExists(t *testing.T) {
 	factory := &mockObjectFactory{}
 	pool := createPool(factory, 3, 0)
-	res, err := pool.Acquire(context.Background(), "2")
+	res, err := pool.Acquire(context.Background(), "2", "")
 	assert.Nil(t, err)
 	assert.Equal(t, 0, factory.getTotalCreated())
 	assert.Equal(t, "2", res.GetResourceID())
@@ -164,7 +164,7 @@ func TestConcurrencyAcquireNoMoreThanCapacity(t *testing.T) {
 		wg.Add(1)
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		go func() {
-			_, err := pool.Acquire(ctx, "")
+			_, err := pool.Acquire(ctx, "", "")
 			cancel()
 			assert.Nil(t, err)
 			wg.Done()
@@ -183,7 +183,7 @@ func TestConcurrencyAcquireMoreThanCapacity(t *testing.T) {
 		wg.Add(1)
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		go func() {
-			pool.Acquire(ctx, "")
+			pool.Acquire(ctx, "", "")
 			cancel()
 			wg.Done()
 		}()
@@ -197,12 +197,12 @@ func TestRelease(t *testing.T) {
 		createDelay: 1 * time.Millisecond,
 	}
 	pool := createPool(factory, 3, 0)
-	n1, _ := pool.Acquire(context.Background(), "")
-	n2, _ := pool.Acquire(context.Background(), "")
-	n3, _ := pool.Acquire(context.Background(), "")
-	n4, _ := pool.Acquire(context.Background(), "")
-	n5, _ := pool.Acquire(context.Background(), "")
-	n6, _ := pool.Acquire(context.Background(), "")
+	n1, _ := pool.Acquire(context.Background(), "", "")
+	n2, _ := pool.Acquire(context.Background(), "", "")
+	n3, _ := pool.Acquire(context.Background(), "", "")
+	n4, _ := pool.Acquire(context.Background(), "", "")
+	n5, _ := pool.Acquire(context.Background(), "", "")
+	n6, _ := pool.Acquire(context.Background(), "", "")
 	assert.Equal(t, 3, factory.getTotalCreated())
 	pool.Release(n1.GetResourceID())
 	pool.Release(n2.GetResourceID())

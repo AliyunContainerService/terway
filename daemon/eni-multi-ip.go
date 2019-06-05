@@ -267,7 +267,7 @@ type eniIPResourceManager struct {
 	pool pool.ObjectPool
 }
 
-func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []string) (ResourceManager, error) {
+func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []resourceManagerInitItem) (ResourceManager, error) {
 	primaryIP, err := aliyun.GetPrivateIPV4()
 	if err != nil {
 		return nil, errors.Wrapf(err, "get primary ip error")
@@ -308,9 +308,9 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 			if err != nil {
 				return errors.Wrapf(err, "error get attach ENI on pool init")
 			}
-			stubMap := make(map[string]bool)
+			stubMap := make(map[string]*podInfo)
 			for _, allocated := range allocatedResources {
-				stubMap[allocated] = true
+				stubMap[allocated.resourceID] = allocated.podInfo
 			}
 
 			for _, eni := range enis {
@@ -334,7 +334,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 						SecAddress: ip,
 						PrimaryIP:  primaryIP,
 					}
-					_, ok := stubMap[eniIP.GetResourceID()]
+					podInfo, ok := stubMap[eniIP.GetResourceID()]
 
 					poolENI.ips = append(poolENI.ips, &ENIIP{
 						ENIIP: eniIP,
@@ -342,7 +342,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 					if !ok {
 						holder.AddIdle(eniIP)
 					} else {
-						holder.AddInuse(eniIP)
+						holder.AddInuse(eniIP, podInfoKey(podInfo.Namespace, podInfo.Name))
 					}
 				}
 				logrus.Debugf("init factory's exist ENI: %+v", poolENI)
@@ -361,7 +361,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 }
 
 func (m *eniIPResourceManager) Allocate(ctx *networkContext, prefer string) (types.NetworkResource, error) {
-	return m.pool.Acquire(ctx, prefer)
+	return m.pool.Acquire(ctx, prefer, podInfoKey(ctx.pod.Namespace, ctx.pod.Name))
 }
 
 func (m *eniIPResourceManager) Release(context *networkContext, resID string) error {
