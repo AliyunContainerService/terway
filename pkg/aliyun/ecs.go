@@ -23,6 +23,7 @@ type ECS interface {
 	FreeENI(eniID string, instanceID string) error
 	GetENIIPs(eniID string) ([]net.IP, error)
 	AssignIPForENI(eniID string) (net.IP, error)
+	AssignNIPsForENI(eniID string, count int) ([]net.IP, error)
 	UnAssignIPForENI(eniID string, ip net.IP) error
 	GetInstanceMaxENI(instanceID string) (int, error)
 	GetInstanceMaxPrivateIP(intanceID string) (int, error)
@@ -274,6 +275,14 @@ func (e *ecsImpl) GetENIIPs(eniID string) ([]net.IP, error) {
 }
 
 func (e *ecsImpl) AssignIPForENI(eniID string) (net.IP, error) {
+	ipList, err := e.AssignNIPsForENI(eniID, 1)
+	if err != nil || len(ipList) != 1 {
+		return nil, fmt.Errorf("error assign ip for eni: %s, ipList: %v, err: %v", eniID, ipList, err)
+	}
+	return ipList[0], nil
+}
+
+func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 	e.privateIPMutex.Lock()
 	defer e.privateIPMutex.Unlock()
 	addressesBefore, err := e.openapiInfoGetter.GetENIPrivateAddresses(eniID)
@@ -284,7 +293,7 @@ func (e *ecsImpl) AssignIPForENI(eniID string) (net.IP, error) {
 	assignPrivateIPAddressesArgs := &ecs.AssignPrivateIpAddressesArgs{
 		RegionId:                       e.region,
 		NetworkInterfaceId:             eniID,
-		SecondaryPrivateIpAddressCount: 1,
+		SecondaryPrivateIpAddressCount: count,
 	}
 
 	start := time.Now()
@@ -310,7 +319,7 @@ func (e *ecsImpl) AssignIPForENI(eniID string) (net.IP, error) {
 				return false, errors.Wrapf(err, "error get after eni private address for %s", eniID)
 			}
 
-			if len(addressesAfter)-len(addressesBefore) != 1 {
+			if len(addressesAfter)-len(addressesBefore) != count {
 				return false, nil
 			}
 			return true, nil
@@ -321,18 +330,17 @@ func (e *ecsImpl) AssignIPForENI(eniID string) (net.IP, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "error allocate eni private address for %s", eniID)
 	}
-	var newIP net.IP
+	var newIPList []net.IP
 	mb := map[string]bool{}
 	for _, beforeIP := range addressesBefore {
 		mb[beforeIP.String()] = true
 	}
 	for _, afterIP := range addressesAfter {
 		if _, ok := mb[afterIP.String()]; !ok {
-			newIP = afterIP
-			break
+			newIPList = append(newIPList, afterIP)
 		}
 	}
-	return newIP, err
+	return newIPList, err
 }
 
 func (e *ecsImpl) UnAssignIPForENI(eniID string, ip net.IP) error {
