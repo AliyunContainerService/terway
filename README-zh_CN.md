@@ -8,7 +8,8 @@ CNI plugin for alibaba cloud VPC/ENI
 
 ## 安装Kubernetes
 
-使用kubeadm的指导文档`https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/`来创建集群
+* 准备阿里云ECS机器，我们验证过的ECS镜像是`Centos 7.4/7.6`
+* 使用kubeadm的指导文档 https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/ 来创建集群
 
 安装好了之后要:
 
