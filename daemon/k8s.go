@@ -387,9 +387,9 @@ func (k *k8s) SetNodeAllocatablePod(count int) error {
 	return nil
 }
 
-// 清理存储
-// 第一次发现Pod在节点上已经不存在，将存储对象标记为删除。
-// 标记为删除的对象，超过一段时间并且当时Pod在节点上确实不存在，真正删除
+// clean up storage
+// tag the object as deletion when found pod not exist
+// the tagged object will be deleted on secondary scan
 func (k *k8s) clean() error {
 
 	list, err := k.storage.List()
