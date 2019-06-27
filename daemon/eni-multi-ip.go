@@ -40,8 +40,7 @@ type ENI struct {
 	done      chan struct{}
 }
 
-// 尝试绑一个
-// 如果满了，返回nil
+// eni ip allocator
 func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 	for {
 		toAllocate := 0

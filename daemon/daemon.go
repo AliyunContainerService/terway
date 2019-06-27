@@ -45,7 +45,7 @@ func (networkService *networkService) getResourceManagerForRes(resType string) R
 	return networkService.mgrForResource[resType]
 }
 
-//返回db中存储的pod信息，或者nil
+//return resource relation in db, or return nil.
 func (networkService *networkService) getPodResource(info *podInfo) (PodResources, error) {
 	obj, err := networkService.resourceDB.Get(podInfoKey(info.Namespace, info.Name))
 	if err == nil {
@@ -665,7 +665,7 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 	return netSrv, nil
 }
 
-//对于configure里没有配置的，填充对应的默认值
+//setup default value
 func setDefault(cfg *types.Configure) error {
 	if cfg.EniCapRatio == 0 {
 		cfg.EniCapRatio = 1

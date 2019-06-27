@@ -10,7 +10,7 @@ import (
 // ErrNotFound key not found in store
 var ErrNotFound = errors.New("not found")
 
-// Storage 可靠存储，数据一旦存储之后就不会丢失
+// Storage persistent storage on disk
 type Storage interface {
 	Put(key string, value interface{}) error
 	Get(key string) (interface{}, error)

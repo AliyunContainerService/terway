@@ -118,7 +118,7 @@ func newENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*eniFactory, e
 }
 
 func (f *eniFactory) Create() (types.NetworkResource, error) {
-	//TODO 支持多个交换机
+	//TODO support multi vswitch
 	return f.ecs.AllocateENI(f.switches[0], f.securityGroup, f.instanceID)
 }
 
