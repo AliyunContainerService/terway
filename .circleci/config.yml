@@ -23,3 +23,21 @@ jobs:
         command: |
           go test -race -coverprofile=coverage.txt -covermode=atomic ./...
           bash <(curl -s https://codecov.io/bash)
+
+  code-check:
+    docker:
+      - image: pouchcontainer/pouchlinter:v0.1.2
+    working_directory: /go/src/github.com/AliyunContainerService/terway
+    steps:
+      - checkout
+      - run:
+          name: validate go code with gometalinter
+          command: |
+            gometalinter --disable-all --skip vendor -E gofmt -E ineffassign -E misspell -E vet -d ./...
+
+workflows:
+  version: 2
+  ci:
+    jobs:
+      - build
+      - code-check
