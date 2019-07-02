@@ -11,6 +11,8 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+
+	//import pprof for diagnose
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
