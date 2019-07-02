@@ -27,6 +27,8 @@ const (
 	daemonModeENIOnly    = "ENIOnly"
 
 	gcPeriod = 5 * time.Minute
+
+	conditionFalse = "false"
 )
 
 type networkService struct {
@@ -675,8 +677,8 @@ func setDefault(cfg *types.Configure) error {
 		cfg.HotPlug = "true"
 	}
 
-	if cfg.HotPlug == "false" || cfg.HotPlug == "0" {
-		cfg.HotPlug = "false"
+	if cfg.HotPlug == conditionFalse || cfg.HotPlug == "0" {
+		cfg.HotPlug = conditionFalse
 	}
 
 	return nil
