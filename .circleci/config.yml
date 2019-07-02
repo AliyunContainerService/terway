@@ -34,6 +34,21 @@ jobs:
           name: validate go code with gometalinter
           command: |
             gometalinter --disable-all --skip vendor -E gofmt -E ineffassign -E misspell -E vet -d ./...
+      - run:
+          name: use opensource tool client9/misspell to correct commonly misspelled English words 
+          command: |
+            find  ./* -name  "*"  | grep -v vendor | xargs misspell -error
+
+  markdown-spellcheck:
+    docker:
+        - image: registry.cn-shanghai.aliyuncs.com/sunyuan/markdown-spellcheck:v1
+    working_directory: /go/src/github.com/AliyunContainerService/terway
+    steps:
+      - checkout
+      - run:
+          name: markdown spellcheck
+          command: |
+            find . -name \*.md | grep -v '^./vendor' | grep  -v ./README-zh_C | xargs mdspell --ignore-numbers --ignore-acronyms --en-us -r -x
 
 workflows:
   version: 2
@@ -41,3 +56,4 @@ workflows:
     jobs:
       - build
       - code-check
+      - markdown-spellcheck

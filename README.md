@@ -216,7 +216,7 @@ docker build -t acs/terway:latest .
 
 ## Contribute
 
-You are welcome to make new issues and pull reuqests.
+You are welcome to make new issues and pull requests.
 
 ## Community
 
