@@ -33,7 +33,7 @@ jobs:
       - run:
           name: validate go code with gometalinter
           command: |
-            gometalinter --disable-all --skip vendor -E goconst -E gofmt -E ineffassign -E golint -E misspell -E vet -d ./...
+            gometalinter --disable-all --skip vendor -E goconst -E gofmt -E ineffassign -E goimports -E golint -E misspell -E vet -d ./...
       - run:
           name: use opensource tool client9/misspell to correct commonly misspelled English words 
           command: |

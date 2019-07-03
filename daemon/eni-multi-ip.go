@@ -2,12 +2,13 @@ package daemon
 
 import (
 	"fmt"
+	"sync"
+
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	"sync"
 )
 
 const (

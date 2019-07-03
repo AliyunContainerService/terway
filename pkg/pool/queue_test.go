@@ -2,10 +2,11 @@ package pool
 
 import (
 	"fmt"
-	"github.com/AliyunContainerService/terway/types"
-	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
+
+	"github.com/AliyunContainerService/terway/types"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestInit(t *testing.T) {

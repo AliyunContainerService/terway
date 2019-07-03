@@ -2,13 +2,14 @@ package driver
 
 import (
 	"encoding/hex"
+	"math/rand"
+	"net"
+	"time"
+
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
-	"math/rand"
-	"net"
-	"time"
 )
 
 type rawNicDriver struct {

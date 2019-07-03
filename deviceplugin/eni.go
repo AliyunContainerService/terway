@@ -1,21 +1,23 @@
 package deviceplugin
 
 import (
-	"k8s.io/apimachinery/pkg/util/wait"
 	"net"
 	"os"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
+
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
-	"google.golang.org/grpc"
 	"io/ioutil"
-	pluginapi "k8s.io/kubernetes/pkg/kubelet/apis/deviceplugin/v1beta1"
 	"path"
 	"regexp"
 	"sync"
 	"syscall"
+
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
+	pluginapi "k8s.io/kubernetes/pkg/kubelet/apis/deviceplugin/v1beta1"
 )
 
 const (

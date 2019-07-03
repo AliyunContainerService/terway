@@ -2,10 +2,11 @@ package tc
 
 import (
 	"fmt"
+	"math"
+
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
-	"math"
 )
 
 // TrafficShapingRule the interface traffic shaping rule

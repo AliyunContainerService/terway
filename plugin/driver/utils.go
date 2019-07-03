@@ -2,10 +2,11 @@ package driver
 
 import (
 	"fmt"
+	"net"
+
 	"github.com/containernetworking/plugins/pkg/utils/sysctl"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
-	"net"
 )
 
 func deleteRoutesForAddr(addr *net.IPNet, tableID int) error {

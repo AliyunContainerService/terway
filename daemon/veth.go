@@ -3,6 +3,13 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk"
@@ -10,12 +17,6 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	log "github.com/sirupsen/logrus"
-	"io/ioutil"
-	"net"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 )
 
 const (

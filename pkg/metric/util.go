@@ -1,8 +1,9 @@
 package metric
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // MsSince returns milliseconds since start.

@@ -2,12 +2,13 @@ package aliyun
 
 import (
 	"fmt"
-	"github.com/AliyunContainerService/terway/pkg/metric"
-	"github.com/denverdino/aliyungo/common"
 	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/denverdino/aliyungo/common"
 )
 
 const (

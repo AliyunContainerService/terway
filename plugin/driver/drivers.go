@@ -2,14 +2,15 @@ package driver
 
 import (
 	"fmt"
+	"net"
+	"os"
+	"syscall"
+
 	"github.com/AliyunContainerService/terway/pkg/tc"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
-	"net"
-	"os"
-	"syscall"
 )
 
 // drivers implement objects
