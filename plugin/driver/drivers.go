@@ -494,16 +494,3 @@ func getNSIP(ifName string, nsHandler ns.NetNS) (net.IP, error) {
 	})
 	return nsIP, err
 }
-
-func getNSHw(ifName string, nsHandler ns.NetNS) (net.HardwareAddr, error) {
-	var nsHw net.HardwareAddr
-	err := nsHandler.Do(func(netNS ns.NetNS) error {
-		link, err := netlink.LinkByName(ifName)
-		if err != nil {
-			return err
-		}
-		nsHw = link.Attrs().HardwareAddr
-		return nil
-	})
-	return nsHw, err
-}

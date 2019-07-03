@@ -7,12 +7,7 @@ import (
 	"github.com/denverdino/aliyungo/common"
 	"io/ioutil"
 	"log"
-	"os"
 )
-
-func debug(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, format, args...)
-}
 
 var (
 	accessKeyID     string

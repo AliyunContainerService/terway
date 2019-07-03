@@ -11,20 +11,19 @@ import (
 )
 
 const (
-	metadataBase     = "http://100.100.100.200/latest/meta-data/"
-	mainEniPath      = "mac"
-	enisPath         = "network/interfaces/macs/"
-	eniIDPath        = "network/interfaces/macs/%s/network-interface-id"
-	eniAddrPath      = "network/interfaces/macs/%s/primary-ip-address"
-	eniNetmaskPath   = "network/interfaces/macs/%s/netmask"
-	eniGatewayPath   = "network/interfaces/macs/%s/gateway"
-	eniPrivateIPs    = "network/interfaces/macs/%s/private-ipv4s"
-	instanceTypePath = "instance/instance-type"
-	instanceIDPath   = "instance-id"
-	regionIDPath     = "region-id"
-	zoneIDPath       = "zone-id"
-	vswitchIDPath    = "vswitch-id"
-	vpcIDPath        = "vpc-id"
+	metadataBase   = "http://100.100.100.200/latest/meta-data/"
+	mainEniPath    = "mac"
+	enisPath       = "network/interfaces/macs/"
+	eniIDPath      = "network/interfaces/macs/%s/network-interface-id"
+	eniAddrPath    = "network/interfaces/macs/%s/primary-ip-address"
+	eniNetmaskPath = "network/interfaces/macs/%s/netmask"
+	eniGatewayPath = "network/interfaces/macs/%s/gateway"
+	eniPrivateIPs  = "network/interfaces/macs/%s/private-ipv4s"
+	instanceIDPath = "instance-id"
+	regionIDPath   = "region-id"
+	zoneIDPath     = "zone-id"
+	vswitchIDPath  = "vswitch-id"
+	vpcIDPath      = "vpc-id"
 )
 
 func metadataValue(url string) (string, error) {
