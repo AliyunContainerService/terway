@@ -257,10 +257,6 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 	return nil
 }
 
-func newENIIPFactory(config *types.PoolConfig) (*eniIPFactory, error) {
-	return &eniIPFactory{}, nil
-}
-
 type eniIPResourceManager struct {
 	pool pool.ObjectPool
 }

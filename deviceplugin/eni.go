@@ -269,15 +269,3 @@ func (m *EniDevicePlugin) Serve(resourceName string) error {
 
 	return nil
 }
-
-func main() {
-	plg := NewEniDevicePlugin(1)
-	err := plg.Serve(DefaultResourceName)
-	if err != nil {
-		log.Fatalf("error serve plugin, %+v", err)
-	}
-
-	for {
-		time.Sleep(time.Hour)
-	}
-}
