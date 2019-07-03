@@ -15,23 +15,23 @@ setup_env() {
 
 
 teardown() {
-	for deploy in ${stress_deploys[@]}; do
-		kubectl delete deploy ${deploy}
+	for deploy in "${stress_deploys[@]}"; do
+		kubectl delete deploy "${deploy}"
 	done
 	kubectl delete ns stresstest
 }
 
 
 max_scale=20
-eni_max_scale=10
+#eni_max_scale=10
 scale_period=3 #minutes
 scale_jitter=1 #minutes
 test_scale() {
 	deploy=$1
 	while true; do
-		scale_num=$(($RANDOM%max_scale))
-		kubectl -n ${stress_ns} scale --replicas ${scale_num} deploy ${deploy}
-		jitter_time=$(($RANDOM%($scale_jitter*2*60)-$scale_jitter*60))
+		scale_num=$((RANDOM%max_scale))
+		kubectl -n ${stress_ns} scale --replicas ${scale_num} deploy "${deploy}"
+		jitter_time=$((RANDOM%(scale_jitter*2*60)-scale_jitter*60))
 		sleep $((scale_period*60+jitter_time))
 	done
 }
@@ -41,14 +41,14 @@ delete_period=1 #minutes
 test_random_delete() {
 	deploy=$1
 	while true; do
-		sleep $((${delete_period}*60))
-		podlist=($(kubectl -n ${stress_ns} get pod -l run=${deploy} -o name))
+		sleep $((delete_period*60))
+		podlist=($(kubectl -n ${stress_ns} get pod -l run="${deploy}" -o name))
 		pod_len=${#podlist[@]}
-		if [ ${pod_len} -gt ${delete_count} ]; then
+		if [ "${pod_len}" -gt "${delete_count}" ]; then
 			pod_len=${delete_count}
 		fi
-		for (( i=0; i<$pod_len; i++ )) do
-			kubectl -n ${stress_ns} delete ${podlist[$i]}
+		for (( i=0; i<pod_len; i++ )) do
+			kubectl -n ${stress_ns} delete "${podlist[$i]}"
 		done
 	done
 }

@@ -20,22 +20,27 @@ install_env() {
 		exit 1;
 	fi
 
-	if [ -z ${terway_image} ]; then
+	if [ -z "${terway_image}" ]; then
 		export terway_image="registry.aliyuncs.com/acs/terway:v1.0.9.10-gfc1045e-aliyun"
 	fi
 
 	export ACCESS_KEY_ID=${access_key}
 	export ACCESS_KEY_SECRET=${access_secret}
 	export REGION=${region}
-	export temp_dir=`mktemp -d`
-
-	export aliyun_cluster=`aliyun cs GET /clusters/${cluster_id}`
-	export security_group=`echo ${aliyun_cluster} | jq .security_group_id | tr -d '"'`
-	export vswitch=`echo ${aliyun_cluster} | jq .vswitch_id | tr -d '"'`
-	aliyun cs GET /k8s/${cluster_id}/user_config | jq -r .config > ${temp_dir}/kubeconfig.yaml
+	temp_dir=$(mktemp -d)
+	export temp_dir
+	aliyun_cluster=$(aliyun cs GET /clusters/${cluster_id})
+	export aliyun_cluster
+	security_group=$(echo "${aliyun_cluster}" | jq .security_group_id | tr -d '"')
+	export security_group
+	vswitch=$(echo "${aliyun_cluster}" | jq .vswitch_id | tr -d '"')
+	export vswitch
+	aliyun cs GET /k8s/"${cluster_id}"/user_config | jq -r .config > "${temp_dir}"/kubeconfig.yaml
 	export KUBECONFIG=${temp_dir}/kubeconfig.yaml
-	export service_cidr=`aliyun cs GET /clusters/${cluster_id} | jq .parameters.ServiceCIDR | tr -d '"'`
-	export pod_cidr=`aliyun cs GET /clusters/${cluster_id} | jq .parameters.ContainerCIDR | tr -d '"'`
+	service_cidr=$(aliyun cs GET /clusters/"${cluster_id}" | jq .parameters.ServiceCIDR | tr -d '"')
+	export service_cidr
+	pod_cidr=$(aliyun cs GET /clusters/"${cluster_id}" | jq .parameters.ContainerCIDR | tr -d '"')
+	export pod_cidr
 
 	if ! kubectl get ds terway -n kube-system; then
 		echo "invaild kubeconfig for cluster or not a terway cluster"
@@ -61,7 +66,7 @@ install_terway() {
 			echo "invaild category "${category}
 			exit 1;
 	esac
-	cp templates/terway/${terway_template} ${temp_dir}/
+	cp templates/terway/${terway_template} "${temp_dir}"/
     sed -e "s#ACCESS_KEY#${access_key}#g" \
 	    -e "s#ACCESS_SECRET#${access_secret}#g" \
 	    -e "s#SERVICE_CIDR#${service_cidr}#g" \
@@ -69,9 +74,9 @@ install_terway() {
 	    -e "s#VSWITCH#${vswitch}#g" \
 	    -e "s#POD_CIDR#${pod_cidr}#g" \
 	    -e "s#TERWAY_IMAGE#${terway_image}#g" \
-	    -i ${temp_dir}/${terway_template}
+	    -i "${temp_dir}/${terway_template}"
 
-	kubectl apply -f ${temp_dir}/${terway_template}
+	kubectl apply -f "${temp_dir}/${terway_template}"
 	kubectl delete pod -n kube-system -l app=terway
 	sleep 30
 }

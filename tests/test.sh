@@ -4,7 +4,7 @@
 
 set -e
 
-source install_env.sh $@
+source install_env.sh "$@"
 
 # test terway pod ready and device plugin
 bats cni_ready.bats
