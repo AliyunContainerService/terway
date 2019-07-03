@@ -49,7 +49,7 @@ jobs:
 
   markdown-spellcheck:
     docker:
-        - image: registry.cn-shanghai.aliyuncs.com/sunyuan/markdown-spellcheck:v1
+        - image: sunyuan3/markdown-spellcheck:v1
     working_directory: /go/src/github.com/AliyunContainerService/terway
     steps:
       - checkout
