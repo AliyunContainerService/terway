@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/AliyunContainerService/terway/types"
-	log "github.com/sirupsen/logrus"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/AliyunContainerService/terway/types"
+	log "github.com/sirupsen/logrus"
 )
 
 // Errors of pool

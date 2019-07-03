@@ -2,11 +2,12 @@ package driver
 
 import (
 	"fmt"
+	"net"
+
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
-	"net"
 )
 
 type ipvlanDriver struct {

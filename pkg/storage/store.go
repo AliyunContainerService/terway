@@ -2,9 +2,10 @@ package storage
 
 import (
 	"errors"
+	"sync"
+
 	"github.com/boltdb/bolt"
 	log "github.com/sirupsen/logrus"
-	"sync"
 )
 
 // ErrNotFound key not found in store

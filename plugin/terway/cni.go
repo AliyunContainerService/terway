@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"runtime"
+	"time"
+
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/plugin/driver"
 	"github.com/AliyunContainerService/terway/rpc"
@@ -17,9 +21,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 	"google.golang.org/grpc"
-	"net"
-	"runtime"
-	"time"
 )
 
 const (

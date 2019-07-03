@@ -2,15 +2,18 @@ package daemon
 
 import (
 	"fmt"
+	"io/ioutil"
+	"net"
+	"net/http"
+
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
-	"io/ioutil"
-	"net"
-	"net/http"
+
+	//import pprof for diagnose
 	_ "net/http/pprof"
 	"os"
 	"os/signal"

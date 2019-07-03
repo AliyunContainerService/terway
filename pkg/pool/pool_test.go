@@ -3,11 +3,12 @@ package pool
 import (
 	"context"
 	"fmt"
-	"github.com/AliyunContainerService/terway/types"
-	"github.com/stretchr/testify/assert"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/AliyunContainerService/terway/types"
+	"github.com/stretchr/testify/assert"
 )
 
 type mockObjectFactory struct {

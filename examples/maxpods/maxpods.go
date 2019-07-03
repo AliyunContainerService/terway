@@ -3,10 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
-	"github.com/denverdino/aliyungo/common"
 	"io/ioutil"
 	"log"
+
+	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/denverdino/aliyungo/common"
 )
 
 var (

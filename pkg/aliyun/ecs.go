@@ -2,6 +2,10 @@ package aliyun
 
 import (
 	"fmt"
+	"net"
+	"sync"
+	"time"
+
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/denverdino/aliyungo/common"
@@ -9,9 +13,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"net"
-	"sync"
-	"time"
 )
 
 // ECS the interface of ecs operation set

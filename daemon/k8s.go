@@ -3,6 +3,13 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+	"unicode"
+
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/pkg/errors"
@@ -12,12 +19,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
-	"net"
-	"os"
-	"strconv"
-	"strings"
-	"time"
-	"unicode"
 )
 
 const (

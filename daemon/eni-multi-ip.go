@@ -2,17 +2,18 @@ package daemon
 
 import (
 	"fmt"
+	"sync"
+
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	"sync"
 )
 
 const (
 	maxEniOperating = 5
-	maxIpBacklog    = 10
+	maxIPBacklog    = 10
 )
 
 type eniIPFactory struct {
@@ -102,7 +103,7 @@ func (f *eniIPFactory) submit() error {
 			return nil
 		}
 	}
-	return errors.Errorf("trigger ENIIP throttle, max operating concurrent: %v", maxIpBacklog)
+	return errors.Errorf("trigger ENIIP throttle, max operating concurrent: %v", maxIPBacklog)
 }
 
 func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
@@ -138,9 +139,8 @@ func (f *eniIPFactory) Create() (ip types.NetworkResource, err error) {
 	if err == nil {
 		ip, err = f.popResult()
 		return
-	} else {
-		logrus.Debugf("allocate from exist eni error: %v, creating eni", err)
 	}
+	logrus.Debugf("allocate from exist eni error: %v, creating eni", err)
 
 	select {
 	case f.eniOperChan <- struct{}{}:
@@ -161,7 +161,7 @@ func (f *eniIPFactory) Create() (ip types.NetworkResource, err error) {
 	eni := &ENI{
 		ENI:       eniObj,
 		ecs:       f.eniFactory.ecs,
-		ipBacklog: make(chan struct{}, maxIpBacklog),
+		ipBacklog: make(chan struct{}, maxIPBacklog),
 		done:      make(chan struct{}, 1),
 	}
 
@@ -271,7 +271,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 		eniFactory:   eniFactory,
 		enis:         []*ENI{},
 		eniOperChan:  make(chan struct{}, maxEniOperating),
-		ipResultChan: make(chan *ENIIP, maxIpBacklog),
+		ipResultChan: make(chan *ENIIP, maxIPBacklog),
 	}
 
 	capacity, err := ecs.GetInstanceMaxPrivateIP(poolConfig.InstanceID)
@@ -310,7 +310,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 					ENI:       eni,
 					ips:       []*ENIIP{},
 					ecs:       ecs,
-					ipBacklog: make(chan struct{}, maxIpBacklog),
+					ipBacklog: make(chan struct{}, maxIPBacklog),
 					done:      make(chan struct{}, 1),
 				}
 				factory.enis = append(factory.enis, poolENI)

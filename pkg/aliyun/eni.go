@@ -3,13 +3,14 @@ package aliyun
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/denverdino/aliyungo/common"
 	"github.com/denverdino/aliyungo/ecs"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	"net"
 )
 
 // ENIInfoGetter interface to get eni information
