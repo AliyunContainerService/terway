@@ -33,13 +33,13 @@ jobs:
       - run:
           name: validate go code with gometalinter
           command: |
-            gometalinter --disable-all --skip vendor -E gofmt -E ineffassign -E misspell -E vet -d ./...
+            gometalinter --disable-all --skip vendor -E goconst -E gofmt -E ineffassign -E misspell -E vet -d ./...
       - run:
           name: use opensource tool client9/misspell to correct commonly misspelled English words 
           command: |
             find  ./* -name  "*"  | grep -v vendor | xargs misspell -error
       - run:
-          name: use ShellCheck (https://github.com/koalaman/shellcheck) to check the validateness of shell scripts in terway repo
+          name: use ShellCheck (https://github.com/koalaman/shellcheck) to check the validateness of shell scripts
           command: |
             find ./ -name "*.sh" | grep -v vendor | xargs shellcheck
       - run:

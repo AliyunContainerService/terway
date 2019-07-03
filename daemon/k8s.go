@@ -200,7 +200,7 @@ func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 	case daemonModeVPC:
 		podAnnotation := pod.GetAnnotations()
 		useENI := false
-		if needEni, ok := podAnnotation[podNeedEni]; ok && (needEni != "" && needEni != "false" && needEni != "0") {
+		if needEni, ok := podAnnotation[podNeedEni]; ok && (needEni != "" && needEni != conditionFalse && needEni != "0") {
 			useENI = true
 		}
 
