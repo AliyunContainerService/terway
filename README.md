@@ -1,17 +1,20 @@
 # Terway CNI Network Plugin
-CNI plugin for Alibaba Cloud VPC/ENI 
+
+CNI plugin for Alibaba Cloud VPC/ENI
 
 [![CircleCI](https://circleci.com/gh/AliyunContainerService/terway.svg?style=svg)](https://circleci.com/gh/AliyunContainerService/terway)
 [![Go Report Card](https://goreportcard.com/badge/github.com/AliyunContainerService/terway)](https://goreportcard.com/report/github.com/AliyunContainerService/terway)
 
-
 English | [简体中文](./README-zh_CN.md)
 
-## Try It:
+## Try It
+
 ### Install Kubernetes
-Install Kubernetes via kubeadm: https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
+
+Install Kubernetes via kubeadm: `https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/`
 
 After setup kubernetes cluster.
+
 * Change `iptables` `Forward` default policy to `ACCEPT` on every node of cluster: `iptables -P FORWARD ACCEPT`.
 * Check the `rp_filter` in sysctl parameters, set them to "0" on every node of cluster.
 
@@ -32,12 +35,11 @@ Terway plugin have two installation modes
 	ENI Secondary IP Mode, Using `Aliyun ENI's secondary ip` to connect the pods. This mode not limited by VPC route tables quotation. Install method: <br />
 	Replace `access_key/access_secret` and `security_group/vswitches` in [terway-multiip.yml](./terway-multiip.yml) with your aliyun openapi credentials and resources id. Then use `kubectl apply -f terway-multiip.yml` to install Terway into kubernetes cluster.
 
-
 Using `kubectl get ds terway -n kube-system` to watch plugin launching. Plugin install completed while terway daemonset available pods equal to nodes.
 
-### Terway network plugin usage:
+### Terway network plugin usage
 
-#### Vpc network container:
+#### Vpc network container
 
 On VPC installation mode, Terway will config pod's address using node's `podCidr` when pod not have any especial config. eg:
 
@@ -62,9 +64,10 @@ If you don't see a command prompt, try pressing enter.
        valid_lft forever preferred_lft forever
     inet6 fe80::4402:2ff:fe6b:651e/64 scope link
        valid_lft forever preferred_lft forever
-```   
+```
 
-#### Using ENI network interface to get the performance equivalent to the underlying network.
+#### Using ENI network interface to get the performance equivalent to the underlying network
+
 On VPC installation mode, Config `eni` request `aliyun/eni: 1` in one container of pod. The following example will create an Nginx Pod and assign an ENI:
 
 ```
@@ -125,20 +128,21 @@ root@nginx-64f497f8fd-ckpdm:/# ip addr show
        valid_lft forever preferred_lft forever
 ```
 
-#### Using network policy to limit accessible between containers.
+#### Using network policy to limit accessible between containers
 
 The Terway plugin is compatible with NetworkPolicy in the standard K8S to control access between containers, for example:
 
 1. Create and expose an deployment for test
-	
+
 	```
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run nginx --image=nginx --replicas=2
 	deployment "nginx" created
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl expose deployment nginx --port=80
 	service "nginx" exposed
 	```
+
 2. Run busybox to test connection to deployment:
-	
+
 	```
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --image=busybox /bin/sh
 	If you don't see a command prompt, try pressing enter.
@@ -148,7 +152,7 @@ The Terway plugin is compatible with NetworkPolicy in the standard K8S to contro
 	```
 
 3. Config network policy，only allow pod access which have `run: nginx` label:
-	
+
 	```
 	kind: NetworkPolicy
 	apiVersion: networking.k8s.io/v1
@@ -174,14 +178,13 @@ The Terway plugin is compatible with NetworkPolicy in the standard K8S to contro
 	Connecting to nginx (172.21.0.225:80)
 	wget: download timed out
 	/ #
-	
+
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --labels="access=true" --image=busybox /bin/sh
 	If you don't see a command prompt, try pressing enter.
 	/ # wget --spider --timeout=1 nginx
 	Connecting to nginx (172.21.0.225:80)
 	/ #
-	```  
-	
+	```
 
 #### Limit container in/out bandwidth
 
@@ -203,9 +206,10 @@ spec:
     image: nginx:1.7.9
     ports:
     - containerPort: 80
-```	
+```
 
 ## Build Terway
+
 Prerequisites:
 
 * Docker >= 17.05 with multi-stage build
@@ -222,5 +226,5 @@ You are welcome to make new issues and pull requests.
 
 ### DingTalk
 
-Join `DingTalk` group by the QR code below:  
+Join `DingTalk` group by the QR code below:
 <img src="./docs/images/ding_group_qrcode.jpg" width="300" height="400" />
