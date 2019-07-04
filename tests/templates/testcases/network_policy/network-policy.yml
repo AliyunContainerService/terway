@@ -110,8 +110,8 @@ spec:
   restartPolicy: Never
   initContainers:
   - name: waiting
-    image: busybox
-    command: ["sh", "-c", "for i in `seq 1 120`; do nslookup -type=A policy-svc && nslookup -type=A non-policy-svc && wget -T 1 non-policy-svc && exit 0; sleep 1; done"]
+    image: alpine
+    command: ["sh", "-c", "for i in `seq 1 120`; do nslookup policy-svc && nslookup non-policy-svc && wget -T 1 non-policy-svc && exit 0; sleep 1; done"]
   containers:
   - name: policy
     image: busybox
@@ -146,8 +146,8 @@ spec:
   restartPolicy: Never
   initContainers:
   - name: waiting
-    image: busybox
-    command: ["sh", "-c", "for i in `seq 1 120`; do nslookup -type=A policy-svc && nslookup -type=A non-policy-svc && wget -T 1 non-policy-svc && exit 0; sleep 1; done"]
+    image: alpine
+    command: ["sh", "-c", "for i in `seq 1 120`; do nslookup policy-svc && nslookup non-policy-svc && wget -T 1 non-policy-svc && exit 0; sleep 1; done"]
   containers:
   - name: policy
     image: busybox
