@@ -1,14 +1,17 @@
 # Terway 网络插件
-CNI plugin for alibaba cloud VPC/ENI 
+
+CNI plugin for alibaba cloud VPC/ENI
 
 [![CircleCI](https://circleci.com/gh/AliyunContainerService/terway.svg?style=svg)](https://circleci.com/gh/AliyunContainerService/terway)
 
 [English](./README.md) | 简体中文
 
 ## 安装Kubernetes
-使用kubeadm的指导文档 https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/ 来创建集群
+
+使用kubeadm的指导文档`https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/`来创建集群
 
 安装好了之后要:
+
 * 将iptables的policy换成ACCEPT，`iptables -P FORWARD ACCEPT`。
 * 检查节点上的"rp_filter"内核参数，并在每个节点上将其设置为"0"。
 
@@ -28,12 +31,12 @@ Terway有两种安装模式：
 	ENI多IP模式，使用Aliyun ENI的辅助IP来打通网络，不受VPC的路由条目限制，安装方式：<br />
 	修改[terway-multiip.yml](./terway-multiip.yml)文件中的eni.conf的配置中的授权和资源配置，然后通过`kubectl apply -f terway-multiip.yml`来安装terway插件。
 
-
 使用`kubectl get ds terway`看到插件在每个节点上都运行起来后，表明插件安装成功。
 
 ## 验证terway的功能
 
 ### 一般VPC网络的容器
+
 在VPC安装模式下，在容器没有做任何特殊配置时，terway会通过在节点上的podCidr中去分配地址然后配置给容器。
 例如：
 
@@ -58,7 +61,7 @@ If you don't see a command prompt, try pressing enter.
        valid_lft forever preferred_lft forever
     inet6 fe80::4402:2ff:fe6b:651e/64 scope link
        valid_lft forever preferred_lft forever
-```   
+```
 
 #### 使用ENI弹性网卡获得等同于底层网络的性能
 
@@ -129,15 +132,16 @@ root@nginx-64f497f8fd-ckpdm:/# ip addr show
 Terway插件兼容标准的K8S中的NetworkPolicy来控制容器间的访问，例如：
 
 1. 启动一个用于测试的服务
-	
+
 	```
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run nginx --image=nginx --replicas=2
 	deployment "nginx" created
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl expose deployment nginx --port=80
 	service "nginx" exposed
 	```
+
 2. 验证到这个服务是可以访问的
-	
+
 	```
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --image=busybox /bin/sh
 	If you don't see a command prompt, try pressing enter.
@@ -147,7 +151,7 @@ Terway插件兼容标准的K8S中的NetworkPolicy来控制容器间的访问，�
 	```
 
 3. 配置network policy规则，只允许某些标签的服务访问
-	
+
 	```
 	kind: NetworkPolicy
 	apiVersion: networking.k8s.io/v1
@@ -173,14 +177,13 @@ Terway插件兼容标准的K8S中的NetworkPolicy来控制容器间的访问，�
 	Connecting to nginx (172.21.0.225:80)
 	wget: download timed out
 	/ #
-	
+
 	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --labels="access=true" --image=busybox /bin/sh
 	If you don't see a command prompt, try pressing enter.
 	/ # wget --spider --timeout=1 nginx
 	Connecting to nginx (172.21.0.225:80)
 	/ #
-	```  
-	
+	```
 
 ### 限制容器的出入带宽
 
@@ -202,4 +205,4 @@ spec:
     image: nginx:1.7.9
     ports:
     - containerPort: 80
-```	
+```
