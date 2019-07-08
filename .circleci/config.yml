@@ -18,11 +18,26 @@ jobs:
           go vet ./...
           go test -race -v ./...
     - run: docker build -t acs/terway:$CIRCLE_BUILD_NUM .
+
+  unittest:
+    docker:
+      - image: sunyuan3/gometalinter:v1
+    working_directory: /go/src/github.com/AliyunContainerService/terway
+    steps:
+    - checkout
     - run:
-        name: codecov
+        name: unittest codecov
         command: |
-          go test -race -coverprofile=coverage.txt -covermode=atomic ./...
-          bash <(curl -s https://codecov.io/bash)
+          [ ! -d coverage ] && mkdir coverage
+          which gocovmerge || go get -u github.com/wadey/gocovmerge
+          for pkg in $(go list ./...); do 
+            go test -v --race -cover -covermode=atomic \
+              -coverprofile=coverage/unit-test-`echo $pkg | tr "/" "_"`.out \
+              $pkg || exit;
+          done
+          gocovmerge coverage/* > coverage.txt
+          ls coverage/*
+          bash <(curl -s https://codecov.io/bash) -cF unittest -y .codecov.yml
 
   code-check:
     docker:
@@ -82,3 +97,4 @@ workflows:
       - build
       - code-check
       - markdown-spellcheck
+      - unittest
