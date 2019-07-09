@@ -4,6 +4,7 @@ CNI plugin for Alibaba Cloud VPC/ENI
 
 [![CircleCI](https://circleci.com/gh/AliyunContainerService/terway.svg?style=svg)](https://circleci.com/gh/AliyunContainerService/terway)
 [![Go Report Card](https://goreportcard.com/badge/github.com/AliyunContainerService/terway)](https://goreportcard.com/report/github.com/AliyunContainerService/terway)
+[![codecov](https://codecov.io/gh/AliyunContainerService/terway/branch/master/graph/badge.svg)](https://codecov.io/gh/AliyunContainerService/terway)
 
 English | [简体中文](./README-zh_CN.md)
 
