@@ -219,6 +219,37 @@ Prerequisites:
 docker build -t acs/terway:latest .
 ```
 
+## Test
+
+unit test:
+
+```
+git clone https://github.com/AliyunContainerService/terway.git
+docker run -i --rm \
+  -v $(pwd)/terway:/go/src/github.com/AliyunContainerService/terway \
+  -w /go/src/github.com/AliyunContainerService/terway \
+  sunyuan3/gometalinter:v1 bash -c "go test -race ./..."
+```
+
+function test:
+
+```
+cd terway/tests
+./test.sh --cluster-id ${clusterid} \
+    --access-key ${ACCESS_KEY_ID} --access-secret ${ACCESS_KEY_SECRET} \
+    --region ${region} --category vpc \
+    --image ${terwayimage}
+```
+
+example:
+
+```
+./test.sh --cluster-id c05ef31ec40754f6c99c995963e2e01ed \
+    --access-key ******** --access-secret ******** \
+    --region cn-huhehaote --category vpc \
+    --image registry.cn-hongkong.aliyuncs.com/sunyuan/terway:45
+```
+
 ## Contribute
 
 You are welcome to make new issues and pull requests.
