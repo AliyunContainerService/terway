@@ -66,8 +66,9 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 		}
 		logrus.Debugf("allocate %v ips for eni", toAllocate)
 		ips, err := e.ecs.AssignNIPsForENI(e.ENI.ID, toAllocate)
-		logrus.Debugf("allocated ips for eni: %v, %v", e.ENI, ips)
+		logrus.Debugf("allocated ips for eni: %v, %v, %v", e.ENI, ips, err)
 		if err != nil {
+			logrus.Errorf("error allocate ips for eni: $v", err)
 			for i := 0; i < toAllocate; i++ {
 				resultChan <- &ENIIP{
 					ENIIP: nil,
