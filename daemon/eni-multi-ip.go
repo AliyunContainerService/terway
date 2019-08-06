@@ -97,16 +97,18 @@ func (f *eniIPFactory) submit() error {
 		logrus.Debugf("check exist eni's ip: %+v", eni)
 		eni.lock.Lock()
 		ipCount := eni.pending + len(eni.ips)
-		eni.lock.Unlock()
 		if ipCount < eni.MaxIPs {
 			select {
 			case eni.ipBacklog <- struct{}{}:
 			default:
+				eni.lock.Unlock()
 				continue
 			}
 			eni.pending++
+			eni.lock.Unlock()
 			return nil
 		}
+		eni.lock.Unlock()
 	}
 	return errors.Errorf("trigger ENIIP throttle, max operating concurrent: %v", maxIPBacklog)
 }
@@ -131,19 +133,23 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 
 }
 
-func (f *eniIPFactory) Create() (ip types.NetworkResource, err error) {
+func (f *eniIPFactory) Create() (types.NetworkResource, error) {
+	var (
+		ip *types.ENIIP
+		err error
+	)
 	defer func() {
 		if ip == nil {
-			logrus.Debugf("create result: %v, error: %v", ip, err != nil)
+			logrus.Debugf("create result: %v, error: %v", ip, err)
 		} else {
-			logrus.Debugf("create result: %v, error: %v", ip.GetResourceID(), err != nil)
+			logrus.Debugf("create result nil: %v, error: %v", ip.GetResourceID(), err)
 		}
 	}()
 
 	err = f.submit()
 	if err == nil {
 		ip, err = f.popResult()
-		return
+		return ip, err
 	}
 	logrus.Debugf("allocate from exist eni error: %v, creating eni", err)
 
@@ -223,13 +229,16 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 	}
 
 	if len(ips) == 1 {
-		f.eniOperChan <- struct{}{}
-		// only remain ENI main ip address, release the ENI interface
-		err = f.eniFactory.Dispose(ip.Eni)
-		<-f.eniOperChan
-		if err != nil {
-			return fmt.Errorf("error dispose ENI for eniip, %v", err)
+		eni.lock.Lock()
+		if eni.pending > 0 {
+			eni.lock.Unlock()
+			return fmt.Errorf("ENI have pending ips to be allocate")
+		} else {
+			// block ip allocate
+			eni.pending = eni.MaxIPs
 		}
+		eni.lock.Unlock()
+
 		f.Lock()
 		for i, e := range f.enis {
 			if ip.Eni.ID == e.ID {
@@ -240,6 +249,14 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 			}
 		}
 		f.Unlock()
+
+		f.eniOperChan <- struct{}{}
+		// only remain ENI main ip address, release the ENI interface
+		err = f.eniFactory.Dispose(ip.Eni)
+		<-f.eniOperChan
+		if err != nil {
+			return fmt.Errorf("error dispose ENI for eniip, %v", err)
+		}
 		return nil
 	}
 
