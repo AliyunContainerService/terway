@@ -49,7 +49,7 @@ func stackTriger() {
 }
 
 // Run terway daemon
-func Run(pidFilePath string, socketFilePath string, debugSocketListen string, configFilePath string, daemonMode string, logLevel string) error {
+func Run(pidFilePath, socketFilePath, debugSocketListen, configFilePath, kubeconfig, master, daemonMode, logLevel string) error {
 	level, err := log.ParseLevel(logLevel)
 	if err != nil {
 		return errors.Wrapf(err, "error set log level: %s", logLevel)
@@ -84,7 +84,7 @@ func Run(pidFilePath string, socketFilePath string, debugSocketListen string, co
 		return fmt.Errorf("error listen at %s: %v", socketFilePath, err)
 	}
 
-	networkService, err := newNetworkService(configFilePath, daemonMode)
+	networkService, err := newNetworkService(configFilePath, kubeconfig, master, daemonMode)
 	if err != nil {
 		return err
 	}

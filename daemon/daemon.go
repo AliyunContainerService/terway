@@ -19,7 +19,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
@@ -521,7 +521,7 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 	}()
 }
 
-func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServer, error) {
+func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (rpc.TerwayBackendServer, error) {
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
 	netSrv := &networkService{}
 	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC || daemonMode == daemonModeENIOnly {
@@ -566,7 +566,7 @@ func newNetworkService(configFilePath, daemonMode string) (rpc.TerwayBackendServ
 		return nil, errors.Wrapf(err, "error get region-id")
 	}
 
-	k8sRestConfig, err := rest.InClusterConfig()
+	k8sRestConfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
 	if err != nil {
 		return nil, err
 	}

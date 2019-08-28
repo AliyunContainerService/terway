@@ -17,18 +17,23 @@ var (
 	logLevel       string
 	daemonMode     string
 	readonlyListen string
+	kubeconfig     string
+	master         string
 )
 
 func init() {
 	flag.StringVar(&daemonMode, "daemon-mode", "VPC", "terway network mode")
 	flag.StringVar(&logLevel, "log-level", "info", "terway log level")
 	flag.StringVar(&readonlyListen, "readonly-listen", debugSocketPath, "terway readonly listen")
+	flag.StringVar(&master, "master", "", "The address of the Kubernetes API server (overrides any value in kubeconfig).")
+	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file with authorization and master location information.")
+
 }
 
 func main() {
 	flag.Parse()
 	log.Infof("Starting terway of version: %s", gitVer)
-	if err := daemon.Run(defaultPidPath, defaultSocketPath, readonlyListen, defaultConfigPath, daemonMode, logLevel); err != nil {
+	if err := daemon.Run(defaultPidPath, defaultSocketPath, readonlyListen, defaultConfigPath, kubeconfig, master, daemonMode, logLevel); err != nil {
 		log.Fatal(err)
 	}
 }
