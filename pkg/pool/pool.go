@@ -128,13 +128,16 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 
 func (p *simpleObjectPool) startCheckIdleTicker() {
 	p.checkIdle()
+	p.checkInsufficient()
 	ticker := time.NewTicker(CheckIdleInterval)
 	for {
 		select {
 		case <-ticker.C:
 			p.checkIdle()
+			p.checkInsufficient()
 		case <-p.notifyCh:
 			p.checkIdle()
+			p.checkInsufficient()
 		}
 	}
 }
@@ -167,6 +170,12 @@ func (p *simpleObjectPool) dispose(res types.NetworkResource) {
 
 func (p *simpleObjectPool) tooManyIdleLocked() bool {
 	return p.idle.Size() > p.maxIdle || (p.idle.Size() > 0 && p.sizeLocked() > p.capacity)
+}
+
+func (p *simpleObjectPool) needAddition() bool {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	return p.idle.Size() < p.minIdle && p.sizeLocked() < p.capacity
 }
 
 func (p *simpleObjectPool) peekOverfullIdle() *poolItem {
@@ -209,25 +218,24 @@ func (p *simpleObjectPool) checkIdle() {
 	}
 }
 
+func (p *simpleObjectPool) checkInsufficient() {
+	for {
+		if !p.needAddition() {
+			break
+		}
+		<-p.tokenCh
+		res, err := p.factory.Create()
+		if err != nil {
+			p.tokenCh <- struct{}{}
+			continue
+		}
+		p.AddIdle(res)
+	}
+}
+
 func (p *simpleObjectPool) preload() error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	for {
-		// init resource sequential to avoid huge creating request on startup
-		if p.idle.Size() >= p.minIdle {
-			break
-		}
-
-		if p.sizeLocked() >= p.capacity {
-			break
-		}
-
-		res, err := p.factory.Create()
-		if err != nil {
-			return err
-		}
-		p.idle.Push(&poolItem{res: res, reverse: time.Now()})
-	}
 
 	tokenCount := p.capacity - p.sizeLocked()
 	for i := 0; i < tokenCount; i++ {
@@ -263,6 +271,7 @@ func (p *simpleObjectPool) Acquire(ctx context.Context, resID, idempotentKey str
 		p.inuse[res.GetResourceID()] = poolItem{res: res, idempotentKey: idempotentKey}
 		p.lock.Unlock()
 		log.Infof("acquire (expect %s): return idle %s", resID, res.GetResourceID())
+		p.notify()
 		return res, nil
 	}
 	size := p.sizeLocked()

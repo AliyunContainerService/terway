@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxEniOperating = 5
+	maxEniOperating = 3
 	maxIPBacklog    = 10
 )
 

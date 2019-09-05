@@ -74,7 +74,7 @@ func (f *mockObjectFactory) getTotalCreated() int {
 
 func TestInitializerWithoutAutoCreate(t *testing.T) {
 	factory := &mockObjectFactory{}
-	createPool(factory, 3, 0)
+	createPool(factory, 3, 5, 3, 0)
 	time.Sleep(time.Second)
 	assert.Equal(t, 0, factory.getTotalCreated())
 	assert.Equal(t, 0, factory.getTotalDisposed())
@@ -82,13 +82,13 @@ func TestInitializerWithoutAutoCreate(t *testing.T) {
 
 func TestInitializerWithAutoCreate(t *testing.T) {
 	factory := &mockObjectFactory{}
-	createPool(factory, 0, 0)
+	createPool(factory, 3, 5, 0, 0)
 	time.Sleep(time.Second)
 	assert.Equal(t, 3, factory.getTotalCreated())
 	assert.Equal(t, 0, factory.getTotalDisposed())
 }
 
-func createPool(factory ObjectFactory, initIdle, initInuse int) ObjectPool {
+func createPool(factory ObjectFactory, minIdle, maxIdle, initIdle, initInuse int) ObjectPool {
 	id := 0
 	cfg := Config{
 		Factory: factory,
@@ -103,8 +103,8 @@ func createPool(factory ObjectFactory, initIdle, initInuse int) ObjectPool {
 			}
 			return nil
 		},
-		MinIdle:  3,
-		MaxIdle:  5,
+		MinIdle:  minIdle,
+		MaxIdle:  maxIdle,
 		Capacity: 10,
 	}
 	pool, err := NewSimpleObjectPool(cfg)
@@ -116,7 +116,7 @@ func createPool(factory ObjectFactory, initIdle, initInuse int) ObjectPool {
 
 func TestInitializerExceedMaxIdle(t *testing.T) {
 	factory := &mockObjectFactory{}
-	createPool(factory, 6, 0)
+	createPool(factory, 3, 5, 6, 0)
 	time.Sleep(1 * time.Second)
 	assert.Equal(t, 0, factory.getTotalCreated())
 	assert.Equal(t, 1, factory.getTotalDisposed())
@@ -124,7 +124,7 @@ func TestInitializerExceedMaxIdle(t *testing.T) {
 
 func TestInitializerExceedCapacity(t *testing.T) {
 	factory := &mockObjectFactory{}
-	createPool(factory, 1, 10)
+	createPool(factory, 3, 5, 1, 10)
 	time.Sleep(time.Second)
 	assert.Equal(t, 0, factory.getTotalCreated())
 	assert.Equal(t, 1, factory.getTotalDisposed())
@@ -132,14 +132,28 @@ func TestInitializerExceedCapacity(t *testing.T) {
 
 func TestAcquireIdle(t *testing.T) {
 	factory := &mockObjectFactory{}
-	pool := createPool(factory, 3, 0)
+	pool := createPool(factory, 0, 5, 3, 0)
 	_, err := pool.Acquire(context.Background(), "", "")
 	assert.Nil(t, err)
 	assert.Equal(t, 0, factory.getTotalCreated())
 }
+
+func TestAutoAddition(t *testing.T) {
+	factory := &mockObjectFactory{}
+	pool := createPool(factory, 3, 5, 0, 0)
+	time.Sleep(1*time.Second)
+	_, err := pool.Acquire(context.Background(), "", "")
+	assert.Nil(t, err)
+	_, err = pool.Acquire(context.Background(), "", "")
+	assert.Nil(t, err)
+	_, err = pool.Acquire(context.Background(), "", "")
+	assert.Nil(t, err)
+	time.Sleep(1*time.Second)
+	assert.Equal(t, 6, factory.getTotalCreated())
+}
 func TestAcquireNonExists(t *testing.T) {
 	factory := &mockObjectFactory{}
-	pool := createPool(factory, 3, 0)
+	pool := createPool(factory, 0, 5, 3, 0)
 	_, err := pool.Acquire(context.Background(), "1000", "")
 	assert.Nil(t, err)
 	assert.Equal(t, 0, factory.getTotalCreated())
@@ -147,7 +161,7 @@ func TestAcquireNonExists(t *testing.T) {
 
 func TestAcquireExists(t *testing.T) {
 	factory := &mockObjectFactory{}
-	pool := createPool(factory, 3, 0)
+	pool := createPool(factory, 0, 5, 3, 0)
 	res, err := pool.Acquire(context.Background(), "2", "")
 	assert.Nil(t, err)
 	assert.Equal(t, 0, factory.getTotalCreated())
@@ -158,7 +172,7 @@ func TestConcurrencyAcquireNoMoreThanCapacity(t *testing.T) {
 	factory := &mockObjectFactory{
 		createDelay: 2 * time.Millisecond,
 	}
-	pool := createPool(factory, 1, 0)
+	pool := createPool(factory, 0, 5, 1, 0)
 	wg := sync.WaitGroup{}
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -177,7 +191,7 @@ func TestConcurrencyAcquireMoreThanCapacity(t *testing.T) {
 	factory := &mockObjectFactory{
 		createDelay: 2 * time.Millisecond,
 	}
-	pool := createPool(factory, 3, 0)
+	pool := createPool(factory, 3, 5, 3, 0)
 	wg := sync.WaitGroup{}
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
@@ -196,7 +210,7 @@ func TestRelease(t *testing.T) {
 	factory := &mockObjectFactory{
 		createDelay: 1 * time.Millisecond,
 	}
-	pool := createPool(factory, 3, 0)
+	pool := createPool(factory, 0, 5, 3, 0)
 	n1, _ := pool.Acquire(context.Background(), "", "")
 	n2, _ := pool.Acquire(context.Background(), "", "")
 	n3, _ := pool.Acquire(context.Background(), "", "")
@@ -220,7 +234,7 @@ func TestRelease(t *testing.T) {
 
 func TestReleaseInvalid(t *testing.T) {
 	factory := &mockObjectFactory{}
-	pool := createPool(factory, 3, 0)
+	pool := createPool(factory, 3, 5, 3, 0)
 	err := pool.Release("not-exists")
 	assert.Equal(t, err, ErrInvalidState)
 }
