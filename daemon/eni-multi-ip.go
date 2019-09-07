@@ -71,8 +71,10 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 			logrus.Errorf("error allocate ips for eni: %v", err)
 			for i := 0; i < toAllocate; i++ {
 				resultChan <- &ENIIP{
-					ENIIP: nil,
-					err:   errors.Errorf("error assign ip for ENI: %v", err),
+					ENIIP: &types.ENIIP{
+						Eni: e.ENI,
+					},
+					err: errors.Errorf("error assign ip for ENI: %v", err),
 				}
 			}
 		} else {
@@ -116,6 +118,15 @@ func (f *eniIPFactory) submit() error {
 func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 	result := <-f.ipResultChan
 	if result.ENIIP == nil || result.err != nil {
+		f.Lock()
+		defer f.Unlock()
+		if result.Eni != nil {
+			for _, eni := range f.enis {
+				if eni.MAC == result.Eni.MAC {
+					eni.pending--
+				}
+			}
+		}
 		return nil, errors.Errorf("error allocate ip from eni: %v", result.err)
 	}
 	f.Lock()
