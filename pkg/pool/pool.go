@@ -23,7 +23,8 @@ var (
 
 const (
 	// CheckIdleInterval the interval of check and process idle eni
-	CheckIdleInterval = 2 * time.Minute
+	CheckIdleInterval  = 2 * time.Minute
+	defaultPoolBackoff = 1 * time.Minute
 )
 
 // ObjectPool object pool interface
@@ -59,6 +60,7 @@ type simpleObjectPool struct {
 	notifyCh   chan interface{}
 	// concurrency to create resource. tokenCh = capacity - (idle + inuse + dispose)
 	tokenCh chan struct{}
+	backoffTime time.Duration
 }
 
 // Config configuration of pool
@@ -102,6 +104,7 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 		capacity: cfg.Capacity,
 		notifyCh: make(chan interface{}),
 		tokenCh:  make(chan struct{}, cfg.Capacity),
+		backoffTime: defaultPoolBackoff,
 	}
 
 	if cfg.Initializer != nil {
@@ -226,9 +229,12 @@ func (p *simpleObjectPool) checkInsufficient() {
 		<-p.tokenCh
 		res, err := p.factory.Create()
 		if err != nil {
+			p.backoffTime = p.backoffTime * 2
 			p.tokenCh <- struct{}{}
+			time.Sleep(p.backoffTime)
 			continue
 		}
+		p.backoffTime = defaultPoolBackoff
 		p.AddIdle(res)
 	}
 }
