@@ -41,6 +41,7 @@ type networkService struct {
 	eniIPResMgr ResourceManager
 	//networkResourceMgr ResourceManager
 	mgrForResource map[string]ResourceManager
+	pendingPods map[string]interface{}
 	sync.RWMutex
 }
 
@@ -128,6 +129,21 @@ func (networkService *networkService) allocateENIMultiIP(ctx *networkContext, ol
 
 func (networkService *networkService) AllocIP(grpcContext context.Context, r *rpc.AllocIPRequest) (*rpc.AllocIPReply, error) {
 	log.Infof("alloc ip request: %+v", r)
+	networkService.Lock()
+	_, ok := networkService.pendingPods[podInfoKey(r.K8SPodNamespace, r.K8SPodName)]
+	if !ok {
+		networkService.pendingPods[podInfoKey(r.K8SPodNamespace, r.K8SPodName)] = struct {}{}
+		networkService.Unlock()
+		defer func() {
+			networkService.Lock()
+			delete(networkService.pendingPods, podInfoKey(r.K8SPodNamespace, r.K8SPodName))
+			networkService.Unlock()
+		}()
+	} else {
+		networkService.Unlock()
+		return nil, fmt.Errorf("pod %s/%s resource processing", r.K8SPodNamespace, r.K8SPodName)
+	}
+
 	networkService.RLock()
 	defer networkService.RUnlock()
 	var (
@@ -525,7 +541,9 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 
 func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (rpc.TerwayBackendServer, error) {
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
-	netSrv := &networkService{}
+	netSrv := &networkService{
+		pendingPods: map[string]interface{}{},
+	}
 	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC || daemonMode == daemonModeENIOnly {
 		netSrv.daemonMode = daemonMode
 	} else {
