@@ -16,6 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
@@ -317,25 +318,10 @@ func deserialize(data []byte) (interface{}, error) {
 	return item, nil
 }
 
-func (k *k8s) podExist(namespace, name string) (bool, error) {
-	podList, err := k.client.CoreV1().Pods(namespace).List(metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", name).String(),
-	})
-	if err != nil {
-		return false, errors.Wrapf(err, "error list pod: %v-%v", namespace, name)
-	}
-	return len(podList.Items) > 0, nil
-}
-
 func (k *k8s) GetPod(namespace, name string) (*podInfo, error) {
 	pod, err := k.client.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
-		exist, err1 := k.podExist(namespace, name)
-		if err1 != nil {
-			log.Warnf("exist pod failed: %v", err1)
-			return nil, err
-		}
-		if err1 == nil && !exist {
+		if apierrors.IsNotFound(err) {
 			key := podInfoKey(namespace, name)
 			obj, err := k.storage.Get(key)
 			if err == nil {
