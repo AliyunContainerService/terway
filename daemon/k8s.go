@@ -320,8 +320,21 @@ func deserialize(data []byte) (interface{}, error) {
 	return item, nil
 }
 
+func (k *k8s) podExist(namespace, name string) (bool, error) {
+	podList, err := k.client.CoreV1().Pods(namespace).List(metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", name).String(),
+		ResourceVersion: "0",
+	})
+	if err != nil {
+		return false, errors.Wrapf(err, "error list pod: %v-%v", namespace, name)
+	}
+	return len(podList.Items) > 0, nil
+}
+
 func (k *k8s) GetPod(namespace, name string) (*podInfo, error) {
-	pod, err := k.client.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{})
+	pod, err := k.client.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{
+		ResourceVersion: "0",
+	})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			key := podInfoKey(namespace, name)
