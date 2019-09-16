@@ -28,6 +28,8 @@ const (
 	podNetworkTypeENIMultiIP = "ENIMultiIP"
 	dbPath                   = "/var/lib/cni/terway/pod.db"
 	dbName                   = "pods"
+
+	apiServerTimeout         = 70 * time.Second
 )
 
 type podInfo struct {

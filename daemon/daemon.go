@@ -590,6 +590,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	if err != nil {
 		return nil, err
 	}
+	k8sRestConfig.Timeout = apiServerTimeout
 	k8sClient, err := kubernetes.NewForConfig(k8sRestConfig)
 	if err != nil {
 		return nil, err
@@ -620,6 +621,19 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	if err != nil {
 		return nil, errors.Wrapf(err, "error init resource manager storage")
 	}
+
+	// get pool config
+	poolConfig, err := getPoolConfig(config, ecs)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error get pool config")
+	}
+	log.Infof("init pool config: %+v", poolConfig)
+
+	err = restoreLocalENIRes(ecs, poolConfig, netSrv.k8s, netSrv.resourceDB)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error restore local eni resources")
+	}
+
 	localResource := make(map[string][]resourceManagerInitItem)
 	resObjList, err := netSrv.resourceDB.List()
 	if err != nil {
@@ -634,13 +648,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 			localResource[res.Type] = append(localResource[res.Type], resourceManagerInitItem{resourceID: res.ID, podInfo: podRes.PodInfo})
 		}
 	}
-
-	// get pool config
-	poolConfig, err := getPoolConfig(config, ecs)
-	if err != nil {
-		return nil, errors.Wrapf(err, "error get pool config")
-	}
-	log.Infof("init pool config: %+v", poolConfig)
+	log.Debugf("local resources to restore: %+v", localResource)
 
 	switch daemonMode {
 	case daemonModeVPC:
@@ -686,6 +694,51 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	netSrv.startGarbageCollectionLoop()
 
 	return netSrv, nil
+}
+
+// restore local eni resources for old terway migration
+func restoreLocalENIRes(ecs aliyun.ECS, pc *types.PoolConfig, k8s Kubernetes, resourceDB storage.Storage) error {
+	resList, err := resourceDB.List()
+	if err != nil {
+		return errors.Wrapf(err, "error list resourceDB storage")
+	}
+	if len(resList) != 0 {
+		log.Debugf("skip restore for upgraded")
+		return nil
+	}
+	eniList, err := ecs.GetAttachedENIs(pc.InstanceID, false)
+	if err != nil {
+		return errors.Wrapf(err, "error get attached eni for restore")
+	}
+	ipEniMap := map[string]*types.ENI{}
+	for _, eni := range eniList {
+		ipEniMap[eni.Address.IP.String()] = eni
+	}
+
+	podList, err := k8s.GetLocalPods()
+	if err != nil {
+		return errors.Wrapf(err, "error get local pod for restore")
+	}
+	for _, pod := range podList {
+		if pod.PodNetworkType == podNetworkTypeVPCENI {
+			log.Debugf("restore for local pod: %+v, enis: %+v", pod, ipEniMap)
+			eni, ok := ipEniMap[pod.PodIP]
+			if ok {
+				resourceDB.Put(podInfoKey(pod.Namespace, pod.Name), PodResources{
+					PodInfo: pod,
+					Resources: []ResourceItem{
+						{
+							ID:   eni.GetResourceID(),
+							Type: eni.GetType(),
+						},
+					},
+				})
+			} else {
+				log.Warnf("error found pod relate eni, pod: %+v", pod)
+			}
+		}
+	}
+	return nil
 }
 
 //setup default value
