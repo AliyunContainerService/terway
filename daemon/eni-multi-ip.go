@@ -233,14 +233,8 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 		return fmt.Errorf("invalid resource to dispose")
 	}
 
-	ips, err := f.eniFactory.ecs.GetENIIPs(ip.Eni.ID)
-
-	if err != nil {
-		return fmt.Errorf("error get ENI ips for: %v", ip)
-	}
-
-	if len(ips) == 1 {
-		eni.lock.Lock()
+	eni.lock.Lock()
+	if len(eni.ips) == 1 {
 		if eni.pending > 0 {
 			eni.lock.Unlock()
 			return fmt.Errorf("ENI have pending ips to be allocate")
@@ -269,6 +263,8 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 			return fmt.Errorf("error dispose ENI for eniip, %v", err)
 		}
 		return nil
+	} else {
+		eni.lock.Unlock()
 	}
 
 	// main ip of ENI, raise put_it_back error

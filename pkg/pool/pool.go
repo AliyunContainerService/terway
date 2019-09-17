@@ -213,11 +213,13 @@ func (p *simpleObjectPool) checkIdle() {
 		err := p.factory.Dispose(res)
 		if err == nil {
 			p.tokenCh <- struct{}{}
+			p.backoffTime = defaultPoolBackoff
 		} else {
 			log.Warnf("error dispose res: %+v", err)
+			p.backoffTime = p.backoffTime * 2
 			p.AddIdle(res)
+			time.Sleep(p.backoffTime)
 		}
-
 	}
 }
 

@@ -41,7 +41,10 @@ type networkService struct {
 	eniIPResMgr ResourceManager
 	//networkResourceMgr ResourceManager
 	mgrForResource map[string]ResourceManager
-	pendingPods map[string]interface{}
+	pendingPods    map[string]interface{}
+	pendingPodsLock sync.RWMutex
+	configFilePath string
+	configContent  string
 	sync.RWMutex
 }
 
@@ -129,18 +132,18 @@ func (networkService *networkService) allocateENIMultiIP(ctx *networkContext, ol
 
 func (networkService *networkService) AllocIP(grpcContext context.Context, r *rpc.AllocIPRequest) (*rpc.AllocIPReply, error) {
 	log.Infof("alloc ip request: %+v", r)
-	networkService.Lock()
+	networkService.pendingPodsLock.Lock()
 	_, ok := networkService.pendingPods[podInfoKey(r.K8SPodNamespace, r.K8SPodName)]
 	if !ok {
 		networkService.pendingPods[podInfoKey(r.K8SPodNamespace, r.K8SPodName)] = struct {}{}
-		networkService.Unlock()
+		networkService.pendingPodsLock.Unlock()
 		defer func() {
-			networkService.Lock()
+			networkService.pendingPodsLock.Lock()
 			delete(networkService.pendingPods, podInfoKey(r.K8SPodNamespace, r.K8SPodName))
-			networkService.Unlock()
+			networkService.pendingPodsLock.Unlock()
 		}()
 	} else {
-		networkService.Unlock()
+		networkService.pendingPodsLock.Unlock()
 		return nil, fmt.Errorf("pod %s/%s resource processing", r.K8SPodNamespace, r.K8SPodName)
 	}
 
@@ -543,6 +546,8 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
 	netSrv := &networkService{
 		pendingPods: map[string]interface{}{},
+		pendingPodsLock: sync.RWMutex{},
+		configFilePath: configFilePath,
 	}
 	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC || daemonMode == daemonModeENIOnly {
 		netSrv.daemonMode = daemonMode

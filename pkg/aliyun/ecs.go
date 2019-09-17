@@ -336,6 +336,7 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 			}
 
 			if len(addressesAfter)-len(addressesBefore) != count {
+				logrus.Debugf("waiting address allocate, before: %+v, after: %+v", addressesBefore, addressesAfter)
 				return false, nil
 			}
 			return true, nil
