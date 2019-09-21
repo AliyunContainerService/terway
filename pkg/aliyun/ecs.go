@@ -15,6 +15,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
+const (
+	// NetworkInterfaceTagCreatorKey denotes the creator tag's key of network interface
+	NetworkInterfaceTagCreatorKey = "creator"
+	// NetworkInterfaceTagCreatorValue denotes the creator tag's value of network interface
+	NetworkInterfaceTagCreatorValue = "terway"
+)
+
 // ECS the interface of ecs operation set
 type ECS interface {
 	AllocateENI(vSwitch string, securityGroup string, instanceID string) (*types.ENI, error)
@@ -85,6 +92,9 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 		SecurityGroupId:      securityGroup,
 		NetworkInterfaceName: generateEniName(),
 		Description:          eniDescription,
+		Tag: map[string]string{
+			NetworkInterfaceTagCreatorKey: NetworkInterfaceTagCreatorValue,
+		},
 	}
 	createNetworkInterfaceResponse, err := e.clientSet.ecs.CreateNetworkInterface(createNetworkInterfaceArgs)
 	metric.OpenAPILatency.WithLabelValues("CreateNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
