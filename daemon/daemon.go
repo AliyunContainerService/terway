@@ -40,11 +40,9 @@ type networkService struct {
 	eniResMgr   ResourceManager
 	eniIPResMgr ResourceManager
 	//networkResourceMgr ResourceManager
-	mgrForResource map[string]ResourceManager
-	pendingPods    map[string]interface{}
+	mgrForResource  map[string]ResourceManager
+	pendingPods     map[string]interface{}
 	pendingPodsLock sync.RWMutex
-	configFilePath string
-	configContent  string
 	sync.RWMutex
 }
 
@@ -135,7 +133,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 	networkService.pendingPodsLock.Lock()
 	_, ok := networkService.pendingPods[podInfoKey(r.K8SPodNamespace, r.K8SPodName)]
 	if !ok {
-		networkService.pendingPods[podInfoKey(r.K8SPodNamespace, r.K8SPodName)] = struct {}{}
+		networkService.pendingPods[podInfoKey(r.K8SPodNamespace, r.K8SPodName)] = struct{}{}
 		networkService.pendingPodsLock.Unlock()
 		defer func() {
 			networkService.pendingPodsLock.Lock()
@@ -545,9 +543,8 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (rpc.TerwayBackendServer, error) {
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
 	netSrv := &networkService{
-		pendingPods: map[string]interface{}{},
+		pendingPods:     map[string]interface{}{},
 		pendingPodsLock: sync.RWMutex{},
-		configFilePath: configFilePath,
 	}
 	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC || daemonMode == daemonModeENIOnly {
 		netSrv.daemonMode = daemonMode
@@ -729,7 +726,7 @@ func restoreLocalENIRes(ecs aliyun.ECS, pc *types.PoolConfig, k8s Kubernetes, re
 			log.Debugf("restore for local pod: %+v, enis: %+v", pod, ipEniMap)
 			eni, ok := ipEniMap[pod.PodIP]
 			if ok {
-				resourceDB.Put(podInfoKey(pod.Namespace, pod.Name), PodResources{
+				err = resourceDB.Put(podInfoKey(pod.Namespace, pod.Name), PodResources{
 					PodInfo: pod,
 					Resources: []ResourceItem{
 						{
@@ -738,6 +735,9 @@ func restoreLocalENIRes(ecs aliyun.ECS, pc *types.PoolConfig, k8s Kubernetes, re
 						},
 					},
 				})
+				if err != nil {
+					return errors.Wrapf(err, "error put resource into store")
+				}
 			} else {
 				log.Warnf("error found pod relate eni, pod: %+v", pod)
 			}

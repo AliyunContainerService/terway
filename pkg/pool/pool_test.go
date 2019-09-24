@@ -141,14 +141,14 @@ func TestAcquireIdle(t *testing.T) {
 func TestAutoAddition(t *testing.T) {
 	factory := &mockObjectFactory{}
 	pool := createPool(factory, 3, 5, 0, 0)
-	time.Sleep(1*time.Second)
+	time.Sleep(1 * time.Second)
 	_, err := pool.Acquire(context.Background(), "", "")
 	assert.Nil(t, err)
 	_, err = pool.Acquire(context.Background(), "", "")
 	assert.Nil(t, err)
 	_, err = pool.Acquire(context.Background(), "", "")
 	assert.Nil(t, err)
-	time.Sleep(1*time.Second)
+	time.Sleep(1 * time.Second)
 	assert.Equal(t, 6, factory.getTotalCreated())
 }
 func TestAcquireNonExists(t *testing.T) {
@@ -197,7 +197,8 @@ func TestConcurrencyAcquireMoreThanCapacity(t *testing.T) {
 		wg.Add(1)
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		go func() {
-			pool.Acquire(ctx, "", "")
+			res, _ := pool.Acquire(ctx, "", "")
+			t.Logf("concurrency acquire resource: %+v", res)
 			cancel()
 			wg.Done()
 		}()

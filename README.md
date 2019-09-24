@@ -13,7 +13,7 @@ English | [简体中文](./README-zh_CN.md)
 ### Install Kubernetes
 
 * Prepare Aliyun ECS instance. The ECS OS we tested is `Centos 7.4/7.6`.
-* Install Kubernetes via kubeadm: https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
+* Install Kubernetes via kubeadm: [create-cluster-kubeadm](https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/)
 
 After setup kubernetes cluster.
 

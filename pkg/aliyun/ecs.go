@@ -389,7 +389,7 @@ func (e *ecsImpl) UnAssignIPForENI(eniID string, ip net.IP) error {
 	start := time.Now()
 	err = wait.ExponentialBackoff(
 		eniOpBackoff,
-		func() (bool,error) {
+		func() (bool, error) {
 			_, err = e.clientSet.ecs.UnassignPrivateIpAddresses(unAssignPrivateIPAddressesArgs)
 			if err != nil {
 				logrus.Warnf("error unassign private ip address: %v, retry...", err)

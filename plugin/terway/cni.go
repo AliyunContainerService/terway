@@ -434,7 +434,10 @@ func cmdDel(args *skel.CmdArgs) error {
 		}
 
 	case rpc.IPType_TypeVPCENI:
-		networkDriver.Teardown(hostVethName, defaultVethForENI, cniNetns, nil)
+		err = networkDriver.Teardown(hostVethName, defaultVethForENI, cniNetns, nil)
+		if err != nil {
+			// ignore ENI veth release error
+		}
 		err = nicDriver.Teardown(hostVethName, args.IfName, cniNetns, nil)
 		if err != nil {
 			return errors.Wrapf(err, "error teardown nic network for pod: %s-%s",

@@ -59,7 +59,7 @@ type simpleObjectPool struct {
 	maxBackoff time.Duration
 	notifyCh   chan interface{}
 	// concurrency to create resource. tokenCh = capacity - (idle + inuse + dispose)
-	tokenCh chan struct{}
+	tokenCh     chan struct{}
 	backoffTime time.Duration
 }
 
@@ -96,14 +96,14 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 	}
 
 	pool := &simpleObjectPool{
-		factory:  cfg.Factory,
-		inuse:    make(map[string]poolItem),
-		idle:     newPriorityQueue(),
-		maxIdle:  cfg.MaxIdle,
-		minIdle:  cfg.MinIdle,
-		capacity: cfg.Capacity,
-		notifyCh: make(chan interface{}),
-		tokenCh:  make(chan struct{}, cfg.Capacity),
+		factory:     cfg.Factory,
+		inuse:       make(map[string]poolItem),
+		idle:        newPriorityQueue(),
+		maxIdle:     cfg.MaxIdle,
+		minIdle:     cfg.MinIdle,
+		capacity:    cfg.Capacity,
+		notifyCh:    make(chan interface{}),
+		tokenCh:     make(chan struct{}, cfg.Capacity),
 		backoffTime: defaultPoolBackoff,
 	}
 

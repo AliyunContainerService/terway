@@ -146,7 +146,7 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 
 func (f *eniIPFactory) Create() (types.NetworkResource, error) {
 	var (
-		ip *types.ENIIP
+		ip  *types.ENIIP
 		err error
 	)
 	defer func() {
@@ -238,10 +238,9 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 		if eni.pending > 0 {
 			eni.lock.Unlock()
 			return fmt.Errorf("ENI have pending ips to be allocate")
-		} else {
-			// block ip allocate
-			eni.pending = eni.MaxIPs
 		}
+		// block ip allocate
+		eni.pending = eni.MaxIPs
 		eni.lock.Unlock()
 
 		f.Lock()
@@ -263,9 +262,8 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 			return fmt.Errorf("error dispose ENI for eniip, %v", err)
 		}
 		return nil
-	} else {
-		eni.lock.Unlock()
 	}
+	eni.lock.Unlock()
 
 	// main ip of ENI, raise put_it_back error
 	if ip.Eni.Address.IP.Equal(ip.SecAddress) {
