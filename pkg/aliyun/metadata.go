@@ -3,6 +3,7 @@ package aliyun
 import (
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -12,19 +13,20 @@ import (
 )
 
 const (
-	metadataBase   = "http://100.100.100.200/latest/meta-data/"
-	mainEniPath    = "mac"
-	enisPath       = "network/interfaces/macs/"
-	eniIDPath      = "network/interfaces/macs/%s/network-interface-id"
-	eniAddrPath    = "network/interfaces/macs/%s/primary-ip-address"
-	eniNetmaskPath = "network/interfaces/macs/%s/netmask"
-	eniGatewayPath = "network/interfaces/macs/%s/gateway"
-	eniPrivateIPs  = "network/interfaces/macs/%s/private-ipv4s"
-	instanceIDPath = "instance-id"
-	regionIDPath   = "region-id"
-	zoneIDPath     = "zone-id"
-	vswitchIDPath  = "vswitch-id"
-	vpcIDPath      = "vpc-id"
+	metadataBase    = "http://100.100.100.200/latest/meta-data/"
+	mainEniPath     = "mac"
+	enisPath        = "network/interfaces/macs/"
+	eniIDPath       = "network/interfaces/macs/%s/network-interface-id"
+	eniAddrPath     = "network/interfaces/macs/%s/primary-ip-address"
+	eniNetmaskPath  = "network/interfaces/macs/%s/netmask"
+	eniGatewayPath  = "network/interfaces/macs/%s/gateway"
+	eniPrivateIPs   = "network/interfaces/macs/%s/private-ipv4s"
+	instanceIDPath  = "instance-id"
+	regionIDPath    = "region-id"
+	zoneIDPath      = "zone-id"
+	vswitchIDPath   = "vswitch-id"
+	vpcIDPath       = "vpc-id"
+	privateIPV4Path = "private-ipv4"
 )
 
 func metadataValue(url string) (string, error) {
@@ -112,4 +114,17 @@ func GetLocalVswitch() (string, error) {
 // GetLocalVPC get vpc id of this node
 func GetLocalVPC() (string, error) {
 	return metadataValue(vpcIDPath)
+}
+
+// GetPrivateIPV4 get private ip for master nic
+func GetPrivateIPV4() (net.IP, error) {
+	value, err := metadataValue(privateIPV4Path)
+	if err != nil {
+		return nil, err
+	}
+	ip := net.ParseIP(value)
+	if ip == nil {
+		return nil, fmt.Errorf("invalid ip format: %s", value)
+	}
+	return ip, nil
 }
