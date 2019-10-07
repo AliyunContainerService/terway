@@ -174,6 +174,7 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 		deviceID := allocResult.GetENIMultiIP().GetEniConfig().GetDeviceNumber()
 		ingress := allocResult.GetENIMultiIP().GetPodConfig().GetIngress()
 		egress := allocResult.GetENIMultiIP().GetPodConfig().GetEgress()
+		serviceCIDRStr := allocResult.GetENIMultiIP().GetServiceCidr()
 
 		var subnet *net.IPNet
 		_, subnet, err = net.ParseCIDR(subnetStr)
@@ -193,18 +194,18 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 
 		primaryIP := net.ParseIP(primaryIPStr)
 		if primaryIP == nil {
-			return fmt.Errorf("eni multi ip return primary ip is not vaild: %v", primaryIPStr)
+			return fmt.Errorf("eni multi ip return primary ip is invaild: %s", primaryIPStr)
 		}
-		primaryIpv4Addr := &net.IPNet{
-			IP:   primaryIP,
-			Mask: net.CIDRMask(32, 32),
+
+		_, serviceCIDR, err := net.ParseCIDR(serviceCIDRStr)
+		if err != nil {
+			return fmt.Errorf("eni multi ip return servicecidr(%s) is invaild: %v", serviceCIDRStr, err)
 		}
-		copy(primaryIpv4Addr.Mask, subnet.Mask)
 
 		if conf.ENIIPVirtualType == eniIPVirtualTypeIPVlan {
 			eniMultiIPDriver = driver.IPVlanDriver
 		}
-		err = eniMultiIPDriver.Setup(hostVethName, args.IfName, subnet, primaryIpv4Addr, gw, nil, int(deviceID), ingress, egress, cniNetns)
+		err = eniMultiIPDriver.Setup(hostVethName, args.IfName, subnet, primaryIP, serviceCIDR, gw, nil, int(deviceID), ingress, egress, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network failed: %v", err)
 		}
@@ -248,7 +249,7 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 		ingress := allocResult.GetVpcIp().GetPodConfig().GetIngress()
 		egress := allocResult.GetVpcIp().GetPodConfig().GetEgress()
 
-		err = networkDriver.Setup(hostVethName, args.IfName, &podIPAddr, nil, gateway, nil, 0, ingress, egress, cniNetns)
+		err = networkDriver.Setup(hostVethName, args.IfName, &podIPAddr, nil, nil, gateway, nil, 0, ingress, egress, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network failed: %v", err)
 		}
@@ -315,18 +316,18 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 
 		ingress := allocResult.GetVpcEni().GetPodConfig().GetIngress()
 		egress := allocResult.GetVpcEni().GetPodConfig().GetEgress()
-		err = networkDriver.Setup(hostVethName, defaultVethForENI, eniAddrSubnet, nil, gw, extraRoutes, 0, ingress, egress, cniNetns)
+		err = networkDriver.Setup(hostVethName, defaultVethForENI, eniAddrSubnet, nil, nil, gw, extraRoutes, 0, ingress, egress, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup veth network for eni failed: %v", err)
 		}
 
 		defer func() {
 			if err != nil {
-				networkDriver.Teardown(hostVethName, args.IfName, cniNetns)
+				networkDriver.Teardown(hostVethName, args.IfName, cniNetns, nil)
 			}
 		}()
 
-		err = nicDriver.Setup(hostVethName, args.IfName, eniAddrSubnet, nil, gw, nil, int(deviceNumber), 0, 0, cniNetns)
+		err = nicDriver.Setup(hostVethName, args.IfName, eniAddrSubnet, nil, nil, gw, nil, int(deviceNumber), 0, 0, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network for vpc eni failed: %v", err)
 		}
@@ -401,7 +402,13 @@ func cmdDel(args *skel.CmdArgs) error {
 		if conf.ENIIPVirtualType == eniIPVirtualTypeIPVlan {
 			eniMultiIPDriver = driver.IPVlanDriver
 		}
-		err = eniMultiIPDriver.Teardown(hostVethName, args.IfName, cniNetns)
+
+		podIP := net.ParseIP(infoResult.GetPodIP())
+		if podIP == nil {
+			return errors.Wrapf(err, "invalid pod ip %s", infoResult.GetPodIP())
+		}
+
+		err = eniMultiIPDriver.Teardown(hostVethName, args.IfName, cniNetns, podIP)
 		if err != nil {
 			return errors.Wrapf(err, "error teardown network for pod: %s-%s",
 				string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME))
@@ -412,7 +419,7 @@ func cmdDel(args *skel.CmdArgs) error {
 		if err != nil {
 			return fmt.Errorf("get info return subnet is not vaild: %v", infoResult.GetNodeCidr())
 		}
-		err = networkDriver.Teardown(hostVethName, args.IfName, cniNetns)
+		err = networkDriver.Teardown(hostVethName, args.IfName, cniNetns, nil)
 		if err != nil {
 			return errors.Wrapf(err, "error teardown network for pod: %s-%s",
 				string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME))
@@ -425,12 +432,12 @@ func cmdDel(args *skel.CmdArgs) error {
 		}
 
 	case rpc.IPType_TypeVPCENI:
-		err = networkDriver.Teardown(hostVethName, defaultVethForENI, cniNetns)
+		err = networkDriver.Teardown(hostVethName, defaultVethForENI, cniNetns, nil)
 		if err != nil {
 			return errors.Wrapf(err, "error teardown veth network for pod: %s-%s",
 				string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME))
 		}
-		err = nicDriver.Teardown(hostVethName, args.IfName, cniNetns)
+		err = nicDriver.Teardown(hostVethName, args.IfName, cniNetns, nil)
 		if err != nil {
 			return errors.Wrapf(err, "error teardown nic network for pod: %s-%s",
 				string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME))

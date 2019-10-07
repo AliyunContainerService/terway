@@ -3,11 +3,11 @@
 
 package rpc
 
-import (
-	fmt "fmt"
-	math "math"
+import proto "github.com/golang/protobuf/proto"
+import fmt "fmt"
+import math "math"
 
-	proto "github.com/golang/protobuf/proto"
+import (
 	context "golang.org/x/net/context"
 	grpc "google.golang.org/grpc"
 )
@@ -38,7 +38,6 @@ var IPType_name = map[int32]string{
 	2: "TypeManagedK8S",
 	3: "TypeENIMultiIP",
 }
-
 var IPType_value = map[string]int32{
 	"TypeVPCIP":      0,
 	"TypeVPCENI":     1,
@@ -49,17 +48,16 @@ var IPType_value = map[string]int32{
 func (x IPType) String() string {
 	return proto.EnumName(IPType_name, int32(x))
 }
-
 func (IPType) EnumDescriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{0}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{0}
 }
 
 type AllocIPRequest struct {
-	K8SPodName             string   `protobuf:"bytes,1,opt,name=K8sPodName,proto3" json:"K8sPodName,omitempty"`
-	K8SPodNamespace        string   `protobuf:"bytes,2,opt,name=K8sPodNamespace,proto3" json:"K8sPodNamespace,omitempty"`
-	K8SPodInfraContainerId string   `protobuf:"bytes,3,opt,name=K8sPodInfraContainerId,proto3" json:"K8sPodInfraContainerId,omitempty"`
-	Netns                  string   `protobuf:"bytes,4,opt,name=Netns,proto3" json:"Netns,omitempty"`
-	IfName                 string   `protobuf:"bytes,5,opt,name=IfName,proto3" json:"IfName,omitempty"`
+	K8SPodName             string   `protobuf:"bytes,1,opt,name=K8sPodName" json:"K8sPodName,omitempty"`
+	K8SPodNamespace        string   `protobuf:"bytes,2,opt,name=K8sPodNamespace" json:"K8sPodNamespace,omitempty"`
+	K8SPodInfraContainerId string   `protobuf:"bytes,3,opt,name=K8sPodInfraContainerId" json:"K8sPodInfraContainerId,omitempty"`
+	Netns                  string   `protobuf:"bytes,4,opt,name=Netns" json:"Netns,omitempty"`
+	IfName                 string   `protobuf:"bytes,5,opt,name=IfName" json:"IfName,omitempty"`
 	XXX_NoUnkeyedLiteral   struct{} `json:"-"`
 	XXX_unrecognized       []byte   `json:"-"`
 	XXX_sizecache          int32    `json:"-"`
@@ -69,17 +67,16 @@ func (m *AllocIPRequest) Reset()         { *m = AllocIPRequest{} }
 func (m *AllocIPRequest) String() string { return proto.CompactTextString(m) }
 func (*AllocIPRequest) ProtoMessage()    {}
 func (*AllocIPRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{0}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{0}
 }
-
 func (m *AllocIPRequest) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_AllocIPRequest.Unmarshal(m, b)
 }
 func (m *AllocIPRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_AllocIPRequest.Marshal(b, m, deterministic)
 }
-func (m *AllocIPRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_AllocIPRequest.Merge(m, src)
+func (dst *AllocIPRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_AllocIPRequest.Merge(dst, src)
 }
 func (m *AllocIPRequest) XXX_Size() int {
 	return xxx_messageInfo_AllocIPRequest.Size(m)
@@ -127,8 +124,8 @@ func (m *AllocIPRequest) GetIfName() string {
 
 // VETH Basic
 type Pod struct {
-	Ingress              uint64   `protobuf:"varint,1,opt,name=Ingress,proto3" json:"Ingress,omitempty"`
-	Egress               uint64   `protobuf:"varint,2,opt,name=Egress,proto3" json:"Egress,omitempty"`
+	Ingress              uint64   `protobuf:"varint,1,opt,name=Ingress" json:"Ingress,omitempty"`
+	Egress               uint64   `protobuf:"varint,2,opt,name=Egress" json:"Egress,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
@@ -138,17 +135,16 @@ func (m *Pod) Reset()         { *m = Pod{} }
 func (m *Pod) String() string { return proto.CompactTextString(m) }
 func (*Pod) ProtoMessage()    {}
 func (*Pod) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{1}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{1}
 }
-
 func (m *Pod) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_Pod.Unmarshal(m, b)
 }
 func (m *Pod) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_Pod.Marshal(b, m, deterministic)
 }
-func (m *Pod) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_Pod.Merge(m, src)
+func (dst *Pod) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_Pod.Merge(dst, src)
 }
 func (m *Pod) XXX_Size() int {
 	return xxx_messageInfo_Pod.Size(m)
@@ -175,8 +171,8 @@ func (m *Pod) GetEgress() uint64 {
 
 // VPC route veth
 type VPCIP struct {
-	PodConfig            *Pod     `protobuf:"bytes,1,opt,name=PodConfig,proto3" json:"PodConfig,omitempty"`
-	NodeCidr             string   `protobuf:"bytes,2,opt,name=NodeCidr,proto3" json:"NodeCidr,omitempty"`
+	PodConfig            *Pod     `protobuf:"bytes,1,opt,name=PodConfig" json:"PodConfig,omitempty"`
+	NodeCidr             string   `protobuf:"bytes,2,opt,name=NodeCidr" json:"NodeCidr,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
@@ -186,17 +182,16 @@ func (m *VPCIP) Reset()         { *m = VPCIP{} }
 func (m *VPCIP) String() string { return proto.CompactTextString(m) }
 func (*VPCIP) ProtoMessage()    {}
 func (*VPCIP) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{2}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{2}
 }
-
 func (m *VPCIP) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_VPCIP.Unmarshal(m, b)
 }
 func (m *VPCIP) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_VPCIP.Marshal(b, m, deterministic)
 }
-func (m *VPCIP) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_VPCIP.Merge(m, src)
+func (dst *VPCIP) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_VPCIP.Merge(dst, src)
 }
 func (m *VPCIP) XXX_Size() int {
 	return xxx_messageInfo_VPCIP.Size(m)
@@ -223,12 +218,12 @@ func (m *VPCIP) GetNodeCidr() string {
 
 // ENI Basic
 type ENI struct {
-	IPv4Addr             string   `protobuf:"bytes,1,opt,name=IPv4Addr,proto3" json:"IPv4Addr,omitempty"`
-	IPv4Subnet           string   `protobuf:"bytes,2,opt,name=IPv4Subnet,proto3" json:"IPv4Subnet,omitempty"`
-	MacAddr              string   `protobuf:"bytes,3,opt,name=MacAddr,proto3" json:"MacAddr,omitempty"`
-	Gateway              string   `protobuf:"bytes,4,opt,name=Gateway,proto3" json:"Gateway,omitempty"`
-	DeviceNumber         int32    `protobuf:"varint,5,opt,name=DeviceNumber,proto3" json:"DeviceNumber,omitempty"`
-	PrimaryIPv4Addr      string   `protobuf:"bytes,6,opt,name=PrimaryIPv4Addr,proto3" json:"PrimaryIPv4Addr,omitempty"`
+	IPv4Addr             string   `protobuf:"bytes,1,opt,name=IPv4Addr" json:"IPv4Addr,omitempty"`
+	IPv4Subnet           string   `protobuf:"bytes,2,opt,name=IPv4Subnet" json:"IPv4Subnet,omitempty"`
+	MacAddr              string   `protobuf:"bytes,3,opt,name=MacAddr" json:"MacAddr,omitempty"`
+	Gateway              string   `protobuf:"bytes,4,opt,name=Gateway" json:"Gateway,omitempty"`
+	DeviceNumber         int32    `protobuf:"varint,5,opt,name=DeviceNumber" json:"DeviceNumber,omitempty"`
+	PrimaryIPv4Addr      string   `protobuf:"bytes,6,opt,name=PrimaryIPv4Addr" json:"PrimaryIPv4Addr,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
@@ -238,17 +233,16 @@ func (m *ENI) Reset()         { *m = ENI{} }
 func (m *ENI) String() string { return proto.CompactTextString(m) }
 func (*ENI) ProtoMessage()    {}
 func (*ENI) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{3}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{3}
 }
-
 func (m *ENI) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_ENI.Unmarshal(m, b)
 }
 func (m *ENI) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_ENI.Marshal(b, m, deterministic)
 }
-func (m *ENI) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ENI.Merge(m, src)
+func (dst *ENI) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ENI.Merge(dst, src)
 }
 func (m *ENI) XXX_Size() int {
 	return xxx_messageInfo_ENI.Size(m)
@@ -303,9 +297,9 @@ func (m *ENI) GetPrimaryIPv4Addr() string {
 
 // Dedicated ENI
 type VPCENI struct {
-	EniConfig            *ENI     `protobuf:"bytes,1,opt,name=EniConfig,proto3" json:"EniConfig,omitempty"`
-	PodConfig            *Pod     `protobuf:"bytes,2,opt,name=PodConfig,proto3" json:"PodConfig,omitempty"`
-	ServiceCidr          string   `protobuf:"bytes,3,opt,name=ServiceCidr,proto3" json:"ServiceCidr,omitempty"`
+	EniConfig            *ENI     `protobuf:"bytes,1,opt,name=EniConfig" json:"EniConfig,omitempty"`
+	PodConfig            *Pod     `protobuf:"bytes,2,opt,name=PodConfig" json:"PodConfig,omitempty"`
+	ServiceCidr          string   `protobuf:"bytes,3,opt,name=ServiceCidr" json:"ServiceCidr,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
@@ -315,17 +309,16 @@ func (m *VPCENI) Reset()         { *m = VPCENI{} }
 func (m *VPCENI) String() string { return proto.CompactTextString(m) }
 func (*VPCENI) ProtoMessage()    {}
 func (*VPCENI) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{4}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{4}
 }
-
 func (m *VPCENI) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_VPCENI.Unmarshal(m, b)
 }
 func (m *VPCENI) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_VPCENI.Marshal(b, m, deterministic)
 }
-func (m *VPCENI) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_VPCENI.Merge(m, src)
+func (dst *VPCENI) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_VPCENI.Merge(dst, src)
 }
 func (m *VPCENI) XXX_Size() int {
 	return xxx_messageInfo_VPCENI.Size(m)
@@ -359,12 +352,12 @@ func (m *VPCENI) GetServiceCidr() string {
 
 // Managed k8s ENI
 type ManagedK8SENI struct {
-	EniConfig            *ENI     `protobuf:"bytes,1,opt,name=EniConfig,proto3" json:"EniConfig,omitempty"`
-	PodConfig            *Pod     `protobuf:"bytes,2,opt,name=PodConfig,proto3" json:"PodConfig,omitempty"`
-	PodCidr              string   `protobuf:"bytes,3,opt,name=PodCidr,proto3" json:"PodCidr,omitempty"`
-	VpcCidr              string   `protobuf:"bytes,4,opt,name=VpcCidr,proto3" json:"VpcCidr,omitempty"`
-	NodeCidr             string   `protobuf:"bytes,5,opt,name=NodeCidr,proto3" json:"NodeCidr,omitempty"`
-	ServiceCidr          string   `protobuf:"bytes,6,opt,name=ServiceCidr,proto3" json:"ServiceCidr,omitempty"`
+	EniConfig            *ENI     `protobuf:"bytes,1,opt,name=EniConfig" json:"EniConfig,omitempty"`
+	PodConfig            *Pod     `protobuf:"bytes,2,opt,name=PodConfig" json:"PodConfig,omitempty"`
+	PodCidr              string   `protobuf:"bytes,3,opt,name=PodCidr" json:"PodCidr,omitempty"`
+	VpcCidr              string   `protobuf:"bytes,4,opt,name=VpcCidr" json:"VpcCidr,omitempty"`
+	NodeCidr             string   `protobuf:"bytes,5,opt,name=NodeCidr" json:"NodeCidr,omitempty"`
+	ServiceCidr          string   `protobuf:"bytes,6,opt,name=ServiceCidr" json:"ServiceCidr,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
@@ -374,17 +367,16 @@ func (m *ManagedK8SENI) Reset()         { *m = ManagedK8SENI{} }
 func (m *ManagedK8SENI) String() string { return proto.CompactTextString(m) }
 func (*ManagedK8SENI) ProtoMessage()    {}
 func (*ManagedK8SENI) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{5}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{5}
 }
-
 func (m *ManagedK8SENI) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_ManagedK8SENI.Unmarshal(m, b)
 }
 func (m *ManagedK8SENI) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_ManagedK8SENI.Marshal(b, m, deterministic)
 }
-func (m *ManagedK8SENI) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ManagedK8SENI.Merge(m, src)
+func (dst *ManagedK8SENI) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ManagedK8SENI.Merge(dst, src)
 }
 func (m *ManagedK8SENI) XXX_Size() int {
 	return xxx_messageInfo_ManagedK8SENI.Size(m)
@@ -439,8 +431,9 @@ func (m *ManagedK8SENI) GetServiceCidr() string {
 
 // ENI Multiple IP
 type ENIMultiIP struct {
-	EniConfig            *ENI     `protobuf:"bytes,1,opt,name=EniConfig,proto3" json:"EniConfig,omitempty"`
-	PodConfig            *Pod     `protobuf:"bytes,2,opt,name=PodConfig,proto3" json:"PodConfig,omitempty"`
+	EniConfig            *ENI     `protobuf:"bytes,1,opt,name=EniConfig" json:"EniConfig,omitempty"`
+	PodConfig            *Pod     `protobuf:"bytes,2,opt,name=PodConfig" json:"PodConfig,omitempty"`
+	ServiceCidr          string   `protobuf:"bytes,3,opt,name=ServiceCidr" json:"ServiceCidr,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
@@ -450,17 +443,16 @@ func (m *ENIMultiIP) Reset()         { *m = ENIMultiIP{} }
 func (m *ENIMultiIP) String() string { return proto.CompactTextString(m) }
 func (*ENIMultiIP) ProtoMessage()    {}
 func (*ENIMultiIP) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{6}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{6}
 }
-
 func (m *ENIMultiIP) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_ENIMultiIP.Unmarshal(m, b)
 }
 func (m *ENIMultiIP) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_ENIMultiIP.Marshal(b, m, deterministic)
 }
-func (m *ENIMultiIP) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ENIMultiIP.Merge(m, src)
+func (dst *ENIMultiIP) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ENIMultiIP.Merge(dst, src)
 }
 func (m *ENIMultiIP) XXX_Size() int {
 	return xxx_messageInfo_ENIMultiIP.Size(m)
@@ -485,9 +477,16 @@ func (m *ENIMultiIP) GetPodConfig() *Pod {
 	return nil
 }
 
+func (m *ENIMultiIP) GetServiceCidr() string {
+	if m != nil {
+		return m.ServiceCidr
+	}
+	return ""
+}
+
 type AllocIPReply struct {
-	Success bool   `protobuf:"varint,1,opt,name=Success,proto3" json:"Success,omitempty"`
-	IPType  IPType `protobuf:"varint,2,opt,name=IPType,proto3,enum=rpc.IPType" json:"IPType,omitempty"`
+	Success bool   `protobuf:"varint,1,opt,name=Success" json:"Success,omitempty"`
+	IPType  IPType `protobuf:"varint,2,opt,name=IPType,enum=rpc.IPType" json:"IPType,omitempty"`
 	// Types that are valid to be assigned to NetworkInfo:
 	//	*AllocIPReply_VpcIp
 	//	*AllocIPReply_VpcEni
@@ -503,17 +502,16 @@ func (m *AllocIPReply) Reset()         { *m = AllocIPReply{} }
 func (m *AllocIPReply) String() string { return proto.CompactTextString(m) }
 func (*AllocIPReply) ProtoMessage()    {}
 func (*AllocIPReply) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{7}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{7}
 }
-
 func (m *AllocIPReply) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_AllocIPReply.Unmarshal(m, b)
 }
 func (m *AllocIPReply) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_AllocIPReply.Marshal(b, m, deterministic)
 }
-func (m *AllocIPReply) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_AllocIPReply.Merge(m, src)
+func (dst *AllocIPReply) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_AllocIPReply.Merge(dst, src)
 }
 func (m *AllocIPReply) XXX_Size() int {
 	return xxx_messageInfo_AllocIPReply.Size(m)
@@ -523,6 +521,35 @@ func (m *AllocIPReply) XXX_DiscardUnknown() {
 }
 
 var xxx_messageInfo_AllocIPReply proto.InternalMessageInfo
+
+type isAllocIPReply_NetworkInfo interface {
+	isAllocIPReply_NetworkInfo()
+}
+
+type AllocIPReply_VpcIp struct {
+	VpcIp *VPCIP `protobuf:"bytes,3,opt,name=VpcIp,oneof"`
+}
+type AllocIPReply_VpcEni struct {
+	VpcEni *VPCENI `protobuf:"bytes,4,opt,name=VpcEni,oneof"`
+}
+type AllocIPReply_ManagedK8S struct {
+	ManagedK8S *ManagedK8SENI `protobuf:"bytes,5,opt,name=ManagedK8S,oneof"`
+}
+type AllocIPReply_ENIMultiIP struct {
+	ENIMultiIP *ENIMultiIP `protobuf:"bytes,6,opt,name=ENIMultiIP,oneof"`
+}
+
+func (*AllocIPReply_VpcIp) isAllocIPReply_NetworkInfo()      {}
+func (*AllocIPReply_VpcEni) isAllocIPReply_NetworkInfo()     {}
+func (*AllocIPReply_ManagedK8S) isAllocIPReply_NetworkInfo() {}
+func (*AllocIPReply_ENIMultiIP) isAllocIPReply_NetworkInfo() {}
+
+func (m *AllocIPReply) GetNetworkInfo() isAllocIPReply_NetworkInfo {
+	if m != nil {
+		return m.NetworkInfo
+	}
+	return nil
+}
 
 func (m *AllocIPReply) GetSuccess() bool {
 	if m != nil {
@@ -536,41 +563,6 @@ func (m *AllocIPReply) GetIPType() IPType {
 		return m.IPType
 	}
 	return IPType_TypeVPCIP
-}
-
-type isAllocIPReply_NetworkInfo interface {
-	isAllocIPReply_NetworkInfo()
-}
-
-type AllocIPReply_VpcIp struct {
-	VpcIp *VPCIP `protobuf:"bytes,3,opt,name=VpcIp,proto3,oneof"`
-}
-
-type AllocIPReply_VpcEni struct {
-	VpcEni *VPCENI `protobuf:"bytes,4,opt,name=VpcEni,proto3,oneof"`
-}
-
-type AllocIPReply_ManagedK8S struct {
-	ManagedK8S *ManagedK8SENI `protobuf:"bytes,5,opt,name=ManagedK8S,proto3,oneof"`
-}
-
-type AllocIPReply_ENIMultiIP struct {
-	ENIMultiIP *ENIMultiIP `protobuf:"bytes,6,opt,name=ENIMultiIP,proto3,oneof"`
-}
-
-func (*AllocIPReply_VpcIp) isAllocIPReply_NetworkInfo() {}
-
-func (*AllocIPReply_VpcEni) isAllocIPReply_NetworkInfo() {}
-
-func (*AllocIPReply_ManagedK8S) isAllocIPReply_NetworkInfo() {}
-
-func (*AllocIPReply_ENIMultiIP) isAllocIPReply_NetworkInfo() {}
-
-func (m *AllocIPReply) GetNetworkInfo() isAllocIPReply_NetworkInfo {
-	if m != nil {
-		return m.NetworkInfo
-	}
-	return nil
 }
 
 func (m *AllocIPReply) GetVpcIp() *VPCIP {
@@ -714,13 +706,13 @@ func _AllocIPReply_OneofSizer(msg proto.Message) (n int) {
 }
 
 type ReleaseIPRequest struct {
-	K8SPodName             string   `protobuf:"bytes,1,opt,name=K8sPodName,proto3" json:"K8sPodName,omitempty"`
-	K8SPodNamespace        string   `protobuf:"bytes,2,opt,name=K8sPodNamespace,proto3" json:"K8sPodNamespace,omitempty"`
-	K8SPodInfraContainerId string   `protobuf:"bytes,3,opt,name=K8sPodInfraContainerId,proto3" json:"K8sPodInfraContainerId,omitempty"`
-	IPType                 IPType   `protobuf:"varint,4,opt,name=IPType,proto3,enum=rpc.IPType" json:"IPType,omitempty"`
-	IPv4Addr               string   `protobuf:"bytes,5,opt,name=IPv4Addr,proto3" json:"IPv4Addr,omitempty"`
-	MacAddr                string   `protobuf:"bytes,6,opt,name=MacAddr,proto3" json:"MacAddr,omitempty"`
-	Reason                 string   `protobuf:"bytes,7,opt,name=Reason,proto3" json:"Reason,omitempty"`
+	K8SPodName             string   `protobuf:"bytes,1,opt,name=K8sPodName" json:"K8sPodName,omitempty"`
+	K8SPodNamespace        string   `protobuf:"bytes,2,opt,name=K8sPodNamespace" json:"K8sPodNamespace,omitempty"`
+	K8SPodInfraContainerId string   `protobuf:"bytes,3,opt,name=K8sPodInfraContainerId" json:"K8sPodInfraContainerId,omitempty"`
+	IPType                 IPType   `protobuf:"varint,4,opt,name=IPType,enum=rpc.IPType" json:"IPType,omitempty"`
+	IPv4Addr               string   `protobuf:"bytes,5,opt,name=IPv4Addr" json:"IPv4Addr,omitempty"`
+	MacAddr                string   `protobuf:"bytes,6,opt,name=MacAddr" json:"MacAddr,omitempty"`
+	Reason                 string   `protobuf:"bytes,7,opt,name=Reason" json:"Reason,omitempty"`
 	XXX_NoUnkeyedLiteral   struct{} `json:"-"`
 	XXX_unrecognized       []byte   `json:"-"`
 	XXX_sizecache          int32    `json:"-"`
@@ -730,17 +722,16 @@ func (m *ReleaseIPRequest) Reset()         { *m = ReleaseIPRequest{} }
 func (m *ReleaseIPRequest) String() string { return proto.CompactTextString(m) }
 func (*ReleaseIPRequest) ProtoMessage()    {}
 func (*ReleaseIPRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{8}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{8}
 }
-
 func (m *ReleaseIPRequest) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_ReleaseIPRequest.Unmarshal(m, b)
 }
 func (m *ReleaseIPRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_ReleaseIPRequest.Marshal(b, m, deterministic)
 }
-func (m *ReleaseIPRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ReleaseIPRequest.Merge(m, src)
+func (dst *ReleaseIPRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ReleaseIPRequest.Merge(dst, src)
 }
 func (m *ReleaseIPRequest) XXX_Size() int {
 	return xxx_messageInfo_ReleaseIPRequest.Size(m)
@@ -801,9 +792,9 @@ func (m *ReleaseIPRequest) GetReason() string {
 }
 
 type ReleaseIPReply struct {
-	Success              bool     `protobuf:"varint,1,opt,name=Success,proto3" json:"Success,omitempty"`
-	IPv4Addr             string   `protobuf:"bytes,2,opt,name=IPv4Addr,proto3" json:"IPv4Addr,omitempty"`
-	DeviceNumber         int32    `protobuf:"varint,3,opt,name=DeviceNumber,proto3" json:"DeviceNumber,omitempty"`
+	Success              bool     `protobuf:"varint,1,opt,name=Success" json:"Success,omitempty"`
+	IPv4Addr             string   `protobuf:"bytes,2,opt,name=IPv4Addr" json:"IPv4Addr,omitempty"`
+	DeviceNumber         int32    `protobuf:"varint,3,opt,name=DeviceNumber" json:"DeviceNumber,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
@@ -813,17 +804,16 @@ func (m *ReleaseIPReply) Reset()         { *m = ReleaseIPReply{} }
 func (m *ReleaseIPReply) String() string { return proto.CompactTextString(m) }
 func (*ReleaseIPReply) ProtoMessage()    {}
 func (*ReleaseIPReply) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{9}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{9}
 }
-
 func (m *ReleaseIPReply) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_ReleaseIPReply.Unmarshal(m, b)
 }
 func (m *ReleaseIPReply) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_ReleaseIPReply.Marshal(b, m, deterministic)
 }
-func (m *ReleaseIPReply) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ReleaseIPReply.Merge(m, src)
+func (dst *ReleaseIPReply) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ReleaseIPReply.Merge(dst, src)
 }
 func (m *ReleaseIPReply) XXX_Size() int {
 	return xxx_messageInfo_ReleaseIPReply.Size(m)
@@ -856,9 +846,9 @@ func (m *ReleaseIPReply) GetDeviceNumber() int32 {
 }
 
 type GetInfoRequest struct {
-	K8SPodName             string   `protobuf:"bytes,1,opt,name=K8sPodName,proto3" json:"K8sPodName,omitempty"`
-	K8SPodNamespace        string   `protobuf:"bytes,2,opt,name=K8sPodNamespace,proto3" json:"K8sPodNamespace,omitempty"`
-	K8SPodInfraContainerId string   `protobuf:"bytes,3,opt,name=K8sPodInfraContainerId,proto3" json:"K8sPodInfraContainerId,omitempty"`
+	K8SPodName             string   `protobuf:"bytes,1,opt,name=K8sPodName" json:"K8sPodName,omitempty"`
+	K8SPodNamespace        string   `protobuf:"bytes,2,opt,name=K8sPodNamespace" json:"K8sPodNamespace,omitempty"`
+	K8SPodInfraContainerId string   `protobuf:"bytes,3,opt,name=K8sPodInfraContainerId" json:"K8sPodInfraContainerId,omitempty"`
 	XXX_NoUnkeyedLiteral   struct{} `json:"-"`
 	XXX_unrecognized       []byte   `json:"-"`
 	XXX_sizecache          int32    `json:"-"`
@@ -868,17 +858,16 @@ func (m *GetInfoRequest) Reset()         { *m = GetInfoRequest{} }
 func (m *GetInfoRequest) String() string { return proto.CompactTextString(m) }
 func (*GetInfoRequest) ProtoMessage()    {}
 func (*GetInfoRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{10}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{10}
 }
-
 func (m *GetInfoRequest) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_GetInfoRequest.Unmarshal(m, b)
 }
 func (m *GetInfoRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_GetInfoRequest.Marshal(b, m, deterministic)
 }
-func (m *GetInfoRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_GetInfoRequest.Merge(m, src)
+func (dst *GetInfoRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetInfoRequest.Merge(dst, src)
 }
 func (m *GetInfoRequest) XXX_Size() int {
 	return xxx_messageInfo_GetInfoRequest.Size(m)
@@ -911,9 +900,10 @@ func (m *GetInfoRequest) GetK8SPodInfraContainerId() string {
 }
 
 type GetInfoReply struct {
-	IPType               IPType   `protobuf:"varint,1,opt,name=IPType,proto3,enum=rpc.IPType" json:"IPType,omitempty"`
-	PodConfig            *Pod     `protobuf:"bytes,2,opt,name=PodConfig,proto3" json:"PodConfig,omitempty"`
-	NodeCidr             string   `protobuf:"bytes,3,opt,name=NodeCidr,proto3" json:"NodeCidr,omitempty"`
+	IPType               IPType   `protobuf:"varint,1,opt,name=IPType,enum=rpc.IPType" json:"IPType,omitempty"`
+	PodConfig            *Pod     `protobuf:"bytes,2,opt,name=PodConfig" json:"PodConfig,omitempty"`
+	NodeCidr             string   `protobuf:"bytes,3,opt,name=NodeCidr" json:"NodeCidr,omitempty"`
+	PodIP                string   `protobuf:"bytes,4,opt,name=PodIP" json:"PodIP,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
@@ -923,17 +913,16 @@ func (m *GetInfoReply) Reset()         { *m = GetInfoReply{} }
 func (m *GetInfoReply) String() string { return proto.CompactTextString(m) }
 func (*GetInfoReply) ProtoMessage()    {}
 func (*GetInfoReply) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{11}
+	return fileDescriptor_rpc_22751a12a1210b22, []int{11}
 }
-
 func (m *GetInfoReply) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_GetInfoReply.Unmarshal(m, b)
 }
 func (m *GetInfoReply) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_GetInfoReply.Marshal(b, m, deterministic)
 }
-func (m *GetInfoReply) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_GetInfoReply.Merge(m, src)
+func (dst *GetInfoReply) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetInfoReply.Merge(dst, src)
 }
 func (m *GetInfoReply) XXX_Size() int {
 	return xxx_messageInfo_GetInfoReply.Size(m)
@@ -965,8 +954,14 @@ func (m *GetInfoReply) GetNodeCidr() string {
 	return ""
 }
 
+func (m *GetInfoReply) GetPodIP() string {
+	if m != nil {
+		return m.PodIP
+	}
+	return ""
+}
+
 func init() {
-	proto.RegisterEnum("rpc.IPType", IPType_name, IPType_value)
 	proto.RegisterType((*AllocIPRequest)(nil), "rpc.AllocIPRequest")
 	proto.RegisterType((*Pod)(nil), "rpc.Pod")
 	proto.RegisterType((*VPCIP)(nil), "rpc.VPCIP")
@@ -979,60 +974,7 @@ func init() {
 	proto.RegisterType((*ReleaseIPReply)(nil), "rpc.ReleaseIPReply")
 	proto.RegisterType((*GetInfoRequest)(nil), "rpc.GetInfoRequest")
 	proto.RegisterType((*GetInfoReply)(nil), "rpc.GetInfoReply")
-}
-
-func init() { proto.RegisterFile("rpc.proto", fileDescriptor_77a6da22d6a3feb1) }
-
-var fileDescriptor_77a6da22d6a3feb1 = []byte{
-	// 761 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xcc, 0x56, 0x4f, 0x4f, 0xdb, 0x4a,
-	0x10, 0x8f, 0x13, 0xe2, 0x90, 0x31, 0x09, 0x79, 0xcb, 0x7b, 0x28, 0xe2, 0xf0, 0x84, 0xf6, 0xe9,
-	0x21, 0xd4, 0x03, 0x52, 0x03, 0x6d, 0xe9, 0x11, 0x52, 0x0b, 0x2c, 0x84, 0x6b, 0x39, 0x28, 0xa7,
-	0x5e, 0x16, 0x7b, 0x83, 0x5c, 0x82, 0xed, 0xae, 0x1d, 0xa2, 0xf4, 0x0b, 0xf4, 0x5a, 0xf5, 0xc3,
-	0xf4, 0x5c, 0xa9, 0x9f, 0xa0, 0xdf, 0xa8, 0xda, 0x3f, 0x8e, 0xff, 0xd0, 0x54, 0x3d, 0xb4, 0x12,
-	0xa7, 0xe4, 0xf7, 0x9b, 0xd9, 0x9d, 0x99, 0xdf, 0xec, 0x4c, 0x02, 0x6d, 0x16, 0x7b, 0x07, 0x31,
-	0x8b, 0xd2, 0x08, 0x35, 0x58, 0xec, 0xe1, 0x2f, 0x1a, 0x74, 0x4f, 0xa6, 0xd3, 0xc8, 0xb3, 0x1c,
-	0x97, 0xbe, 0x9b, 0xd1, 0x24, 0x45, 0xff, 0x02, 0x5c, 0x1c, 0x27, 0x4e, 0xe4, 0xdb, 0xe4, 0x8e,
-	0xf6, 0xb5, 0x5d, 0x6d, 0xbf, 0xed, 0x16, 0x18, 0xb4, 0x0f, 0x9b, 0x39, 0x4a, 0x62, 0xe2, 0xd1,
-	0x7e, 0x5d, 0x38, 0x55, 0x69, 0xf4, 0x1c, 0xb6, 0x25, 0x65, 0x85, 0x13, 0x46, 0x86, 0x51, 0x98,
-	0x92, 0x20, 0xa4, 0xcc, 0xf2, 0xfb, 0x0d, 0x71, 0x60, 0x85, 0x15, 0xfd, 0x0d, 0x4d, 0x9b, 0xa6,
-	0x61, 0xd2, 0x5f, 0x13, 0x6e, 0x12, 0xa0, 0x6d, 0xd0, 0xad, 0x89, 0xc8, 0xa9, 0x29, 0x68, 0x85,
-	0xf0, 0x0b, 0x68, 0x38, 0x91, 0x8f, 0xfa, 0xd0, 0xb2, 0xc2, 0x1b, 0x46, 0x93, 0x44, 0xe4, 0xbc,
-	0xe6, 0x66, 0x90, 0x1f, 0x34, 0xa5, 0xa1, 0x2e, 0x0c, 0x0a, 0xe1, 0x0b, 0x68, 0x8e, 0x9d, 0xa1,
-	0xe5, 0xa0, 0x3d, 0x68, 0x3b, 0x91, 0x3f, 0x8c, 0xc2, 0x49, 0x70, 0x23, 0x0e, 0x1b, 0x83, 0xf5,
-	0x03, 0x2e, 0x94, 0x13, 0xf9, 0x6e, 0x6e, 0x42, 0x3b, 0xb0, 0x6e, 0x47, 0x3e, 0x1d, 0x06, 0x3e,
-	0x53, 0x25, 0x2f, 0x31, 0xfe, 0xaa, 0x41, 0xc3, 0xb4, 0x2d, 0xee, 0x63, 0x39, 0xf7, 0x47, 0x27,
-	0xbe, 0xcf, 0x94, 0x76, 0x4b, 0xcc, 0x95, 0xe5, 0xdf, 0x47, 0xb3, 0xeb, 0x90, 0xa6, 0xea, 0x86,
-	0x02, 0xc3, 0x4b, 0xb8, 0x24, 0x9e, 0x38, 0x2a, 0x05, 0xca, 0x20, 0xb7, 0x9c, 0x91, 0x94, 0xce,
-	0xc9, 0x42, 0x69, 0x92, 0x41, 0x84, 0x61, 0xe3, 0x15, 0xbd, 0x0f, 0x3c, 0x6a, 0xcf, 0xee, 0xae,
-	0x29, 0x13, 0xda, 0x34, 0xdd, 0x12, 0xc7, 0x3b, 0xe6, 0xb0, 0xe0, 0x8e, 0xb0, 0xc5, 0x32, 0x35,
-	0x5d, 0x76, 0xac, 0x42, 0xe3, 0xf7, 0xa0, 0x8f, 0x9d, 0x21, 0xaf, 0x63, 0x0f, 0xda, 0x66, 0x18,
-	0xfc, 0x40, 0x13, 0xd3, 0xb6, 0xdc, 0xdc, 0x54, 0xd6, 0xae, 0xbe, 0x5a, 0xbb, 0x5d, 0x30, 0x46,
-	0x94, 0xf1, 0xa4, 0x84, 0x7c, 0xb2, 0xbe, 0x22, 0x85, 0xbf, 0x69, 0xd0, 0xb9, 0x24, 0x21, 0xb9,
-	0xa1, 0xfe, 0xc5, 0xf1, 0xe8, 0x4f, 0xe4, 0xd0, 0x87, 0x16, 0x07, 0x79, 0xfc, 0x0c, 0x72, 0xcb,
-	0x38, 0xf6, 0x84, 0x45, 0xe9, 0xab, 0x60, 0xa9, 0xe7, 0xcd, 0x72, 0xcf, 0xab, 0x35, 0xe9, 0x0f,
-	0x6b, 0x7a, 0x03, 0x60, 0xda, 0xd6, 0xe5, 0x6c, 0x9a, 0x06, 0xf2, 0x9d, 0xfd, 0xce, 0x7a, 0xf0,
-	0xc7, 0x3a, 0x6c, 0x2c, 0x87, 0x37, 0x9e, 0x2e, 0x78, 0x19, 0xa3, 0x99, 0xe7, 0x65, 0x33, 0xb0,
-	0xee, 0x66, 0x10, 0xfd, 0x07, 0xba, 0xe5, 0x5c, 0x2d, 0x62, 0x39, 0xab, 0xdd, 0x81, 0x21, 0xee,
-	0x93, 0x94, 0xab, 0x4c, 0x08, 0x43, 0x73, 0x1c, 0x7b, 0x56, 0x2c, 0xd4, 0x31, 0x06, 0x20, 0x7c,
-	0xc4, 0x88, 0x9c, 0xd7, 0x5c, 0x69, 0x42, 0xff, 0x83, 0x3e, 0x8e, 0x3d, 0x33, 0x0c, 0x84, 0x50,
-	0x86, 0xba, 0x48, 0x3e, 0x9a, 0xf3, 0x9a, 0xab, 0x8c, 0xe8, 0x08, 0x20, 0xef, 0xa5, 0x10, 0xce,
-	0x18, 0x20, 0xe1, 0x5a, 0x6a, 0xf1, 0x79, 0xcd, 0x2d, 0xf8, 0xa1, 0xa7, 0x45, 0xb9, 0x84, 0x9e,
-	0xc6, 0x60, 0x33, 0x53, 0x48, 0xd1, 0xfc, 0x48, 0x8e, 0x4e, 0x3b, 0x60, 0xd8, 0x34, 0x9d, 0x47,
-	0xec, 0xd6, 0x0a, 0x27, 0x11, 0xfe, 0x50, 0x87, 0x9e, 0x4b, 0xa7, 0x94, 0x24, 0xf4, 0x31, 0x6d,
-	0xb4, 0x5c, 0xfe, 0xb5, 0xd5, 0xf2, 0x17, 0x57, 0x47, 0xb3, 0xb2, 0x3a, 0x0a, 0xab, 0x41, 0x2f,
-	0xaf, 0x86, 0x6d, 0xd0, 0x5d, 0x4a, 0x92, 0x28, 0xec, 0xb7, 0xe4, 0x5a, 0x94, 0x08, 0xbf, 0x85,
-	0x6e, 0x41, 0x88, 0x9f, 0xbf, 0x8e, 0x62, 0xe4, 0x7a, 0x25, 0x72, 0x75, 0xc1, 0x34, 0x1e, 0x2e,
-	0x18, 0xfc, 0x49, 0x83, 0xee, 0x19, 0x4d, 0x79, 0x07, 0x1e, 0x8d, 0xe6, 0x78, 0x0e, 0x1b, 0xcb,
-	0x9c, 0x78, 0xf9, 0x79, 0x0f, 0xb4, 0xd5, 0x3d, 0xf8, 0xd5, 0x55, 0x52, 0x5c, 0x0b, 0x8d, 0xf2,
-	0x5a, 0x78, 0xf2, 0x3a, 0x0b, 0x84, 0x3a, 0xd0, 0xe6, 0x9f, 0x62, 0x84, 0x7a, 0x35, 0xd4, 0x05,
-	0x50, 0xd0, 0xb4, 0xad, 0x9e, 0x86, 0x10, 0x74, 0x39, 0xce, 0x07, 0xa0, 0x57, 0xcf, 0xb8, 0xfc,
-	0x85, 0xf7, 0x1a, 0x83, 0xcf, 0x1a, 0x74, 0xae, 0x28, 0x9b, 0x93, 0xc5, 0x29, 0xf1, 0x6e, 0x69,
-	0xe8, 0xa3, 0x43, 0x68, 0xa9, 0xc1, 0x47, 0x5b, 0x22, 0xbd, 0xf2, 0x6f, 0xf8, 0xce, 0x5f, 0x65,
-	0x32, 0x9e, 0x2e, 0x70, 0x0d, 0xbd, 0x84, 0xf6, 0xf2, 0x45, 0xa0, 0x7f, 0x84, 0x47, 0x75, 0x54,
-	0x76, 0xb6, 0xaa, 0xb4, 0x3c, 0xfa, 0x0c, 0xda, 0x5c, 0x4b, 0x87, 0xab, 0xa9, 0x22, 0x96, 0xfb,
-	0xad, 0x22, 0x16, 0x05, 0xc7, 0xb5, 0x6b, 0x5d, 0xfc, 0xd3, 0x38, 0xfc, 0x1e, 0x00, 0x00, 0xff,
-	0xff, 0xb6, 0x91, 0x53, 0xdc, 0x76, 0x08, 0x00, 0x00,
+	proto.RegisterEnum("rpc.IPType", IPType_name, IPType_value)
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -1043,9 +985,8 @@ var _ grpc.ClientConn
 // is compatible with the grpc package it is being compiled against.
 const _ = grpc.SupportPackageIsVersion4
 
-// TerwayBackendClient is the client API for TerwayBackend service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
+// Client API for TerwayBackend service
+
 type TerwayBackendClient interface {
 	AllocIP(ctx context.Context, in *AllocIPRequest, opts ...grpc.CallOption) (*AllocIPReply, error)
 	ReleaseIP(ctx context.Context, in *ReleaseIPRequest, opts ...grpc.CallOption) (*ReleaseIPReply, error)
@@ -1062,7 +1003,7 @@ func NewTerwayBackendClient(cc *grpc.ClientConn) TerwayBackendClient {
 
 func (c *terwayBackendClient) AllocIP(ctx context.Context, in *AllocIPRequest, opts ...grpc.CallOption) (*AllocIPReply, error) {
 	out := new(AllocIPReply)
-	err := c.cc.Invoke(ctx, "/rpc.TerwayBackend/AllocIP", in, out, opts...)
+	err := grpc.Invoke(ctx, "/rpc.TerwayBackend/AllocIP", in, out, c.cc, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1071,7 +1012,7 @@ func (c *terwayBackendClient) AllocIP(ctx context.Context, in *AllocIPRequest, o
 
 func (c *terwayBackendClient) ReleaseIP(ctx context.Context, in *ReleaseIPRequest, opts ...grpc.CallOption) (*ReleaseIPReply, error) {
 	out := new(ReleaseIPReply)
-	err := c.cc.Invoke(ctx, "/rpc.TerwayBackend/ReleaseIP", in, out, opts...)
+	err := grpc.Invoke(ctx, "/rpc.TerwayBackend/ReleaseIP", in, out, c.cc, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1080,14 +1021,15 @@ func (c *terwayBackendClient) ReleaseIP(ctx context.Context, in *ReleaseIPReques
 
 func (c *terwayBackendClient) GetIPInfo(ctx context.Context, in *GetInfoRequest, opts ...grpc.CallOption) (*GetInfoReply, error) {
 	out := new(GetInfoReply)
-	err := c.cc.Invoke(ctx, "/rpc.TerwayBackend/GetIPInfo", in, out, opts...)
+	err := grpc.Invoke(ctx, "/rpc.TerwayBackend/GetIPInfo", in, out, c.cc, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// TerwayBackendServer is the server API for TerwayBackend service.
+// Server API for TerwayBackend service
+
 type TerwayBackendServer interface {
 	AllocIP(context.Context, *AllocIPRequest) (*AllocIPReply, error)
 	ReleaseIP(context.Context, *ReleaseIPRequest) (*ReleaseIPReply, error)
@@ -1171,4 +1113,59 @@ var _TerwayBackend_serviceDesc = grpc.ServiceDesc{
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "rpc.proto",
+}
+
+func init() { proto.RegisterFile("rpc.proto", fileDescriptor_rpc_22751a12a1210b22) }
+
+var fileDescriptor_rpc_22751a12a1210b22 = []byte{
+	// 770 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xcc, 0x56, 0xcd, 0x4e, 0xdb, 0x4a,
+	0x14, 0x8e, 0x13, 0xec, 0x90, 0x63, 0x12, 0x72, 0x07, 0x2e, 0x8a, 0x58, 0x5c, 0x21, 0x5f, 0x5d,
+	0x84, 0xee, 0x02, 0xa9, 0x81, 0xb6, 0x74, 0x09, 0x69, 0x04, 0x23, 0x84, 0x6b, 0x39, 0x28, 0xfb,
+	0xc1, 0x9e, 0x20, 0x97, 0x60, 0xbb, 0x63, 0x07, 0x94, 0x2e, 0xba, 0xed, 0xaa, 0x52, 0xd5, 0x87,
+	0xe9, 0xba, 0x52, 0x9f, 0xa0, 0x6f, 0x54, 0xcd, 0x8f, 0xe3, 0x1f, 0x9a, 0xaa, 0x9b, 0x56, 0xac,
+	0xe0, 0xfb, 0xce, 0x99, 0x9c, 0x73, 0xbe, 0xf3, 0x93, 0x40, 0x8b, 0xc5, 0xde, 0x7e, 0xcc, 0xa2,
+	0x34, 0x42, 0x0d, 0x16, 0x7b, 0xd6, 0x17, 0x0d, 0x3a, 0xc7, 0xd3, 0x69, 0xe4, 0x61, 0xc7, 0xa5,
+	0x6f, 0x66, 0x34, 0x49, 0xd1, 0x3f, 0x00, 0xe7, 0x47, 0x89, 0x13, 0xf9, 0x36, 0xb9, 0xa5, 0x3d,
+	0x6d, 0x47, 0xdb, 0x6b, 0xb9, 0x05, 0x06, 0xed, 0xc1, 0x7a, 0x8e, 0x92, 0x98, 0x78, 0xb4, 0x57,
+	0x17, 0x4e, 0x55, 0x1a, 0x3d, 0x83, 0x2d, 0x49, 0xe1, 0x70, 0xc2, 0xc8, 0x20, 0x0a, 0x53, 0x12,
+	0x84, 0x94, 0x61, 0xbf, 0xd7, 0x10, 0x0f, 0x96, 0x58, 0xd1, 0x26, 0xe8, 0x36, 0x4d, 0xc3, 0xa4,
+	0xb7, 0x22, 0xdc, 0x24, 0x40, 0x5b, 0x60, 0xe0, 0x89, 0xc8, 0x49, 0x17, 0xb4, 0x42, 0xd6, 0x73,
+	0x68, 0x38, 0x91, 0x8f, 0x7a, 0xd0, 0xc4, 0xe1, 0x35, 0xa3, 0x49, 0x22, 0x72, 0x5e, 0x71, 0x33,
+	0xc8, 0x1f, 0x0e, 0xa5, 0xa1, 0x2e, 0x0c, 0x0a, 0x59, 0xe7, 0xa0, 0x8f, 0x9d, 0x01, 0x76, 0xd0,
+	0x2e, 0xb4, 0x9c, 0xc8, 0x1f, 0x44, 0xe1, 0x24, 0xb8, 0x16, 0x8f, 0xcd, 0xfe, 0xea, 0x3e, 0x17,
+	0xca, 0x89, 0x7c, 0x37, 0x37, 0xa1, 0x6d, 0x58, 0xb5, 0x23, 0x9f, 0x0e, 0x02, 0x9f, 0xa9, 0x92,
+	0x17, 0xd8, 0xfa, 0xaa, 0x41, 0x63, 0x68, 0x63, 0xee, 0x83, 0x9d, 0xbb, 0xc3, 0x63, 0xdf, 0x67,
+	0x4a, 0xbb, 0x05, 0xe6, 0xca, 0xf2, 0xff, 0x47, 0xb3, 0xab, 0x90, 0xa6, 0xea, 0x13, 0x0a, 0x0c,
+	0x2f, 0xe1, 0x82, 0x78, 0xe2, 0xa9, 0x14, 0x28, 0x83, 0xdc, 0x72, 0x4a, 0x52, 0x7a, 0x4f, 0xe6,
+	0x4a, 0x93, 0x0c, 0x22, 0x0b, 0xd6, 0x5e, 0xd2, 0xbb, 0xc0, 0xa3, 0xf6, 0xec, 0xf6, 0x8a, 0x32,
+	0xa1, 0x8d, 0xee, 0x96, 0x38, 0xde, 0x31, 0x87, 0x05, 0xb7, 0x84, 0xcd, 0x17, 0xa9, 0x19, 0xb2,
+	0x63, 0x15, 0xda, 0x7a, 0x0b, 0xc6, 0xd8, 0x19, 0xf0, 0x3a, 0x76, 0xa1, 0x35, 0x0c, 0x83, 0x1f,
+	0x68, 0x32, 0xb4, 0xb1, 0x9b, 0x9b, 0xca, 0xda, 0xd5, 0x97, 0x6b, 0xb7, 0x03, 0xe6, 0x88, 0x32,
+	0x9e, 0x94, 0x90, 0x4f, 0xd6, 0x57, 0xa4, 0xac, 0x6f, 0x1a, 0xb4, 0x2f, 0x48, 0x48, 0xae, 0xa9,
+	0x7f, 0x7e, 0x34, 0xfa, 0x1d, 0x39, 0xf4, 0xa0, 0xc9, 0x41, 0x1e, 0x3f, 0x83, 0xdc, 0x32, 0x8e,
+	0x3d, 0x61, 0x51, 0xfa, 0x2a, 0x58, 0xea, 0xb9, 0x5e, 0xee, 0x79, 0xb5, 0x26, 0xe3, 0x61, 0x4d,
+	0xef, 0x00, 0x86, 0x36, 0xbe, 0x98, 0x4d, 0xd3, 0x40, 0xce, 0xd9, 0x1f, 0xd6, 0xf4, 0x63, 0x1d,
+	0xd6, 0x16, 0xeb, 0x1d, 0x4f, 0xe7, 0xbc, 0xd0, 0xd1, 0xcc, 0xf3, 0xb2, 0x2d, 0x59, 0x75, 0x33,
+	0x88, 0xfe, 0x05, 0x03, 0x3b, 0x97, 0xf3, 0x58, 0x6e, 0x73, 0xa7, 0x6f, 0x8a, 0x88, 0x92, 0x72,
+	0x95, 0x09, 0x59, 0xa0, 0x8f, 0x63, 0x0f, 0xc7, 0x22, 0x96, 0xd9, 0x07, 0xe1, 0x23, 0x96, 0xe8,
+	0xac, 0xe6, 0x4a, 0x13, 0xfa, 0x0f, 0x8c, 0x71, 0xec, 0x0d, 0xc3, 0x40, 0x48, 0x69, 0xaa, 0x0f,
+	0x92, 0x63, 0x75, 0x56, 0x73, 0x95, 0x11, 0x1d, 0x02, 0xe4, 0xdd, 0x16, 0xd2, 0x9a, 0x7d, 0x24,
+	0x5c, 0x4b, 0x43, 0x70, 0x56, 0x73, 0x0b, 0x7e, 0xe8, 0x49, 0x51, 0x50, 0xa1, 0xb8, 0xd9, 0x5f,
+	0xcf, 0x34, 0x54, 0x34, 0x7f, 0x92, 0xa3, 0x93, 0x36, 0x98, 0x36, 0x4d, 0xef, 0x23, 0x76, 0x83,
+	0xc3, 0x49, 0x64, 0xbd, 0xaf, 0x43, 0xd7, 0xa5, 0x53, 0x4a, 0x12, 0xfa, 0x98, 0x6e, 0x5e, 0x2e,
+	0xff, 0xca, 0x72, 0xf9, 0x8b, 0xc7, 0x45, 0xaf, 0x1c, 0x97, 0xc2, 0xf1, 0x30, 0xca, 0xc7, 0x63,
+	0x0b, 0x0c, 0x97, 0x92, 0x24, 0x0a, 0x7b, 0x4d, 0x79, 0x38, 0x25, 0xb2, 0x5e, 0x43, 0xa7, 0x20,
+	0xc4, 0xcf, 0xa7, 0xa3, 0x18, 0xb9, 0x5e, 0x89, 0x5c, 0x3d, 0x41, 0x8d, 0x87, 0x27, 0xc8, 0xfa,
+	0xa4, 0x41, 0xe7, 0x94, 0xa6, 0xbc, 0x03, 0x8f, 0x46, 0x73, 0xeb, 0x83, 0x06, 0x6b, 0x8b, 0xa4,
+	0x78, 0xfd, 0x79, 0x13, 0xb4, 0xe5, 0x4d, 0xf8, 0xd5, 0xed, 0x2c, 0x5e, 0x8e, 0x46, 0xe5, 0x72,
+	0x6c, 0x82, 0xce, 0x13, 0x72, 0xb2, 0x6f, 0x38, 0x01, 0xfe, 0x7f, 0x95, 0x85, 0x47, 0x6d, 0x68,
+	0xf1, 0xbf, 0x62, 0xb3, 0xba, 0x35, 0xd4, 0x01, 0x50, 0x70, 0x68, 0xe3, 0xae, 0x86, 0x10, 0x74,
+	0x38, 0xce, 0xf7, 0xa2, 0x5b, 0xcf, 0xb8, 0x7c, 0xf0, 0xbb, 0x8d, 0xfe, 0x67, 0x0d, 0xda, 0x97,
+	0x94, 0xdd, 0x93, 0xf9, 0x09, 0xf1, 0x6e, 0x68, 0xe8, 0xa3, 0x03, 0x68, 0xaa, 0x7b, 0x80, 0x36,
+	0x44, 0xd2, 0xe5, 0x2f, 0xff, 0xed, 0xbf, 0xca, 0x64, 0x3c, 0x9d, 0x5b, 0x35, 0xf4, 0x02, 0x5a,
+	0x8b, 0x41, 0x41, 0x7f, 0x0b, 0x8f, 0xea, 0x06, 0x6d, 0x6f, 0x54, 0x69, 0xf9, 0xf4, 0x29, 0xb4,
+	0xb8, 0xc2, 0x0e, 0xd7, 0x58, 0x45, 0x2c, 0x8f, 0x81, 0x8a, 0x58, 0x6c, 0x83, 0x55, 0xbb, 0x32,
+	0xc4, 0x4f, 0x94, 0x83, 0xef, 0x01, 0x00, 0x00, 0xff, 0xff, 0xb5, 0x7c, 0xc1, 0xbf, 0xaf, 0x08,
+	0x00, 0x00,
 }

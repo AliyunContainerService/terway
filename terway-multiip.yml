@@ -68,6 +68,7 @@ data:
       "access_key": "ak",
       "access_secret": "ak",
       "security_group": "sg-xxx",
+      "service_cidr": "10.96.0.0/12",
       "vswitches": {
         "cn-hongkong-b": ["vsw-xxx"]
       },
