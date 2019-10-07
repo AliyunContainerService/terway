@@ -18,7 +18,8 @@ type rawNicDriver struct {
 func (r *rawNicDriver) Setup(hostVeth string,
 	containerVeth string,
 	ipv4Addr *net.IPNet,
-	primaryIpv4Addr *net.IPNet,
+	primaryIpv4Addr net.IP,
+	serviceCIDR *net.IPNet,
 	gateway net.IP,
 	extraRoutes []*types.Route,
 	deviceID int,
@@ -152,7 +153,10 @@ func (r *rawNicDriver) Setup(hostVeth string,
 	return nil
 }
 
-func (r *rawNicDriver) Teardown(hostVeth string, containerVeth string, netNS ns.NetNS) error {
+func (r *rawNicDriver) Teardown(hostVeth string,
+	containerVeth string,
+	netNS ns.NetNS,
+	containerIP net.IP) error {
 	// 1. move link out
 	hostCurrentNs, err := ns.GetCurrentNS()
 	defer hostCurrentNs.Close()

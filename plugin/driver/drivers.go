@@ -17,7 +17,7 @@ import (
 var (
 	VethDriver   NetnsDriver = &vethDriver{}
 	NicDriver    NetnsDriver = &rawNicDriver{}
-	IPVlanDriver NetnsDriver = &ipvlanDriver{}
+	IPVlanDriver NetnsDriver = newIPVlanDriver()
 )
 
 // NetnsDriver to config container netns interface and routes
@@ -25,14 +25,19 @@ type NetnsDriver interface {
 	Setup(hostVeth string,
 		containerVeth string,
 		ipv4Addr *net.IPNet,
-		primaryIpv4Addr *net.IPNet,
+		primaryIpv4Addr net.IP,
+		serviceCIDR *net.IPNet,
 		gateway net.IP,
 		extraRoutes []*types.Route,
 		deviceID int,
 		ingress uint64,
 		egress uint64,
 		netNS ns.NetNS) error
-	Teardown(hostVeth string, containerVeth string, netNS ns.NetNS) error
+
+	Teardown(hostVeth string,
+		containerVeth string,
+		netNS ns.NetNS,
+		containerIP net.IP) error
 }
 
 type vethDriver struct {
@@ -59,7 +64,8 @@ func (d *vethDriver) Setup(
 	hostIfName string,
 	containerVeth string,
 	ipv4Addr *net.IPNet,
-	primaryIpv4Addr *net.IPNet,
+	primaryIpv4Addr net.IP,
+	serviceCIDR *net.IPNet,
 	gateway net.IP,
 	extraRoutes []*types.Route,
 	deviceID int,
@@ -351,7 +357,10 @@ func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableID int, gw net.IP) e
 	return nil
 }
 
-func (d *vethDriver) Teardown(hostIfName string, containerVeth string, netNS ns.NetNS) error {
+func (d *vethDriver) Teardown(hostIfName string,
+	containerVeth string,
+	netNS ns.NetNS,
+	_ net.IP) error {
 	var (
 		hostVeth netlink.Link
 		err      error
