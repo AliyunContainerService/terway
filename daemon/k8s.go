@@ -28,6 +28,8 @@ const (
 	podNetworkTypeENIMultiIP = "ENIMultiIP"
 	dbPath                   = "/var/lib/cni/terway/pod.db"
 	dbName                   = "pods"
+
+	apiServerTimeout = 70 * time.Second
 )
 
 type podInfo struct {
@@ -319,7 +321,9 @@ func deserialize(data []byte) (interface{}, error) {
 }
 
 func (k *k8s) GetPod(namespace, name string) (*podInfo, error) {
-	pod, err := k.client.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{})
+	pod, err := k.client.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{
+		ResourceVersion: "0",
+	})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			key := podInfoKey(namespace, name)
@@ -352,7 +356,8 @@ func (k *k8s) GetNodeCidr() *net.IPNet {
 
 func (k *k8s) GetLocalPods() ([]*podInfo, error) {
 	options := metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("spec.nodeName", k.nodeName).String(),
+		FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", k.nodeName).String(),
+		ResourceVersion: "0",
 	}
 	list, err := k.client.CoreV1().Pods(corev1.NamespaceAll).List(options)
 	if err != nil {

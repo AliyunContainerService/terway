@@ -436,8 +436,7 @@ func cmdDel(args *skel.CmdArgs) error {
 	case rpc.IPType_TypeVPCENI:
 		err = networkDriver.Teardown(hostVethName, defaultVethForENI, cniNetns, nil)
 		if err != nil {
-			return errors.Wrapf(err, "error teardown veth network for pod: %s-%s",
-				string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME))
+			// ignore ENI veth release error
 		}
 		err = nicDriver.Teardown(hostVethName, args.IfName, cniNetns, nil)
 		if err != nil {

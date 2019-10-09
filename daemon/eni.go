@@ -4,6 +4,8 @@ import (
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/sirupsen/logrus"
+
 	//"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/pkg/errors"
@@ -14,7 +16,8 @@ type eniResourceManager struct {
 	ecs  aliyun.ECS
 }
 
-func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResource []string) (ResourceManager, error) {
+func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []resourceManagerInitItem) (ResourceManager, error) {
+	logrus.Debugf("new ENI Resource Manager, pool config: %+v, allocated resources: %+v", poolConfig, allocatedResources)
 	factory, err := newENIFactory(poolConfig, ecs)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error create ENI factory")
@@ -39,13 +42,13 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 			if err != nil {
 				return errors.Wrapf(err, "error get attach ENI on pool init")
 			}
-			allocatedMap := make(map[string]bool)
-			for _, allocated := range allocatedResource {
-				allocatedMap[allocated] = true
+			allocatedMap := make(map[string]*podInfo)
+			for _, allocated := range allocatedResources {
+				allocatedMap[allocated.resourceID] = allocated.podInfo
 			}
 			for _, e := range enis {
-				if _, ok := allocatedMap[e.ID]; ok {
-					holder.AddInuse(e)
+				if podInfo, ok := allocatedMap[e.GetResourceID()]; ok {
+					holder.AddInuse(e, podInfoKey(podInfo.Namespace, podInfo.Name))
 				} else {
 					holder.AddIdle(e)
 				}
@@ -72,7 +75,7 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 }
 
 func (m *eniResourceManager) Allocate(ctx *networkContext, prefer string) (types.NetworkResource, error) {
-	return m.pool.Acquire(ctx, prefer)
+	return m.pool.Acquire(ctx, prefer, podInfoKey(ctx.pod.Namespace, ctx.pod.Name))
 }
 
 func (m *eniResourceManager) Release(context *networkContext, resID string) error {

@@ -21,6 +21,11 @@ type PodResources struct {
 	PodInfo   *podInfo
 }
 
+type resourceManagerInitItem struct {
+	resourceID string
+	podInfo    *podInfo
+}
+
 // GetResourceItemByType get pod resource by resource type
 func (p PodResources) GetResourceItemByType(resType string) []ResourceItem {
 	var ret []ResourceItem

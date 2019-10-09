@@ -11,6 +11,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
+	k8snet "k8s.io/apimachinery/pkg/util/net"
 )
 
 // drivers implement objects
@@ -293,6 +294,10 @@ func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableID int, gw net.IP) e
 			return errors.Wrapf(err, "error set eni parent link up")
 		}
 	}
+	nodeIPNet := *linkIP
+	if nodeIP, err := k8snet.ChooseBindAddress(nil); err == nil {
+		nodeIPNet.IP = nodeIP
+	}
 
 	// remove eni extra address
 	addrDel := 0
@@ -301,7 +306,7 @@ func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableID int, gw net.IP) e
 		return fmt.Errorf("error list address for eni: %v", err)
 	}
 	for _, addr := range addrs {
-		if !addr.IP.Equal(linkIP.IP) {
+		if !addr.IP.Equal(nodeIPNet.IP) {
 			err = netlink.AddrDel(eni, &addr)
 			if err != nil {
 				return fmt.Errorf("error remove extra address for eni: %v", err)
@@ -312,7 +317,7 @@ func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableID int, gw net.IP) e
 
 	if addrDel == len(addrs) {
 		err = netlink.AddrAdd(eni, &netlink.Addr{
-			IPNet: linkIP,
+			IPNet: &nodeIPNet,
 		})
 		if err != nil {
 			return fmt.Errorf("error set address for eni: %v", err)

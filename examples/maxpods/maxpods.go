@@ -6,6 +6,8 @@ import (
 	"io/ioutil"
 	"log"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/denverdino/aliyungo/common"
 )
@@ -27,6 +29,7 @@ func init() {
 func main() {
 	flag.Parse()
 	log.SetOutput(ioutil.Discard)
+	logrus.SetOutput(ioutil.Discard)
 	ecs, err := aliyun.NewECS(accessKeyID, accessKeySecret, common.Region(region))
 	if err != nil {
 		panic(err)
