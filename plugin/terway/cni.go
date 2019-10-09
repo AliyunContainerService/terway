@@ -32,9 +32,11 @@ const (
 	eniIPVirtualTypeIPVlan = "IPVlan"
 	delegateConf           = `
 {
+	"name": "networks",
 	"ipam": {
 		"type": "host-local",
 		"subnet": "%s",
+		"dataDir": "/var/lib/cni/",
 		"routes": [
 			{ "dst": "0.0.0.0/0" }
 		]
