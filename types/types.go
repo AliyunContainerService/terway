@@ -37,6 +37,7 @@ func (eni *ENI) GetType() string {
 type ENIIP struct {
 	Eni        *ENI
 	SecAddress net.IP
+	PrimaryIP  net.IP
 }
 
 // GetResourceID return mac address of eni and secondary ip address

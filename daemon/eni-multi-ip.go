@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"net"
 	"sync"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
@@ -19,6 +20,7 @@ const (
 type eniIPFactory struct {
 	eniFactory   *eniFactory
 	enis         []*ENI
+	primaryIP    net.IP
 	eniOperChan  chan struct{}
 	ipResultChan chan *ENIIP
 	sync.RWMutex
@@ -35,6 +37,7 @@ type ENI struct {
 	lock sync.Mutex
 	*types.ENI
 	ips       []*ENIIP
+	primaryIP net.IP
 	pending   int
 	ipBacklog chan struct{}
 	ecs       aliyun.ECS
@@ -77,6 +80,7 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 					ENIIP: &types.ENIIP{
 						Eni:        e.ENI,
 						SecAddress: ip,
+						PrimaryIP:  e.primaryIP,
 					},
 					err: nil,
 				}
@@ -161,6 +165,7 @@ func (f *eniIPFactory) Create() (ip types.NetworkResource, err error) {
 	eni := &ENI{
 		ENI:       eniObj,
 		ecs:       f.eniFactory.ecs,
+		primaryIP: f.primaryIP,
 		ipBacklog: make(chan struct{}, maxIPBacklog),
 		done:      make(chan struct{}, 1),
 	}
@@ -168,6 +173,7 @@ func (f *eniIPFactory) Create() (ip types.NetworkResource, err error) {
 	mainENIIP := &types.ENIIP{
 		Eni:        eni.ENI,
 		SecAddress: eni.ENI.Address.IP,
+		PrimaryIP:  eni.primaryIP,
 	}
 
 	eni.ips = append(eni.ips, &ENIIP{
@@ -262,6 +268,12 @@ type eniIPResourceManager struct {
 }
 
 func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []string) (ResourceManager, error) {
+	primaryIP, err := aliyun.GetPrivateIPV4()
+	if err != nil {
+		return nil, errors.Wrapf(err, "get primary ip error")
+	}
+	logrus.Infof("node's primary ip is %v", primaryIP)
+
 	eniFactory, err := newENIFactory(poolConfig, ecs)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get ENI factory for eniip factory")
@@ -270,6 +282,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 	factory := &eniIPFactory{
 		eniFactory:   eniFactory,
 		enis:         []*ENI{},
+		primaryIP:    primaryIP,
 		eniOperChan:  make(chan struct{}, maxEniOperating),
 		ipResultChan: make(chan *ENIIP, maxIPBacklog),
 	}
@@ -310,6 +323,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 					ENI:       eni,
 					ips:       []*ENIIP{},
 					ecs:       ecs,
+					primaryIP: primaryIP,
 					ipBacklog: make(chan struct{}, maxIPBacklog),
 					done:      make(chan struct{}, 1),
 				}
@@ -318,6 +332,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 					eniIP := &types.ENIIP{
 						Eni:        eni,
 						SecAddress: ip,
+						PrimaryIP:  primaryIP,
 					}
 					_, ok := stubMap[eniIP.GetResourceID()]
 

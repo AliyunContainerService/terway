@@ -69,6 +69,7 @@ message ManagedK8SENI {
 message ENIMultiIP {
     ENI EniConfig = 1;
     Pod PodConfig = 2;
+    string ServiceCidr = 3;
 }
 
 message AllocIPReply {
@@ -108,4 +109,5 @@ message GetInfoReply {
     IPType IPType = 1;
     Pod PodConfig = 2;
     string NodeCidr = 3;
+    string PodIP = 4;
 }

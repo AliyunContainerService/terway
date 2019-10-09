@@ -213,12 +213,13 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 					MacAddr:         eniMultiIP.Eni.MAC,
 					Gateway:         eniMultiIP.Eni.Gateway.String(),
 					DeviceNumber:    eniMultiIP.Eni.DeviceNumber,
-					PrimaryIPv4Addr: eniMultiIP.Eni.Address.IP.String(),
+					PrimaryIPv4Addr: eniMultiIP.PrimaryIP.String(),
 				},
 				PodConfig: &rpc.Pod{
 					Ingress: podinfo.TcIngress,
 					Egress:  podinfo.TcEgress,
 				},
+				ServiceCidr: networkService.k8s.GetServiceCidr().String(),
 			},
 		}
 	case podNetworkTypeVPCENI:
@@ -408,6 +409,7 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 				Ingress: podinfo.TcIngress,
 				Egress:  podinfo.TcEgress,
 			},
+			PodIP: podinfo.PodIP,
 		}
 		return getIPInfoResult, nil
 	case podNetworkTypeVPCIP:
