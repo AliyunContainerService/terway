@@ -430,15 +430,13 @@ func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
 	err := wait.ExponentialBackoff(
 		eniStateBackoff,
 		func() (done bool, err error) {
-			start := time.Now()
-			insType, err := e.clientSet.ecs.DescribeInstanceAttribute(instanceID)
-			metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+			insType, err := e.GetInstanceAttributesType(instanceID)
 			if err != nil {
 				logrus.Warnf("error get instance info: %s: %v， retry...", instanceID, err)
 				return false, nil
 			}
 
-			start = time.Now()
+			start := time.Now()
 			instanceTypeItems, err := e.clientSet.ecs.DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
 				InstanceTypeFamily: insType.InstanceTypeFamily,
 			})
@@ -488,14 +486,12 @@ func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 	err := wait.ExponentialBackoff(
 		eniStateBackoff,
 		func() (done bool, err error) {
-			start := time.Now()
-			insType, err := e.clientSet.ecs.DescribeInstanceAttribute(instanceID)
-			metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+			insType, err := e.GetInstanceAttributesType(instanceID)
 			if err != nil {
 				return false, nil
 			}
 
-			start = time.Now()
+			start := time.Now()
 			instanceTypeItems, err := e.clientSet.ecs.DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
 				InstanceTypeFamily: insType.InstanceTypeFamily,
 			})
@@ -550,12 +546,29 @@ func (e *ecsImpl) GetENIByMac(instanceID, mac string) (*types.ENI, error) {
 }
 
 func (e *ecsImpl) GetAttachedSecurityGroup(instanceID string) (string, error) {
-	ins, err := e.clientSet.ecs.DescribeInstanceAttribute(instanceID)
+	insType, err := e.GetInstanceAttributesType(instanceID)
 	if err != nil {
 		return "", errors.Wrapf(err, "error describe instance attribute for security group: %s", instanceID)
 	}
-	if len(ins.SecurityGroupIds.SecurityGroupId) > 0 {
-		return ins.SecurityGroupIds.SecurityGroupId[0], nil
+	if len(insType.SecurityGroupIds.SecurityGroupId) > 0 {
+		return insType.SecurityGroupIds.SecurityGroupId[0], nil
 	}
 	return "", fmt.Errorf("error get instance security groups: %s", instanceID)
+}
+
+func (e *ecsImpl) GetInstanceAttributesType(instanceID string) (*ecs.InstanceAttributesType, error) {
+	diArgs := &ecs.DescribeInstancesArgs{
+		RegionId:    e.region,
+		InstanceIds: fmt.Sprintf("[%q]", instanceID),
+	}
+	start := time.Now()
+	instanceAttributesTypes, _, err := e.clientSet.ecs.DescribeInstances(diArgs)
+	metric.OpenAPILatency.WithLabelValues("DescribeInstances", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	if err != nil {
+		return nil, err
+	}
+	if len(instanceAttributesTypes) != 1 {
+		return nil, fmt.Errorf("error get instanceAttributesType with instanceID %s: expected 1 but got %d", instanceID, len(instanceAttributesTypes))
+	}
+	return &instanceAttributesTypes[0], nil
 }
