@@ -91,7 +91,7 @@
     "util",
   ]
   pruneopts = "UT"
-  revision = "589d612576cf10cc400d4172d2067c4b89d1cd91"
+  revision = "dba750c0c223616304deb91306ace2b4b1e4eaeb"
 
 [[projects]]
   branch = "master"
@@ -684,13 +684,16 @@
     "github.com/sirupsen/logrus",
     "github.com/stretchr/testify/assert",
     "github.com/vishvananda/netlink",
+    "github.com/vishvananda/netlink/nl",
     "golang.org/x/net/context",
+    "golang.org/x/sys/unix",
     "google.golang.org/grpc",
     "gopkg.in/yaml.v2",
     "k8s.io/api/core/v1",
     "k8s.io/apimachinery/pkg/api/errors",
     "k8s.io/apimachinery/pkg/apis/meta/v1",
     "k8s.io/apimachinery/pkg/fields",
+    "k8s.io/apimachinery/pkg/util/net",
     "k8s.io/apimachinery/pkg/util/wait",
     "k8s.io/client-go/kubernetes",
     "k8s.io/client-go/tools/clientcmd",
