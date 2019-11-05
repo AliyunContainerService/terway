@@ -87,7 +87,7 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 		err   error
 	)
 	createNetworkInterfaceArgs := &ecs.CreateNetworkInterfaceArgs{
-		RegionId:             common.Region(e.region),
+		RegionId:             e.region,
 		VSwitchId:            vSwitch,
 		SecurityGroupId:      securityGroup,
 		NetworkInterfaceName: generateEniName(),
@@ -120,7 +120,7 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 
 	start = time.Now()
 	attachNetworkInterfaceArgs := &ecs.AttachNetworkInterfaceArgs{
-		RegionId:           common.Region(e.region),
+		RegionId:           e.region,
 		NetworkInterfaceId: createNetworkInterfaceResponse.NetworkInterfaceId,
 		InstanceId:         instanceID,
 	}
@@ -179,7 +179,7 @@ func (e *ecsImpl) destroyInterface(eniID string, instanceID string, force bool) 
 	)
 
 	detachNetworkInterfaceArgs := &ecs.DetachNetworkInterfaceArgs{
-		RegionId:           common.Region(e.region),
+		RegionId:           e.region,
 		NetworkInterfaceId: eniID,
 		InstanceId:         instanceID,
 	}
