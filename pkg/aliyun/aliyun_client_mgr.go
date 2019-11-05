@@ -107,7 +107,7 @@ func NewClientMgr(key, secret string) (*ClientMgr, error) {
 		vpcclient.WithSecurityToken(role.SecurityToken).
 			WithAccessKeyId(role.AccessKeyId).
 			WithAccessKeySecret(role.AccessKeySecret)
-	}, time.Duration(tokenResyncPeriod), mgr.stop)
+	}, tokenResyncPeriod, mgr.stop)
 
 	return mgr, nil
 }

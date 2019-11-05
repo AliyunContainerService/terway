@@ -50,7 +50,7 @@ func (e *eniMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
 	}
 	mask := net.ParseIP(netmask)
 	if mask == nil {
-		return nil, errors.Errorf("error parse eni mask: %s from metadata", ipAddr)
+		return nil, errors.Errorf("error parse eni mask: %s from metadata", netmask)
 	}
 	eni.Address = net.IPNet{
 		IP: ip,
@@ -62,8 +62,8 @@ func (e *eniMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
 		return nil, errors.Wrapf(err, "error get eni gateway from metaserver, mac: %s", mac)
 	}
 	gateway := net.ParseIP(gw)
-	if mask == nil {
-		return nil, errors.Errorf("error parse eni mask: %s from metadata", ipAddr)
+	if gateway == nil {
+		return nil, errors.Errorf("error parse eni gateway: %s from metadata", gw)
 	}
 	eni.Gateway = gateway
 
