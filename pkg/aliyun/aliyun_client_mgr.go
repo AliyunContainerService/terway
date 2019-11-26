@@ -75,9 +75,9 @@ func NewClientMgr(key, secret string) (*ClientMgr, error) {
 	}
 	regionID := common.Region(metaRegion)
 	keyid, sec, tok := token.authid()
-	ecsclient := ecs.NewECSClientWithSecurityToken(keyid, sec, tok, regionID)
+	ecsclient := ecs.NewECSClientWithSecurityToken4RegionalDomain(keyid, sec, tok, regionID)
 	ecsclient.SetUserAgent(kubernetesAlicloudIdentity)
-	vpcclient := ecs.NewVPCClientWithSecurityToken(keyid, sec, tok, regionID)
+	vpcclient := ecs.NewVPCClientWithSecurityToken4RegionalDomain(keyid, sec, tok, regionID)
 
 	mgr := &ClientMgr{
 		stop:  make(<-chan struct{}, 1),
