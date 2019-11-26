@@ -11,6 +11,8 @@ type Configure struct {
 	VSwitches     map[string][]string `yaml:"vswitches" json:"vswitches"`
 	MaxPoolSize   int                 `yaml:"max_pool_size" json:"max_pool_size"`
 	MinPoolSize   int                 `yaml:"min_pool_size" json:"min_pool_size"`
+	MinENI        int                 `yaml:"min_eni" json:"min_eni"`
+	MaxENI        int                 `yaml:"max_eni" json:"max_eni"`
 	Prefix        string              `yaml:"prefix" json:"prefix"`
 	SecurityGroup string              `yaml:"security_group" json:"security_group"`
 	HotPlug       string              `yaml:"hot_plug" json:"hot_plug"`
@@ -22,6 +24,8 @@ type Configure struct {
 type PoolConfig struct {
 	MaxPoolSize   int
 	MinPoolSize   int
+	MinENI        int
+	MaxENI        int
 	VPC           string
 	Zone          string
 	VSwitch       []string

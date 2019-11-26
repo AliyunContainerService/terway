@@ -6,7 +6,6 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/sirupsen/logrus"
 
-	//"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/pkg/errors"
 )
@@ -29,9 +28,19 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 	}
 
 	capacity = int(float64(capacity)*poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
+
+	if poolConfig.MaxENI != 0 && poolConfig.MaxENI < capacity {
+		capacity = poolConfig.MaxENI
+	}
+
 	if poolConfig.MaxPoolSize > capacity {
 		poolConfig.MaxPoolSize = capacity
 	}
+
+	if poolConfig.MinENI != 0 {
+		poolConfig.MinPoolSize = poolConfig.MinENI
+	}
+
 	poolCfg := pool.Config{
 		MaxIdle:  poolConfig.MaxPoolSize,
 		MinIdle:  poolConfig.MinPoolSize,

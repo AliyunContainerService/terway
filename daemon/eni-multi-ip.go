@@ -20,6 +20,7 @@ const (
 type eniIPFactory struct {
 	eniFactory   *eniFactory
 	enis         []*ENI
+	maxENI       chan struct{}
 	primaryIP    net.IP
 	eniOperChan  chan struct{}
 	ipResultChan chan *ENIIP
@@ -164,14 +165,22 @@ func (f *eniIPFactory) Create() (types.NetworkResource, error) {
 	}
 	logrus.Debugf("allocate from exist eni error: %v, creating eni", err)
 
+
+	var rawEni types.NetworkResource
 	select {
-	case f.eniOperChan <- struct{}{}:
+	case f.maxENI <- struct{}{}:
+		select {
+		case f.eniOperChan <- struct{}{}:
+		default:
+			return nil, errors.Errorf("trigger ENI throttle, max operating concurrent: %v", maxEniOperating)
+		}
+		rawEni, err = f.eniFactory.Create()
+		<-f.eniOperChan
 	default:
-		return nil, errors.Errorf("trigger ENI throttle, max operating concurrent: %v", maxEniOperating)
+		return nil, errors.Errorf("max ENI exceeded")
 	}
-	rawEni, err := f.eniFactory.Create()
-	<-f.eniOperChan
 	if err != nil {
+		<-f.maxENI
 		return nil, err
 	}
 
@@ -203,6 +212,7 @@ func (f *eniIPFactory) Create() (types.NetworkResource, error) {
 	go eni.allocateWorker(f.ipResultChan)
 	f.Unlock()
 
+	ip = mainENIIP
 	return mainENIIP, nil
 }
 
@@ -261,6 +271,7 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 		if err != nil {
 			return fmt.Errorf("error dispose ENI for eniip, %v", err)
 		}
+		<-f.maxENI
 		return nil
 	}
 	eni.lock.Unlock()
@@ -310,14 +321,39 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 		ipResultChan: make(chan *ENIIP, maxIPBacklog),
 	}
 
-	capacity, err := ecs.GetInstanceMaxPrivateIP(poolConfig.InstanceID)
+	maxEni, err := ecs.GetInstanceMaxENI(poolConfig.InstanceID)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get eniip max capacity for eniip factory")
+		return nil, errors.Wrapf(err, "error get max eni for eniip factory")
+	}
+	maxEni = maxEni - 1
+
+	ipPerENI, err := ecs.GetENIMaxIP(poolConfig.InstanceID, "")
+	if err != nil {
+		return nil, errors.Wrapf(err, "error get max ip per eni for eniip factory")
+	}
+
+	if poolConfig.MaxENI != 0 && poolConfig.MaxENI < maxEni {
+		maxEni = poolConfig.MaxENI
+	}
+	capacity := maxEni * ipPerENI
+	if capacity < 0 {
+		capacity = 0
+	}
+	factory.maxENI = make(chan struct{}, maxEni)
+
+	if poolConfig.MinENI != 0 {
+		poolConfig.MinPoolSize = poolConfig.MinENI * ipPerENI
 	}
 
 	if poolConfig.MaxPoolSize > capacity {
 		logrus.Infof("max pool size bigger than node capacity, set max pool size to capacity")
 		poolConfig.MaxPoolSize = capacity
+	}
+
+	if poolConfig.MinPoolSize > poolConfig.MaxPoolSize {
+		logrus.Warnf("min_pool_size bigger: %v than max_pool_size: %v, set max_pool_size to the min_pool_size",
+			poolConfig.MinPoolSize, poolConfig.MaxPoolSize)
+		poolConfig.MaxPoolSize = poolConfig.MinPoolSize
 	}
 
 	poolCfg := pool.Config{
@@ -369,6 +405,11 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 					}
 				}
 				logrus.Debugf("init factory's exist ENI: %+v", poolENI)
+				select {
+				case factory.maxENI <- struct{}{}:
+				default:
+					logrus.Warnf("exist enis already over eni limits, maxENI config will not be available")
+				}
 				go poolENI.allocateWorker(factory.ipResultChan)
 			}
 			return nil

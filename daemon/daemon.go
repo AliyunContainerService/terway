@@ -782,6 +782,8 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 	poolConfig := &types.PoolConfig{
 		MaxPoolSize:   cfg.MaxPoolSize,
 		MinPoolSize:   cfg.MinPoolSize,
+		MaxENI:        cfg.MaxENI,
+		MinENI:        cfg.MinENI,
 		AccessID:      cfg.AccessID,
 		AccessSecret:  cfg.AccessSecret,
 		HotPlug:       cfg.HotPlug == "true",
