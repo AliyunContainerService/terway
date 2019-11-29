@@ -50,6 +50,7 @@ type Kubernetes interface {
 	GetServiceCidr() *net.IPNet
 	GetNodeCidr() *net.IPNet
 	SetNodeAllocatablePod(count int) error
+	PatchAllocatedPodIP(podInfo *podInfo, podIP string) (*corev1.Pod, error)
 }
 
 type k8s struct {
@@ -371,6 +372,21 @@ func (k *k8s) GetLocalPods() ([]*podInfo, error) {
 
 	return ret, nil
 }
+
+func (k *k8s) PatchAllocatedPodIP(podInfo *podInfo, podIP string) (*corev1.Pod, error) {
+	pod, err := k.client.CoreV1().Pods(podInfo.Namespace).Get(podInfo.Name, metav1.GetOptions{
+		ResourceVersion: "0",
+	})
+	if err != nil || pod == nil {
+		return nil, err
+	}
+	if pod.Status.PodIP != "" {
+		return nil, err
+	}
+	pod.Status.PodIP = podIP
+	return k.client.CoreV1().Pods(podInfo.Namespace).UpdateStatus(pod)
+}
+
 func (k *k8s) GetServiceCidr() *net.IPNet {
 	return k.svcCidr
 }
