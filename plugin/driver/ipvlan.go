@@ -358,8 +358,11 @@ func (rule *redirectRule) isMatch(filter netlink.Filter) bool {
 }
 
 func (rule *redirectRule) toU32Filter() *netlink.U32 {
-	act := netlink.NewMirredAction(rule.dstIndex)
-	act.MirredAction = netlink.TCA_INGRESS_REDIR
+	mirredAct := netlink.NewMirredAction(rule.dstIndex)
+	mirredAct.MirredAction = netlink.TCA_INGRESS_REDIR
+
+	tunAct := netlink.NewTunnelKeyAction()
+	tunAct.Action = netlink.TCA_TUNNEL_KEY_UNSET
 
 	return &netlink.U32{
 		FilterAttrs: netlink.FilterAttrs{
@@ -379,7 +382,8 @@ func (rule *redirectRule) toU32Filter() *netlink.U32 {
 			},
 		},
 		Actions: []netlink.Action{
-			act,
+			tunAct,
+			mirredAct,
 		},
 	}
 }
