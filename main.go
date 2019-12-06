@@ -19,6 +19,7 @@ var (
 	readonlyListen string
 	kubeconfig     string
 	master         string
+	patchPodIP     bool
 )
 
 func init() {
@@ -27,13 +28,14 @@ func init() {
 	flag.StringVar(&readonlyListen, "readonly-listen", debugSocketPath, "terway readonly listen")
 	flag.StringVar(&master, "master", "", "The address of the Kubernetes API server (overrides any value in kubeconfig).")
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file with authorization and master location information.")
+	flag.BoolVar(&patchPodIP, "patch-podip", false, "Whether patch the podIP to kube-apiserver after setting up the pod network.")
 
 }
 
 func main() {
 	flag.Parse()
 	log.Infof("Starting terway of version: %s", gitVer)
-	if err := daemon.Run(defaultPidPath, defaultSocketPath, readonlyListen, defaultConfigPath, kubeconfig, master, daemonMode, logLevel); err != nil {
+	if err := daemon.Run(defaultPidPath, defaultSocketPath, readonlyListen, defaultConfigPath, kubeconfig, master, daemonMode, logLevel, patchPodIP); err != nil {
 		log.Fatal(err)
 	}
 }
