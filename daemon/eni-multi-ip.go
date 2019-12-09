@@ -165,7 +165,6 @@ func (f *eniIPFactory) Create() (types.NetworkResource, error) {
 	}
 	logrus.Debugf("allocate from exist eni error: %v, creating eni", err)
 
-
 	var rawEni types.NetworkResource
 	select {
 	case f.maxENI <- struct{}{}:

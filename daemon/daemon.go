@@ -596,7 +596,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string, pa
 
 	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, regionID)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get region-id")
+		return nil, errors.Wrapf(err, "error get aliyun client")
 	}
 
 	k8sRestConfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)

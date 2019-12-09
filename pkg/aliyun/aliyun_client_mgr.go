@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/denverdino/aliyungo/common"
 	"github.com/denverdino/aliyungo/ecs"
 	"github.com/denverdino/aliyungo/metadata"
@@ -58,11 +60,11 @@ func NewClientMgr(key, secret string) (*ClientMgr, error) {
 		var err error
 		roleName, err = m.RoleName()
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrapf(err, "error get instance role from metadata")
 		}
 		role, err := m.RamRoleToken(roleName)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrapf(err, "error get instance role info from metadata")
 		}
 		log.Debugf("alicloud: clientmgr, using role=[%s] with initial token=[%+v]", roleName, role)
 		token.auth = role
