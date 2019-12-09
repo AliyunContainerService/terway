@@ -596,7 +596,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string, pa
 
 	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, regionID)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get region-id")
+		return nil, errors.Wrapf(err, "error get aliyun client")
 	}
 
 	k8sRestConfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
@@ -782,6 +782,8 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 	poolConfig := &types.PoolConfig{
 		MaxPoolSize:   cfg.MaxPoolSize,
 		MinPoolSize:   cfg.MinPoolSize,
+		MaxENI:        cfg.MaxENI,
+		MinENI:        cfg.MinENI,
 		AccessID:      cfg.AccessID,
 		AccessSecret:  cfg.AccessSecret,
 		HotPlug:       cfg.HotPlug == "true",

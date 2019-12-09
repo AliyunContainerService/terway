@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io/ioutil"
@@ -73,9 +74,25 @@ func (f *vethResourceManager) GarbageCollection(inUseSet map[string]interface{},
 			continue
 		}
 
-		content, err := ioutil.ReadFile(filepath.Join(defaultIpamPath, file.Name()))
+		ipamFile, err := os.Open(filepath.Join(defaultIpamPath, file.Name()))
+		if err != nil {
+			log.Errorf("failed to open ipam file: %v, %v", file, err)
+			continue
+		}
+
+		r := bufio.NewReader(ipamFile)
+		content, _, err := r.ReadLine()
 		if err != nil {
 			log.Errorf("Failed to read file %v: %v", file, err)
+			err = ipamFile.Close()
+			if err != nil {
+				log.Errorf("Failed to close file %v: %v", file, err)
+			}
+			continue
+		}
+		err = ipamFile.Close()
+		if err != nil {
+			log.Errorf("Failed to close file %v: %v", file, err)
 		}
 		ipContainerIDMap[file.Name()] = strings.TrimSpace(string(content))
 	}
