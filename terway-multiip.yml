@@ -83,6 +83,7 @@ data:
       "eniip_virtual_type": "Veth"
     }
   # eniip_virtual_type: virtual type for eni multi ip "Veth" || "IPVlan"
+  disable_network_policy: "false"
 
 ---
 
@@ -168,6 +169,12 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        - name: DISABLE_POLICY
+          valueFrom:
+            configMapKeyRef:
+              name: eni-config
+              key: disable_network_policy
+              optional: true
         securityContext:
           privileged: true
         resources:

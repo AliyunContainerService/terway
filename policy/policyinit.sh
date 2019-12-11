@@ -2,8 +2,8 @@
 export DATASTORE_TYPE=kubernetes
 if [ "$DATASTORE_TYPE" = "kubernetes" ]; then
     if [ -z "$KUBERNETES_SERVICE_HOST" ]; then
-       echo "can not found k8s apiserver service env, exiting"
-       exit 1
+        echo "can not found k8s apiserver service env, exiting"
+        exit 1
     fi
 fi
 export FELIX_LOGSEVERITYSYS=none
@@ -28,4 +28,9 @@ fi
 if [ ! -z $DATASTORE_TYPE ]; then
     export FELIX_DATASTORETYPE=$DATASTORE_TYPE
 fi
-exec calico-felix
+
+if [ -z $DISABLE_POLICY ] || [ x"$DISABLE_POLICY" == x"false" ] || [ x"$DISABLE_POLICY" == x"0" ]; then
+    exec calico-felix
+else
+    exec uninstall_policy.sh
+fi
