@@ -255,6 +255,10 @@ example:
 
 You are welcome to make new issues and pull requests.
 
+## Built With
+
+[Felix](https://github.com/projectcalico/felix): Terway's NetworkPolicy is implemented by integrating [`ProjectCalico`](https://projectcalico.org)'s `Felix` components. `Felix` watch `NetworkPolicy` configuration and config ACL rules on container `veth`.
+
 ## Community
 
 ### DingTalk
