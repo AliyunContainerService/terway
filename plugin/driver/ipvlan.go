@@ -364,6 +364,10 @@ func (rule *redirectRule) toU32Filter() *netlink.U32 {
 	tunAct := netlink.NewTunnelKeyAction()
 	tunAct.Action = netlink.TCA_TUNNEL_KEY_UNSET
 
+	skbedit := netlink.NewSkbEditAction()
+	ptype := uint16(unix.PACKET_HOST)
+	skbedit.PType = &ptype
+
 	return &netlink.U32{
 		FilterAttrs: netlink.FilterAttrs{
 			LinkIndex: rule.index,
@@ -383,6 +387,7 @@ func (rule *redirectRule) toU32Filter() *netlink.U32 {
 		},
 		Actions: []netlink.Action{
 			tunAct,
+			skbedit,
 			mirredAct,
 		},
 	}
