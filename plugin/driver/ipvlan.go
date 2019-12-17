@@ -207,6 +207,7 @@ func (driver *ipvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slave
 		return nil, errors.Wrapf(err, "%s, add device %s error with another list device error %v",
 			driver.name, slaveName, e)
 	}
+
 	return link, nil
 }
 
@@ -478,6 +479,11 @@ func (driver *ipvlanDriver) setupInitNamespace(
 	if slaveLink.Attrs().OperState != netlink.OperUp {
 		if err := netlink.LinkSetUp(slaveLink); err != nil {
 			return errors.Wrapf(err, "%s, set device %s up error", driver.name, slaveLink.Attrs().Name)
+		}
+	}
+	if slaveLink.Attrs().Flags&unix.IFF_NOARP == 0 {
+		if err := netlink.LinkSetARPOff(slaveLink); err != nil {
+			return errors.Wrapf(err, "%s, set device %s noarp error", driver.name, slaveLink.Attrs().Name)
 		}
 	}
 
