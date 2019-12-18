@@ -70,19 +70,18 @@ func newK8S(client kubernetes.Interface, svcCidr *net.IPNet, daemonMode string) 
 		return nil, errors.Wrap(err, "failed getting node name")
 	}
 
+	if svcCidr == nil {
+		svcCidr, err = serviceCidrFromAPIServer(client)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed getting service cidr")
+		}
+	}
+
 	var nodeCidr *net.IPNet
 	if daemonMode == daemonModeVPC {
 		nodeCidr, err = nodeCidrFromAPIServer(client, nodeName)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed getting node cidr")
-		}
-	}
-
-	// fixme: mode ENIMultiIP with IPVlan need to ensure service cidr but Veth won't, should we add up a new daemonModeENIIPVlan ?
-	if svcCidr == nil && (daemonMode == daemonModeVPC || daemonMode == daemonModeENIMultiIP) {
-		svcCidr, err = serviceCidrFromAPIServer(client)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed getting service cidr")
 		}
 	}
 
