@@ -176,6 +176,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 		if err != nil {
 			networkContext.Log().Errorf("alloc result with error, %+v", err)
 			for _, res := range networkContext.resources {
+				networkService.deletePodResource(podinfo)
 				mgr := networkService.getResourceManagerForRes(res.Type)
 				if mgr == nil {
 					networkContext.Log().Warnf("error cleanup allocated network resource %s, %s: %v", res.ID, res.Type, err)
@@ -216,7 +217,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 				},
 			},
 		}
-
+		networkContext.resources = append(networkContext.resources, newRes.Resources...)
 		err = networkService.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error put resource into store")
@@ -256,7 +257,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 				},
 			},
 		}
-
+		networkContext.resources = append(networkContext.resources, newRes.Resources...)
 		err = networkService.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error put resource into store")
@@ -296,7 +297,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 				},
 			},
 		}
-
+		networkContext.resources = append(networkContext.resources, newRes.Resources...)
 		err = networkService.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error put resource into store")
