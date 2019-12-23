@@ -207,6 +207,7 @@ func (driver *ipvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slave
 		return nil, errors.Wrapf(err, "%s, add device %s error with another list device error %v",
 			driver.name, slaveName, e)
 	}
+
 	return link, nil
 }
 
@@ -338,32 +339,74 @@ func (rule *redirectRule) isMatch(filter netlink.Filter) bool {
 	if len(u32.Sel.Keys) != 1 {
 		return false
 	}
-	if len(u32.Actions) != 1 {
-		return false
-	}
 
 	key := u32.Sel.Keys[0]
 	if key.Mask != rule.mask || key.Off != rule.offset || key.Val != rule.value {
 		return false
 	}
 
-	act, ok := u32.Actions[0].(*netlink.MirredAction)
+	return rule.isMatchActions(u32.Actions)
+}
+
+func (rule *redirectRule) isMatchActions(acts []netlink.Action) bool {
+	if len(acts) != 3 {
+		return false
+	}
+
+	tun, ok := acts[0].(*netlink.TunnelKeyAction)
 	if !ok {
 		return false
 	}
-	if act.Ifindex != rule.dstIndex || act.MirredAction != rule.redir {
+	if tun.Attrs().Action != netlink.TC_ACT_PIPE {
 		return false
 	}
+	if tun.Action != netlink.TCA_TUNNEL_KEY_UNSET {
+		return false
+	}
+
+	skbedit, ok := acts[1].(*netlink.SkbEditAction)
+	if !ok {
+		return false
+	}
+	if skbedit.Attrs().Action != netlink.TC_ACT_PIPE {
+		return false
+	}
+	if skbedit.PType == nil || *skbedit.PType != uint16(unix.PACKET_HOST) {
+		return false
+	}
+
+	mirred, ok := acts[2].(*netlink.MirredAction)
+	if !ok {
+		return false
+	}
+	if mirred.Attrs().Action != netlink.TC_ACT_STOLEN {
+		return false
+	}
+	if mirred.MirredAction != rule.redir {
+		return false
+	}
+	if mirred.Ifindex != rule.dstIndex {
+		return false
+	}
+
 	return true
 }
 
-func (rule *redirectRule) toU32Filter() *netlink.U32 {
+func (rule *redirectRule) toActions() []netlink.Action {
 	mirredAct := netlink.NewMirredAction(rule.dstIndex)
 	mirredAct.MirredAction = netlink.TCA_INGRESS_REDIR
 
 	tunAct := netlink.NewTunnelKeyAction()
 	tunAct.Action = netlink.TCA_TUNNEL_KEY_UNSET
 
+	skbedit := netlink.NewSkbEditAction()
+	ptype := uint16(unix.PACKET_HOST)
+	skbedit.PType = &ptype
+
+	return []netlink.Action{tunAct, skbedit, mirredAct}
+}
+
+func (rule *redirectRule) toU32Filter() *netlink.U32 {
 	return &netlink.U32{
 		FilterAttrs: netlink.FilterAttrs{
 			LinkIndex: rule.index,
@@ -381,10 +424,7 @@ func (rule *redirectRule) toU32Filter() *netlink.U32 {
 				},
 			},
 		},
-		Actions: []netlink.Action{
-			tunAct,
-			mirredAct,
-		},
+		Actions: rule.toActions(),
 	}
 }
 
@@ -439,6 +479,11 @@ func (driver *ipvlanDriver) setupInitNamespace(
 	if slaveLink.Attrs().OperState != netlink.OperUp {
 		if err := netlink.LinkSetUp(slaveLink); err != nil {
 			return errors.Wrapf(err, "%s, set device %s up error", driver.name, slaveLink.Attrs().Name)
+		}
+	}
+	if slaveLink.Attrs().Flags&unix.IFF_NOARP == 0 {
+		if err := netlink.LinkSetARPOff(slaveLink); err != nil {
+			return errors.Wrapf(err, "%s, set device %s noarp error", driver.name, slaveLink.Attrs().Name)
 		}
 	}
 
