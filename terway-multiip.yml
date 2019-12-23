@@ -110,7 +110,7 @@ spec:
       hostNetwork: true
       initContainers:
       - name: terway-init
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.44-gc77da45-aliyun
+        image: registry.aliyuncs.com/acs/terway:v1.0.10.122-gd0be015-aliyun
         imagePullPolicy: Always
         securityContext:
           privileged: true
@@ -120,6 +120,7 @@ spec:
         - 'cp /usr/bin/terway /opt/cni/bin/;
                   chmod +x /opt/cni/bin/terway;
                   cp /etc/eni/10-terway.conf /etc/cni/net.d/;
+                  sysctl -w net.ipv4.conf.eth0.rp_filter=0;
                   modprobe sch_htb || true;
                   chroot /host sh -c "systemctl disable eni.service; rm -f /etc/udev/rules.d/75-persistent-net-generator.rules /lib/udev/rules.d/60-net.rules /lib/udev/rules.d/61-eni.rules /lib/udev/write_net_rules && udevadm control --reload-rules && udevadm trigger; true"'
         volumeMounts:
@@ -135,7 +136,7 @@ spec:
           name: host-root
       containers:
       - name: terway
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.44-gc77da45-aliyun
+        image: registry.aliyuncs.com/acs/terway:v1.0.10.122-gd0be015-aliyun
         imagePullPolicy: Always
         command: ['/usr/bin/terwayd', '-log-level', 'debug', '-daemon-mode', 'ENIMultiIP']
         securityContext:
@@ -161,7 +162,7 @@ spec:
         - mountPath: /var/lib/kubelet/device-plugins
           name: device-plugin-path
       - name: policy
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.44-gc77da45-aliyun
+        image: registry.aliyuncs.com/acs/terway:v1.0.10.122-gd0be015-aliyun
         imagePullPolicy: Always
         command: ["/bin/policyinit.sh"]
         env:
