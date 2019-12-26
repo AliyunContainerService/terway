@@ -21,7 +21,10 @@ config_masquerade() {
 
         if ! iptables -t nat -L terway-brb-masq | grep -q $clusterCIDR; then
             # Add MASQUERADE rule for traffic from clusterCIDR to non-clusterCIDR.
-            iptables -t nat -A terway-brb-masq -s $clusterCIDR ! -d $clusterCIDR -j MASQUERADE
+            if ! iptables -t nat -A terway-brb-masq -s $clusterCIDR ! -d $clusterCIDR -j MASQUERADE --random-fully; then
+                # fallback to no random-fully
+                iptables -t nat -A terway-brb-masq -s $clusterCIDR ! -d $clusterCIDR -j MASQUERADE
+            fi
         fi
     fi
 }

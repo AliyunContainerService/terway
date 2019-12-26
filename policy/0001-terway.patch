@@ -1,16 +1,18 @@
-From d78ba5e0af829e1c44414b48484d2285790b9e8d Mon Sep 17 00:00:00 2001
+From 0c60a194b0040c19e74eefeb54890b8e28388c12 Mon Sep 17 00:00:00 2001
 From: "bingshen.wbs" <bingshen.wbs@alibaba-inc.com>
 Date: Mon, 11 Mar 2019 14:36:25 +0800
 Subject: [PATCH] terway
 
 ---
  calc/calc_graph.go               |  5 +++--
- daemon/daemon.go                 | 36 ++++++++++++++++++------------------
- dataplane/linux/endpoint_mgr.go  | 18 +++++++++---------
+ daemon/daemon.go                 | 36 ++++++++++++++++----------------
+ dataplane/linux/endpoint_mgr.go  | 18 ++++++++--------
  dataplane/linux/int_dataplane.go |  4 ++--
- dataplane/linux/masq_mgr.go      |  8 +++++++-
+ dataplane/linux/masq_mgr.go      |  8 ++++++-
  glide.yaml                       |  5 +++++
- 6 files changed, 44 insertions(+), 32 deletions(-)
+ iptables/feature_detect.go       | 16 +++++++++++++-
+ iptables/features_detect_test.go |  9 ++++++++
+ 8 files changed, 68 insertions(+), 33 deletions(-)
 
 diff --git a/calc/calc_graph.go b/calc/calc_graph.go
 index 0eaa6890..4127acfd 100644
@@ -22,10 +24,10 @@ index 0eaa6890..4127acfd 100644
  	//
 -	configBatcher := NewConfigBatcher(hostname, callbacks)
 -	configBatcher.RegisterWith(allUpdDispatcher)
-+	// disable config processor for terway
++	// disable config processer for terway
 +	//configBatcher := NewConfigBatcher(hostname, callbacks)
 +	//configBatcher.RegisterWith(allUpdDispatcher)
-
+ 
  	// The profile decoder identifies objects with special dataplane significance which have
  	// been encoded as profiles by libcalico-go. At present this includes Kubernetes Service
 diff --git a/daemon/daemon.go b/daemon/daemon.go
@@ -35,10 +37,10 @@ index b08a84c8..6c3e6746 100644
 @@ -119,7 +119,7 @@ func Run(configFile string) {
  	// Initialise early so we can trace out config parsing.
  	logutils.ConfigureEarlyLogging()
-
+ 
 -	ctx := context.Background()
 +	//ctx := context.Background()
-
+ 
  	if os.Getenv("GOGC") == "" {
  		// Tune the GC to trade off a little extra CPU usage for significantly lower
 @@ -216,23 +216,23 @@ configRetry:
@@ -89,7 +91,7 @@ index 81f7a010..0bbfb601 100644
 @@ -519,15 +519,15 @@ func (m *endpointManager) resolveWorkloadEndpoints() {
  		m.needToCheckEndpointMarkChains = true
  	}
-
+ 
 -	m.wlIfaceNamesToReconfigure.Iter(func(item interface{}) error {
 -		ifaceName := item.(string)
 -		err := m.configureInterface(ifaceName)
@@ -109,7 +111,7 @@ index 81f7a010..0bbfb601 100644
 +	//	return set.RemoveItem
 +	//})
  }
-
+ 
  func (m *endpointManager) resolveEndpointMarks() {
 diff --git a/dataplane/linux/int_dataplane.go b/dataplane/linux/int_dataplane.go
 index 92b3183c..94dd252b 100644
@@ -121,17 +123,17 @@ index 92b3183c..94dd252b 100644
  	// Felix being able to configure it.
 -	writeProcSys("/proc/sys/net/ipv4/conf/default/rp_filter", "1")
 +	//writeProcSys("/proc/sys/net/ipv4/conf/default/rp_filter", "1")
-
+ 
  	for _, t := range d.iptablesRawTables {
  		rawChains := d.ruleRenderer.StaticRawTableChains(t.IPVersion)
 @@ -832,7 +832,7 @@ func (d *InternalDataplane) configureKernel() {
-
+ 
  	// Make sure the default for new interfaces is set to strict checking so that there's no
  	// race when a new interface is added and felix hasn't configured it yet.
 -	writeProcSys("/proc/sys/net/ipv4/conf/default/rp_filter", "1")
 +	//writeProcSys("/proc/sys/net/ipv4/conf/default/rp_filter", "1")
  }
-
+ 
  func readRPFilter() (value int64, err error) {
 diff --git a/dataplane/linux/masq_mgr.go b/dataplane/linux/masq_mgr.go
 index 402a4507..09a451a4 100644
@@ -139,16 +141,16 @@ index 402a4507..09a451a4 100644
 +++ b/dataplane/linux/masq_mgr.go
 @@ -15,6 +15,7 @@
  package intdataplane
-
+ 
  import (
 +	"os"
  	"strings"
-
+ 
  	log "github.com/sirupsen/logrus"
 @@ -69,6 +70,11 @@ func newMasqManager(
  		Type:    ipsets.IPSetTypeHashNet,
  	}, []string{})
-
+ 
 +	if os.Getenv("CALICO_IPV4POOL_CIDR") != "" {
 +		ipsetsDataplane.AddMembers(rules.IPSetIDNATOutgoingMasqPools, []string{os.Getenv("CALICO_IPV4POOL_CIDR")})
 +		ipsetsDataplane.AddMembers(rules.IPSetIDNATOutgoingAllPools, []string{os.Getenv("CALICO_IPV4POOL_CIDR")})
@@ -165,7 +167,7 @@ index 402a4507..09a451a4 100644
 +	chain := m.ruleRenderer.NATOutgoingChain(true, m.ipVersion)
  	m.natTable.UpdateChain(chain)
  	m.dirty = false
-
+ 
 diff --git a/glide.yaml b/glide.yaml
 index bf21eb42..d5ed26f6 100644
 --- a/glide.yaml
@@ -182,6 +184,74 @@ index bf21eb42..d5ed26f6 100644
  - package: github.com/jbenet/go-reuseport
  # go-reuseport pulls in go-log without a pin and master is now incompatible with the
  # version of gogo/protobuf that we are using.  Pin to most recent working master revision.
+diff --git a/iptables/feature_detect.go b/iptables/feature_detect.go
+index f9c49805..bfe06a98 100644
+--- a/iptables/feature_detect.go
++++ b/iptables/feature_detect.go
+@@ -17,6 +17,7 @@ package iptables
+ import (
+ 	"io/ioutil"
+ 	"regexp"
++	"strconv"
+ 	"sync"
+ 
+ 	"github.com/hashicorp/go-version"
+@@ -25,7 +26,7 @@ import (
+ 
+ var (
+ 	vXDotYDotZRegexp    = regexp.MustCompile(`v(\d+\.\d+\.\d+)`)
+-	kernelVersionRegexp = regexp.MustCompile(`Linux version (\d+\.\d+\.\d+)`)
++	kernelVersionRegexp = regexp.MustCompile(`Linux version (\d+\.\d+\.\d+[-\d]*)`)
+ 
+ 	// iptables versions:
+ 	// v1Dot4Dot7 is the oldest version we've ever supported.
+@@ -38,6 +39,10 @@ var (
+ 	// Linux kernel versions:
+ 	// v3Dot10Dot0 is the oldest version we support at time of writing.
+ 	v3Dot10Dot0 = mustParseVersion("3.10.0")
++
++	// RHEL spec kernel versions:
++	v3Dot10Dot693 = mustParseVersion("3.10.0-693")
++
+ 	// v3Dot14Dot0 added the random-fully feature on the iptables interface.
+ 	v3Dot14Dot0 = mustParseVersion("3.14.0")
+ )
+@@ -100,6 +105,15 @@ func (d *FeatureDetector) refreshFeaturesLockHeld() {
+ 		RestoreSupportsLock: iptV.Compare(v1Dot6Dot2) >= 0,
+ 	}
+ 
++	// for rhel/centos >= 7.4 which backport fully-random
++	kerSeg := kerV.Segments()
++	if len(kerSeg) == 3 && kerSeg[0] == 3 && kerSeg[1] == 10 && kerSeg[2] == 0 {
++		if releaseVersion, err := strconv.Atoi(kerV.Prerelease()); err == nil {
++			features.SNATFullyRandom = releaseVersion >= 693
++			features.MASQFullyRandom = releaseVersion >= 693
++		}
++	}
++
+ 	if d.featureCache == nil || *d.featureCache != features {
+ 		log.WithFields(log.Fields{
+ 			"features":        features,
+diff --git a/iptables/features_detect_test.go b/iptables/features_detect_test.go
+index d1804794..b0fba0c8 100644
+--- a/iptables/features_detect_test.go
++++ b/iptables/features_detect_test.go
+@@ -39,6 +39,15 @@ func TestFeatureDetection(t *testing.T) {
+ 				MASQFullyRandom:     true,
+ 			},
+ 		},
++		{
++			"iptables v1.6.2",
++			"Linux version 3.10.0-693.21.3.el7.x86_64",
++			Features{
++				RestoreSupportsLock: true,
++				SNATFullyRandom:     true,
++				MASQFullyRandom:     true,
++			},
++		},
+ 		{
+ 			"iptables v1.6.1",
+ 			"Linux version 3.14.0",
 -- 
-2.15.1
+2.17.1 (Apple Git-112)
 
