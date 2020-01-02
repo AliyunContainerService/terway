@@ -432,8 +432,14 @@ func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
 		func() (done bool, err error) {
 			insType, err := e.GetInstanceAttributesType(instanceID)
 			if err != nil {
-				logrus.Warnf("error get instance info: %s: %v， retry...", instanceID, err)
-				return false, nil
+				// failback to deprecated DescribeInstanceAttribute
+				start := time.Now()
+				insType, err = e.clientSet.ecs.DescribeInstanceAttribute(instanceID)
+				metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+				if err != nil {
+					logrus.Warnf("error get instance info: %s: %v， retry...", instanceID, err)
+					return false, nil
+				}
 			}
 
 			start := time.Now()
@@ -443,6 +449,11 @@ func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
 			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 			if err != nil {
+				// failback to preload eni quota
+				if quota, ok := ecsEniMatix[insType.InstanceType]; ok {
+					eniCap = quota
+					return true, nil
+				}
 				logrus.Warnf("error get instance types info: %v， retry...", err)
 				return false, nil
 			}
@@ -501,7 +512,6 @@ func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 				logrus.Warnf("error get instance info: %v， retry...", err)
 				return false, nil
 			}
-
 			for _, instanceTypeSpec := range instanceTypeItems {
 				if instanceTypeSpec.InstanceTypeId == insType.InstanceType {
 					eniIPCap = instanceTypeSpec.EniPrivateIpAddressQuantity
@@ -548,7 +558,13 @@ func (e *ecsImpl) GetENIByMac(instanceID, mac string) (*types.ENI, error) {
 func (e *ecsImpl) GetAttachedSecurityGroup(instanceID string) (string, error) {
 	insType, err := e.GetInstanceAttributesType(instanceID)
 	if err != nil {
-		return "", errors.Wrapf(err, "error describe instance attribute for security group: %s", instanceID)
+		// failback to deprecated DescribeInstanceAttribute
+		start := time.Now()
+		insType, err = e.clientSet.ecs.DescribeInstanceAttribute(instanceID)
+		metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+		if err != nil {
+			return "", errors.Wrapf(err, "error describe instance attribute for security group: %s", instanceID)
+		}
 	}
 	if len(insType.SecurityGroupIds.SecurityGroupId) > 0 {
 		return insType.SecurityGroupIds.SecurityGroupId[0], nil
