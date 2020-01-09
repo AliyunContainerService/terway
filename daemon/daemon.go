@@ -176,7 +176,8 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 		if err != nil {
 			networkContext.Log().Errorf("alloc result with error, %+v", err)
 			for _, res := range networkContext.resources {
-				networkService.deletePodResource(podinfo)
+				err = networkService.deletePodResource(podinfo)
+				networkContext.Log().Errorf("rollback res[%v] with error, %+v", res, err)
 				mgr := networkService.getResourceManagerForRes(res.Type)
 				if mgr == nil {
 					networkContext.Log().Warnf("error cleanup allocated network resource %s, %s: %v", res.ID, res.Type, err)

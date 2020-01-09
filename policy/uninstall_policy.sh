@@ -19,11 +19,11 @@ config_masquerade() {
             iptables -t nat -A POSTROUTING -m comment --comment "terway:masq-outgoing" -j terway-brb-masq
         fi
 
-        if ! iptables -t nat -L terway-brb-masq | grep -q $clusterCIDR; then
+        if ! iptables -t nat -L terway-brb-masq | grep -q "$clusterCIDR"; then
             # Add MASQUERADE rule for traffic from clusterCIDR to non-clusterCIDR.
-            if ! iptables -t nat -A terway-brb-masq -s $clusterCIDR ! -d $clusterCIDR -j MASQUERADE --random-fully; then
+            if ! iptables -t nat -A terway-brb-masq -s "$clusterCIDR" ! -d "$clusterCIDR" -j MASQUERADE --random-fully; then
                 # fallback to no random-fully
-                iptables -t nat -A terway-brb-masq -s $clusterCIDR ! -d $clusterCIDR -j MASQUERADE
+                iptables -t nat -A terway-brb-masq -s "$clusterCIDR" ! -d "$clusterCIDR" -j MASQUERADE
             fi
         fi
     fi
@@ -41,16 +41,16 @@ cleanup_felix() {
     echo "Make sure calico-node DaemonSet is stopped before this gets executed."
 
     echo "Flushing all the calico iptables chains in the nat table..."
-    iptables-save -t nat | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do iptables -t nat -F $line; done
+    iptables-save -t nat | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do iptables -t nat -F "$line"; done
 
     echo "Flushing all the calico iptables chains in the raw table..."
-    iptables-save -t raw | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do iptables -t raw -F $line; done
+    iptables-save -t raw | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do iptables -t raw -F "$line"; done
 
     echo "Flushing all the calico iptables chains in the mangle table..."
-    iptables-save -t mangle | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do iptables -t mangle -F $line; done
+    iptables-save -t mangle | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do iptables -t mangle -F "$line"; done
 
     echo "Flushing all the calico iptables chains in the filter table..."
-    iptables-save -t filter | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do iptables -t filter -F $line; done
+    iptables-save -t filter | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do iptables -t filter -F "$line"; done
 
     echo "Cleaning up calico rules from the nat table..."
     iptables-save -t nat | grep -e '--comment "cali:' | cut -c 3- | sed 's/^ *//;s/ *$//' | xargs -l1 iptables -t nat -D

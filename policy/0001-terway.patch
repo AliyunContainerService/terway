@@ -24,7 +24,7 @@ index 0eaa6890..4127acfd 100644
  	//
 -	configBatcher := NewConfigBatcher(hostname, callbacks)
 -	configBatcher.RegisterWith(allUpdDispatcher)
-+	// disable config processer for terway
++	// disable config processor for terway
 +	//configBatcher := NewConfigBatcher(hostname, callbacks)
 +	//configBatcher.RegisterWith(allUpdDispatcher)
  

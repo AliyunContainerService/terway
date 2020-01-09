@@ -29,7 +29,7 @@ if [ ! -z $DATASTORE_TYPE ]; then
     export FELIX_DATASTORETYPE=$DATASTORE_TYPE
 fi
 
-if [ -z $DISABLE_POLICY ] || [ x"$DISABLE_POLICY" == x"false" ] || [ x"$DISABLE_POLICY" == x"0" ]; then
+if [ -z "$DISABLE_POLICY" ] || [ x"$DISABLE_POLICY" = x"false" ] || [ x"$DISABLE_POLICY" = x"0" ]; then
     exec calico-felix
 else
     exec uninstall_policy.sh
