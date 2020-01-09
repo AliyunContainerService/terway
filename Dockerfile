@@ -27,7 +27,8 @@ RUN cd /go/src/github.com/projectcalico/felix && \
 
 FROM alpine:3.8
 COPY policy/policyinit.sh /bin/
-RUN apk --update add curl ipset bash iproute2 ethtool bridge-utils && chmod +x /bin/policyinit.sh && rm -f /var/cache/apk/*
+COPY policy/uninstall_policy.sh /bin/
+RUN apk --update add curl ipset bash iproute2 ethtool bridge-utils socat grep findutils && chmod +x /bin/policyinit.sh /bin/uninstall_policy.sh && rm -f /var/cache/apk/*
 COPY --from=felix-builder /go/src/github.com/projectcalico/felix/bin/calico-felix-amd64 /bin/calico-felix
 RUN chmod +x /bin/calico-felix
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terwayd /usr/bin/terwayd

@@ -78,7 +78,7 @@ data:
       "name": "terway",
       "type": "terway"
     }
-
+  disable_network_policy: "false"
 ---
 
 apiVersion: extensions/v1beta1
@@ -104,7 +104,7 @@ spec:
       hostNetwork: true
       initContainers:
       - name: terway-init
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.44-gc77da45-aliyun
+        image: registry.aliyuncs.com/acs/terway:v1.0.10.122-gd0be015-aliyun
         imagePullPolicy: Always
         securityContext:
           privileged: true
@@ -120,7 +120,7 @@ spec:
           name: lib-modules
       containers:
       - name: terway
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.44-gc77da45-aliyun
+        image: registry.aliyuncs.com/acs/terway:v1.0.10.122-gd0be015-aliyun
         imagePullPolicy: Always
         securityContext:
           privileged: true
@@ -145,7 +145,7 @@ spec:
         - mountPath: /var/lib/kubelet/device-plugins
           name: device-plugin-path
       - name: policy
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.44-gc77da45-aliyun
+        image: registry.aliyuncs.com/acs/terway:v1.0.10.122-gd0be015-aliyun
         command: ["/bin/policyinit.sh"]
         imagePullPolicy: Always
         env:
@@ -155,6 +155,12 @@ spec:
                 fieldPath: spec.nodeName
           - name: Network
             value: 172.16.0.0/16
+          - name: DISABLE_POLICY
+            valueFrom:
+              configMapKeyRef:
+                name: eni-config
+                key: disable_network_policy
+                optional: true
         securityContext:
           privileged: true
         resources:
