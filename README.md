@@ -43,7 +43,7 @@ Using `kubectl get ds terway -n kube-system` to watch plugin launching. Plugin i
 
 #### Vpc network container
 
-On VPC installation mode, Terway will config pod's address using node's `podCidr` when pod not have any especial config. eg:
+On VPC installation mode, Terway will config pod's address using node's `podCidr` when pod not have any special config. eg:
 
 ```
 [root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl run -it --rm --image busybox busybox
