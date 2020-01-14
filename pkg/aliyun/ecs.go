@@ -499,6 +499,7 @@ func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 		func() (done bool, err error) {
 			insType, err := e.GetInstanceAttributesType(instanceID)
 			if err != nil {
+				logrus.Debugf("error get instance attributes type %s: %v", instanceID, err)
 				return false, nil
 			}
 
