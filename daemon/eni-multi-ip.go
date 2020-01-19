@@ -171,6 +171,7 @@ func (f *eniIPFactory) Create() (types.NetworkResource, error) {
 		select {
 		case f.eniOperChan <- struct{}{}:
 		default:
+			<-f.maxENI
 			return nil, errors.Errorf("trigger ENI throttle, max operating concurrent: %v", maxEniOperating)
 		}
 		rawEni, err = f.eniFactory.Create()
