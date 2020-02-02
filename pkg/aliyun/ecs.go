@@ -22,6 +22,8 @@ const (
 	NetworkInterfaceTagCreatorValue = "terway"
 )
 
+var ErrNoValidVSwitch = errors.Errorf("No valid vswitch found.")
+
 // ECS the interface of ecs operation set
 type ECS interface {
 	AllocateENI(vSwitch string, securityGroup string, instanceID string) (*types.ENI, error)
@@ -37,6 +39,7 @@ type ECS interface {
 	GetInstanceMaxPrivateIP(intanceID string) (int, error)
 	GetENIMaxIP(instanceID string, eniID string) (int, error)
 	GetAttachedSecurityGroup(instanceID string) (string, error)
+	DescribeVSwitch(vSwitch string) (availIpCount int, err error)
 }
 
 type ecsImpl struct {
@@ -75,6 +78,29 @@ func NewECS(ak, sk string, region common.Region) (ECS, error) {
 		openapiInfoGetter: &openapiENIInfoGetter,
 		region:            region,
 	}, nil
+}
+
+// DescribeVSwitch for vswitch
+func (e *ecsImpl) DescribeVSwitch(vSwitch string) (availIpCount int, err error)  {
+	vSwitchArgs := &ecs.DescribeVSwitchesArgs{
+		RegionId:             e.region,
+		VSwitchId:            vSwitch,
+	}
+	vsw, _, err := e.clientSet.ecs.DescribeVSwitches(vSwitchArgs)
+	// For systems without RAM policy for VPC API permission, result is:
+	// vsw is an empty slice, err is nil.
+	// For systems which have RAM policy for VPC API permission, result is:
+	// vsw is a slice with a single element, err is nil.
+	logrus.Debugf("result for DescribeVSwitch: vsw slice = %+v, err = %v", vsw, err)
+
+	if err == nil {
+		if len(vsw) > 0 {
+			return vsw[0].AvailableIpAddressCount, nil
+		} else {
+			return 0, ErrNoValidVSwitch
+		}
+	}
+	return 0, err
 }
 
 // AllocateENI for instance
@@ -310,9 +336,10 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 	}
 
 	start := time.Now()
+	var innerErr error
 	err = wait.ExponentialBackoff(eniOpBackoff, func() (bool, error) {
-		_, err = e.clientSet.ecs.AssignPrivateIpAddresses(assignPrivateIPAddressesArgs)
-		if err != nil {
+		_, innerErr = e.clientSet.ecs.AssignPrivateIpAddresses(assignPrivateIPAddressesArgs)
+		if innerErr != nil {
 			logrus.Warnf("Assign private ip address failed: %+v, retrying", err)
 			return false, nil
 		}
@@ -320,7 +347,7 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 	})
 	metric.OpenAPILatency.WithLabelValues("AssignPrivateIpAddresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
-		return nil, errors.Wrapf(err, "error assign address for eniID: %v", eniID)
+		return nil, errors.Wrapf(err, "error assign address for eniID: %v, %v", eniID, innerErr)
 	}
 
 	start = time.Now()

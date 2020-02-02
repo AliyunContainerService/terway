@@ -67,6 +67,12 @@ func (e *eniMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
 	}
 	eni.Gateway = gateway
 
+	vswitch, err := metadataValue(fmt.Sprintf(metadataBase+eniVSwitchPath, mac))
+	if err != nil {
+		return nil, errors.Wrapf(err, "error get eni vswitch from metaserver, mac: %s", mac)
+	}
+	eni.VSwitch = vswitch
+
 	eni.Name, err = link.GetDeviceName(mac)
 	if err != nil {
 		logrus.Warnf("error get device name for eni: %v", err)

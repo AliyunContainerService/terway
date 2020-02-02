@@ -21,6 +21,7 @@ type ENI struct {
 	Gateway      net.IP
 	DeviceNumber int32
 	MaxIPs       int
+	VSwitch      string
 }
 
 // GetResourceID return mac address of eni

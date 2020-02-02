@@ -12,6 +12,7 @@ import (
 	"github.com/denverdino/aliyungo/common"
 )
 
+// Reference https://help.aliyun.com/knowledge_detail/49122.html
 const (
 	metadataBase    = "http://100.100.100.200/latest/meta-data/"
 	mainEniPath     = "mac"
@@ -21,6 +22,7 @@ const (
 	eniNetmaskPath  = "network/interfaces/macs/%s/netmask"
 	eniGatewayPath  = "network/interfaces/macs/%s/gateway"
 	eniPrivateIPs   = "network/interfaces/macs/%s/private-ipv4s"
+	eniVSwitchPath  = "network/interfaces/macs/%s/vswitch-id"
 	instanceIDPath  = "instance-id"
 	regionIDPath    = "region-id"
 	zoneIDPath      = "zone-id"

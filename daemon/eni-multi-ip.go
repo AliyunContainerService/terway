@@ -3,7 +3,9 @@ package daemon
 import (
 	"fmt"
 	"net"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/pool"
@@ -15,6 +17,14 @@ import (
 const (
 	maxEniOperating = 3
 	maxIPBacklog    = 10
+)
+
+// AssignPrivateIpAddresses const error message
+// Reference: https://help.aliyun.com/document_detail/85917.html
+const (
+
+	InvalidVSwitchId_IpNotEnough = "InvalidVSwitchId.IpNotEnough"
+	EniIpAllocInhibitTimeout = 10 * time.Minute
 )
 
 type eniIPFactory struct {
@@ -43,6 +53,8 @@ type ENI struct {
 	ipBacklog chan struct{}
 	ecs       aliyun.ECS
 	done      chan struct{}
+	// Unix timestamp to mark when this ENI can allocate Pod IP.
+	ipAllocInhibitExpireAt time.Time
 }
 
 // eni ip allocator
@@ -96,12 +108,45 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 func (f *eniIPFactory) submit() error {
 	f.Lock()
 	defer f.Unlock()
-	for _, eni := range f.enis {
-		logrus.Debugf("check exist eni's ip: %+v", eni)
+	var enis []*ENI
+	// If there is only one switch, then no need for ordering.
+	// If there are multiple switches, then construct an enis slice per each switch's availabe IP count.
+	if len(f.enis) == 1 {
+		enis = f.enis
+	} else {
+		if vSwitchesInDescOrder, err := f.eniFactory.GetVSwitchesInDescOrder(); err == aliyun.ErrNoValidVSwitch {
+			// When RAM policy for VPC API permission doesn't exist, flow goes here.
+			enis = f.enis
+		} else {
+			// When RAM policy for VPC API permission exists, flow goes here.
+			for _, vswitch := range vSwitchesInDescOrder {
+				for _, eni := range f.enis {
+					if vswitch == eni.VSwitch {
+						enis = append(enis, eni)
+					}
+				}
+			} // for END
+		} // if-else END
+	}
+
+	//for _, eni := range f.enis {
+	for _, eni := range enis {
+		logrus.Debugf("check existing eni: %+v", eni)
 		eni.lock.Lock()
+		now := time.Now()
+		logrus.Debugf("check if the current eni is in the time window for IP allocation inhibition: %+v", eni)
+		// if the current eni has been inhibited for Pod IP allocation, then skip current eni.
+		if now.Before(eni.ipAllocInhibitExpireAt) {
+			continue
+		}
+		eni.lock.Unlock()
+
+		eni.lock.Lock()
+		logrus.Debugf("check if the current eni will reach eni IP quota with new pending IP added: %+v", eni)
 		ipCount := eni.pending + len(eni.ips)
 		if ipCount < eni.MaxIPs {
 			select {
+			// specify which ENI will allocate IP for Pod.
 			case eni.ipBacklog <- struct{}{}:
 			default:
 				eni.lock.Unlock()
@@ -119,12 +164,19 @@ func (f *eniIPFactory) submit() error {
 func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 	result := <-f.ipResultChan
 	if result.ENIIP == nil || result.err != nil {
+		// There are two error cases:
+		// Error Case 1. The ENI-associated VSwitch has no available IP for Pod IP allocation.
+		// Error Case 2. The IP number allocated has reached ENI quota.
 		f.Lock()
 		defer f.Unlock()
 		if result.Eni != nil {
 			for _, eni := range f.enis {
 				if eni.MAC == result.Eni.MAC {
 					eni.pending--
+					// if an error message with InvalidVSwitchId_IpNotEnough returned, then mark the ENI as IP allocation inhibited.
+					if strings.Contains(err.Error(), InvalidVSwitchId_IpNotEnough) {
+						eni.ipAllocInhibitExpireAt = time.Now().Add(EniIpAllocInhibitTimeout)
+					}
 				}
 			}
 		}
