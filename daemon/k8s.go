@@ -1,14 +1,18 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
+
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/storage"
@@ -29,7 +33,8 @@ const (
 	dbPath                   = "/var/lib/cni/terway/pod.db"
 	dbName                   = "pods"
 
-	apiServerTimeout = 70 * time.Second
+	apiServerTimeout           = 70 * time.Second
+	apiServerReconnectThrottle = 2 * time.Minute
 )
 
 type podInfo struct {
@@ -54,16 +59,35 @@ type Kubernetes interface {
 }
 
 type k8s struct {
-	client   kubernetes.Interface
-	storage  storage.Storage
-	mode     string
-	nodeName string
-	nodeCidr *net.IPNet
-	svcCidr  *net.IPNet
+	client      kubernetes.Interface
+	storage     storage.Storage
+	mode        string
+	nodeName    string
+	nodeCidr    *net.IPNet
+	svcCidr     *net.IPNet
+	apiConn     *connTracker
+	apiConnTime time.Time
+	sync.Locker
 }
 
 // newK8S return Kubernetes service by pod spec and daemon mode
-func newK8S(client kubernetes.Interface, svcCidr *net.IPNet, daemonMode string) (Kubernetes, error) {
+func newK8S(master, kubeconfig string, svcCidr *net.IPNet, daemonMode string) (Kubernetes, error) {
+
+	k8sRestConfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	k8sRestConfig.Timeout = apiServerTimeout
+	t := &connTracker{
+		dialer: &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second},
+		conns:  make(map[*closableConn]struct{}),
+	}
+	k8sRestConfig.Dial = t.Dial
+
+	client, err := kubernetes.NewForConfig(k8sRestConfig)
+	if err != nil {
+		return nil, err
+	}
 
 	nodeName, err := getNodeName(client)
 	if err != nil {
@@ -91,12 +115,15 @@ func newK8S(client kubernetes.Interface, svcCidr *net.IPNet, daemonMode string) 
 	}
 
 	k8sObj := &k8s{
-		client:   client,
-		mode:     daemonMode,
-		nodeName: nodeName,
-		nodeCidr: nodeCidr,
-		svcCidr:  svcCidr,
-		storage:  storage,
+		client:      client,
+		mode:        daemonMode,
+		nodeName:    nodeName,
+		nodeCidr:    nodeCidr,
+		svcCidr:     svcCidr,
+		storage:     storage,
+		apiConn:     t,
+		apiConnTime: time.Now(),
+		Locker:      &sync.RWMutex{},
 	}
 
 	go func() {
@@ -339,6 +366,7 @@ func (k *k8s) GetPod(namespace, name string) (*podInfo, error) {
 				return nil, err
 			}
 		}
+		k.reconnectOnTimeoutError(err)
 		return nil, err
 	}
 	podInfo := convertPod(k.mode, pod)
@@ -363,6 +391,7 @@ func (k *k8s) GetLocalPods() ([]*podInfo, error) {
 	}
 	list, err := k.client.CoreV1().Pods(corev1.NamespaceAll).List(options)
 	if err != nil {
+		k.reconnectOnTimeoutError(err)
 		return nil, errors.Wrapf(err, "failed listting pods on %s from apiserver", k.nodeName)
 	}
 	var ret []*podInfo
@@ -379,13 +408,19 @@ func (k *k8s) PatchAllocatedPodIP(podInfo *podInfo, podIP string) (*corev1.Pod, 
 		ResourceVersion: "0",
 	})
 	if err != nil || pod == nil {
+		k.reconnectOnTimeoutError(err)
 		return nil, err
 	}
 	if pod.Status.PodIP != "" {
 		return nil, err
 	}
 	pod.Status.PodIP = podIP
-	return k.client.CoreV1().Pods(podInfo.Namespace).UpdateStatus(pod)
+	pod, err = k.client.CoreV1().Pods(podInfo.Namespace).UpdateStatus(pod)
+	if err != nil {
+		k.reconnectOnTimeoutError(err)
+		return nil, err
+	}
+	return pod, nil
 }
 
 func (k *k8s) GetServiceCidr() *net.IPNet {
@@ -447,4 +482,76 @@ func (k *k8s) clean() error {
 		}
 	}
 	return nil
+}
+
+func (k *k8s) reconnectOnTimeoutError(err error) {
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "timeout") {
+		log.Warnf("apiserver connection timeout: [%v], last establish: [%v], reconnecting...", err, k.apiConnTime)
+		k.Lock()
+		// avoid connection boom
+		if k.apiConnTime.Add(apiServerReconnectThrottle).Before(time.Now()) {
+			k.apiConn.closeAllConns()
+			k.apiConnTime = time.Now()
+		}
+		k.Unlock()
+	}
+}
+
+// connTracker is a dialer that tracks all open connections it creates.
+type connTracker struct {
+	dialer *net.Dialer
+
+	mu    sync.Mutex
+	conns map[*closableConn]struct{}
+}
+
+// closeAllConns forcibly closes all tracked connections.
+func (c *connTracker) closeAllConns() {
+	c.mu.Lock()
+	conns := c.conns
+	c.conns = make(map[*closableConn]struct{})
+	c.mu.Unlock()
+
+	for conn := range conns {
+		conn.Close()
+	}
+}
+
+func (c *connTracker) Dial(network, address string) (net.Conn, error) {
+	return c.DialContext(context.Background(), network, address)
+}
+
+func (c *connTracker) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	conn, err := c.dialer.DialContext(ctx, network, address)
+	if err != nil {
+		return nil, err
+	}
+
+	closable := &closableConn{Conn: conn}
+
+	// Start tracking the connection
+	c.mu.Lock()
+	c.conns[closable] = struct{}{}
+	c.mu.Unlock()
+
+	// When the connection is closed, remove it from the map. This will
+	// be no-op if the connection isn't in the map, e.g. if closeAllConns()
+	// is called.
+	closable.onClose = func() {
+		c.mu.Lock()
+		delete(c.conns, closable)
+		c.mu.Unlock()
+	}
+
+	return closable, nil
+}
+
+type closableConn struct {
+	onClose func()
+	net.Conn
+}
+
+func (c *closableConn) Close() error {
+	go c.onClose()
+	return c.Conn.Close()
 }
