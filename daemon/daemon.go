@@ -18,8 +18,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
@@ -601,16 +599,6 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string, pa
 		return nil, errors.Wrapf(err, "error get aliyun client")
 	}
 
-	k8sRestConfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-	k8sRestConfig.Timeout = apiServerTimeout
-	k8sClient, err := kubernetes.NewForConfig(k8sRestConfig)
-	if err != nil {
-		return nil, err
-	}
-
 	var ipnet *net.IPNet
 	if config.ServiceCIDR != "" {
 		_, ipnet, err = net.ParseCIDR(config.ServiceCIDR)
@@ -619,7 +607,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string, pa
 		}
 	}
 
-	netSrv.k8s, err = newK8S(k8sClient, ipnet, daemonMode)
+	netSrv.k8s, err = newK8S(master, kubeconfig, ipnet, daemonMode)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error init k8s service")
 	}
