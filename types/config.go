@@ -18,6 +18,7 @@ type Configure struct {
 	HotPlug       string              `yaml:"hot_plug" json:"hot_plug"`
 	EniCapRatio   float64             `yaml:"eni_cap_ratio" json:"eni_cap_ratio"`
 	EniCapShift   int                 `yaml:"eni_cap_shift" json:"eni_cap_shift"`
+	VSwitchSelectionPolicy  string     `yaml:"vswitch_selection_policy" json:"vswitch_selection_policy"`
 }
 
 // PoolConfig configuration of pool and resource factory
@@ -37,4 +38,5 @@ type PoolConfig struct {
 	HotPlug       bool
 	EniCapRatio   float64
 	EniCapShift   int
+	VSwitchSelectionPolicy string
 }

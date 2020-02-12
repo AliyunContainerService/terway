@@ -773,6 +773,12 @@ func setDefault(cfg *types.Configure) error {
 		cfg.HotPlug = conditionFalse
 	}
 
+	// Default policy for vswitch selection is random.
+	if cfg.VSwitchSelectionPolicy == "" ||
+		(cfg.VSwitchSelectionPolicy != types.VSwitchSelectionPolicyRandom &&
+			cfg.VSwitchSelectionPolicy != types.VSwitchSelectionPolicyOrdered) {
+		cfg.VSwitchSelectionPolicy = types.VSwitchSelectionPolicyRandom
+	}
 	return nil
 }
 
@@ -792,6 +798,7 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 		EniCapRatio:   cfg.EniCapRatio,
 		EniCapShift:   cfg.EniCapShift,
 		SecurityGroup: cfg.SecurityGroup,
+		VSwitchSelectionPolicy: cfg.VSwitchSelectionPolicy,
 	}
 
 	zone, err := aliyun.GetLocalZone()

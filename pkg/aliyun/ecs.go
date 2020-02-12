@@ -89,18 +89,17 @@ func (e *ecsImpl) DescribeVSwitch(vSwitch string) (availIpCount int, err error) 
 	vsw, _, err := e.clientSet.ecs.DescribeVSwitches(vSwitchArgs)
 	// For systems without RAM policy for VPC API permission, result is:
 	// vsw is an empty slice, err is nil.
-	// For systems which have RAM policy for VPC API permission, result is:
+	// For systems which have RAM policy for VPC API permission,
+	// (1) if vswitch indeed exists, result is:
 	// vsw is a slice with a single element, err is nil.
-	logrus.Debugf("result for DescribeVSwitch: vsw slice = %+v, err = %v", vsw, err)
-
-	if err == nil {
-		if len(vsw) > 0 {
-			return vsw[0].AvailableIpAddressCount, nil
-		} else {
-			return 0, ErrNoValidVSwitch
-		}
+	// (2) if vswitch doesn't exist, result is:
+	// vsw is an empty slice, err is not nil.
+	logrus.Debugf("result for DescribeVSwitches: vsw slice = %+v, err = %v", vsw, err)
+	if len(vsw) > 0 {
+		return vsw[0].AvailableIpAddressCount, nil
+	} else {
+		return 0, err
 	}
-	return 0, err
 }
 
 // AllocateENI for instance

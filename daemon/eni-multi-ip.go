@@ -27,6 +27,8 @@ const (
 	EniIpAllocInhibitTimeout = 10 * time.Minute
 )
 
+const timeFormat = "2006-01-02 15:04:05"
+
 type eniIPFactory struct {
 	eniFactory   *eniFactory
 	enis         []*ENI
@@ -79,7 +81,7 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 		}
 		logrus.Debugf("allocate %v ips for eni", toAllocate)
 		ips, err := e.ecs.AssignNIPsForENI(e.ENI.ID, toAllocate)
-		logrus.Debugf("allocated ips for eni: %v, %v, %v", e.ENI, ips, err)
+		logrus.Debugf("allocated ips for eni: eni = %v, ips = %v, err = %v", e.ENI, ips, err)
 		if err != nil {
 			logrus.Errorf("error allocate ips for eni: %v", err)
 			for i := 0; i < toAllocate; i++ {
@@ -105,48 +107,55 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 	}
 }
 
+func (f *eniIPFactory) getEnis() ([]*ENI, error) {
+	var enis []*ENI
+	enisLen := len(f.enis)
+	// If there is only one switch, then no need for ordering.
+	if enisLen == 1 {
+		return f.enis, nil
+	}
+	// If VSwitchSelectionPolicy is ordered, then call f.eniFactory.GetVSwitches() API to get a switch slice
+	// in descending order per each switch's availabel IP count.
+	vSwitches, err := f.eniFactory.GetVSwitches()
+	logrus.Debugf("adjusted vswitch slice: %+v, original eni slice: %+v", vSwitches, f.enis)
+	if err != nil {
+		logrus.Errorf("error to get vswitch slice: %v, instead use original eni slice in eniIPFactory: %v", err, f.enis)
+		return f.enis, err
+	} else {
+		for _, vswitch := range vSwitches {
+			for _, eni := range f.enis {
+				if vswitch == eni.VSwitch {
+					enis = append(enis, eni)
+				}
+			}
+		}
+		return enis, nil
+	}
+
+}
+
 func (f *eniIPFactory) submit() error {
 	f.Lock()
 	defer f.Unlock()
 	var enis []*ENI
-	// If there is only one switch, then no need for ordering.
-	// If there are multiple switches, then construct an enis slice per each switch's availabe IP count.
-	if len(f.enis) == 1 {
-		enis = f.enis
-	} else {
-		if vSwitchesInDescOrder, err := f.eniFactory.GetVSwitchesInDescOrder(); err == aliyun.ErrNoValidVSwitch {
-			// When RAM policy for VPC API permission doesn't exist, flow goes here.
-			enis = f.enis
-		} else {
-			// When RAM policy for VPC API permission exists, flow goes here.
-			for _, vswitch := range vSwitchesInDescOrder {
-				for _, eni := range f.enis {
-					if vswitch == eni.VSwitch {
-						enis = append(enis, eni)
-					}
-				}
-			} // for END
-		} // if-else END
-	}
-
-	//for _, eni := range f.enis {
+	enis, _ = f.getEnis()
 	for _, eni := range enis {
 		logrus.Debugf("check existing eni: %+v", eni)
 		eni.lock.Lock()
 		now := time.Now()
-		logrus.Debugf("check if the current eni is in the time window for IP allocation inhibition: %+v", eni)
+		logrus.Debugf("check if the current eni is in the time window for IP allocation inhibition: " +
+			"eni = %+v, vsw= %s, now = %s, expireAt = %s", eni, eni.VSwitch, now.Format(timeFormat), eni.ipAllocInhibitExpireAt.Format(timeFormat))
 		// if the current eni has been inhibited for Pod IP allocation, then skip current eni.
 		if now.Before(eni.ipAllocInhibitExpireAt) {
+			eni.lock.Unlock()
+			logrus.Debugf("skip IP allocation: eni = %+v, vsw = %s", eni, eni.VSwitch)
 			continue
 		}
-		eni.lock.Unlock()
 
-		eni.lock.Lock()
 		logrus.Debugf("check if the current eni will reach eni IP quota with new pending IP added: %+v", eni)
 		ipCount := eni.pending + len(eni.ips)
 		if ipCount < eni.MaxIPs {
 			select {
-			// specify which ENI will allocate IP for Pod.
 			case eni.ipBacklog <- struct{}{}:
 			default:
 				eni.lock.Unlock()
@@ -174,8 +183,10 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 				if eni.MAC == result.Eni.MAC {
 					eni.pending--
 					// if an error message with InvalidVSwitchId_IpNotEnough returned, then mark the ENI as IP allocation inhibited.
-					if strings.Contains(err.Error(), InvalidVSwitchId_IpNotEnough) {
+					if strings.Contains(result.err.Error(), InvalidVSwitchId_IpNotEnough) {
 						eni.ipAllocInhibitExpireAt = time.Now().Add(EniIpAllocInhibitTimeout)
+						logrus.Debugf("eni's associated vswitch %s has no available IP, set eni ipAllocInhibitExpireAt = %s",
+							eni.VSwitch, eni.ipAllocInhibitExpireAt.Format(timeFormat))
 					}
 				}
 			}

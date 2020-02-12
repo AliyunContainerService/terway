@@ -12,6 +12,12 @@ const (
 	ResourceTypeENIIP = "eniIp"
 )
 
+// Vswitch Selection Policy
+const (
+	VSwitchSelectionPolicyRandom = "random"
+	VSwitchSelectionPolicyOrdered = "ordered"
+)
+
 // ENI aliyun ENI resource
 type ENI struct {
 	ID           string
