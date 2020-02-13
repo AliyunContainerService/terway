@@ -127,6 +127,7 @@ func newMapSorter(m map[string]int) MapSorter {
 }
 
 func (ms MapSorter) SortInDescendingOrder()  {
+	logrus.Debugf("before bubble sorting, slice = %+v", ms)
 	for i := 0; i < ms.Len(); i++ {
 		for j := 0; j < ms.Len()-i-1; j++ {
 			if ms[j].Val < ms[j+1].Val {
@@ -134,6 +135,8 @@ func (ms MapSorter) SortInDescendingOrder()  {
 			}
 		}
 	}
+	logrus.Debugf("after bubble sorting, slice = %+v", ms)
+
 }
 func (ms MapSorter) Len() int {
 	return len(ms)
@@ -235,7 +238,7 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 
 func (f *eniFactory) Create() (types.NetworkResource, error) {
 	vSwitches, _ := f.GetVSwitches()
-	logrus.Debugf("adjusted vswitch slice: %+v", vSwitches)
+	logrus.Infof("adjusted vswitch slice: %+v", vSwitches)
 	return f.ecs.AllocateENI(vSwitches[0], f.securityGroup, f.instanceID)
 }
 

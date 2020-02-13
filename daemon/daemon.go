@@ -774,9 +774,7 @@ func setDefault(cfg *types.Configure) error {
 	}
 
 	// Default policy for vswitch selection is random.
-	if cfg.VSwitchSelectionPolicy == "" ||
-		(cfg.VSwitchSelectionPolicy != types.VSwitchSelectionPolicyRandom &&
-			cfg.VSwitchSelectionPolicy != types.VSwitchSelectionPolicyOrdered) {
+	if cfg.VSwitchSelectionPolicy == "" {
 		cfg.VSwitchSelectionPolicy = types.VSwitchSelectionPolicyRandom
 	}
 	return nil

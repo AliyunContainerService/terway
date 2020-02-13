@@ -81,7 +81,7 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 		}
 		logrus.Debugf("allocate %v ips for eni", toAllocate)
 		ips, err := e.ecs.AssignNIPsForENI(e.ENI.ID, toAllocate)
-		logrus.Debugf("allocated ips for eni: eni = %v, ips = %v, err = %v", e.ENI, ips, err)
+		logrus.Debugf("allocated ips for eni: eni = %+v, ips = %+v, err = %v", e.ENI, ips, err)
 		if err != nil {
 			logrus.Errorf("error allocate ips for eni: %v", err)
 			for i := 0; i < toAllocate; i++ {
@@ -117,7 +117,7 @@ func (f *eniIPFactory) getEnis() ([]*ENI, error) {
 	// If VSwitchSelectionPolicy is ordered, then call f.eniFactory.GetVSwitches() API to get a switch slice
 	// in descending order per each switch's availabel IP count.
 	vSwitches, err := f.eniFactory.GetVSwitches()
-	logrus.Debugf("adjusted vswitch slice: %+v, original eni slice: %+v", vSwitches, f.enis)
+	logrus.Infof("adjusted vswitch slice: %+v, original eni slice: %+v", vSwitches, f.enis)
 	if err != nil {
 		logrus.Errorf("error to get vswitch slice: %v, instead use original eni slice in eniIPFactory: %v", err, f.enis)
 		return f.enis, err
@@ -140,10 +140,10 @@ func (f *eniIPFactory) submit() error {
 	var enis []*ENI
 	enis, _ = f.getEnis()
 	for _, eni := range enis {
-		logrus.Debugf("check existing eni: %+v", eni)
+		logrus.Infof("check existing eni: %+v", eni)
 		eni.lock.Lock()
 		now := time.Now()
-		logrus.Debugf("check if the current eni is in the time window for IP allocation inhibition: " +
+		logrus.Infof("check if the current eni is in the time window for IP allocation inhibition: " +
 			"eni = %+v, vsw= %s, now = %s, expireAt = %s", eni, eni.VSwitch, now.Format(timeFormat), eni.ipAllocInhibitExpireAt.Format(timeFormat))
 		// if the current eni has been inhibited for Pod IP allocation, then skip current eni.
 		if now.Before(eni.ipAllocInhibitExpireAt) {
@@ -152,8 +152,9 @@ func (f *eniIPFactory) submit() error {
 			continue
 		}
 
-		logrus.Debugf("check if the current eni will reach eni IP quota with new pending IP added: %+v", eni)
 		ipCount := eni.pending + len(eni.ips)
+		logrus.Debugf("check if the current eni will reach eni IP quota with new pending IP added: " +
+			"eni = %+v, eni.pending = %d, len(eni.ips) = %d, eni.MaxIPs = %d", eni, eni.pending, len(eni.ips), eni.MaxIPs)
 		if ipCount < eni.MaxIPs {
 			select {
 			case eni.ipBacklog <- struct{}{}:
@@ -185,7 +186,7 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 					// if an error message with InvalidVSwitchId_IpNotEnough returned, then mark the ENI as IP allocation inhibited.
 					if strings.Contains(result.err.Error(), InvalidVSwitchId_IpNotEnough) {
 						eni.ipAllocInhibitExpireAt = time.Now().Add(EniIpAllocInhibitTimeout)
-						logrus.Debugf("eni's associated vswitch %s has no available IP, set eni ipAllocInhibitExpireAt = %s",
+						logrus.Infof("eni's associated vswitch %s has no available IP, set eni ipAllocInhibitExpireAt = %s",
 							eni.VSwitch, eni.ipAllocInhibitExpireAt.Format(timeFormat))
 					}
 				}
