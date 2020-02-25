@@ -81,10 +81,10 @@ func NewECS(ak, sk string, region common.Region) (ECS, error) {
 }
 
 // DescribeVSwitch for vswitch
-func (e *ecsImpl) DescribeVSwitch(vSwitch string) (availIpCount int, err error)  {
+func (e *ecsImpl) DescribeVSwitch(vSwitch string) (availIpCount int, err error) {
 	vSwitchArgs := &ecs.DescribeVSwitchesArgs{
-		RegionId:             e.region,
-		VSwitchId:            vSwitch,
+		RegionId:  e.region,
+		VSwitchId: vSwitch,
 	}
 	vsw, _, err := e.clientSet.ecs.DescribeVSwitches(vSwitchArgs)
 	// For systems without RAM policy for VPC API permission, result is:

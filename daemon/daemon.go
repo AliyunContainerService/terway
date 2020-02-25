@@ -786,16 +786,16 @@ func validateConfig(cfg *types.Configure) error {
 
 func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, error) {
 	poolConfig := &types.PoolConfig{
-		MaxPoolSize:   cfg.MaxPoolSize,
-		MinPoolSize:   cfg.MinPoolSize,
-		MaxENI:        cfg.MaxENI,
-		MinENI:        cfg.MinENI,
-		AccessID:      cfg.AccessID,
-		AccessSecret:  cfg.AccessSecret,
-		HotPlug:       cfg.HotPlug == "true",
-		EniCapRatio:   cfg.EniCapRatio,
-		EniCapShift:   cfg.EniCapShift,
-		SecurityGroup: cfg.SecurityGroup,
+		MaxPoolSize:            cfg.MaxPoolSize,
+		MinPoolSize:            cfg.MinPoolSize,
+		MaxENI:                 cfg.MaxENI,
+		MinENI:                 cfg.MinENI,
+		AccessID:               cfg.AccessID,
+		AccessSecret:           cfg.AccessSecret,
+		HotPlug:                cfg.HotPlug == "true",
+		EniCapRatio:            cfg.EniCapRatio,
+		EniCapShift:            cfg.EniCapShift,
+		SecurityGroup:          cfg.SecurityGroup,
 		VSwitchSelectionPolicy: cfg.VSwitchSelectionPolicy,
 	}
 

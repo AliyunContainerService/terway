@@ -22,9 +22,8 @@ const (
 // AssignPrivateIpAddresses const error message
 // Reference: https://help.aliyun.com/document_detail/85917.html
 const (
-
 	InvalidVSwitchId_IpNotEnough = "InvalidVSwitchId.IpNotEnough"
-	EniIpAllocInhibitTimeout = 10 * time.Minute
+	EniIpAllocInhibitTimeout     = 10 * time.Minute
 )
 
 const timeFormat = "2006-01-02 15:04:05"
@@ -143,7 +142,7 @@ func (f *eniIPFactory) submit() error {
 		logrus.Infof("check existing eni: %+v", eni)
 		eni.lock.Lock()
 		now := time.Now()
-		logrus.Infof("check if the current eni is in the time window for IP allocation inhibition: " +
+		logrus.Infof("check if the current eni is in the time window for IP allocation inhibition: "+
 			"eni = %+v, vsw= %s, now = %s, expireAt = %s", eni, eni.VSwitch, now.Format(timeFormat), eni.ipAllocInhibitExpireAt.Format(timeFormat))
 		// if the current eni has been inhibited for Pod IP allocation, then skip current eni.
 		if now.Before(eni.ipAllocInhibitExpireAt) {
@@ -153,7 +152,7 @@ func (f *eniIPFactory) submit() error {
 		}
 
 		ipCount := eni.pending + len(eni.ips)
-		logrus.Debugf("check if the current eni will reach eni IP quota with new pending IP added: " +
+		logrus.Debugf("check if the current eni will reach eni IP quota with new pending IP added: "+
 			"eni = %+v, eni.pending = %d, len(eni.ips) = %d, eni.MaxIPs = %d", eni, eni.pending, len(eni.ips), eni.MaxIPs)
 		if ipCount < eni.MaxIPs {
 			select {

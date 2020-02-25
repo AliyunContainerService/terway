@@ -14,7 +14,7 @@ const (
 
 // Vswitch Selection Policy
 const (
-	VSwitchSelectionPolicyRandom = "random"
+	VSwitchSelectionPolicyRandom  = "random"
 	VSwitchSelectionPolicyOrdered = "ordered"
 )
 
