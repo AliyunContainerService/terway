@@ -22,7 +22,7 @@ const (
 // AssignPrivateIpAddresses const error message
 // Reference: https://help.aliyun.com/document_detail/85917.html
 const (
-	InvalidVSwitchIdIpNotEnough = "InvalidVSwitchId.IpNotEnough"
+	InvalidVSwitchIDIPNotEnough = "InvalidVSwitchId.IpNotEnough"
 	EniIPAllocInhibitTimeout    = 10 * time.Minute
 )
 
@@ -181,8 +181,8 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 			for _, eni := range f.enis {
 				if eni.MAC == result.Eni.MAC {
 					eni.pending--
-					// if an error message with InvalidVSwitchIdIpNotEnough returned, then mark the ENI as IP allocation inhibited.
-					if strings.Contains(result.err.Error(), InvalidVSwitchIdIpNotEnough) {
+					// if an error message with InvalidVSwitchIDIPNotEnough returned, then mark the ENI as IP allocation inhibited.
+					if strings.Contains(result.err.Error(), InvalidVSwitchIDIPNotEnough) {
 						eni.ipAllocInhibitExpireAt = time.Now().Add(EniIPAllocInhibitTimeout)
 						logrus.Infof("eni's associated vswitch %s has no available IP, set eni ipAllocInhibitExpireAt = %s",
 							eni.VSwitch, eni.ipAllocInhibitExpireAt.Format(timeFormat))

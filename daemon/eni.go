@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	// The duration for the vswitchIPCntMap content's effectiveness
-	VSwitchIPCntTimeout = 10 * time.Minute
+	// vSwitchIPCntTimeout is the duration for the vswitchIPCntMap content's effectiveness
+	vSwitchIPCntTimeout = 10 * time.Minute
 )
 
 type eniResourceManager struct {
@@ -131,7 +131,7 @@ func newMapSorter(m map[string]int) MapSorter {
 	return ms
 }
 
-// Bubble sort per element's value
+// SortInDescendingOrder is a bubble sort per element's value
 func (ms MapSorter) SortInDescendingOrder() {
 	logrus.Debugf("before bubble sorting, slice = %+v", ms)
 	for i := 0; i < ms.Len(); i++ {
@@ -223,7 +223,7 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 			}
 
 			f.Lock()
-			f.tsExpireAt = time.Now().Add(VSwitchIPCntTimeout)
+			f.tsExpireAt = time.Now().Add(vSwitchIPCntTimeout)
 			f.Unlock()
 		}
 
