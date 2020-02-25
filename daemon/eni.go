@@ -1,6 +1,10 @@
 package daemon
 
 import (
+	"math/rand"
+	"sync"
+	"time"
+
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/types"
@@ -8,6 +12,11 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/pkg/errors"
+)
+
+const (
+	// vSwitchIPCntTimeout is the duration for the vswitchIPCntMap content's effectiveness
+	vSwitchIPCntTimeout = 10 * time.Minute
 )
 
 type eniResourceManager struct {
@@ -106,11 +115,56 @@ func (m *eniResourceManager) GarbageCollection(inUseSet map[string]interface{}, 
 	return nil
 }
 
+// MapSorter is a slice container for sorting
+type MapSorter []Item
+
+// Item is the element type of MapSorter, which contains the values for sorting
+type Item struct {
+	Key string
+	Val int
+}
+
+func newMapSorter(m map[string]int) MapSorter {
+	ms := make(MapSorter, 0, len(m))
+	for k, v := range m {
+		ms = append(ms, Item{k, v})
+	}
+	return ms
+}
+
+// SortInDescendingOrder is a bubble sort per element's value
+func (ms MapSorter) SortInDescendingOrder() {
+	logrus.Debugf("before bubble sorting, slice = %+v", ms)
+	for i := 0; i < ms.Len(); i++ {
+		for j := 0; j < ms.Len()-i-1; j++ {
+			if ms[j].Val < ms[j+1].Val {
+				ms.Swap(j, j+1)
+			}
+		}
+	}
+	logrus.Debugf("after bubble sorting, slice = %+v", ms)
+
+}
+func (ms MapSorter) Len() int {
+	return len(ms)
+}
+func (ms MapSorter) Less(i, j int) bool {
+	//return ms[i].Key < ms[j].Key // order by key
+	return ms[i].Val < ms[j].Val // order by value
+}
+func (ms MapSorter) Swap(i, j int) {
+	ms[i], ms[j] = ms[j], ms[i]
+}
+
 type eniFactory struct {
-	switches      []string
-	securityGroup string
-	instanceID    string
-	ecs           aliyun.ECS
+	switches               []string
+	securityGroup          string
+	instanceID             string
+	ecs                    aliyun.ECS
+	vswitchIPCntMap        map[string]int
+	tsExpireAt             time.Time
+	vswitchSelectionPolicy string
+	sync.RWMutex
 }
 
 func newENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*eniFactory, error) {
@@ -122,16 +176,77 @@ func newENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*eniFactory, e
 		poolConfig.SecurityGroup = securityGroup
 	}
 	return &eniFactory{
-		switches:      poolConfig.VSwitch,
-		securityGroup: poolConfig.SecurityGroup,
-		instanceID:    poolConfig.InstanceID,
-		ecs:           ecs,
+		switches:               poolConfig.VSwitch,
+		securityGroup:          poolConfig.SecurityGroup,
+		instanceID:             poolConfig.InstanceID,
+		ecs:                    ecs,
+		vswitchIPCntMap:        make(map[string]int),
+		vswitchSelectionPolicy: poolConfig.VSwitchSelectionPolicy,
 	}, nil
 }
 
+func (f *eniFactory) GetVSwitches() ([]string, error) {
+
+	var vSwitches []string
+
+	vswCnt := len(f.switches)
+	// If there is ONLY ONE vswitch, then there is no need for ordering per switches' available IP counts,
+	// return the slice with only this vswitch.
+	if vswCnt == 1 {
+		return f.switches, nil
+	}
+
+	if f.vswitchSelectionPolicy == types.VSwitchSelectionPolicyRandom {
+		vSwitches = make([]string, vswCnt)
+		copy(vSwitches, f.switches)
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(vswCnt, func(i, j int) { vSwitches[i], vSwitches[j] = vSwitches[j], vSwitches[i] })
+		return vSwitches, nil
+	}
+
+	if f.vswitchSelectionPolicy == types.VSwitchSelectionPolicyOrdered {
+		// If VSwitchSelectionPolicy is ordered, then call f.ecs.DescribeVSwitch API to get the switch's available IP count
+		// PS: this is only feasible for systems with RAM policy for VPC API permission.
+		// Use f.vswitchIPCntMap to track IP count + vswitch ID
+		var start = time.Now()
+		// If f.vswitchIPCntMap is empty, then fill in the map with switch + switch's available IP count.
+		if (len(f.vswitchIPCntMap) == 0 && f.tsExpireAt.IsZero()) || start.After(f.tsExpireAt) {
+			// Loop vswitch slice to get each vswitch's available IP count.
+			for _, vswitch := range f.switches {
+				availIPCount, err := f.ecs.DescribeVSwitch(vswitch)
+				f.Lock()
+				if err != nil {
+					f.vswitchIPCntMap[vswitch] = 0
+				} else {
+					f.vswitchIPCntMap[vswitch] = availIPCount
+				}
+				f.Unlock()
+			}
+
+			f.Lock()
+			f.tsExpireAt = time.Now().Add(vSwitchIPCntTimeout)
+			f.Unlock()
+		}
+
+		if len(f.vswitchIPCntMap) > 0 {
+			m := newMapSorter(f.vswitchIPCntMap)
+			//sort.Sort(sort.Reverse(m))
+			m.SortInDescendingOrder()
+			for _, item := range m {
+				vSwitches = append(vSwitches, item.Key)
+			}
+		} else {
+			vSwitches = f.switches
+		}
+	}
+
+	return vSwitches, nil
+}
+
 func (f *eniFactory) Create() (types.NetworkResource, error) {
-	//TODO support multi vswitch
-	return f.ecs.AllocateENI(f.switches[0], f.securityGroup, f.instanceID)
+	vSwitches, _ := f.GetVSwitches()
+	logrus.Infof("adjusted vswitch slice: %+v", vSwitches)
+	return f.ecs.AllocateENI(vSwitches[0], f.securityGroup, f.instanceID)
 }
 
 func (f *eniFactory) Dispose(resource types.NetworkResource) error {

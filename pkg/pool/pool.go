@@ -50,7 +50,7 @@ type ObjectFactory interface {
 
 type simpleObjectPool struct {
 	inuse      map[string]poolItem
-	idle       *priorityQeueu
+	idle       *priorityQeueu // Todo: Fix this typo
 	lock       sync.Mutex
 	factory    ObjectFactory
 	maxIdle    int
