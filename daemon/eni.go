@@ -1,13 +1,14 @@
 package daemon
 
 import (
+	"math/rand"
+	"sync"
+	"time"
+
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/sirupsen/logrus"
-	"math/rand"
-	"sync"
-	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/pkg/errors"
