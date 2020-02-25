@@ -22,8 +22,6 @@ const (
 	NetworkInterfaceTagCreatorValue = "terway"
 )
 
-var ErrNoValidVSwitch = errors.Errorf("No valid vswitch found.")
-
 // ECS the interface of ecs operation set
 type ECS interface {
 	AllocateENI(vSwitch string, securityGroup string, instanceID string) (*types.ENI, error)
@@ -39,7 +37,7 @@ type ECS interface {
 	GetInstanceMaxPrivateIP(intanceID string) (int, error)
 	GetENIMaxIP(instanceID string, eniID string) (int, error)
 	GetAttachedSecurityGroup(instanceID string) (string, error)
-	DescribeVSwitch(vSwitch string) (availIpCount int, err error)
+	DescribeVSwitch(vSwitch string) (availIPCount int, err error)
 }
 
 type ecsImpl struct {
@@ -81,7 +79,7 @@ func NewECS(ak, sk string, region common.Region) (ECS, error) {
 }
 
 // DescribeVSwitch for vswitch
-func (e *ecsImpl) DescribeVSwitch(vSwitch string) (availIpCount int, err error) {
+func (e *ecsImpl) DescribeVSwitch(vSwitch string) (availIPCount int, err error) {
 	vSwitchArgs := &ecs.DescribeVSwitchesArgs{
 		RegionId:  e.region,
 		VSwitchId: vSwitch,
@@ -97,9 +95,9 @@ func (e *ecsImpl) DescribeVSwitch(vSwitch string) (availIpCount int, err error) 
 	logrus.Debugf("result for DescribeVSwitches: vsw slice = %+v, err = %v", vsw, err)
 	if len(vsw) > 0 {
 		return vsw[0].AvailableIpAddressCount, nil
-	} else {
-		return 0, err
 	}
+	return 0, err
+
 }
 
 // AllocateENI for instance

@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	// The duration for the vswitchIPCntMap content's effectiveness
 	VSwitchIPCntTimeout = 10 * time.Minute
 )
 
@@ -113,7 +114,10 @@ func (m *eniResourceManager) GarbageCollection(inUseSet map[string]interface{}, 
 	return nil
 }
 
+// MapSorter is a slice container for sorting
 type MapSorter []Item
+
+// Item is the element type of MapSorter, which contains the values for sorting
 type Item struct {
 	Key string
 	Val int
@@ -127,6 +131,7 @@ func newMapSorter(m map[string]int) MapSorter {
 	return ms
 }
 
+// Bubble sort per element's value
 func (ms MapSorter) SortInDescendingOrder() {
 	logrus.Debugf("before bubble sorting, slice = %+v", ms)
 	for i := 0; i < ms.Len(); i++ {
@@ -155,7 +160,7 @@ type eniFactory struct {
 	securityGroup          string
 	instanceID             string
 	ecs                    aliyun.ECS
-	vswitchIpCntMap        map[string]int
+	vswitchIPCntMap        map[string]int
 	tsExpireAt             time.Time
 	vswitchSelectionPolicy string
 	sync.RWMutex
@@ -174,7 +179,7 @@ func newENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*eniFactory, e
 		securityGroup:          poolConfig.SecurityGroup,
 		instanceID:             poolConfig.InstanceID,
 		ecs:                    ecs,
-		vswitchIpCntMap:        make(map[string]int),
+		vswitchIPCntMap:        make(map[string]int),
 		vswitchSelectionPolicy: poolConfig.VSwitchSelectionPolicy,
 	}, nil
 }
@@ -201,18 +206,18 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 	if f.vswitchSelectionPolicy == types.VSwitchSelectionPolicyOrdered {
 		// If VSwitchSelectionPolicy is ordered, then call f.ecs.DescribeVSwitch API to get the switch's available IP count
 		// PS: this is only feasible for systems with RAM policy for VPC API permission.
-		// Use f.vswitchIpCntMap to track IP count + vswitch ID
+		// Use f.vswitchIPCntMap to track IP count + vswitch ID
 		var start = time.Now()
-		// If f.vswitchIpCntMap is empty, then fill in the map with switch + switch's available IP count.
-		if (len(f.vswitchIpCntMap) == 0 && f.tsExpireAt.IsZero()) || start.After(f.tsExpireAt) {
+		// If f.vswitchIPCntMap is empty, then fill in the map with switch + switch's available IP count.
+		if (len(f.vswitchIPCntMap) == 0 && f.tsExpireAt.IsZero()) || start.After(f.tsExpireAt) {
 			// Loop vswitch slice to get each vswitch's available IP count.
 			for _, vswitch := range f.switches {
-				availIpCount, err := f.ecs.DescribeVSwitch(vswitch)
+				availIPCount, err := f.ecs.DescribeVSwitch(vswitch)
 				f.Lock()
 				if err != nil {
-					f.vswitchIpCntMap[vswitch] = 0
+					f.vswitchIPCntMap[vswitch] = 0
 				} else {
-					f.vswitchIpCntMap[vswitch] = availIpCount
+					f.vswitchIPCntMap[vswitch] = availIPCount
 				}
 				f.Unlock()
 			}
@@ -222,8 +227,8 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 			f.Unlock()
 		}
 
-		if len(f.vswitchIpCntMap) > 0 {
-			m := newMapSorter(f.vswitchIpCntMap)
+		if len(f.vswitchIPCntMap) > 0 {
+			m := newMapSorter(f.vswitchIPCntMap)
 			//sort.Sort(sort.Reverse(m))
 			m.SortInDescendingOrder()
 			for _, item := range m {
