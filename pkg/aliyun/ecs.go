@@ -523,8 +523,14 @@ func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 		func() (done bool, err error) {
 			insType, err := e.GetInstanceAttributesType(instanceID)
 			if err != nil {
-				logrus.Debugf("error get instance attributes type %s: %v", instanceID, err)
-				return false, nil
+				// failback to deprecated DescribeInstanceAttribute
+				start := time.Now()
+				insType, err = e.clientSet.ecs.DescribeInstanceAttribute(instanceID)
+				metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+				if err != nil {
+					logrus.Warnf("error get instance info: %s: %v， retry...", instanceID, err)
+					return false, nil
+				}
 			}
 
 			start := time.Now()
