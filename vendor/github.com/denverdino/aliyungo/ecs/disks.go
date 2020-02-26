@@ -139,6 +139,7 @@ type CreateDiskArgs struct {
 	Encrypted    bool
 	DiskCategory DiskCategory
 	Size         int
+	Tag          map[string]string
 	SnapshotId   string
 	ClientToken  string
 	KMSKeyID     string
@@ -348,7 +349,7 @@ func (client *Client) WaitForDisk(regionId common.Region, diskId string, status 
 		if err != nil {
 			return err
 		}
-		if disks == nil || len(disks) == 0 {
+		if len(disks) == 0 {
 			return common.GetClientErrorFromString("Not found")
 		}
 		if disks[0].Status == status {
