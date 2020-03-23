@@ -7,6 +7,7 @@ type Configure struct {
 	Version                string              `yaml:"version" json:"version"`
 	AccessID               string              `yaml:"access_key" json:"access_key"`
 	AccessSecret           string              `yaml:"access_secret" json:"access_secret"`
+	CredentialPath         string              `yaml:"credential_path" json:"credential_path"`
 	ServiceCIDR            string              `yaml:"service_cidr" json:"service_cidr"`
 	VSwitches              map[string][]string `yaml:"vswitches" json:"vswitches"`
 	MaxPoolSize            int                 `yaml:"max_pool_size" json:"max_pool_size"`

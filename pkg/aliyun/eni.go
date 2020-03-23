@@ -175,7 +175,7 @@ func (eoa *eniOpenAPI) GetENIPrivateAddresses(eniID string) ([]net.IP, error) {
 		RegionId:           eoa.region,
 		NetworkInterfaceId: []string{eniID},
 	}
-	resp, err := eoa.clientSet.ecs.DescribeNetworkInterfaces(describeNetworkInterfacesArgs)
+	resp, err := eoa.clientSet.Ecs().DescribeNetworkInterfaces(describeNetworkInterfacesArgs)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get info from openapi: eniid: %s", eniID)
 	}
