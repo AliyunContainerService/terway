@@ -13,12 +13,11 @@ import (
 )
 
 var (
-	accessKeyID       string
-	accessKeySecret   string
-	credentialPath    string
-	credentialKeyPath string
-	region            string
-	mode              string
+	accessKeyID     string
+	accessKeySecret string
+	credentialPath  string
+	region          string
+	mode            string
 )
 
 func init() {

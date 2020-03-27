@@ -3,6 +3,7 @@ package aliyun
 import (
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -337,7 +338,10 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 	err = wait.ExponentialBackoff(eniOpBackoff, func() (bool, error) {
 		_, innerErr = e.clientSet.Ecs().AssignPrivateIpAddresses(assignPrivateIPAddressesArgs)
 		if innerErr != nil {
-			logrus.Warnf("Assign private ip address failed: %+v, retrying", err)
+			logrus.Warnf("Assign private ip address failed: %+v, retrying", innerErr)
+			if strings.Contains(innerErr.Error(), InvalidVSwitchIDIPNotEnough) {
+				return false, errors.Errorf("Assign private ip address failed: %+v", innerErr)
+			}
 			return false, nil
 		}
 		return true, nil

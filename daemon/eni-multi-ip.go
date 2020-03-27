@@ -19,11 +19,8 @@ const (
 	maxIPBacklog    = 10
 )
 
-// AssignPrivateIpAddresses const error message
-// Reference: https://help.aliyun.com/document_detail/85917.html
 const (
-	InvalidVSwitchIDIPNotEnough = "InvalidVSwitchId.IpNotEnough"
-	EniIPAllocInhibitTimeout    = 10 * time.Minute
+	eniIPAllocInhibitTimeout = 10 * time.Minute
 )
 
 const timeFormat = "2006-01-02 15:04:05"
@@ -110,7 +107,7 @@ func (f *eniIPFactory) getEnis() ([]*ENI, error) {
 	var enis []*ENI
 	enisLen := len(f.enis)
 	// If there is only one switch, then no need for ordering.
-	if enisLen == 1 {
+	if enisLen <= 1 {
 		return f.enis, nil
 	}
 	// If VSwitchSelectionPolicy is ordered, then call f.eniFactory.GetVSwitches() API to get a switch slice
@@ -182,8 +179,8 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 				if eni.MAC == result.Eni.MAC {
 					eni.pending--
 					// if an error message with InvalidVSwitchIDIPNotEnough returned, then mark the ENI as IP allocation inhibited.
-					if strings.Contains(result.err.Error(), InvalidVSwitchIDIPNotEnough) {
-						eni.ipAllocInhibitExpireAt = time.Now().Add(EniIPAllocInhibitTimeout)
+					if strings.Contains(result.err.Error(), aliyun.InvalidVSwitchIDIPNotEnough) {
+						eni.ipAllocInhibitExpireAt = time.Now().Add(eniIPAllocInhibitTimeout)
 						logrus.Infof("eni's associated vswitch %s has no available IP, set eni ipAllocInhibitExpireAt = %s",
 							eni.VSwitch, eni.ipAllocInhibitExpireAt.Format(timeFormat))
 					}
