@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"math/rand"
+	"sort"
 	"sync"
 	"time"
 
@@ -134,26 +135,12 @@ func newMapSorter(m map[string]int) MapSorter {
 
 // SortInDescendingOrder is a bubble sort per element's value
 func (ms MapSorter) SortInDescendingOrder() {
-	logrus.Debugf("before bubble sorting, slice = %+v", ms)
-	for i := 0; i < ms.Len(); i++ {
-		for j := 0; j < ms.Len()-i-1; j++ {
-			if ms[j].Val < ms[j+1].Val {
-				ms.Swap(j, j+1)
-			}
-		}
-	}
-	logrus.Debugf("after bubble sorting, slice = %+v", ms)
-
-}
-func (ms MapSorter) Len() int {
-	return len(ms)
-}
-func (ms MapSorter) Less(i, j int) bool {
-	//return ms[i].Key < ms[j].Key // order by key
-	return ms[i].Val < ms[j].Val // order by value
-}
-func (ms MapSorter) Swap(i, j int) {
-	ms[i], ms[j] = ms[j], ms[i]
+	logrus.Debugf("before sorting, slice = %+v", ms)
+	sort.Slice(ms, func(i, j int) bool {
+		// reverse sorting
+		return ms[i].Val > ms[j].Val
+	})
+	logrus.Debugf("after sorting, slice = %+v", ms)
 }
 
 type eniFactory struct {
@@ -208,25 +195,29 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 		// If VSwitchSelectionPolicy is ordered, then call f.ecs.DescribeVSwitch API to get the switch's available IP count
 		// PS: this is only feasible for systems with RAM policy for VPC API permission.
 		// Use f.vswitchIPCntMap to track IP count + vswitch ID
-		var start = time.Now()
+		var (
+			start        = time.Now()
+			err          error
+			availIPCount int
+		)
 		// If f.vswitchIPCntMap is empty, then fill in the map with switch + switch's available IP count.
+		f.Lock()
 		if (len(f.vswitchIPCntMap) == 0 && f.tsExpireAt.IsZero()) || start.After(f.tsExpireAt) {
 			// Loop vswitch slice to get each vswitch's available IP count.
 			for _, vswitch := range f.switches {
-				availIPCount, err := f.ecs.DescribeVSwitch(vswitch)
-				f.Lock()
+				availIPCount, err = f.ecs.DescribeVSwitch(vswitch)
 				if err != nil {
 					f.vswitchIPCntMap[vswitch] = 0
 				} else {
 					f.vswitchIPCntMap[vswitch] = availIPCount
 				}
-				f.Unlock()
 			}
-
-			f.Lock()
-			f.tsExpireAt = time.Now().Add(vSwitchIPCntTimeout)
-			f.Unlock()
+			if err == nil {
+				// don't cache result when error
+				f.tsExpireAt = time.Now().Add(vSwitchIPCntTimeout)
+			}
 		}
+		f.Unlock()
 
 		if len(f.vswitchIPCntMap) > 0 {
 			m := newMapSorter(f.vswitchIPCntMap)
@@ -243,10 +234,18 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 	return vSwitches, nil
 }
 
-func (f *eniFactory) Create() (types.NetworkResource, error) {
+func (f *eniFactory) Create(int) ([]types.NetworkResource, error) {
+	return f.CreateWithIPCount(1)
+}
+
+func (f *eniFactory) CreateWithIPCount(count int) ([]types.NetworkResource, error) {
 	vSwitches, _ := f.GetVSwitches()
 	logrus.Infof("adjusted vswitch slice: %+v", vSwitches)
-	return f.ecs.AllocateENI(vSwitches[0], f.securityGroup, f.instanceID)
+	eni, err := f.ecs.AllocateENI(vSwitches[0], f.securityGroup, f.instanceID, count)
+	if err != nil {
+		return nil, err
+	}
+	return []types.NetworkResource{eni}, nil
 }
 
 func (f *eniFactory) Dispose(resource types.NetworkResource) error {

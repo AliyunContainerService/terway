@@ -25,7 +25,7 @@ const (
 
 // ECS the interface of ecs operation set
 type ECS interface {
-	AllocateENI(vSwitch string, securityGroup string, instanceID string) (*types.ENI, error)
+	AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int) (*types.ENI, error)
 	GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error)
 	GetENIByID(instanceID, eniID string) (*types.ENI, error)
 	GetENIByMac(instanceID, mac string) (*types.ENI, error)
@@ -102,7 +102,7 @@ func (e *ecsImpl) DescribeVSwitch(vSwitch string) (availIPCount int, err error) 
 }
 
 // AllocateENI for instance
-func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID string) (*types.ENI, error) {
+func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int) (*types.ENI, error) {
 	if vSwitch == "" || len(securityGroup) == 0 || instanceID == "" {
 		return nil, errors.Errorf("invalid eni args for allocate")
 	}
@@ -111,11 +111,12 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 		err   error
 	)
 	createNetworkInterfaceArgs := &ecs.CreateNetworkInterfaceArgs{
-		RegionId:             e.region,
-		VSwitchId:            vSwitch,
-		SecurityGroupId:      securityGroup,
-		NetworkInterfaceName: generateEniName(),
-		Description:          eniDescription,
+		RegionId:                       e.region,
+		VSwitchId:                      vSwitch,
+		SecurityGroupId:                securityGroup,
+		NetworkInterfaceName:           generateEniName(),
+		Description:                    eniDescription,
+		SecondaryPrivateIpAddressCount: ipCount - 1,
 		Tag: map[string]string{
 			NetworkInterfaceTagCreatorKey: NetworkInterfaceTagCreatorValue,
 		},

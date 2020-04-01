@@ -44,7 +44,7 @@ type ResourceHolder interface {
 
 // ObjectFactory interface of network resource object factory
 type ObjectFactory interface {
-	Create() (types.NetworkResource, error)
+	Create(int) ([]types.NetworkResource, error)
 	Dispose(types.NetworkResource) error
 }
 
@@ -175,10 +175,14 @@ func (p *simpleObjectPool) tooManyIdleLocked() bool {
 	return p.idle.Size() > p.maxIdle || (p.idle.Size() > 0 && p.sizeLocked() > p.capacity)
 }
 
-func (p *simpleObjectPool) needAddition() bool {
+func (p *simpleObjectPool) needAddition() int {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	return p.idle.Size() < p.minIdle && p.sizeLocked() < p.capacity
+	addition := p.minIdle - p.idle.Size()
+	if addition > (p.capacity - p.sizeLocked()) {
+		return p.capacity - p.sizeLocked()
+	}
+	return addition
 }
 
 func (p *simpleObjectPool) peekOverfullIdle() *poolItem {
@@ -224,21 +228,43 @@ func (p *simpleObjectPool) checkIdle() {
 }
 
 func (p *simpleObjectPool) checkInsufficient() {
-	for {
-		if !p.needAddition() {
-			break
-		}
-		<-p.tokenCh
-		res, err := p.factory.Create()
-		if err != nil {
-			p.backoffTime = p.backoffTime * 2
-			p.tokenCh <- struct{}{}
-			time.Sleep(p.backoffTime)
+	addition := p.needAddition()
+	if addition <= 0 {
+		return
+	}
+	var tokenAquired int
+	for i := 0; i < addition; i++ {
+		// pending resources
+		select {
+		case <-p.tokenCh:
+			tokenAquired++
+		default:
 			continue
 		}
-		p.backoffTime = defaultPoolBackoff
-		p.AddIdle(res)
 	}
+	log.Debugf("token acquired count: %v", tokenAquired)
+	resList, err := p.factory.Create(tokenAquired)
+	if err != nil {
+		log.Errorf("error add idle network resources: %v", err)
+	}
+	if tokenAquired == len(resList) {
+		p.backoffTime = defaultPoolBackoff
+	}
+	for _, res := range resList {
+		log.Infof("add resource %s to pool idle", res.GetResourceID())
+		p.AddIdle(res)
+		tokenAquired--
+	}
+	for i := 0; i < tokenAquired; i++ {
+		// release token
+		p.tokenCh <- struct{}{}
+	}
+
+	if err != nil {
+		p.backoffTime = p.backoffTime * 2
+		time.Sleep(p.backoffTime)
+	}
+	return
 }
 
 func (p *simpleObjectPool) preload() error {
@@ -294,14 +320,14 @@ func (p *simpleObjectPool) Acquire(ctx context.Context, resID, idempotentKey str
 	select {
 	case <-p.tokenCh:
 		//should we pass ctx into factory.Create?
-		res, err := p.factory.Create()
-		if err != nil {
+		res, err := p.factory.Create(1)
+		if err != nil || len(res) == 0 {
 			p.tokenCh <- struct{}{}
 			return nil, fmt.Errorf("error create from factory: %v", err)
 		}
-		log.Infof("acquire (expect %s): return newly %s", resID, res.GetResourceID())
-		p.AddInuse(res, idempotentKey)
-		return res, nil
+		log.Infof("acquire (expect %s): return newly %s", resID, res[0].GetResourceID())
+		p.AddInuse(res[0], idempotentKey)
+		return res[0], nil
 	case <-ctx.Done():
 		log.Infof("acquire (expect %s): return err %v", resID, ErrContextDone)
 		return nil, ErrContextDone

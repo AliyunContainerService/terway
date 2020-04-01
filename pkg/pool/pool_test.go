@@ -33,7 +33,7 @@ func (n mockNetworkResource) GetType() string {
 	return "mock"
 }
 
-func (f *mockObjectFactory) Create() (types.NetworkResource, error) {
+func (f *mockObjectFactory) Create(int) ([]types.NetworkResource, error) {
 	time.Sleep(f.createDelay)
 	if f.err != nil {
 		return nil, f.err
@@ -47,9 +47,9 @@ func (f *mockObjectFactory) Create() (types.NetworkResource, error) {
 
 	f.idGenerator++
 	f.totalCreated++
-	return &mockNetworkResource{
+	return []types.NetworkResource{&mockNetworkResource{
 		id: fmt.Sprintf("%d", f.idGenerator),
-	}, nil
+	}}, nil
 }
 
 func (f *mockObjectFactory) Dispose(types.NetworkResource) error {
