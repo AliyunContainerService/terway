@@ -40,7 +40,6 @@ type networkService struct {
 	//networkResourceMgr ResourceManager
 	mgrForResource  map[string]ResourceManager
 	pendingPods     map[string]interface{}
-	patchPodIP      bool
 	pendingPodsLock sync.RWMutex
 	sync.RWMutex
 }
@@ -199,7 +198,6 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 	}
 
 	// 3. Allocate network resource for pod
-	var podIP string
 	switch podinfo.PodNetworkType {
 	case podNetworkTypeENIMultiIP:
 		var eniMultiIP *types.ENIIP
@@ -221,7 +219,6 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 		if err != nil {
 			return nil, errors.Wrapf(err, "error put resource into store")
 		}
-		podIP = eniMultiIP.SecAddress.String()
 		allocIPReply.IPType = rpc.IPType_TypeENIMultiIP
 		allocIPReply.Success = true
 		allocIPReply.NetworkInfo = &rpc.AllocIPReply_ENIMultiIP{
@@ -261,7 +258,6 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 		if err != nil {
 			return nil, errors.Wrapf(err, "error put resource into store")
 		}
-		podIP = vpcEni.Address.IP.String()
 		allocIPReply.IPType = rpc.IPType_TypeVPCENI
 		allocIPReply.Success = true
 		allocIPReply.NetworkInfo = &rpc.AllocIPReply_VpcEni{
@@ -323,14 +319,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 		return nil, errors.Wrapf(err, "error on grpc connection")
 	}
 
-	// 4. patch podIP to kube-apiserver
-	if allocIPReply.Success && podIP != "" && networkService.patchPodIP {
-		if _, err := networkService.k8s.PatchAllocatedPodIP(podinfo, podIP); err != nil {
-			return nil, errors.Wrapf(err, fmt.Sprintf("failed to patch podIP to pod %s.", podInfoKey(podinfo.Namespace, podinfo.Name)))
-		}
-	}
-
-	// 5. return allocate result
+	// 4. return allocate result
 	return allocIPReply, err
 }
 
@@ -550,10 +539,9 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 	}()
 }
 
-func newNetworkService(configFilePath, kubeconfig, master, daemonMode string, patchPodIP bool) (rpc.TerwayBackendServer, error) {
+func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (rpc.TerwayBackendServer, error) {
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
 	netSrv := &networkService{
-		patchPodIP:      patchPodIP,
 		pendingPods:     map[string]interface{}{},
 		pendingPodsLock: sync.RWMutex{},
 	}
