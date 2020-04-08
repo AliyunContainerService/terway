@@ -401,6 +401,20 @@ func cmdDel(args *skel.CmdArgs) error {
 
 	hostVethName := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
 
+	reply, err := terwayBackendClient.ReleaseIP(
+		context.Background(),
+		&rpc.ReleaseIPRequest{
+			K8SPodName:             string(k8sConfig.K8S_POD_NAME),
+			K8SPodNamespace:        string(k8sConfig.K8S_POD_NAMESPACE),
+			K8SPodInfraContainerId: string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID),
+			IPType:                 infoResult.GetIPType(),
+			Reason:                 "normal release",
+		})
+
+	if err != nil || !reply.GetSuccess() {
+		return fmt.Errorf("error release ip for pod, maybe cause resource leak: %v, %v", err, reply)
+	}
+
 	switch infoResult.IPType {
 	case rpc.IPType_TypeENIMultiIP:
 		if conf.ENIIPVirtualType == eniIPVirtualTypeIPVlan {
@@ -448,20 +462,6 @@ func cmdDel(args *skel.CmdArgs) error {
 
 	default:
 		return fmt.Errorf("not support this network type")
-	}
-
-	reply, err := terwayBackendClient.ReleaseIP(
-		context.Background(),
-		&rpc.ReleaseIPRequest{
-			K8SPodName:             string(k8sConfig.K8S_POD_NAME),
-			K8SPodNamespace:        string(k8sConfig.K8S_POD_NAMESPACE),
-			K8SPodInfraContainerId: string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID),
-			IPType:                 infoResult.GetIPType(),
-			Reason:                 "normal release",
-		})
-
-	if err != nil || !reply.GetSuccess() {
-		return fmt.Errorf("error release ip for pod, maybe cause resource leak: %v, %v", err, reply)
 	}
 
 	result := &current.Result{

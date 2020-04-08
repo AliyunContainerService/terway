@@ -102,7 +102,7 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 		maxIdle:     cfg.MaxIdle,
 		minIdle:     cfg.MinIdle,
 		capacity:    cfg.Capacity,
-		notifyCh:    make(chan interface{}),
+		notifyCh:    make(chan interface{}, 1),
 		tokenCh:     make(chan struct{}, cfg.Capacity),
 		backoffTime: defaultPoolBackoff,
 	}
@@ -232,39 +232,45 @@ func (p *simpleObjectPool) checkInsufficient() {
 	if addition <= 0 {
 		return
 	}
-	var tokenAquired int
+	var tokenAcquired int
 	for i := 0; i < addition; i++ {
 		// pending resources
 		select {
 		case <-p.tokenCh:
-			tokenAquired++
+			tokenAcquired++
 		default:
 			continue
 		}
 	}
-	log.Debugf("token acquired count: %v", tokenAquired)
-	resList, err := p.factory.Create(tokenAquired)
+	log.Debugf("token acquired count: %v", tokenAcquired)
+	if tokenAcquired <= 0 {
+		return
+	}
+	resList, err := p.factory.Create(tokenAcquired)
 	if err != nil {
 		log.Errorf("error add idle network resources: %v", err)
 	}
-	if tokenAquired == len(resList) {
+	if tokenAcquired == len(resList) {
 		p.backoffTime = defaultPoolBackoff
 	}
 	for _, res := range resList {
 		log.Infof("add resource %s to pool idle", res.GetResourceID())
 		p.AddIdle(res)
-		tokenAquired--
+		tokenAcquired--
 	}
-	for i := 0; i < tokenAquired; i++ {
+	for i := 0; i < tokenAcquired; i++ {
 		// release token
 		p.tokenCh <- struct{}{}
+	}
+	if tokenAcquired != 0 {
+		log.Debugf("token acquired left: %d, err: %v", tokenAcquired, err)
+		p.notify()
 	}
 
 	if err != nil {
 		p.backoffTime = p.backoffTime * 2
 		time.Sleep(p.backoffTime)
 	}
-	return
 }
 
 func (p *simpleObjectPool) preload() error {

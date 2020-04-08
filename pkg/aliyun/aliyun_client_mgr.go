@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
-
 	"github.com/denverdino/aliyungo/common"
 	"github.com/sirupsen/logrus"
 
@@ -183,12 +181,12 @@ func pks5UnPadding(origData []byte) []byte {
 func decrypt(s string, keyring []byte) ([]byte, error) {
 	cdata, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		glog.Errorf("failed to decode base64 string, err: %v", err)
+		logrus.Errorf("failed to decode base64 string, err: %v", err)
 		return nil, err
 	}
 	block, err := aes.NewCipher(keyring)
 	if err != nil {
-		glog.Errorf("failed to new cipher, err: %v", err)
+		logrus.Errorf("failed to new cipher, err: %v", err)
 		return nil, err
 	}
 	blockSize := block.BlockSize()

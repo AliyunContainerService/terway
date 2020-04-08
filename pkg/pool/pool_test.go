@@ -3,9 +3,12 @@ package pool
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/stretchr/testify/assert"
@@ -112,6 +115,11 @@ func createPool(factory ObjectFactory, minIdle, maxIdle, initIdle, initInuse int
 		panic(err)
 	}
 	return pool
+}
+
+func TestMain(m *testing.M) {
+	logrus.SetLevel(logrus.DebugLevel)
+	os.Exit(m.Run())
 }
 
 func TestInitializerExceedMaxIdle(t *testing.T) {

@@ -119,7 +119,7 @@ func (f *eniIPFactory) getEnis() ([]*ENI, error) {
 	if enisLen <= 1 {
 		return f.enis, nil
 	}
-	// pre sort eni by ip count to balance ip allocate on enis
+	// pre sort eni by ip count to balance ip allocation on enis
 	sort.Slice(f.enis, func(i, j int) bool {
 		return f.enis[i].getIPCountLocked() < f.enis[j].getIPCountLocked()
 	})

@@ -477,7 +477,9 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 			podKeyMap := make(map[string]bool)
 
 			for _, pod := range pods {
-				podKeyMap[podInfoKey(pod.Namespace, pod.Name)] = true
+				if !pod.SandboxExited {
+					podKeyMap[podInfoKey(pod.Namespace, pod.Name)] = true
+				}
 			}
 
 			var (

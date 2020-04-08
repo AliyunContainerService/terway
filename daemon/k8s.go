@@ -45,6 +45,7 @@ type podInfo struct {
 	TcEgress       uint64
 	PodNetworkType string
 	PodIP          string
+	SandboxExited  bool
 	IPStickTime    time.Duration
 }
 
@@ -277,6 +278,8 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 			pi.TcEgress = egress
 		}
 	}
+
+	pi.SandboxExited = pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
 
 	if len(pod.OwnerReferences) != 0 {
 		switch strings.ToLower(pod.OwnerReferences[0].Kind) {
