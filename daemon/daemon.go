@@ -477,7 +477,9 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 			podKeyMap := make(map[string]bool)
 
 			for _, pod := range pods {
-				podKeyMap[podInfoKey(pod.Namespace, pod.Name)] = true
+				if !pod.SandboxExited {
+					podKeyMap[podInfoKey(pod.Namespace, pod.Name)] = true
+				}
 			}
 
 			var (
@@ -582,7 +584,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, errors.Wrapf(err, "error get region-id")
 	}
 
-	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, regionID)
+	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, regionID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get aliyun client")
 	}

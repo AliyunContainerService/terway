@@ -3,6 +3,7 @@ package aliyun
 import (
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,7 +25,7 @@ const (
 
 // ECS the interface of ecs operation set
 type ECS interface {
-	AllocateENI(vSwitch string, securityGroup string, instanceID string) (*types.ENI, error)
+	AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int) (*types.ENI, error)
 	GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error)
 	GetENIByID(instanceID, eniID string) (*types.ENI, error)
 	GetENIByMac(instanceID, mac string) (*types.ENI, error)
@@ -50,13 +51,13 @@ type ecsImpl struct {
 }
 
 // NewECS return new ECS implement object
-func NewECS(ak, sk string, region common.Region) (ECS, error) {
-	clientSet, err := NewClientMgr(ak, sk)
+func NewECS(ak, sk, credentialPath string, region common.Region) (ECS, error) {
+	clientSet, err := NewClientMgr(ak, sk, credentialPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get clientset")
 	}
 	if region == "" {
-		regionStr, err := clientSet.meta.Region()
+		regionStr, err := clientSet.MetaData().Region()
 		if err != nil {
 			return nil, errors.Wrapf(err, "error get regionid")
 		}
@@ -84,7 +85,7 @@ func (e *ecsImpl) DescribeVSwitch(vSwitch string) (availIPCount int, err error) 
 		RegionId:  e.region,
 		VSwitchId: vSwitch,
 	}
-	vsw, _, err := e.clientSet.ecs.DescribeVSwitches(vSwitchArgs)
+	vsw, _, err := e.clientSet.Ecs().DescribeVSwitches(vSwitchArgs)
 	// For systems without RAM policy for VPC API permission, result is:
 	// vsw is an empty slice, err is nil.
 	// For systems which have RAM policy for VPC API permission,
@@ -101,7 +102,7 @@ func (e *ecsImpl) DescribeVSwitch(vSwitch string) (availIPCount int, err error) 
 }
 
 // AllocateENI for instance
-func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID string) (*types.ENI, error) {
+func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int) (*types.ENI, error) {
 	if vSwitch == "" || len(securityGroup) == 0 || instanceID == "" {
 		return nil, errors.Errorf("invalid eni args for allocate")
 	}
@@ -110,16 +111,17 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 		err   error
 	)
 	createNetworkInterfaceArgs := &ecs.CreateNetworkInterfaceArgs{
-		RegionId:             e.region,
-		VSwitchId:            vSwitch,
-		SecurityGroupId:      securityGroup,
-		NetworkInterfaceName: generateEniName(),
-		Description:          eniDescription,
+		RegionId:                       e.region,
+		VSwitchId:                      vSwitch,
+		SecurityGroupId:                securityGroup,
+		NetworkInterfaceName:           generateEniName(),
+		Description:                    eniDescription,
+		SecondaryPrivateIpAddressCount: ipCount - 1,
 		Tag: map[string]string{
 			NetworkInterfaceTagCreatorKey: NetworkInterfaceTagCreatorValue,
 		},
 	}
-	createNetworkInterfaceResponse, err := e.clientSet.ecs.CreateNetworkInterface(createNetworkInterfaceArgs)
+	createNetworkInterfaceResponse, err := e.clientSet.Ecs().CreateNetworkInterface(createNetworkInterfaceArgs)
 	metric.OpenAPILatency.WithLabelValues("CreateNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		return nil, err
@@ -148,7 +150,7 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 		InstanceId:         instanceID,
 	}
 	err = wait.ExponentialBackoff(eniOpBackoff, func() (bool, error) {
-		err = e.clientSet.ecs.AttachNetworkInterface(attachNetworkInterfaceArgs)
+		err = e.clientSet.Ecs().AttachNetworkInterface(attachNetworkInterfaceArgs)
 		if err != nil {
 			logrus.Warnf("attach Network Interface failed: %v, retry...", err)
 			return false, nil
@@ -212,7 +214,7 @@ func (e *ecsImpl) destroyInterface(eniID string, instanceID string, force bool) 
 		eniReleaseBackoff,
 		func() (done bool, err error) {
 			start = time.Now()
-			_, err = e.clientSet.ecs.DetachNetworkInterface(detachNetworkInterfaceArgs)
+			_, err = e.clientSet.Ecs().DetachNetworkInterface(detachNetworkInterfaceArgs)
 			metric.OpenAPILatency.WithLabelValues("DetachNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 			if err != nil {
 				retryErr = err
@@ -243,7 +245,7 @@ func (e *ecsImpl) destroyInterface(eniID string, instanceID string, force bool) 
 		eniReleaseBackoff,
 		func() (done bool, err error) {
 			start = time.Now()
-			_, err = e.clientSet.ecs.DeleteNetworkInterface(deleteNetworkInterfaceArgs)
+			_, err = e.clientSet.Ecs().DeleteNetworkInterface(deleteNetworkInterfaceArgs)
 			metric.OpenAPILatency.WithLabelValues("DeleteNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 			if err != nil {
 				logrus.Warnf("error delete eni: %v, retrying...", err)
@@ -267,7 +269,7 @@ func (e *ecsImpl) WaitForNetworkInterface(eniID, status string, backoff wait.Bac
 				NetworkInterfaceId: eniIds,
 			}
 
-			nisResponse, err := e.clientSet.ecs.DescribeNetworkInterfaces(&describeNetworkInterfacesArgs)
+			nisResponse, err := e.clientSet.Ecs().DescribeNetworkInterfaces(&describeNetworkInterfacesArgs)
 			if err != nil {
 				logrus.Warnf("Failed to describe network interface %v: %v", eniID, err)
 				return false, nil
@@ -335,9 +337,12 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 	start := time.Now()
 	var innerErr error
 	err = wait.ExponentialBackoff(eniOpBackoff, func() (bool, error) {
-		_, innerErr = e.clientSet.ecs.AssignPrivateIpAddresses(assignPrivateIPAddressesArgs)
+		_, innerErr = e.clientSet.Ecs().AssignPrivateIpAddresses(assignPrivateIPAddressesArgs)
 		if innerErr != nil {
-			logrus.Warnf("Assign private ip address failed: %+v, retrying", err)
+			logrus.Warnf("Assign private ip address failed: %+v, retrying", innerErr)
+			if strings.Contains(innerErr.Error(), InvalidVSwitchIDIPNotEnough) {
+				return false, errors.Errorf("Assign private ip address failed: %+v", innerErr)
+			}
 			return false, nil
 		}
 		return true, nil
@@ -414,7 +419,7 @@ func (e *ecsImpl) UnAssignIPForENI(eniID string, ip net.IP) error {
 	err = wait.ExponentialBackoff(
 		eniOpBackoff,
 		func() (bool, error) {
-			_, err = e.clientSet.ecs.UnassignPrivateIpAddresses(unAssignPrivateIPAddressesArgs)
+			_, err = e.clientSet.Ecs().UnassignPrivateIpAddresses(unAssignPrivateIPAddressesArgs)
 			if err != nil {
 				logrus.Warnf("error unassign private ip address: %v, retry...", err)
 				return false, nil
@@ -458,7 +463,7 @@ func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
 			if err != nil {
 				// failback to deprecated DescribeInstanceAttribute
 				start := time.Now()
-				insType, err = e.clientSet.ecs.DescribeInstanceAttribute(instanceID)
+				insType, err = e.clientSet.Ecs().DescribeInstanceAttribute(instanceID)
 				metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 				if err != nil {
 					logrus.Warnf("error get instance info: %s: %v， retry...", instanceID, err)
@@ -467,7 +472,7 @@ func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
 			}
 
 			start := time.Now()
-			instanceTypeItems, err := e.clientSet.ecs.DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
+			instanceTypeItems, err := e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
 				InstanceTypeFamily: insType.InstanceTypeFamily,
 			})
 			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
@@ -525,7 +530,7 @@ func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 			if err != nil {
 				// failback to deprecated DescribeInstanceAttribute
 				start := time.Now()
-				insType, err = e.clientSet.ecs.DescribeInstanceAttribute(instanceID)
+				insType, err = e.clientSet.Ecs().DescribeInstanceAttribute(instanceID)
 				metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 				if err != nil {
 					logrus.Warnf("error get instance info: %s: %v， retry...", instanceID, err)
@@ -534,7 +539,7 @@ func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 			}
 
 			start := time.Now()
-			instanceTypeItems, err := e.clientSet.ecs.DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
+			instanceTypeItems, err := e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
 				InstanceTypeFamily: insType.InstanceTypeFamily,
 			})
 			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
@@ -591,7 +596,7 @@ func (e *ecsImpl) GetAttachedSecurityGroup(instanceID string) (string, error) {
 	if err != nil {
 		// failback to deprecated DescribeInstanceAttribute
 		start := time.Now()
-		insType, err = e.clientSet.ecs.DescribeInstanceAttribute(instanceID)
+		insType, err = e.clientSet.Ecs().DescribeInstanceAttribute(instanceID)
 		metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 		if err != nil {
 			return "", errors.Wrapf(err, "error describe instance attribute for security group: %s", instanceID)
@@ -609,7 +614,7 @@ func (e *ecsImpl) GetInstanceAttributesType(instanceID string) (*ecs.InstanceAtt
 		InstanceIds: fmt.Sprintf("[%q]", instanceID),
 	}
 	start := time.Now()
-	instanceAttributesTypes, _, err := e.clientSet.ecs.DescribeInstances(diArgs)
+	instanceAttributesTypes, _, err := e.clientSet.Ecs().DescribeInstances(diArgs)
 	metric.OpenAPILatency.WithLabelValues("DescribeInstances", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		return nil, err

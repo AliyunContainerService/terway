@@ -17,7 +17,7 @@ spec:
         app: eni-tomcat
     spec:
       containers:
-      - image: nginx
+      - image: registry.aliyuncs.com/acs-sample/nginx
         name: nginx
         resources:
           limits:
@@ -85,7 +85,7 @@ spec:
           name: nginx-configmap
       containers:
       - name: nginx
-        image: nginx
+        image: registry.aliyuncs.com/acs-sample/nginx
         volumeMounts:
         - name: nginx
           mountPath: /etc/nginx

@@ -6,8 +6,8 @@ RUN cd plugin/terway && CGO_ENABLED=0 GOOS=linux go build -o terway .
 
 FROM calico/go-build:v0.20 as felix-builder
 RUN apk --no-cache add ip6tables tini ipset iputils iproute2 conntrack-tools file git
-ENV GIT_BRANCH=v3.5.2
-ENV GIT_COMMIT=1e59bb818c35b96e5de6e882fcb07510f81b50da
+ENV GIT_BRANCH=v3.5.8
+ENV GIT_COMMIT=7e12e362499ed281e5f5ca2747a0ba4e76e896b6
 #ENV http_proxy=1.1.1.1:1080
 #ENV https_proxy=1.1.1.1:1080
 RUN mkdir -p /go/src/github.com/projectcalico/ && cd /go/src/github.com/projectcalico/ && \

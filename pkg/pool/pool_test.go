@@ -3,9 +3,12 @@ package pool
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/stretchr/testify/assert"
@@ -33,7 +36,7 @@ func (n mockNetworkResource) GetType() string {
 	return "mock"
 }
 
-func (f *mockObjectFactory) Create() (types.NetworkResource, error) {
+func (f *mockObjectFactory) Create(int) ([]types.NetworkResource, error) {
 	time.Sleep(f.createDelay)
 	if f.err != nil {
 		return nil, f.err
@@ -47,9 +50,9 @@ func (f *mockObjectFactory) Create() (types.NetworkResource, error) {
 
 	f.idGenerator++
 	f.totalCreated++
-	return &mockNetworkResource{
+	return []types.NetworkResource{&mockNetworkResource{
 		id: fmt.Sprintf("%d", f.idGenerator),
-	}, nil
+	}}, nil
 }
 
 func (f *mockObjectFactory) Dispose(types.NetworkResource) error {
@@ -112,6 +115,11 @@ func createPool(factory ObjectFactory, minIdle, maxIdle, initIdle, initInuse int
 		panic(err)
 	}
 	return pool
+}
+
+func TestMain(m *testing.M) {
+	logrus.SetLevel(logrus.DebugLevel)
+	os.Exit(m.Run())
 }
 
 func TestInitializerExceedMaxIdle(t *testing.T) {

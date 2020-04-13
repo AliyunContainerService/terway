@@ -16,7 +16,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx
+    image: registry.aliyuncs.com/acs-sample/nginx
 
 ---
 apiVersion: networking.k8s.io/v1
@@ -68,7 +68,7 @@ spec:
         topologyKey: kubernetes.io/hostname
   containers:
   - name: nginx
-    image: nginx
+    image: registry.aliyuncs.com/acs-sample/nginx
 
 ---
 apiVersion: v1
@@ -110,14 +110,14 @@ spec:
   restartPolicy: Never
   initContainers:
   - name: waiting
-    image: alpine
+    image: registry.aliyuncs.com/acs/alpine:3.6
     command: ["sh", "-c", "for i in `seq 1 120`; do nslookup policy-svc && nslookup non-policy-svc && wget -T 1 non-policy-svc && exit 0; sleep 1; done"]
   containers:
   - name: policy
-    image: busybox
+    image: registry.aliyuncs.com/acs/alpine:3.6
     command: ["sh", "-c", "wget -T 1 policy-svc"]
   - name: non-policy
-    image: busybox
+    image: registry.aliyuncs.com/acs/alpine:3.6
     command: ["sh", "-c", "wget -T 1 non-policy-svc"]
 ---
 
@@ -146,12 +146,12 @@ spec:
   restartPolicy: Never
   initContainers:
   - name: waiting
-    image: alpine
+    image: registry.aliyuncs.com/acs/alpine:3.6
     command: ["sh", "-c", "for i in `seq 1 120`; do nslookup policy-svc && nslookup non-policy-svc && wget -T 1 non-policy-svc && exit 0; sleep 1; done"]
   containers:
   - name: policy
-    image: busybox
+    image: registry.aliyuncs.com/acs/alpine:3.6
     command: ["sh", "-c", "wget -T 1 policy-svc"]
   - name: non-policy
-    image: busybox
+    image: registry.aliyuncs.com/acs/alpine:3.6
     command: ["sh", "-c", "wget -T 1 non-policy-svc"]
