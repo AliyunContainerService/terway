@@ -37,6 +37,42 @@ Terway plugin have two installation modes
 	ENI Secondary IP Mode, Using `Aliyun ENI's secondary ip` to connect the pods. This mode not limited by VPC route tables quotation. Install method: <br />
 	Replace `access_key/access_secret` and `security_group/vswitches` in [terway-multiip.yml](./terway-multiip.yml) with your aliyun openapi credentials and resources id. Then use `kubectl apply -f terway-multiip.yml` to install Terway into kubernetes cluster.
 
+Terway requires the `access_key` have following [RAM Permissions](https://ram.console.aliyun.com/)
+
+```json
+{
+  "Version": "1",
+  "Statement": [{
+      "Action": [
+        "ecs:CreateNetworkInterface",
+        "ecs:DescribeNetworkInterfaces",
+        "ecs:AttachNetworkInterface",
+        "ecs:DetachNetworkInterface",
+        "ecs:DeleteNetworkInterface",
+        "ecs:DescribeInstanceAttribute",
+        "ecs:DescribeInstanceTypesNew",
+        "ecs:AssignPrivateIpAddresses",
+        "ecs:UnassignPrivateIpAddresses",
+        "ecs:DescribeInstances"
+      ],
+      "Resource": [
+        "*"
+      ],
+      "Effect": "Allow"
+    },
+    {
+      "Action": [
+        "vpc:DescribeVSwitches"
+      ],
+      "Resource": [
+        "*"
+      ],
+      "Effect": "Allow"
+    }
+  ]
+}
+```
+
 Using `kubectl get ds terway -n kube-system` to watch plugin launching. Plugin install completed while terway daemonset available pods equal to nodes.
 
 ### Terway network plugin usage
