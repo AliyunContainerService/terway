@@ -402,6 +402,10 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 		return nil, errors.Wrapf(err, "error get pod info for: %+v", r)
 	}
 
+	if !networkService.verifyPodNetworkType(podinfo.PodNetworkType) {
+		return nil, fmt.Errorf("unexpect pod network type get info, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
+	}
+
 	// 1. Init Context
 	networkContext := &networkContext{
 		Context:    ctx,
