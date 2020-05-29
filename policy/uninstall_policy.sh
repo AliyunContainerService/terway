@@ -68,4 +68,8 @@ cleanup_felix() {
 config_masquerade
 cleanup_felix
 # for health check
-exec socat PIPE TCP-LISTEN:9099,fork
+if [ "$FELIX_HEALTHPORT" != "" ]; then
+        exec socat PIPE TCP-LISTEN:"$FELIX_HEALTHPORT",fork
+else
+        exec socat PIPE TCP-LISTEN:9099,fork
+fi
