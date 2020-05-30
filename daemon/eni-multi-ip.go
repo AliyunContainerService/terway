@@ -57,6 +57,10 @@ type ENI struct {
 	ipAllocInhibitExpireAt time.Time
 }
 
+type eniIPResourceManager struct {
+	pool pool.ObjectPool
+}
+
 func (e *ENI) getIPCountLocked() int {
 	return e.pending + len(e.ips)
 }
@@ -221,7 +225,6 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 		}
 	}
 	return nil, errors.Errorf("unexpected eni ip allocated: %v", result)
-
 }
 
 func (f *eniIPFactory) Create(count int) ([]types.NetworkResource, error) {
@@ -253,13 +256,14 @@ func (f *eniIPFactory) Create(count int) ([]types.NetworkResource, error) {
 	if initENIIPCount > maxIPBacklog {
 		initENIIPCount = maxIPBacklog
 	}
+
 	if initENIIPCount > 0 {
 		logrus.Debugf("create eni async, ip count: %+v", initENIIPCount)
-		_, err = f.createENIAsync(initENIIPCount)
+		_, err = f.createENI(initENIIPCount)
 		if err == nil {
 			waiting += initENIIPCount
 		} else {
-			logrus.Errorf("error create eni async: %+v", err)
+			logrus.Errorf("failed to createENI: %+v", err)
 		}
 	}
 
@@ -364,14 +368,47 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 	return nil
 }
 
-func (f *eniIPFactory) initialENI(eni *ENI) {
+func (f *eniIPFactory) createENI(initIPs int) (*ENI, error) {
+	eni := &ENI{
+		lock:      sync.Mutex{},
+		ENI:       nil,
+		ips:       make([]*ENIIP, 0),
+		primaryIP: f.primaryIP,
+		pending:   initIPs,
+		ipBacklog: make(chan struct{}, maxIPBacklog),
+		ecs:       f.eniFactory.ecs,
+		done:      make(chan struct{}, 1),
+	}
+	select {
+	case f.maxENI <- struct{}{}:
+		select {
+		case f.eniOperChan <- struct{}{}:
+		default:
+			<-f.maxENI
+			return nil, fmt.Errorf("trigger ENI throttle, max operating concurrent: %v", maxEniOperating)
+		}
+		if err := f.initialENI(eni); err != nil {
+			<-f.maxENI
+			return eni, err
+		}
+		f.Lock()
+		f.enis = append(f.enis, eni)
+		logrus.Debugf("createENI completed ENI count: %d", len(f.enis))
+		f.Unlock()
+		return eni, nil
+	default:
+		return nil, fmt.Errorf("max ENI exceeded")
+	}
+}
+
+// initialENI for alloc a new ENI
+func (f *eniIPFactory) initialENI(eni *ENI) error {
 	rawEni, err := f.eniFactory.CreateWithIPCount(eni.pending)
 	var ips []net.IP
 	// eni operate finished
 	<-f.eniOperChan
 	if err != nil || len(rawEni) != 1 {
-		// create eni failed, put quota back
-		<-f.maxENI
+		logrus.Warnf("failed to initialENI rawEni:%d err: %+v", rawEni, err)
 	} else {
 		var ok bool
 		eni.ENI, ok = rawEni[0].(*types.ENI)
@@ -395,20 +432,8 @@ func (f *eniIPFactory) initialENI(eni *ENI) {
 	}
 	logrus.Debugf("eni initial finished: %+v, err: %+v", eni, err)
 	if err != nil {
-		eni.lock.Lock()
-		//failed all pending on this initial eni
-		for i := 0; i < eni.pending; i++ {
-			f.ipResultChan <- &ENIIP{
-				ENIIP: &types.ENIIP{
-					Eni: nil,
-				},
-				err: errors.Errorf("error initial ENI: %v", err),
-			}
-		}
-		eni.lock.Unlock()
-		return
+		return err
 	}
-
 	eni.lock.Lock()
 	for _, ip := range ips {
 		eniip := &types.ENIIP{
@@ -421,42 +446,9 @@ func (f *eniIPFactory) initialENI(eni *ENI) {
 			err:   nil,
 		}
 	}
-
 	eni.lock.Unlock()
 	go eni.allocateWorker(f.ipResultChan)
-}
-
-func (f *eniIPFactory) createENIAsync(initIPs int) (*ENI, error) {
-	eni := &ENI{
-		lock:      sync.Mutex{},
-		ENI:       nil,
-		ips:       make([]*ENIIP, 0),
-		primaryIP: f.primaryIP,
-		pending:   initIPs,
-		ipBacklog: make(chan struct{}, maxIPBacklog),
-		ecs:       f.eniFactory.ecs,
-		done:      make(chan struct{}, 1),
-	}
-	select {
-	case f.maxENI <- struct{}{}:
-		select {
-		case f.eniOperChan <- struct{}{}:
-		default:
-			<-f.maxENI
-			return nil, fmt.Errorf("trigger ENI throttle, max operating concurrent: %v", maxEniOperating)
-		}
-		go f.initialENI(eni)
-	default:
-		return nil, fmt.Errorf("max ENI exceeded")
-	}
-	f.Lock()
-	f.enis = append(f.enis, eni)
-	f.Unlock()
-	return eni, nil
-}
-
-type eniIPResourceManager struct {
-	pool pool.ObjectPool
+	return nil
 }
 
 func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []resourceManagerInitItem) (ResourceManager, error) {
