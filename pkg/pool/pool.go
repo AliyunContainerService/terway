@@ -49,15 +49,14 @@ type ObjectFactory interface {
 }
 
 type simpleObjectPool struct {
-	inuse      map[string]poolItem
-	idle       *priorityQeueu // Todo: Fix this typo
-	lock       sync.Mutex
-	factory    ObjectFactory
-	maxIdle    int
-	minIdle    int
-	capacity   int
-	maxBackoff time.Duration
-	notifyCh   chan interface{}
+	inuse    map[string]poolItem
+	idle     *priorityQeueu // Todo: Fix this typo
+	lock     sync.Mutex
+	factory  ObjectFactory
+	maxIdle  int
+	minIdle  int
+	capacity int
+	notifyCh chan interface{}
 	// concurrency to create resource. tokenCh = capacity - (idle + inuse + dispose)
 	tokenCh     chan struct{}
 	backoffTime time.Duration
@@ -159,16 +158,6 @@ func queueKeys(q *priorityQeueu) string {
 		keys = append(keys, q.slots[i].res.GetResourceID())
 	}
 	return strings.Join(keys, ", ")
-}
-
-func (p *simpleObjectPool) dispose(res types.NetworkResource) {
-	log.Infof("try dispose res %+v", res)
-	if err := p.factory.Dispose(res); err != nil {
-		//put it back on dispose fail
-		log.Warnf("failed dispose %s: %v, put it back to idle", res.GetResourceID(), err)
-	} else {
-		p.tokenCh <- struct{}{}
-	}
 }
 
 func (p *simpleObjectPool) tooManyIdleLocked() bool {

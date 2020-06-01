@@ -147,7 +147,7 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 
 	defer func() {
 		if err != nil {
-			terwayBackendClient.ReleaseIP(context.Background(),
+			_, err = terwayBackendClient.ReleaseIP(context.Background(),
 				&rpc.ReleaseIPRequest{
 					K8SPodName:             string(k8sConfig.K8S_POD_NAME),
 					K8SPodNamespace:        string(k8sConfig.K8S_POD_NAMESPACE),
@@ -158,7 +158,7 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 		}
 	}()
 
-	hostVethName := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
+	hostVethName, _ := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
 	var (
 		allocatedIPAddr      net.IPNet
 		allocatedGatewayAddr net.IP
@@ -238,7 +238,7 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 
 		defer func() {
 			if err != nil {
-				ipam.ExecDel(delegateIpam, []byte(fmt.Sprintf(delegateConf, subnet.String())))
+				err = ipam.ExecDel(delegateIpam, []byte(fmt.Sprintf(delegateConf, subnet.String())))
 			}
 		}()
 
@@ -399,7 +399,7 @@ func cmdDel(args *skel.CmdArgs) error {
 		))
 	}
 
-	hostVethName := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
+	hostVethName, _ := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
 
 	switch infoResult.IPType {
 	case rpc.IPType_TypeENIMultiIP:
@@ -436,10 +436,11 @@ func cmdDel(args *skel.CmdArgs) error {
 		}
 
 	case rpc.IPType_TypeVPCENI:
-		err = networkDriver.Teardown(hostVethName, defaultVethForENI, cniNetns, nil)
-		if err != nil {
-			// ignore ENI veth release error
-		}
+		_ = networkDriver.Teardown(hostVethName, defaultVethForENI, cniNetns, nil)
+		// ignore ENI veth release error
+		//if err != nil {
+		//	// ignore ENI veth release error
+		//}
 		err = nicDriver.Teardown(hostVethName, args.IfName, cniNetns, nil)
 		if err != nil {
 			return errors.Wrapf(err, "error teardown nic network for pod: %s-%s",
@@ -472,20 +473,24 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func getNetworkClient() (rpc.TerwayBackendClient, func(), error) {
-	grpcConn, err := grpc.Dial(defaultSocketPath, grpc.WithInsecure(), grpc.WithDialer(
-		func(s string, duration time.Duration) (net.Conn, error) {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	grpcConn, err := grpc.DialContext(timeoutCtx, defaultSocketPath, grpc.WithInsecure(), grpc.WithContextDialer(
+		func(ctx context.Context, s string) (net.Conn, error) {
 			unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
 			if err != nil {
 				return nil, nil
 			}
-			return net.DialUnix("unix", nil, unixAddr)
+			d := net.Dialer{}
+			return d.DialContext(timeoutCtx, "unix", unixAddr.String())
 		}))
 	if err != nil {
+		cancel()
 		return nil, nil, errors.Wrap(err, "error dial terway daemon")
 	}
 
 	terwayBackendClient := rpc.NewTerwayBackendClient(grpcConn)
 	return terwayBackendClient, func() {
 		grpcConn.Close()
+		cancel()
 	}, nil
 }

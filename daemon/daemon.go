@@ -180,7 +180,10 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 					networkContext.Log().Warnf("error cleanup allocated network resource %s, %s: %v", res.ID, res.Type, err)
 					continue
 				}
-				mgr.Release(networkContext, res.ID)
+				err = mgr.Release(networkContext, res.ID)
+				if err != nil {
+					networkContext.Log().Infof("rollback res error: %+v", err)
+				}
 			}
 		} else {
 			networkContext.Log().Infof("alloc result: %+v", allocIPReply)
@@ -507,8 +510,8 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 				}
 				for _, res := range resRelate.Resources {
 					if _, ok := inUseSet[res.Type]; !ok {
-						inUseSet[res.Type] = make(map[string]interface{}, 0)
-						expireSet[res.Type] = make(map[string]interface{}, 0)
+						inUseSet[res.Type] = make(map[string]interface{})
+						expireSet[res.Type] = make(map[string]interface{})
 					}
 					// already in use by others
 					if _, ok := inUseSet[res.Type][res.ID]; ok {

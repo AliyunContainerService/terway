@@ -285,7 +285,6 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 		switch strings.ToLower(pod.OwnerReferences[0].Kind) {
 		case "statefulset":
 			pi.IPStickTime = defaultStickTimeForSts
-			break
 		}
 	}
 

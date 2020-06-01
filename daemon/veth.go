@@ -30,8 +30,9 @@ type vethResourceManager struct {
 }
 
 func (*vethResourceManager) Allocate(context *networkContext, prefer string) (types.NetworkResource, error) {
+	vethName, _ := link.VethNameForPod(context.pod.Name, context.pod.Namespace, defaultPrefix)
 	return &types.Veth{
-		HostVeth: link.VethNameForPod(context.pod.Name, context.pod.Namespace, defaultPrefix),
+		HostVeth: vethName,
 	}, nil
 }
 

@@ -62,7 +62,9 @@ func Run(pidFilePath, socketFilePath, debugSocketListen, configFilePath, kubecon
 		}
 
 		if _, err := os.Stat(path.Dir(pidFilePath)); err != nil && os.IsNotExist(err) {
-			os.MkdirAll(path.Dir(pidFilePath), 0666)
+			if err = os.MkdirAll(path.Dir(pidFilePath), 0666); err != nil {
+				return fmt.Errorf("error create pid file: %+v", err)
+			}
 		}
 		if err := ioutil.WriteFile(pidFilePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
 			return fmt.Errorf("error writing pidfile %q: %v", pidFilePath, err)
@@ -126,7 +128,7 @@ func runDebugServer(debugSocketListen string) error {
 		err error
 	)
 	if strings.HasPrefix(debugSocketListen, "unix://") {
-		debugSocketListen = strings.TrimLeft(debugSocketListen, "unix://")
+		debugSocketListen = strings.TrimPrefix(debugSocketListen, "unix://")
 		if err := os.MkdirAll(filepath.Dir(debugSocketListen), 0700); err != nil {
 			return err
 		}
