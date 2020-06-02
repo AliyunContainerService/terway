@@ -74,10 +74,22 @@ jobs:
           command: |
             find . -name \*.md | grep -v '^./vendor' | grep  -v ./README-zh_C | xargs mdspell --ignore-numbers --ignore-acronyms --en-us -r -x
 
+  golangci-lint:
+    docker:
+        - image: golangci/golangci-lint:v1.27.0
+    working_directory: /go/src/github.com/AliyunContainerService/terway
+    steps:
+      - checkout
+      - run:
+          name: golangci-lint
+          command: |
+            golangci-lint run -v
+
 workflows:
   version: 2
   ci:
     jobs:
+      - golangci-lint
       - build
       - code-check
       - markdown-spellcheck
