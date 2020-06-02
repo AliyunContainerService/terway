@@ -405,7 +405,21 @@ func (f *eniIPFactory) initialENI(eni *ENI) {
 				err: errors.Errorf("error initial ENI: %v", err),
 			}
 		}
+		// disable eni for submit
+		eni.pending = f.eniMaxIP
 		eni.lock.Unlock()
+
+		// remove from eni list
+		f.Lock()
+		for i, e := range f.enis {
+			if e == eni {
+				f.enis[len(f.enis)-1], f.enis[i] = f.enis[i], f.enis[len(f.enis)-1]
+				f.enis = f.enis[:len(f.enis)-1]
+				break
+			}
+		}
+		f.Unlock()
+
 		return
 	}
 
