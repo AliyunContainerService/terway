@@ -144,7 +144,10 @@ func (d *DiskStorage) load() error {
 			if err != nil {
 				return err
 			}
-			d.memory.Put(string(k), obj)
+			err = d.memory.Put(string(k), obj)
+			if err != nil {
+				return err
+			}
 		}
 		return nil
 	})

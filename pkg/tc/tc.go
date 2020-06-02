@@ -39,7 +39,7 @@ const latencyInMillis = 25
 
 // SetRule set the traffic rule on interface
 func SetRule(dev netlink.Link, rule *TrafficShapingRule) error {
-	if rule.Rate < 0 {
+	if rule.Rate <= 0 {
 		return fmt.Errorf("invalid rate %d", rule.Rate)
 	}
 

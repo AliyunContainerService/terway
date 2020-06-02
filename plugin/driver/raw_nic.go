@@ -32,7 +32,9 @@ func (r *rawNicDriver) Setup(hostVeth string,
 		return errors.Wrapf(err, "NicDriver, cannot found spec nic link")
 	}
 	hostCurrentNs, err := ns.GetCurrentNS()
-	defer hostCurrentNs.Close()
+	defer func() {
+		err = hostCurrentNs.Close()
+	}()
 	if err != nil {
 		return errors.Wrapf(err, "NicDriver, cannot get host netns")
 	}
@@ -44,7 +46,7 @@ func (r *rawNicDriver) Setup(hostVeth string,
 
 	defer func() {
 		if err != nil {
-			netNS.Do(func(netNS ns.NetNS) error {
+			err = netNS.Do(func(netNS ns.NetNS) error {
 				nicLink, err = netlink.LinkByName(containerVeth)
 				if err == nil {
 					nicName, err1 := r.randomNicName()
@@ -62,7 +64,7 @@ func (r *rawNicDriver) Setup(hostVeth string,
 					nicLink, err = netlink.LinkByName(nicLink.Attrs().Name)
 				}
 				if err == nil {
-					netlink.LinkSetDown(nicLink)
+					err = netlink.LinkSetDown(nicLink)
 					return netlink.LinkSetNsFd(nicLink, int(hostCurrentNs.Fd()))
 				}
 				return err
@@ -159,7 +161,9 @@ func (r *rawNicDriver) Teardown(hostVeth string,
 	containerIP net.IP) error {
 	// 1. move link out
 	hostCurrentNs, err := ns.GetCurrentNS()
-	defer hostCurrentNs.Close()
+	defer func() {
+		err = hostCurrentNs.Close()
+	}()
 	if err != nil {
 		return errors.Wrapf(err, "NicDriver, cannot get host netns")
 	}

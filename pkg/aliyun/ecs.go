@@ -132,7 +132,9 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 			eniDestroy := &types.ENI{
 				ID: createNetworkInterfaceResponse.NetworkInterfaceId,
 			}
-			e.destroyInterface(eniDestroy.ID, instanceID, true)
+			if err = e.destroyInterface(eniDestroy.ID, instanceID, true); err != nil {
+				logrus.Errorf("error rollback interface, may cause eni leak: %+v", err)
+			}
 		}
 	}()
 

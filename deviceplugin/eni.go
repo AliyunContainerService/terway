@@ -47,19 +47,23 @@ func NewEniDevicePlugin(count int) *EniDevicePlugin {
 }
 
 // dial establishes the gRPC communication with the registered device plugin.
-func dial(unixSocketPath string, timeout time.Duration) (*grpc.ClientConn, error) {
-	c, err := grpc.Dial(unixSocketPath, grpc.WithInsecure(), grpc.WithBlock(),
-		grpc.WithTimeout(timeout),
-		grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
+func dial(unixSocketPath string, timeout time.Duration) (*grpc.ClientConn, func(), error) {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	c, err := grpc.DialContext(timeoutCtx, unixSocketPath, grpc.WithInsecure(), grpc.WithBlock(),
+		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 			return net.DialTimeout("unix", addr, timeout)
 		}),
 	)
 
 	if err != nil {
-		return nil, err
+		cancel()
+		return nil, nil, err
 	}
 
-	return c, nil
+	return c, func() {
+		err = c.Close()
+		cancel()
+	}, nil
 }
 
 // Start starts the gRPC server of the device plugin
@@ -82,15 +86,19 @@ func (m *EniDevicePlugin) Start() error {
 	pluginapi.RegisterDevicePluginServer(m.server, m)
 
 	m.stop = make(chan struct{}, 1)
-	go m.server.Serve(sock)
+	go func() {
+		err := m.server.Serve(sock)
+		if err != nil {
+			log.Errorf("error start device plugin server, %+v", err)
+		}
+	}()
 
 	// Wait for server to start by launching a blocking connection
-	conn, err := dial(m.socket, 5*time.Second)
+	_, closeConn, err := dial(m.socket, 5*time.Second)
 	if err != nil {
 		return err
 	}
-	conn.Close()
-
+	closeConn()
 	return nil
 }
 
@@ -119,11 +127,11 @@ func (m *EniDevicePlugin) Stop() error {
 
 // Register registers the device plugin for the given resourceName with Kubelet.
 func (m *EniDevicePlugin) Register(request pluginapi.RegisterRequest) error {
-	conn, err := dial(pluginapi.KubeletSocket, 5*time.Second)
+	conn, closeConn, err := dial(pluginapi.KubeletSocket, 5*time.Second)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer closeConn()
 
 	client := pluginapi.NewRegistrationClient(conn)
 
@@ -140,7 +148,10 @@ func (m *EniDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlu
 	for i := 0; i < m.count; i++ {
 		devs = append(devs, &pluginapi.Device{ID: fmt.Sprintf("eni-%d", i), Health: pluginapi.Healthy})
 	}
-	s.Send(&pluginapi.ListAndWatchResponse{Devices: devs})
+	err := s.Send(&pluginapi.ListAndWatchResponse{Devices: devs})
+	if err != nil {
+		return err
+	}
 	ticker := time.NewTicker(time.Second * 5)
 	for {
 		select {
@@ -223,8 +234,11 @@ func (m *EniDevicePlugin) watchKubeletRestart() {
 		}
 		if os.IsNotExist(err) {
 			log.Infof("device plugin socket %s removed, restarting.", m.socket)
-			m.Stop()
-			err := m.Start()
+			err := m.Stop()
+			if err != nil {
+				log.Errorf("stop current device plugin server with error: %v", err)
+			}
+			err = m.Start()
 			if err != nil {
 				log.Fatalf("error restart device plugin after kubelet restart %+v", err)
 			}
@@ -263,7 +277,10 @@ func (m *EniDevicePlugin) Serve(resourceName string) error {
 	)
 	if err != nil {
 		log.Errorf("Could not register device plugin: %v", err)
-		m.Stop()
+		err := m.Stop()
+		if err != nil {
+			log.Errorf("stop current device plugin server with error: %v", err)
+		}
 		return err
 	}
 	log.Infof("Registered device plugin with Kubelet")
