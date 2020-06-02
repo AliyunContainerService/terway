@@ -410,6 +410,7 @@ func (f *eniIPFactory) initialENI(eni *ENI) {
 	}
 
 	eni.lock.Lock()
+	extraAlloc := eni.pending - len(ips)
 	for _, ip := range ips {
 		eniip := &types.ENIIP{
 			Eni:        eni.ENI,
@@ -420,6 +421,19 @@ func (f *eniIPFactory) initialENI(eni *ENI) {
 			ENIIP: eniip,
 			err:   nil,
 		}
+	}
+	for i := 0; i < extraAlloc; i++ {
+		select {
+		case eni.ipBacklog <- struct{}{}:
+		default:
+			f.ipResultChan <- &ENIIP{
+				ENIIP: &types.ENIIP{
+					Eni: nil,
+				},
+				err: errors.Errorf("need retry to allocate eni ip: %v", err),
+			}
+		}
+
 	}
 
 	eni.lock.Unlock()
