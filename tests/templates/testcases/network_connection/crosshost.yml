@@ -109,6 +109,6 @@ spec:
     app: vpc-crosshost-nginx
   ports:
   - protocol: TCP
-    nodePort: 30080
+    nodePort: 30090
     port: 80
 
