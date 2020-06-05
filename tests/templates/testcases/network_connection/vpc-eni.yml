@@ -102,6 +102,6 @@ spec:
     app: vpc-eni-nginx
   ports:
   - protocol: TCP
-    nodePort: 30080
+    nodePort: 30110
     port: 80
 

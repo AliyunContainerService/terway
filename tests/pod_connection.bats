@@ -55,7 +55,7 @@ function request_hostport {
     retry 20 5 object_exist pod -l app=vpc-crosshost-nginx
 	# wait nginx startup
     sleep 20
-    retry 3 2 request_hostport 30080
+    retry 3 2 request_hostport 30090
     [ "$status" -eq "0" ]
     kubectl delete -f templates/testcases/network_connection/crosshost.yml || true
     delete_deploy
@@ -70,7 +70,7 @@ function request_hostport {
 		retry 20 5 object_exist pod -l app=eni-nginx
 		# wait nginx startup
         sleep 20
-	    retry 3 2 request_hostport 30080
+	    retry 3 2 request_hostport 30100
 	    [ "$status" -eq "0" ]
 	    kubectl delete -f templates/testcases/network_connection/eni.yml || true
 	    delete_deploy
@@ -86,7 +86,7 @@ function request_hostport {
 		retry 20 5 object_exist pod -l app=vpc-eni-nginx
 		# wait nginx startup
         sleep 20
-	    retry 3 2 request_hostport 30080
+	    retry 3 2 request_hostport 30110
 	    [ "$status" -eq "0" ]
 	    kubectl delete -f templates/testcases/network_connection/vpc-eni.yml || true
 	    delete_deploy
