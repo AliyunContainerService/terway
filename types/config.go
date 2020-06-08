@@ -20,6 +20,7 @@ type Configure struct {
 	EniCapRatio            float64             `yaml:"eni_cap_ratio" json:"eni_cap_ratio"`
 	EniCapShift            int                 `yaml:"eni_cap_shift" json:"eni_cap_shift"`
 	VSwitchSelectionPolicy string              `yaml:"vswitch_selection_policy" json:"vswitch_selection_policy"`
+	EnableEIPPool          string              `yaml:"enable_eip_pool" json:"enable_eip_pool"`
 }
 
 // PoolConfig configuration of pool and resource factory

@@ -27,6 +27,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	apiTypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -48,6 +49,13 @@ const (
 	labelDynamicConfig = "terway-config"
 )
 
+type podEipInfo struct {
+	PodEip          bool
+	PodEipID        string
+	PodEipIP        string
+	PodEipBandWidth int
+}
+
 type podInfo struct {
 	//K8sPod *v1.Pod
 	Name           string
@@ -57,6 +65,7 @@ type podInfo struct {
 	PodNetworkType string
 	PodIP          string
 	SandboxExited  bool
+	EipInfo        podEipInfo
 	IPStickTime    time.Duration
 }
 
@@ -67,6 +76,7 @@ type Kubernetes interface {
 	GetServiceCidr() *net.IPNet
 	GetNodeCidr() *net.IPNet
 	SetNodeAllocatablePod(count int) error
+	PatchEipInfo(info *podInfo) error
 	RecordNodeEvent(eventType, reason, message string)
 	RecordPodEvent(podName, podNamespace, eventType, reason, message string) error
 	GetNodeDynamicConfigLabel() string
@@ -101,6 +111,35 @@ func (k *k8s) SetSvcCidr(svcCidr *net.IPNet) error {
 	}
 
 	k.svcCidr = svcCidr
+	return nil
+}
+
+func (k *k8s) PatchEipInfo(info *podInfo) error {
+	pod, err := k.client.CoreV1().Pods(info.Namespace).Get(info.Name, metav1.GetOptions{
+		ResourceVersion: "0",
+	})
+	if err != nil || pod == nil {
+		k.reconnectOnTimeoutError(err)
+		return err
+	}
+
+	if pod.GetAnnotations() != nil {
+		if eip, ok := pod.GetAnnotations()[podEipAddress]; ok {
+			if eip == info.EipInfo.PodEipIP {
+				return nil
+			}
+			return errors.Errorf("Pod already have eip annotation: %v", eip)
+		}
+	}
+	pod.Annotations[podEipAddress] = info.EipInfo.PodEipIP
+
+	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, podEipAddress, info.EipInfo.PodEipIP)
+
+	_, err = k.client.CoreV1().Pods(info.Namespace).Patch(info.Name, apiTypes.MergePatchType, []byte(annotationPatchStr))
+	if err != nil {
+		k.reconnectOnTimeoutError(err)
+		return err
+	}
 	return nil
 }
 
@@ -270,6 +309,13 @@ const podNeedEni = "k8s.aliyun.com/ENI"
 const podIngressBandwidth = "k8s.aliyun.com/ingress-bandwidth"
 const podEgressBandwidth = "k8s.aliyun.com/egress-bandwidth"
 
+const podWithEip = "k8s.aliyun.com/pod-with-eip"
+const eciWithEip = "k8s.aliyun.com/eci-with-eip" // to adopt ask annotation
+const podEipBandwidth = "k8s.aliyun.com/eip-bandwidth"
+const podEciEipInstanceID = "k8s.aliyun.com/eci-eip-instanceid" // to adopt ask annotation
+const podPodEipInstanceID = "k8s.aliyun.com/pod-eip-instanceid"
+const podEipAddress = "k8s.aliyun.com/allocated-eipAddress"
+
 const defaultStickTimeForSts = 5 * time.Minute
 
 var (
@@ -330,6 +376,34 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 		if egress, err := parseBandwidth(egressBandwidth); err == nil {
 			pi.TcEgress = egress
 		}
+	}
+
+	if eipAnnotation, ok := podAnnotation[podWithEip]; ok && eipAnnotation == conditionTrue {
+		pi.EipInfo.PodEip = true
+		pi.EipInfo.PodEipBandWidth = 5
+	}
+	if eipAnnotation, ok := podAnnotation[eciWithEip]; ok && eipAnnotation == conditionTrue {
+		pi.EipInfo.PodEip = true
+		pi.EipInfo.PodEipBandWidth = 5
+	}
+
+	if eipAnnotation, ok := podAnnotation[podEipBandwidth]; ok {
+		eipBandwidth, err := strconv.Atoi(eipAnnotation)
+		if err != nil {
+			log.Errorf("error convert eip bandwidth: %v", eipBandwidth)
+		} else {
+			pi.EipInfo.PodEipBandWidth = eipBandwidth
+		}
+	}
+
+	if eipAnnotation, ok := podAnnotation[podEciEipInstanceID]; ok && eipAnnotation != "" {
+		pi.EipInfo.PodEip = true
+		pi.EipInfo.PodEipID = eipAnnotation
+	}
+
+	if eipAnnotation, ok := podAnnotation[podPodEipInstanceID]; ok && eipAnnotation != "" {
+		pi.EipInfo.PodEip = true
+		pi.EipInfo.PodEipID = eipAnnotation
 	}
 
 	pi.SandboxExited = pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
