@@ -1,20 +1,20 @@
 package pool
 
-type priorityQeueu struct {
+type priorityQueue struct {
 	slots    []*poolItem
 	size     int
 	capacity int
 }
 
-func newPriorityQueue() *priorityQeueu {
-	return &priorityQeueu{
+func newPriorityQueue() *priorityQueue {
+	return &priorityQueue{
 		capacity: 10,
 		size:     0,
 		slots:    make([]*poolItem, 10),
 	}
 }
 
-func (q *priorityQeueu) Pop() *poolItem {
+func (q *priorityQueue) Pop() *poolItem {
 	if q.size == 0 {
 		return nil
 	}
@@ -25,7 +25,7 @@ func (q *priorityQeueu) Pop() *poolItem {
 	return ret
 }
 
-func (q *priorityQeueu) bubbleUp(index int) {
+func (q *priorityQueue) bubbleUp(index int) {
 	for index > 0 {
 		parent := (index - 1) / 2
 		if !q.slots[index].lessThan(q.slots[parent]) {
@@ -36,13 +36,13 @@ func (q *priorityQeueu) bubbleUp(index int) {
 	}
 }
 
-func (q *priorityQeueu) swap(x, y int) {
+func (q *priorityQueue) swap(x, y int) {
 	tmp := q.slots[x]
 	q.slots[x] = q.slots[y]
 	q.slots[y] = tmp
 }
 
-func (q *priorityQeueu) bubbleDown(index int) {
+func (q *priorityQueue) bubbleDown(index int) {
 	for index < q.size {
 		left := index*2 + 1
 		right := index*2 + 2
@@ -70,14 +70,14 @@ func (q *priorityQeueu) bubbleDown(index int) {
 	}
 }
 
-func (q *priorityQeueu) Peek() *poolItem {
+func (q *priorityQueue) Peek() *poolItem {
 	if q.size == 0 {
 		return nil
 	}
 	return q.slots[0]
 }
 
-func (q *priorityQeueu) Rob(id string) *poolItem {
+func (q *priorityQueue) Rob(id string) *poolItem {
 	for i := 0; i < q.size; i++ {
 		item := q.slots[i]
 		if item.res.GetResourceID() == id {
@@ -91,7 +91,7 @@ func (q *priorityQeueu) Rob(id string) *poolItem {
 	return nil
 }
 
-func (q *priorityQeueu) Find(id string) *poolItem {
+func (q *priorityQueue) Find(id string) *poolItem {
 	for i := 0; i < q.size; i++ {
 		if q.slots[i].res.GetResourceID() == id {
 			return q.slots[i]
@@ -100,7 +100,7 @@ func (q *priorityQeueu) Find(id string) *poolItem {
 	return nil
 }
 
-func (q *priorityQeueu) Push(item *poolItem) {
+func (q *priorityQueue) Push(item *poolItem) {
 	q.slots[q.size] = item
 	q.size++
 	q.bubbleUp(q.size - 1)
@@ -112,6 +112,6 @@ func (q *priorityQeueu) Push(item *poolItem) {
 	}
 }
 
-func (q *priorityQeueu) Size() int {
+func (q *priorityQueue) Size() int {
 	return q.size
 }

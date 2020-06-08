@@ -1,0 +1,35 @@
+syntax = "proto3";
+package rpc;
+
+service TerwayTracing {
+  rpc GetResourceTypes(Placeholder) returns (ResourcesTypesReply);
+  rpc GetResources(ResourceTypeRequest) returns (ResourcesNamesReply);
+  rpc GetResourceConfig(ResourceTypeNameRequest) returns (ResourceConfigReply);
+  rpc GetResourceTrace(ResourceTypeNameRequest) returns (ResourceTraceReply);
+}
+
+message Placeholder {}
+
+message ResourcesTypesReply {
+  repeated string TypeNames = 1;
+}
+message ResourcesNamesReply {
+  repeated string Name = 1;
+}
+
+message ResourceTypeRequest {
+  string Name = 1;
+}
+
+message ResourceTypeNameRequest {
+  string Type = 1;
+  string Name = 2;
+}
+
+message ResourceConfigReply {
+  map<string, string> Config = 1;
+}
+
+message ResourceTraceReply {
+  map<string, string> Trace = 1;
+}

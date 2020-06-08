@@ -548,6 +548,11 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 	}()
 }
 
+// tracing
+func (networkService *networkService) GetConfig() map[string]string {
+
+}
+
 func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (rpc.TerwayBackendServer, error) {
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
 	netSrv := &networkService{

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/prometheus/client_golang/prometheus"
 	"strings"
 	"sync"
 	"time"
@@ -30,7 +32,7 @@ const (
 // ObjectPool object pool interface
 type ObjectPool interface {
 	Acquire(ctx context.Context, resID, idempotentKey string) (types.NetworkResource, error)
-	ReleaseWithReverse(resID string, reverse time.Duration) error
+	ReleaseWithReservation(resID string, reservation time.Duration) error
 	Release(resID string) error
 	AcquireAny(ctx context.Context, idempotentKey string) (types.NetworkResource, error)
 	Stat(resID string) error
@@ -49,8 +51,9 @@ type ObjectFactory interface {
 }
 
 type simpleObjectPool struct {
+	name     string
 	inuse    map[string]poolItem
-	idle     *priorityQeueu // Todo: Fix this typo
+	idle     *priorityQueue // Todo: Fix this typo
 	lock     sync.Mutex
 	factory  ObjectFactory
 	maxIdle  int
@@ -60,10 +63,15 @@ type simpleObjectPool struct {
 	// concurrency to create resource. tokenCh = capacity - (idle + inuse + dispose)
 	tokenCh     chan struct{}
 	backoffTime time.Duration
+	// metrics
+	metricIdle     prometheus.Gauge
+	metricTotal    prometheus.Gauge
+	metricDisposed prometheus.Counter
 }
 
 // Config configuration of pool
 type Config struct {
+	Name        string
 	Factory     ObjectFactory
 	Initializer Initializer
 	MinIdle     int
@@ -73,12 +81,12 @@ type Config struct {
 
 type poolItem struct {
 	res           types.NetworkResource
-	reverse       time.Time
+	reservation   time.Time
 	idempotentKey string
 }
 
 func (i *poolItem) lessThan(other *poolItem) bool {
-	return i.reverse.Before(other.reverse)
+	return i.reservation.Before(other.reservation)
 }
 
 // Initializer of pool
@@ -95,6 +103,7 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 	}
 
 	pool := &simpleObjectPool{
+		name:        cfg.Name,
 		factory:     cfg.Factory,
 		inuse:       make(map[string]poolItem),
 		idle:        newPriorityQueue(),
@@ -104,6 +113,14 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 		notifyCh:    make(chan interface{}, 1),
 		tokenCh:     make(chan struct{}, cfg.Capacity),
 		backoffTime: defaultPoolBackoff,
+		// create metrics with labels in the pool struct
+		// and it will show in metrics even if it has not been triggered yet
+		metricIdle: metric.ResourcePoolIdle.WithLabelValues(cfg.Name, fmt.Sprint(cfg.Capacity),
+			fmt.Sprint(cfg.MaxIdle), fmt.Sprint(cfg.MinIdle)),
+		metricTotal: metric.ResourcePoolTotal.WithLabelValues(cfg.Name, fmt.Sprint(cfg.Capacity),
+			fmt.Sprint(cfg.MaxIdle), fmt.Sprint(cfg.MinIdle)),
+		metricDisposed: metric.ResourcePoolDisposed.WithLabelValues(cfg.Name, fmt.Sprint(cfg.Capacity),
+			fmt.Sprint(cfg.MaxIdle), fmt.Sprint(cfg.MinIdle)),
 	}
 
 	if cfg.Initializer != nil {
@@ -124,7 +141,6 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 		mapKeys(pool.inuse))
 
 	go pool.startCheckIdleTicker()
-
 	return pool, nil
 }
 
@@ -152,7 +168,7 @@ func mapKeys(m map[string]poolItem) string {
 	return strings.Join(keys, ", ")
 }
 
-func queueKeys(q *priorityQeueu) string {
+func queueKeys(q *priorityQueue) string {
 	var keys []string
 	for i := 0; i < q.size; i++ {
 		keys = append(keys, q.slots[i].res.GetResourceID())
@@ -187,7 +203,7 @@ func (p *simpleObjectPool) peekOverfullIdle() *poolItem {
 		return nil
 	}
 
-	if item.reverse.After(time.Now()) {
+	if item.reservation.After(time.Now()) {
 		return nil
 	}
 	return p.idle.Pop()
@@ -201,12 +217,17 @@ func (p *simpleObjectPool) checkIdle() {
 			break
 		}
 
+		p.metricIdle.Dec()
+		p.metricTotal.Dec()
+
 		res := item.res
 		log.Infof("try dispose res %+v", res)
 		err := p.factory.Dispose(res)
 		if err == nil {
 			p.tokenCh <- struct{}{}
 			p.backoffTime = defaultPoolBackoff
+			// one item popped from idle and total
+			p.metricDisposed.Inc()
 		} else {
 			log.Warnf("error dispose res: %+v", err)
 			p.backoffTime = p.backoffTime * 2
@@ -300,6 +321,7 @@ func (p *simpleObjectPool) Acquire(ctx context.Context, resID, idempotentKey str
 		p.inuse[res.GetResourceID()] = poolItem{res: res, idempotentKey: idempotentKey}
 		p.lock.Unlock()
 		log.Infof("acquire (expect %s): return idle %s", resID, res.GetResourceID())
+		p.metricIdle.Dec()
 		p.notify()
 		return res, nil
 	}
@@ -355,7 +377,7 @@ func (p *simpleObjectPool) notify() {
 	}
 }
 
-func (p *simpleObjectPool) ReleaseWithReverse(resID string, reverse time.Duration) error {
+func (p *simpleObjectPool) ReleaseWithReservation(resID string, reservation time.Duration) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	res, ok := p.inuse[resID]
@@ -364,24 +386,29 @@ func (p *simpleObjectPool) ReleaseWithReverse(resID string, reverse time.Duratio
 		return ErrInvalidState
 	}
 
-	log.Infof("release %s, reverse %v: return success", resID, reverse)
+	log.Infof("release %s, reservation %v: return success", resID, reservation)
 	delete(p.inuse, resID)
-	reverseTo := time.Now()
-	if reverse > 0 {
-		reverseTo = reverseTo.Add(reverse)
+	reserveTo := time.Now()
+	if reservation > 0 {
+		reserveTo = reserveTo.Add(reservation)
 	}
-	p.idle.Push(&poolItem{res: res.res, reverse: reverseTo})
+	p.idle.Push(&poolItem{res: res.res, reservation: reserveTo})
+	p.metricIdle.Inc()
 	p.notify()
 	return nil
 }
 func (p *simpleObjectPool) Release(resID string) error {
-	return p.ReleaseWithReverse(resID, time.Duration(0))
+	return p.ReleaseWithReservation(resID, time.Duration(0))
 }
 
 func (p *simpleObjectPool) AddIdle(resource types.NetworkResource) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.idle.Push(&poolItem{res: resource, reverse: time.Now()})
+	p.idle.Push(&poolItem{res: resource, reservation: time.Now()})
+	// assume AddIdle() adds a resource that not exists in the pool before
+	// both add total and idle gauge
+	p.metricTotal.Inc()
+	p.metricIdle.Inc()
 }
 
 func (p *simpleObjectPool) AddInuse(res types.NetworkResource, idempotentKey string) {
@@ -391,4 +418,6 @@ func (p *simpleObjectPool) AddInuse(res types.NetworkResource, idempotentKey str
 		res:           res,
 		idempotentKey: idempotentKey,
 	}
+	// assume AddInuse() adds a resource that not exists in the pool before
+	p.metricTotal.Inc()
 }

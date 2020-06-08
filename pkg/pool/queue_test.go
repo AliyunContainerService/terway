@@ -19,7 +19,7 @@ func createNetworkResource(id string) types.NetworkResource {
 }
 
 func createPoolItem(id int) *poolItem {
-	return &poolItem{res: createNetworkResource(fmt.Sprintf("%d", id)), reverse: time.Now().Add(time.Hour * time.Duration(id))}
+	return &poolItem{res: createNetworkResource(fmt.Sprintf("%d", id)), reservation: time.Now().Add(time.Hour * time.Duration(id))}
 }
 
 func TestPop(t *testing.T) {

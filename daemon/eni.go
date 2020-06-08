@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"math/rand"
 	"sort"
 	"sync"
@@ -18,6 +19,9 @@ import (
 const (
 	// vSwitchIPCntTimeout is the duration for the vswitchIPCntMap content's effectiveness
 	vSwitchIPCntTimeout = 10 * time.Minute
+
+	poolNameENI    = "eni-%s"
+	factoryNameENI = "eni-%s"
 )
 
 type eniResourceManager struct {
@@ -52,6 +56,8 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 	}
 
 	poolCfg := pool.Config{
+		// generate a unique name string ?
+		Name:     poolNameENI,
 		MaxIdle:  poolConfig.MaxPoolSize,
 		MinIdle:  poolConfig.MinPoolSize,
 		Capacity: capacity,
@@ -99,7 +105,7 @@ func (m *eniResourceManager) Allocate(ctx *networkContext, prefer string) (types
 
 func (m *eniResourceManager) Release(context *networkContext, resID string) error {
 	if context != nil && context.pod != nil {
-		return m.pool.ReleaseWithReverse(resID, context.pod.IPStickTime)
+		return m.pool.ReleaseWithReservation(resID, context.pod.IPStickTime)
 	}
 	return m.pool.Release(resID)
 }
@@ -144,6 +150,7 @@ func (ms MapSorter) SortInDescendingOrder() {
 }
 
 type eniFactory struct {
+	name                   string
 	switches               []string
 	securityGroup          string
 	instanceID             string
@@ -163,6 +170,7 @@ func newENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*eniFactory, e
 		poolConfig.SecurityGroup = securityGroup
 	}
 	return &eniFactory{
+		name:                   fmt.Sprintf(factoryNameENI, randomString()),
 		switches:               poolConfig.VSwitch,
 		securityGroup:          poolConfig.SecurityGroup,
 		instanceID:             poolConfig.InstanceID,

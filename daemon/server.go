@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -93,6 +94,8 @@ func Run(pidFilePath, socketFilePath, debugSocketListen, configFilePath, kubecon
 
 	grpcServer := grpc.NewServer()
 	rpc.RegisterTerwayBackendServer(grpcServer, networkService)
+	rpc.RegisterTerwayTracingServer(grpcServer, tracing.DefaultRPCServer())
+
 	stop := make(chan struct{})
 
 	go func() {
