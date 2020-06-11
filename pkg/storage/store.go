@@ -105,6 +105,7 @@ func NewDiskStorage(name string, path string, serializer Serializer, deserialize
 	if err != nil {
 		return nil, err
 	}
+
 	return diskstorage, nil
 }
 

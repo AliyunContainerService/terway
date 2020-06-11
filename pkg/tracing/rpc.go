@@ -26,7 +26,7 @@ func (t *tracingRPC) GetResourceTypes(_ context.Context, _ *rpc.Placeholder) (*r
 
 func (t *tracingRPC) GetResources(_ context.Context, request *rpc.ResourceTypeRequest) (*rpc.ResourcesNamesReply, error) {
 	names := t.tracer.GetResourceNames(request.Name)
-	response := &rpc.ResourcesNamesReply{Name: names}
+	response := &rpc.ResourcesNamesReply{ResourceNames: names}
 
 	return response, nil
 }
@@ -37,7 +37,12 @@ func (t *tracingRPC) GetResourceConfig(_ context.Context, request *rpc.ResourceT
 		return nil, err
 	}
 
-	response := &rpc.ResourceConfigReply{Config: config}
+	var entry []*rpc.MapKeyValueEntry
+	for _, v := range config {
+		entry = append(entry, toRPCEntry(v))
+	}
+
+	response := &rpc.ResourceConfigReply{Config: entry}
 	return response, nil
 }
 
@@ -47,6 +52,34 @@ func (t *tracingRPC) GetResourceTrace(_ context.Context, request *rpc.ResourceTy
 		return nil, err
 	}
 
-	response := &rpc.ResourceTraceReply{Trace: trace}
+	var entry []*rpc.MapKeyValueEntry
+	for _, v := range trace {
+		entry = append(entry, toRPCEntry(v))
+	}
+
+	response := &rpc.ResourceTraceReply{Trace: entry}
 	return response, nil
+}
+
+func (t *tracingRPC) ResourceExecute(request *rpc.ResourceExecuteRequest, server rpc.TerwayTracing_ResourceExecuteServer) error {
+	c, err := t.tracer.Execute(request.Type, request.Name, request.Command, request.Args)
+	if err != nil {
+		return err
+	}
+
+	for message := range c {
+		err = server.Send(&rpc.ResourceExecuteReply{Message: message})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func toRPCEntry(entry MapKeyValueEntry) *rpc.MapKeyValueEntry {
+	return &rpc.MapKeyValueEntry{
+		Key:   entry.Key,
+		Value: entry.Value,
+	}
 }

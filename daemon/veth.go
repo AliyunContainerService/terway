@@ -111,9 +111,11 @@ func (f *vethResourceManager) GarbageCollection(inUseSet map[string]interface{},
 }
 
 func newVPCResourceManager() (ResourceManager, error) {
-	return &vethResourceManager{
+	mgr := &vethResourceManager{
 		runtimeAPI: dockerRuntime{},
-	}, nil
+	}
+
+	return mgr, nil
 }
 
 type containerRuntime interface {

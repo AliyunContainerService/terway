@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/prometheus/client_golang/prometheus"
 	"strings"
 	"sync"
@@ -36,6 +37,7 @@ type ObjectPool interface {
 	Release(resID string) error
 	AcquireAny(ctx context.Context, idempotentKey string) (types.NetworkResource, error)
 	Stat(resID string) error
+	GetName() string
 }
 
 // ResourceHolder interface to initialize pool
@@ -53,7 +55,7 @@ type ObjectFactory interface {
 type simpleObjectPool struct {
 	name     string
 	inuse    map[string]poolItem
-	idle     *priorityQueue // Todo: Fix this typo
+	idle     *priorityQueue
 	lock     sync.Mutex
 	factory  ObjectFactory
 	maxIdle  int
@@ -72,6 +74,7 @@ type simpleObjectPool struct {
 // Config configuration of pool
 type Config struct {
 	Name        string
+	Type        string
 	Factory     ObjectFactory
 	Initializer Initializer
 	MinIdle     int
@@ -115,11 +118,11 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 		backoffTime: defaultPoolBackoff,
 		// create metrics with labels in the pool struct
 		// and it will show in metrics even if it has not been triggered yet
-		metricIdle: metric.ResourcePoolIdle.WithLabelValues(cfg.Name, fmt.Sprint(cfg.Capacity),
+		metricIdle: metric.ResourcePoolIdle.WithLabelValues(cfg.Name, cfg.Type, fmt.Sprint(cfg.Capacity),
 			fmt.Sprint(cfg.MaxIdle), fmt.Sprint(cfg.MinIdle)),
-		metricTotal: metric.ResourcePoolTotal.WithLabelValues(cfg.Name, fmt.Sprint(cfg.Capacity),
+		metricTotal: metric.ResourcePoolTotal.WithLabelValues(cfg.Name, cfg.Type, fmt.Sprint(cfg.Capacity),
 			fmt.Sprint(cfg.MaxIdle), fmt.Sprint(cfg.MinIdle)),
-		metricDisposed: metric.ResourcePoolDisposed.WithLabelValues(cfg.Name, fmt.Sprint(cfg.Capacity),
+		metricDisposed: metric.ResourcePoolDisposed.WithLabelValues(cfg.Name, cfg.Type, fmt.Sprint(cfg.Capacity),
 			fmt.Sprint(cfg.MaxIdle), fmt.Sprint(cfg.MinIdle)),
 	}
 
@@ -141,6 +144,8 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 		mapKeys(pool.inuse))
 
 	go pool.startCheckIdleTicker()
+
+	_ = tracing.Register(tracing.ResourceTypeObjectPool, pool.name, pool)
 	return pool, nil
 }
 
@@ -368,6 +373,35 @@ func (p *simpleObjectPool) Stat(resID string) error {
 	}
 
 	return ErrNotFound
+}
+
+func (p *simpleObjectPool) GetName() string {
+	return p.name
+}
+
+func (p *simpleObjectPool) Config() []tracing.MapKeyValueEntry {
+	config := []tracing.MapKeyValueEntry{
+		{"name", p.name},
+		{"max_idle", fmt.Sprint(p.maxIdle)},
+		{"min_idle", fmt.Sprint(p.minIdle)},
+		{"capacity", fmt.Sprint(p.capacity)},
+	}
+
+	return config
+}
+
+func (p *simpleObjectPool) Trace() []tracing.MapKeyValueEntry {
+	trace := []tracing.MapKeyValueEntry{
+		{"idle", queueKeys(p.idle)},
+		{"inuse", mapKeys(p.inuse)},
+	}
+
+	return trace
+}
+
+func (p *simpleObjectPool) Execute(_ string, _ []string, message chan<- string) {
+	message <- "no command available"
+	close(message)
 }
 
 func (p *simpleObjectPool) notify() {

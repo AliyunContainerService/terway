@@ -3,6 +3,7 @@ WORKDIR /go/src/github.com/AliyunContainerService/terway/
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X \"main.gitVer=`git rev-parse --short HEAD 2>/dev/null`\" " -o terwayd .
 RUN cd plugin/terway && CGO_ENABLED=0 GOOS=linux go build -o terway .
+RUN cd cli && CGO_ENABLED=0 GOOS=linux go build -o terway-cli .
 
 FROM calico/go-build:v0.20 as felix-builder
 RUN apk --no-cache add ip6tables tini ipset iputils iproute2 conntrack-tools file git
@@ -33,4 +34,5 @@ COPY --from=felix-builder /go/src/github.com/projectcalico/felix/bin/calico-feli
 RUN chmod +x /bin/calico-felix
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terwayd /usr/bin/terwayd
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/plugin/terway/terway /usr/bin/terway
+COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cli/terway-cli /usr/bin/terway-cli
 ENTRYPOINT ["/usr/bin/terwayd"]

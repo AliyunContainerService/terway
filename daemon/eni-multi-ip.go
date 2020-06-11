@@ -3,6 +3,7 @@ package daemon
 import (
 	"fmt"
 	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/prometheus/client_golang/prometheus"
 	"net"
 	"sort"
@@ -25,6 +26,7 @@ const (
 const (
 	eniIPAllocInhibitTimeout = 10 * time.Minute
 
+	typeNameENIIP    = "eniip"
 	poolNameENIIP    = "eniip-%s"
 	factoryNameENIIP = "eniip-%s"
 )
@@ -135,7 +137,7 @@ func (f *eniIPFactory) getEnis() ([]*ENI, error) {
 	})
 
 	// If VSwitchSelectionPolicy is ordered, then call f.eniFactory.GetVSwitches() API to get a switch slice
-	// in descending order per each switch's availabel IP count.
+	// in descending order per each switch's available IP count.
 	vSwitches, err := f.eniFactory.GetVSwitches()
 	logrus.Infof("adjusted vswitch slice: %+v, original eni slice: %+v", vSwitches, f.enis)
 	if err != nil {
@@ -377,6 +379,7 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 		}
 	}
 	eni.lock.Unlock()
+	metric.ENIIPFactoryIPCount.WithLabelValues(f.name, eni.MAC, fmt.Sprint(eni.MaxIPs)).Dec()
 	return nil
 }
 
@@ -504,6 +507,122 @@ func (f *eniIPFactory) createENIAsync(initIPs int) (*ENI, error) {
 	return eni, nil
 }
 
+func (f *eniIPFactory) Config() []tracing.MapKeyValueEntry {
+	config := []tracing.MapKeyValueEntry{
+		{"name", f.name},
+		{"eni_max_ip", fmt.Sprint(f.eniMaxIP)},
+		{"primary_ip", f.primaryIP.String()},
+	}
+
+	return config
+}
+
+func (f *eniIPFactory) Trace() []tracing.MapKeyValueEntry {
+	var trace []tracing.MapKeyValueEntry
+
+	secIPCount := 0
+
+	trace = append(trace, tracing.MapKeyValueEntry{Key: "eni_count", Value: fmt.Sprint(len(f.enis))})
+	trace = append(trace, tracing.MapKeyValueEntry{Key: "secondary_ip_count", Value: ""}) // placeholder
+
+	for _, v := range f.enis {
+		secIPCount += len(v.ips)
+		trace = append(trace, tracing.MapKeyValueEntry{
+			Key:   fmt.Sprintf("eni/%s/pending", v.MAC),
+			Value: fmt.Sprint(v.pending),
+		})
+
+		var secIPs []string
+		for _, v := range v.ips {
+			secIPs = append(secIPs, v.SecAddress.String())
+		}
+
+		trace = append(trace, tracing.MapKeyValueEntry{
+			Key:   fmt.Sprintf("eni/%s/secondary_ips", v.MAC),
+			Value: strings.Join(secIPs, " "),
+		})
+
+		trace = append(trace, tracing.MapKeyValueEntry{
+			Key:   fmt.Sprintf("eni/%s/ip_alloc_inhibit_expire_at", v.MAC),
+			Value: v.ipAllocInhibitExpireAt.Format(timeFormat),
+		})
+	}
+
+	trace[1].Value = fmt.Sprint(secIPCount)
+
+	return trace
+}
+
+func (f *eniIPFactory) Execute(cmd string, _ []string, message chan<- string) {
+	switch cmd {
+	case "check_account": // check account
+		f.checkAccount(message)
+	default:
+		message <- "can't recognize command"
+	}
+
+	close(message)
+}
+
+func (f *eniIPFactory) checkAccount(message chan<- string) {
+	// get ENIs via Aliyun API
+	message <- "fetching attached ENIs from aliyun\n"
+	enis, err := f.eniFactory.ecs.GetAttachedENIs(f.eniFactory.instanceID, false)
+	if err != nil {
+		message <- fmt.Sprintf("error while fetching from remote: %s\n", err.Error())
+		return
+	}
+
+	message <- fmt.Sprintf("%d enis fetched\n", len(enis))
+
+	// check local enis count
+	if len(f.enis) != len(enis) {
+		message <- fmt.Sprintf("remote eni count not equal to local: remote %d, local: %d\n", len(enis), len(f.enis))
+	}
+
+	// diff
+	diffMap := make(map[string]*ENI)
+
+	for _, v := range f.enis {
+		diffMap[v.ID] = v
+	}
+
+	// range for remote enis
+	for _, v := range enis {
+		message <- fmt.Sprintf("checking eni %s(%s)", v.ID, v.MAC)
+
+		eni, ok := diffMap[v.ID]
+		if !ok {
+			message <- fmt.Sprintf("remote eni %s(%s) not found on local machine\n", v.ID, v.MAC)
+			continue
+		}
+
+		// diff secondary ips
+		remoteIPs, err := f.eniFactory.ecs.GetENIIPs(v.ID)
+		if err != nil {
+			message <- fmt.Sprintf("error while fetching ips: %s", err.Error())
+			return
+		}
+
+		diffIPMap := make(map[string]struct{})
+		diffIPMap[eni.primaryIP.String()] = struct{}{}
+
+		for _, ip := range eni.ips {
+			diffIPMap[ip.SecAddress.String()] = struct{}{}
+		}
+
+		// range for remote ips
+		for _, ip := range remoteIPs {
+			_, ok := diffIPMap[ip.String()]
+			if !ok {
+				message <- fmt.Sprintf("ip %s attached to eni %s(%s) not found on local machine\n", ip.String(), v.ID, v.MAC)
+			}
+		}
+	}
+
+	message <- "done.\n"
+}
+
 type eniIPResourceManager struct {
 	pool pool.ObjectPool
 }
@@ -576,6 +695,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 
 	poolCfg := pool.Config{
 		Name:     fmt.Sprintf(poolNameENIIP, randomString()),
+		Type:     typeNameENIIP,
 		MaxIdle:  poolConfig.MaxPoolSize,
 		MinIdle:  poolConfig.MinPoolSize,
 		Factory:  factory,
@@ -641,9 +761,11 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 	if err != nil {
 		return nil, err
 	}
-	return &eniIPResourceManager{
+	mgr := &eniIPResourceManager{
 		pool: pool,
-	}, nil
+	}
+	_ = tracing.Register(tracing.ResourceTypeFactory, factory.name, factory)
+	return mgr, nil
 }
 
 func (m *eniIPResourceManager) Allocate(ctx *networkContext, prefer string) (types.NetworkResource, error) {

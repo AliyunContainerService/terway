@@ -12,18 +12,27 @@ const (
 	ResourceTypeNetworkService  = "network_service"
 	ResourceTypeObjectPool      = "object_pool"
 	ResourceTypeFactory         = "factory"
+	ResourceTypeStorage         = "storage"
 )
 
 var (
 	defaultTracer Tracer
 )
 
+type MapKeyValueEntry struct {
+	Key   string
+	Value string
+}
+
 // TraceHandler
 type TraceHandler interface {
-	// Config() returns the static resource config (like min_idle, max_idle, etc) as map[string]string
-	Config() map[string]string
-	// Trace() returns the trace info (like ENIs count, MAC address) as map[string]string
-	Trace() map[string]string
+	// Config() returns the static resource config (like min_idle, max_idle, etc) as []MapKeyValueEntry
+	Config() []MapKeyValueEntry
+	// Trace() returns the trace info (like ENIs count, MAC address) as []MapKeyValueEntry
+	Trace() []MapKeyValueEntry
+	// Execute(string, []string) execute command in the registered resource, and returns a string channel as stream
+	// if the execution has done, the channel should be closed
+	Execute(cmd string, args []string, message chan<- string)
 }
 
 type resourceMap map[string]TraceHandler
@@ -33,6 +42,10 @@ type Tracer struct {
 	mtx sync.Mutex
 	// store TraceHandler by resource name
 	traceMap map[string]resourceMap
+}
+
+func init() {
+	defaultTracer.traceMap = make(map[string]resourceMap)
 }
 
 // Register registers a TraceHandler to the tracer
@@ -116,7 +129,7 @@ func (t *Tracer) getHandler(typ, resourceName string) (TraceHandler, error) {
 	return v, nil
 }
 
-func (t *Tracer) GetConfig(typ, resourceName string) (map[string]string, error) {
+func (t *Tracer) GetConfig(typ, resourceName string) ([]MapKeyValueEntry, error) {
 	handler, err := t.getHandler(typ, resourceName)
 	if err != nil {
 		return nil, err
@@ -125,13 +138,25 @@ func (t *Tracer) GetConfig(typ, resourceName string) (map[string]string, error) 
 	return handler.Config(), nil
 }
 
-func (t *Tracer) GetTrace(typ, resourceName string) (map[string]string, error) {
+func (t *Tracer) GetTrace(typ, resourceName string) ([]MapKeyValueEntry, error) {
 	handler, err := t.getHandler(typ, resourceName)
 	if err != nil {
 		return nil, err
 	}
 
 	return handler.Trace(), nil
+}
+
+func (t *Tracer) Execute(typ, resourceName, cmd string, args []string) (<-chan string, error) {
+	handler, err := t.getHandler(typ, resourceName)
+	if err != nil {
+		return nil, err
+	}
+
+	ch := make(chan string)
+
+	go handler.Execute(cmd, args, ch)
+	return ch, nil
 }
 
 // Register registers a TraceHandler to the tracer
@@ -142,4 +167,11 @@ func Register(typ, resourceName string, handler TraceHandler) error {
 // Unregister remove TraceHandler from tracer. do nothing if not found
 func Unregister(typ, resourceName string) {
 	defaultTracer.Unregister(typ, resourceName)
+}
+
+func NewTracer() *Tracer {
+	return &Tracer{
+		mtx:      sync.Mutex{},
+		traceMap: make(map[string]resourceMap),
+	}
 }

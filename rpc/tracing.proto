@@ -6,6 +6,7 @@ service TerwayTracing {
   rpc GetResources(ResourceTypeRequest) returns (ResourcesNamesReply);
   rpc GetResourceConfig(ResourceTypeNameRequest) returns (ResourceConfigReply);
   rpc GetResourceTrace(ResourceTypeNameRequest) returns (ResourceTraceReply);
+  rpc ResourceExecute(ResourceExecuteRequest) returns (stream ResourceExecuteReply);
 }
 
 message Placeholder {}
@@ -14,7 +15,7 @@ message ResourcesTypesReply {
   repeated string TypeNames = 1;
 }
 message ResourcesNamesReply {
-  repeated string Name = 1;
+  repeated string ResourceNames = 1;
 }
 
 message ResourceTypeRequest {
@@ -26,10 +27,26 @@ message ResourceTypeNameRequest {
   string Name = 2;
 }
 
+message ResourceExecuteRequest {
+  string Type = 1;
+  string Name = 2;
+  string Command = 3;
+  repeated string Args = 4;
+}
+
+message ResourceExecuteReply {
+  string Message = 1;
+}
+
+message MapKeyValueEntry {
+  string Key = 1;
+  string Value = 2;
+}
+
 message ResourceConfigReply {
-  map<string, string> Config = 1;
+  repeated MapKeyValueEntry Config = 1;
 }
 
 message ResourceTraceReply {
-  map<string, string> Trace = 1;
+  repeated MapKeyValueEntry Trace = 1;
 }

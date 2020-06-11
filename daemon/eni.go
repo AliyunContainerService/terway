@@ -20,6 +20,7 @@ const (
 	// vSwitchIPCntTimeout is the duration for the vswitchIPCntMap content's effectiveness
 	vSwitchIPCntTimeout = 10 * time.Minute
 
+	typeNameENI    = "eni"
 	poolNameENI    = "eni-%s"
 	factoryNameENI = "eni-%s"
 )
@@ -56,8 +57,8 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 	}
 
 	poolCfg := pool.Config{
-		// generate a unique name string ?
-		Name:     poolNameENI,
+		Name:     fmt.Sprintf(poolNameENI, randomString()),
+		Type:     typeNameENI,
 		MaxIdle:  poolConfig.MaxPoolSize,
 		MinIdle:  poolConfig.MinPoolSize,
 		Capacity: capacity,
@@ -93,10 +94,12 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 	if err != nil {
 		return nil, err
 	}
-	return &eniResourceManager{
+	mgr := &eniResourceManager{
 		pool: pool,
 		ecs:  ecs,
-	}, nil
+	}
+
+	return mgr, nil
 }
 
 func (m *eniResourceManager) Allocate(ctx *networkContext, prefer string) (types.NetworkResource, error) {
