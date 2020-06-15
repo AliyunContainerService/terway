@@ -1,7 +1,10 @@
 package tracing
 
 import (
+	"errors"
 	"fmt"
+	"github.com/AliyunContainerService/terway/types"
+	"net"
 	"sync"
 )
 
@@ -10,10 +13,33 @@ const (
 	ResourceTypeResourceDB      = "resource_db"
 	ResourceTypeResourceManager = "resource_manager"
 	ResourceTypeNetworkService  = "network_service"
-	ResourceTypeObjectPool      = "object_pool"
+	ResourceTypeResourcePool    = "resource_pool"
 	ResourceTypeFactory         = "factory"
 	ResourceTypeStorage         = "storage"
 )
+
+type PodResourceMapping struct {
+	Valid    bool
+	ResID    string
+	PodName  string
+	Resource ResourceMapping
+}
+
+// FactoryResourceMapping actually get resources from aliyun api
+type FactoryResourceMapping struct {
+	// ResID: mac / mac:ip
+	ResID string
+	ENI   *types.ENI
+	ENIIP *types.ENIIP
+}
+
+type ResourceMapping struct {
+	Valid           bool
+	ResID           string
+	ENI             *types.ENI
+	IP              net.IP
+	FactoryResource FactoryResourceMapping
+}
 
 var (
 	defaultTracer Tracer
@@ -35,13 +61,18 @@ type TraceHandler interface {
 	Execute(cmd string, args []string, message chan<- string)
 }
 
+type ResourceMappingHandler interface {
+	GetResourceMapping() ([]PodResourceMapping, error)
+}
+
 type resourceMap map[string]TraceHandler
 
 type Tracer struct {
 	// use a RWMutex?
 	mtx sync.Mutex
 	// store TraceHandler by resource name
-	traceMap map[string]resourceMap
+	traceMap        map[string]resourceMap
+	resourceMapping ResourceMappingHandler
 }
 
 func init() {
@@ -78,6 +109,10 @@ func (t *Tracer) Unregister(typ, resourceName string) {
 	}
 
 	delete(resourceMap, resourceName)
+}
+
+func (t *Tracer) RegisterResourceMapping(mapping ResourceMappingHandler) {
+	t.resourceMapping = mapping
 }
 
 func (t *Tracer) GetTypes() []string {
@@ -159,9 +194,21 @@ func (t *Tracer) Execute(typ, resourceName, cmd string, args []string) (<-chan s
 	return ch, nil
 }
 
+func (t *Tracer) GetResourceMapping() ([]PodResourceMapping, error) {
+	if t.resourceMapping == nil {
+		return nil, errors.New("no resource mapping handler registered")
+	}
+
+	return t.resourceMapping.GetResourceMapping()
+}
+
 // Register registers a TraceHandler to the tracer
 func Register(typ, resourceName string, handler TraceHandler) error {
 	return defaultTracer.Register(typ, resourceName, handler)
+}
+
+func RegisterResourceMapping(handler ResourceMappingHandler) {
+	defaultTracer.RegisterResourceMapping(handler)
 }
 
 // Unregister remove TraceHandler from tracer. do nothing if not found

@@ -557,8 +557,11 @@ func (f *eniIPFactory) Execute(cmd string, _ []string, message chan<- string) {
 	switch cmd {
 	case "check_account": // check account
 		f.checkAccount(message)
+	case "mapping":
+		mapping, err := f.GetResourceMapping()
+		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
 	default:
-		message <- "can't recognize command"
+		message <- "can't recognize command\n"
 	}
 
 	close(message)
@@ -589,7 +592,7 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 
 	// range for remote enis
 	for _, v := range enis {
-		message <- fmt.Sprintf("checking eni %s(%s)", v.ID, v.MAC)
+		message <- fmt.Sprintf("checking eni %s(%s)\n", v.ID, v.MAC)
 
 		eni, ok := diffMap[v.ID]
 		if !ok {
@@ -621,6 +624,42 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 	}
 
 	message <- "done.\n"
+}
+
+func (f *eniIPFactory) GetResourceMapping() ([]tracing.FactoryResourceMapping, error) {
+	// Get ENIs from Aliyun API
+	enis, err := f.eniFactory.ecs.GetAttachedENIs(f.eniFactory.instanceID, false)
+	if err != nil {
+		return nil, err
+	}
+
+	var mapping []tracing.FactoryResourceMapping
+
+	for _, eni := range enis {
+		// get secondary ips from one eni
+		ips, err := f.eniFactory.ecs.GetENIIPs(eni.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, ip := range ips {
+			eniip := types.ENIIP{
+				Eni:        eni,
+				SecAddress: ip,
+				PrimaryIP:  eni.Address.IP,
+			}
+
+			m := tracing.FactoryResourceMapping{
+				ResID: eniip.GetResourceID(),
+				ENI:   nil,
+				ENIIP: &eniip,
+			}
+
+			mapping = append(mapping, m)
+		}
+	}
+
+	return mapping, nil
 }
 
 type eniIPResourceManager struct {
@@ -789,4 +828,8 @@ func (m *eniIPResourceManager) GarbageCollection(inUseSet map[string]interface{}
 		}
 	}
 	return nil
+}
+
+func (m *eniIPResourceManager) GetResourceMapping() ([]tracing.ResourceMapping, error) {
+	return m.pool.GetResourceMapping()
 }

@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"fmt"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"math/rand"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +38,8 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 	if err != nil {
 		return nil, errors.Wrapf(err, "error create ENI factory")
 	}
+
+	_ = tracing.Register(tracing.ResourceTypeFactory, "eni", factory)
 
 	capacity, err := ecs.GetInstanceMaxENI(poolConfig.InstanceID)
 	if err != nil {
@@ -123,6 +127,9 @@ func (m *eniResourceManager) GarbageCollection(inUseSet map[string]interface{}, 
 		}
 	}
 	return nil
+}
+func (m *eniResourceManager) GetResourceMapping() ([]tracing.ResourceMapping, error) {
+	return m.GetResourceMapping()
 }
 
 // MapSorter is a slice container for sorting
@@ -262,4 +269,64 @@ func (f *eniFactory) CreateWithIPCount(count int) ([]types.NetworkResource, erro
 func (f *eniFactory) Dispose(resource types.NetworkResource) error {
 	eni := resource.(*types.ENI)
 	return f.ecs.FreeENI(eni.ID, f.instanceID)
+}
+
+func (f *eniFactory) Config() []tracing.MapKeyValueEntry {
+	config := []tracing.MapKeyValueEntry{
+		{"name", f.name},
+		{"vswitches", strings.Join(f.switches, " ")},
+		{"vswitch_selection_policy", f.vswitchSelectionPolicy},
+	}
+
+	return config
+}
+
+func (f *eniFactory) Trace() []tracing.MapKeyValueEntry {
+	trace := []tracing.MapKeyValueEntry{
+		{"cache_expire_at", fmt.Sprint(f.tsExpireAt)},
+	}
+
+	for vs, cnt := range f.vswitchIPCntMap {
+		key := fmt.Sprintf("vswitch/%s/ip_count", vs)
+		trace = append(trace, tracing.MapKeyValueEntry{
+			Key:   key,
+			Value: fmt.Sprint(cnt),
+		})
+	}
+
+	return trace
+}
+
+func (f *eniFactory) Execute(cmd string, _ []string, message chan<- string) {
+	switch cmd {
+	case "mapping":
+		mapping, err := f.GetResourceMapping()
+		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
+	default:
+		message <- "can't recognize command\n"
+	}
+
+	close(message)
+}
+
+func (f *eniFactory) GetResourceMapping() ([]tracing.FactoryResourceMapping, error) {
+	// Get ENIs from Aliyun API
+	enis, err := f.ecs.GetAttachedENIs(f.instanceID, false)
+	if err != nil {
+		return nil, err
+	}
+
+	var mapping []tracing.FactoryResourceMapping
+
+	for _, eni := range enis {
+		m := tracing.FactoryResourceMapping{
+			ResID: eni.GetResourceID(),
+			ENI:   eni,
+			ENIIP: nil,
+		}
+
+		mapping = append(mapping, m)
+	}
+
+	return mapping, nil
 }

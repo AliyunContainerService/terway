@@ -557,7 +557,7 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 func (networkService *networkService) Config() []tracing.MapKeyValueEntry {
 	// name, daemon_mode, configFilePath, kubeconfig, master
 	config := []tracing.MapKeyValueEntry{
-		{"name", "network_service"}, // use a unique name?
+		{"name", "default"}, // use a unique name?
 		{"daemon_mode", networkService.daemonMode},
 		{"config_file_path", networkService.configFilePath},
 		{"kubeconfig", networkService.kubeConfig},
@@ -596,9 +596,79 @@ func (networkService *networkService) Trace() []tracing.MapKeyValueEntry {
 	return trace
 }
 
-func (networkService *networkService) Execute(_ string, _ []string, message chan<- string) {
-	message <- "no command available"
+func (networkService *networkService) Execute(cmd string, _ []string, message chan<- string) {
+	switch cmd {
+	case "mapping":
+		mapping, err := networkService.GetResourceMapping()
+		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
+	default:
+		message <- "can't recognize command\n"
+	}
+
 	close(message)
+}
+
+func (networkService *networkService) GetResourceMapping() ([]tracing.PodResourceMapping, error) {
+	log.Println("get network_service resource mapping")
+	var resourceMapping []tracing.ResourceMapping
+
+	var err error
+
+	// get []ResourceMapping
+	switch networkService.daemonMode {
+	case daemonModeENIMultiIP:
+		resourceMapping, err = networkService.eniIPResMgr.GetResourceMapping()
+	case daemonModeVPC:
+		return []tracing.PodResourceMapping{}, nil
+	case daemonModeENIOnly:
+		resourceMapping, err = networkService.eniResMgr.GetResourceMapping()
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// get pods
+	var mapping []tracing.PodResourceMapping
+	podMap := make(map[string]int)
+
+	pods, err := networkService.resourceDB.List()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, pod := range pods {
+		p := pod.(PodResources)
+		for _, res := range p.Resources {
+			m := tracing.PodResourceMapping{
+				ResID:   res.ID,
+				PodName: p.PodInfo.Name,
+			}
+
+			mapping = append(mapping, m)
+			podMap[m.ResID] = len(mapping) - 1
+		}
+	}
+
+	for _, res := range resourceMapping {
+		i, ok := podMap[res.ResID]
+		if !ok { // not exists
+			m := tracing.PodResourceMapping{
+				Valid:    false,
+				Resource: res,
+			}
+
+			mapping = append(mapping, m)
+			continue
+		}
+
+		// exists
+		mapping[i].Valid = true
+		mapping[i].Resource = res
+	}
+
+	log.Printf("get network_service resource mapping done: %v\n", mapping)
+	return mapping, nil
 }
 
 func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (rpc.TerwayBackendServer, error) {
@@ -751,6 +821,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 
 	// register for tracing
 	_ = tracing.Register(tracing.ResourceTypeNetworkService, "default", netSrv)
+	tracing.RegisterResourceMapping(netSrv)
 
 	return netSrv, nil
 }

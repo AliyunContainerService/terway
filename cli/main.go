@@ -20,25 +20,41 @@ const helpString = `Terway Tracing CLI
         config <type> [resource_name] - get config of the resource, get the first if name not specified
         trace <type> [resource_name] - get trace of the resource, get the first if name not specified
         show  <type> [resource_name] - get both config & trace of the resource
-        execute <type> <resource> <command> args... - send command to the given resource
+        exec <type> <resource> <command> args... - send command to the given resource
+		mapping - get terway resource mapping
 `
 
-func main() {
-	/*
-		subcommands:
-		list [type] - show types/resources list
-		config <type> [resource] - get config of resource
-		trace <type> [resource] - get trace of resource
-		exec <type> <resource> <command> [args...]
-	*/
+type SubcommandHandler func(c rpc.TerwayTracingClient, ctx context.Context, args []string) error
 
+var subcommands = map[string]SubcommandHandler{
+	"list":    list,
+	"config":  config,
+	"trace":   trace,
+	"show":    show,
+	"exec":    exec,
+	"mapping": mapping,
+}
+
+var outputColors = map[rpc.ResourceMappingType]string{
+	rpc.ResourceMappingType_MappingTypeNormal: "\033[0m",
+	rpc.ResourceMappingType_MappingTypeIdle:   "\033[0;34m",
+	rpc.ResourceMappingType_MappingTypeError:  "\033[1;31m",
+}
+
+const (
+	TableHeaderPodName           = "Pod Name"
+	TableHeaderResourceID        = "Res ID"
+	TableHeaderFactoryResourceID = "Factory Res ID"
+)
+
+func main() {
 	if len(os.Args) < 2 {
 		fmt.Printf(helpString)
 		_, _ = fmt.Fprintf(os.Stderr, "parameter error.\n")
 		os.Exit(1)
 	}
 
-	// initialize grpc
+	// initialize gRPC
 	ctx, _ := context.WithTimeout(context.Background(), time.Second*10)
 	grpcConn, err := grpc.DialContext(ctx, defaultSocketPath, grpc.WithInsecure(), grpc.WithContextDialer(
 		func(ctx context.Context, s string) (net.Conn, error) {
@@ -59,18 +75,10 @@ func main() {
 	c := rpc.NewTerwayTracingClient(grpcConn)
 
 	args := os.Args[1:]
-	switch args[0] { // subcommands
-	case "list":
-		err = list(c, ctx, args[1:])
-	case "config":
-		err = config(c, ctx, args[1:])
-	case "trace":
-		err = trace(c, ctx, args[1:])
-	case "show":
-		err = show(c, ctx, args[1:])
-	case "exec":
-		err = exec(c, ctx, args[1:])
-	default:
+	handler, ok := subcommands[args[0]]
+	if ok {
+		err = handler(c, ctx, args[1:])
+	} else {
 		_, _ = fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", args[0])
 	}
 
@@ -79,7 +87,6 @@ func main() {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %s\n", err.Error())
 		os.Exit(1)
 	}
-
 }
 
 func list(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
@@ -212,7 +219,7 @@ func show(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
 }
 
 func exec(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
-	// <type> <resource> <commmand> [args...]
+	// <type> <resource> <command> [args...]
 	if len(args) < 3 {
 		return errors.New("too few arguments")
 	}
@@ -246,6 +253,58 @@ func exec(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
 	if err == io.EOF {
 		return nil
 	}
+
+	return err
+}
+
+func mapping(c rpc.TerwayTracingClient, ctx context.Context, _ []string) error {
+	placeholder := &rpc.Placeholder{}
+	result, err := c.GetResourceMapping(ctx, placeholder)
+	if err != nil {
+		return err
+	}
+
+	cPod := len(TableHeaderPodName)
+	cResource := len(TableHeaderResourceID)
+	cFactory := len(TableHeaderFactoryResourceID)
+
+	// calculate the appropriate column length
+	for _, v := range result.Info {
+		if len(v.PodName) == 0 {
+			v.PodName = "X"
+		}
+		if cPod < len(v.PodName) {
+			cPod = len(v.PodName)
+		}
+
+		if len(v.ResourceName) == 0 {
+			v.ResourceName = "X"
+		}
+		if cResource < len(v.ResourceName) {
+			cResource = len(v.ResourceName)
+		}
+
+		if len(v.FactoryResourceName) == 0 {
+			v.FactoryResourceName = "X"
+		}
+		if cFactory < len(v.FactoryResourceName) {
+			cFactory = len(v.FactoryResourceName)
+		}
+	}
+
+	fmtString := fmt.Sprintf("%%-%ds%%-%ds%%-%ds\n", cPod+3, cResource+3, cFactory+3)
+	// print table header
+	fmt.Printf(fmtString, TableHeaderPodName, TableHeaderResourceID, TableHeaderFactoryResourceID)
+	for _, v := range result.Info {
+		fmt.Print(outputColors[v.Type]) // print color
+		fmt.Printf(fmtString, v.PodName, v.ResourceName, v.FactoryResourceName)
+
+		if err == nil && v.Type == rpc.ResourceMappingType_MappingTypeError {
+			err = errors.New("error exists in mapping")
+		}
+	}
+
+	fmt.Print(outputColors[rpc.ResourceMappingType_MappingTypeNormal])
 
 	return err
 }

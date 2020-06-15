@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"io/ioutil"
 	"net"
 	"os"
@@ -108,6 +109,10 @@ func (f *vethResourceManager) GarbageCollection(inUseSet map[string]interface{},
 		}
 	}
 	return nil
+}
+
+func (f *vethResourceManager) GetResourceMapping() ([]tracing.ResourceMapping, error) {
+	return []tracing.ResourceMapping{}, nil
 }
 
 func newVPCResourceManager() (ResourceManager, error) {

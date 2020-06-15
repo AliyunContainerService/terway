@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/AliyunContainerService/terway/rpc"
 	"testing"
 )
@@ -16,4 +17,11 @@ func TestPrintTree(t *testing.T) {
 	}
 
 	printMapAsTree(kvs)
+}
+
+func TestPrintColors(t *testing.T) {
+	for _, v := range outputColors {
+		fmt.Print(v)
+		fmt.Println("Test Test Test Test")
+	}
 }

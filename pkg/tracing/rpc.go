@@ -2,6 +2,7 @@ package tracing
 
 import (
 	"context"
+	"fmt"
 	"github.com/AliyunContainerService/terway/rpc"
 )
 
@@ -75,6 +76,43 @@ func (t *tracingRPC) ResourceExecute(request *rpc.ResourceExecuteRequest, server
 	}
 
 	return nil
+}
+
+func (t *tracingRPC) GetResourceMapping(_ context.Context, _ *rpc.Placeholder) (*rpc.PodResourceMappingReply, error) {
+	fmt.Println("get resource mapping from rpc")
+	mapping, err := t.tracer.GetResourceMapping()
+	if err != nil {
+		return nil, err
+	}
+
+	var info []*rpc.PodResourceMapping
+	for _, m := range mapping {
+		info = append(info, toRPCMapping(m))
+	}
+
+	return &rpc.PodResourceMappingReply{
+		Info: info,
+	}, nil
+}
+
+func toRPCMapping(mapping PodResourceMapping) *rpc.PodResourceMapping {
+	rMapping := rpc.PodResourceMapping{
+		Type:                rpc.ResourceMappingType_MappingTypeNormal,
+		PodName:             mapping.PodName,
+		ResourceName:        mapping.Resource.ResID,
+		FactoryResourceName: mapping.Resource.FactoryResource.ResID,
+	}
+
+	if !mapping.Valid {
+		// FactoryResourceName == "" for case resource has been in the pool but not found via API
+		if !mapping.Resource.Valid || rMapping.FactoryResourceName == "" {
+			rMapping.Type = rpc.ResourceMappingType_MappingTypeError
+		} else {
+			rMapping.Type = rpc.ResourceMappingType_MappingTypeIdle
+		}
+	}
+
+	return &rMapping
 }
 
 func toRPCEntry(entry MapKeyValueEntry) *rpc.MapKeyValueEntry {

@@ -38,6 +38,7 @@ type ObjectPool interface {
 	AcquireAny(ctx context.Context, idempotentKey string) (types.NetworkResource, error)
 	Stat(resID string) error
 	GetName() string
+	GetResourceMapping() ([]tracing.ResourceMapping, error)
 }
 
 // ResourceHolder interface to initialize pool
@@ -50,6 +51,7 @@ type ResourceHolder interface {
 type ObjectFactory interface {
 	Create(int) ([]types.NetworkResource, error)
 	Dispose(types.NetworkResource) error
+	GetResourceMapping() ([]tracing.FactoryResourceMapping, error)
 }
 
 type simpleObjectPool struct {
@@ -145,7 +147,7 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 
 	go pool.startCheckIdleTicker()
 
-	_ = tracing.Register(tracing.ResourceTypeObjectPool, pool.name, pool)
+	_ = tracing.Register(tracing.ResourceTypeResourcePool, pool.name, pool)
 	return pool, nil
 }
 
@@ -399,8 +401,15 @@ func (p *simpleObjectPool) Trace() []tracing.MapKeyValueEntry {
 	return trace
 }
 
-func (p *simpleObjectPool) Execute(_ string, _ []string, message chan<- string) {
-	message <- "no command available"
+func (p *simpleObjectPool) Execute(cmd string, _ []string, message chan<- string) {
+	switch cmd {
+	case "mapping":
+		mapping, err := p.GetResourceMapping()
+		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
+	default:
+		message <- "can't recognize command\n"
+	}
+
 	close(message)
 }
 
@@ -454,4 +463,60 @@ func (p *simpleObjectPool) AddInuse(res types.NetworkResource, idempotentKey str
 	}
 	// assume AddInuse() adds a resource that not exists in the pool before
 	p.metricTotal.Inc()
+}
+
+func (p *simpleObjectPool) GetResourceMapping() ([]tracing.ResourceMapping, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	factoryMapping, err := p.factory.GetResourceMapping()
+	if err != nil {
+		return nil, err
+	}
+
+	// Get Resource in Pool
+	var mapping []tracing.ResourceMapping
+
+	poolMap := make(map[string]int)
+
+	// idle
+	for i := 0; i < p.idle.size; i++ {
+		item := p.idle.slots[i]
+		m := tracing.ResourceMapping{
+			ResID: item.res.GetResourceID(),
+		}
+
+		mapping = append(mapping, m)
+		poolMap[m.ResID] = len(mapping) - 1 // the last element index
+	}
+
+	// inuse
+	for _, v := range p.inuse {
+		m := tracing.ResourceMapping{
+			ResID: v.res.GetResourceID(),
+		}
+
+		mapping = append(mapping, m)
+		poolMap[m.ResID] = len(mapping) - 1 // the last element index
+	}
+
+	// map to factory
+	for _, v := range factoryMapping {
+		i, ok := poolMap[v.ResID]
+		if !ok { // resource not exist in factory
+			m := tracing.ResourceMapping{
+				Valid:           false,
+				FactoryResource: v,
+			}
+
+			mapping = append(mapping, m)
+			continue
+		}
+
+		// resource exists in factory
+		mapping[i].FactoryResource = v
+		mapping[i].Valid = true
+	}
+
+	return mapping, nil
 }

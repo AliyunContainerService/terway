@@ -7,6 +7,7 @@ service TerwayTracing {
   rpc GetResourceConfig(ResourceTypeNameRequest) returns (ResourceConfigReply);
   rpc GetResourceTrace(ResourceTypeNameRequest) returns (ResourceTraceReply);
   rpc ResourceExecute(ResourceExecuteRequest) returns (stream ResourceExecuteReply);
+  rpc GetResourceMapping(Placeholder) returns (PodResourceMappingReply);
 }
 
 message Placeholder {}
@@ -49,4 +50,21 @@ message ResourceConfigReply {
 
 message ResourceTraceReply {
   repeated MapKeyValueEntry Trace = 1;
+}
+
+enum ResourceMappingType {
+  MappingTypeNormal = 0; // Pod -> Resource -> Factory
+  MappingTypeIdle = 1; // x -> Resource -> Factory
+  MappingTypeError = 2; // x -> x -> Factory
+}
+
+message PodResourceMapping {
+  ResourceMappingType type = 1;
+  string PodName = 2;
+  string ResourceName = 3;
+  string FactoryResourceName = 4;
+}
+
+message PodResourceMappingReply {
+  repeated PodResourceMapping info = 1;
 }
