@@ -30,6 +30,14 @@ const (
 	gcPeriod = 5 * time.Minute
 
 	conditionFalse = "false"
+
+	networkServiceName         = "default"
+	tracingKeyName             = "name"
+	tracingKeyDaemonMode       = "daemon_mode"
+	tracingKeyConfigFilePath   = "config_file_path"
+	tracingKeyKubeConfig       = "kubeconfig"
+	tracingKeyMaster           = "master"
+	tracingKeyPendingPodsCount = "pending_pods_count"
 )
 
 type networkService struct {
@@ -557,21 +565,19 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 func (networkService *networkService) Config() []tracing.MapKeyValueEntry {
 	// name, daemon_mode, configFilePath, kubeconfig, master
 	config := []tracing.MapKeyValueEntry{
-		{"name", "default"}, // use a unique name?
-		{"daemon_mode", networkService.daemonMode},
-		{"config_file_path", networkService.configFilePath},
-		{"kubeconfig", networkService.kubeConfig},
-		{"master", networkService.master},
+		{Key: tracingKeyName, Value: networkServiceName}, // use a unique name?
+		{Key: tracingKeyDaemonMode, Value: networkService.daemonMode},
+		{Key: tracingKeyConfigFilePath, Value: networkService.configFilePath},
+		{Key: tracingKeyKubeConfig, Value: networkService.kubeConfig},
+		{Key: tracingKeyMaster, Value: networkService.master},
 	}
 
 	return config
 }
 
 func (networkService *networkService) Trace() []tracing.MapKeyValueEntry {
-	// pending_pods_count, (pods_count)
-
 	trace := []tracing.MapKeyValueEntry{
-		{"pending_pods_count", fmt.Sprint(len(networkService.pendingPods))}, // race condition ?
+		{Key: tracingKeyPendingPodsCount, Value: fmt.Sprint(len(networkService.pendingPods))}, // race condition ?
 	}
 
 	resList, err := networkService.resourceDB.List()

@@ -24,9 +24,9 @@ const helpString = `Terway Tracing CLI
 		mapping - get terway resource mapping
 `
 
-type SubcommandHandler func(c rpc.TerwayTracingClient, ctx context.Context, args []string) error
+type subcommandHandler func(ctx context.Context, c rpc.TerwayTracingClient, args []string) error
 
-var subcommands = map[string]SubcommandHandler{
+var subcommands = map[string]subcommandHandler{
 	"list":    list,
 	"config":  config,
 	"trace":   trace,
@@ -49,13 +49,13 @@ const (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Printf(helpString)
+		fmt.Print(helpString)
 		_, _ = fmt.Fprintf(os.Stderr, "parameter error.\n")
 		os.Exit(1)
 	}
 
 	// initialize gRPC
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	grpcConn, err := grpc.DialContext(ctx, defaultSocketPath, grpc.WithInsecure(), grpc.WithContextDialer(
 		func(ctx context.Context, s string) (net.Conn, error) {
 			unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
@@ -67,29 +67,32 @@ func main() {
 		}))
 
 	if err != nil {
+		cancel()
 		_, _ = fmt.Fprintf(os.Stderr, "error while dialing to daemon: %s", err.Error())
 		os.Exit(1)
 	}
 
 	defer grpcConn.Close()
+	defer cancel()
 	c := rpc.NewTerwayTracingClient(grpcConn)
 
 	args := os.Args[1:]
 	handler, ok := subcommands[args[0]]
 	if ok {
-		err = handler(c, ctx, args[1:])
+		err = handler(ctx, c, args[1:])
 	} else {
 		_, _ = fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", args[0])
 	}
 
 	if err != nil {
+		cancel()
 		_ = grpcConn.Close()
 		_, _ = fmt.Fprintf(os.Stderr, "error: %s\n", err.Error())
 		os.Exit(1)
 	}
 }
 
-func list(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
+func list(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
 	if len(args) > 1 {
 		return errors.New("too many arguments")
 	}
@@ -116,7 +119,7 @@ func list(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
 	return nil
 }
 
-func config(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
+func config(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
 	if len(args) > 2 {
 		return errors.New("too many arguments")
 	}
@@ -151,7 +154,7 @@ func config(c rpc.TerwayTracingClient, ctx context.Context, args []string) error
 	return nil
 }
 
-func trace(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
+func trace(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
 	if len(args) > 2 {
 		return errors.New("too many arguments")
 	}
@@ -181,7 +184,7 @@ func trace(c rpc.TerwayTracingClient, ctx context.Context, args []string) error 
 	return nil
 }
 
-func show(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
+func show(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
 	if len(args) >= 2 {
 		return errors.New("too many arguments")
 	}
@@ -218,7 +221,7 @@ func show(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
 	return nil
 }
 
-func exec(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
+func exec(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
 	// <type> <resource> <command> [args...]
 	if len(args) < 3 {
 		return errors.New("too few arguments")
@@ -257,7 +260,7 @@ func exec(c rpc.TerwayTracingClient, ctx context.Context, args []string) error {
 	return err
 }
 
-func mapping(c rpc.TerwayTracingClient, ctx context.Context, _ []string) error {
+func mapping(ctx context.Context, c rpc.TerwayTracingClient, _ []string) error {
 	placeholder := &rpc.Placeholder{}
 	result, err := c.GetResourceMapping(ctx, placeholder)
 	if err != nil {
@@ -324,25 +327,25 @@ func getFirstNameWithType(c rpc.TerwayTracingClient, ctx context.Context, typ st
 	return resource.ResourceNames[0], nil
 }
 
-func printMap(m []*rpc.MapKeyValueEntry) {
-	if len(m) == 0 {
-		fmt.Printf("no record\n")
-		return
-	}
-
-	// get the longest length in k
-	length := 0
-	for _, v := range m {
-		if len(v.Key) > length {
-			length = len(v.Key)
-		}
-	}
-
-	fmtString := fmt.Sprintf("%%-%ds%%s\n", length+3)
-	for _, v := range m {
-		fmt.Printf(fmtString, v.Key+":", v.Value)
-	}
-}
+//func printMap(m []*rpc.MapKeyValueEntry) {
+//	if len(m) == 0 {
+//		fmt.Printf("no record\n")
+//		return
+//	}
+//
+//	// get the longest length in k
+//	length := 0
+//	for _, v := range m {
+//		if len(v.Key) > length {
+//			length = len(v.Key)
+//		}
+//	}
+//
+//	fmtString := fmt.Sprintf("%%-%ds%%s\n", length+3)
+//	for _, v := range m {
+//		fmt.Printf(fmtString, v.Key+":", v.Value)
+//	}
+//}
 
 func printMapAsTree(m []*rpc.MapKeyValueEntry) {
 	// build a tree

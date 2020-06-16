@@ -29,6 +29,11 @@ const (
 	typeNameENIIP    = "eniip"
 	poolNameENIIP    = "eniip-%s"
 	factoryNameENIIP = "eniip-%s"
+
+	tracingKeyENIMaxIP         = "eni_max_ip"
+	tracingKeyPrimaryIP        = "primary_ip"
+	tracingKeyENICount         = "eni_count"
+	tracingKeySecondaryIPCount = "secondary_ip_count"
 )
 
 const timeFormat = "2006-01-02 15:04:05"
@@ -509,9 +514,9 @@ func (f *eniIPFactory) createENIAsync(initIPs int) (*ENI, error) {
 
 func (f *eniIPFactory) Config() []tracing.MapKeyValueEntry {
 	config := []tracing.MapKeyValueEntry{
-		{"name", f.name},
-		{"eni_max_ip", fmt.Sprint(f.eniMaxIP)},
-		{"primary_ip", f.primaryIP.String()},
+		{Key: tracingKeyName, Value: f.name},
+		{Key: tracingKeyENIMaxIP, Value: fmt.Sprint(f.eniMaxIP)},
+		{Key: tracingKeyPrimaryIP, Value: f.primaryIP.String()},
 	}
 
 	return config
@@ -522,8 +527,8 @@ func (f *eniIPFactory) Trace() []tracing.MapKeyValueEntry {
 
 	secIPCount := 0
 
-	trace = append(trace, tracing.MapKeyValueEntry{Key: "eni_count", Value: fmt.Sprint(len(f.enis))})
-	trace = append(trace, tracing.MapKeyValueEntry{Key: "secondary_ip_count", Value: ""}) // placeholder
+	trace = append(trace, tracing.MapKeyValueEntry{Key: tracingKeyENICount, Value: fmt.Sprint(len(f.enis))})
+	trace = append(trace, tracing.MapKeyValueEntry{Key: tracingKeySecondaryIPCount, Value: ""}) // placeholder
 
 	for _, v := range f.enis {
 		secIPCount += len(v.ips)

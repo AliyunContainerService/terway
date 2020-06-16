@@ -10,10 +10,12 @@ type tracingRPC struct {
 	tracer *Tracer
 }
 
+// DefaultRPCServer returns the RPC server for default tracer
 func DefaultRPCServer() rpc.TerwayTracingServer {
 	return RPCServer(&defaultTracer)
 }
 
+// RPCServer returns RPC server for the given tracer
 func RPCServer(tracer *Tracer) rpc.TerwayTracingServer {
 	return &tracingRPC{tracer: tracer}
 }

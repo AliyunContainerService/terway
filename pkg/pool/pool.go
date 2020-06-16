@@ -28,6 +28,13 @@ const (
 	// CheckIdleInterval the interval of check and process idle eni
 	CheckIdleInterval  = 2 * time.Minute
 	defaultPoolBackoff = 1 * time.Minute
+
+	tracingKeyName     = "name"
+	tracingKeyMaxIdle  = "max_idle"
+	tracingKeyMinIdle  = "min_idle"
+	tracingKeyCapacity = "capacity"
+	tracingKeyIdle     = "idle"
+	tracingKeyInuse    = "inuse"
 )
 
 // ObjectPool object pool interface
@@ -383,10 +390,10 @@ func (p *simpleObjectPool) GetName() string {
 
 func (p *simpleObjectPool) Config() []tracing.MapKeyValueEntry {
 	config := []tracing.MapKeyValueEntry{
-		{"name", p.name},
-		{"max_idle", fmt.Sprint(p.maxIdle)},
-		{"min_idle", fmt.Sprint(p.minIdle)},
-		{"capacity", fmt.Sprint(p.capacity)},
+		{Key: tracingKeyName, Value: p.name},
+		{Key: tracingKeyMaxIdle, Value: fmt.Sprint(p.maxIdle)},
+		{Key: tracingKeyMinIdle, Value: fmt.Sprint(p.minIdle)},
+		{Key: tracingKeyCapacity, Value: fmt.Sprint(p.capacity)},
 	}
 
 	return config
@@ -394,8 +401,8 @@ func (p *simpleObjectPool) Config() []tracing.MapKeyValueEntry {
 
 func (p *simpleObjectPool) Trace() []tracing.MapKeyValueEntry {
 	trace := []tracing.MapKeyValueEntry{
-		{"idle", queueKeys(p.idle)},
-		{"inuse", mapKeys(p.inuse)},
+		{Key: tracingKeyIdle, Value: queueKeys(p.idle)},
+		{Key: tracingKeyInuse, Value: mapKeys(p.inuse)},
 	}
 
 	return trace

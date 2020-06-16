@@ -25,6 +25,10 @@ const (
 	typeNameENI    = "eni"
 	poolNameENI    = "eni-%s"
 	factoryNameENI = "eni-%s"
+
+	tracingKeyVSwitches              = "vswitches"
+	tracingKeyVSwitchSelectionPolicy = "vswitch_selection_policy"
+	tracingKeyCacheExpireAt          = "cache_expire_at"
 )
 
 type eniResourceManager struct {
@@ -129,7 +133,7 @@ func (m *eniResourceManager) GarbageCollection(inUseSet map[string]interface{}, 
 	return nil
 }
 func (m *eniResourceManager) GetResourceMapping() ([]tracing.ResourceMapping, error) {
-	return m.GetResourceMapping()
+	return m.pool.GetResourceMapping()
 }
 
 // MapSorter is a slice container for sorting
@@ -273,9 +277,9 @@ func (f *eniFactory) Dispose(resource types.NetworkResource) error {
 
 func (f *eniFactory) Config() []tracing.MapKeyValueEntry {
 	config := []tracing.MapKeyValueEntry{
-		{"name", f.name},
-		{"vswitches", strings.Join(f.switches, " ")},
-		{"vswitch_selection_policy", f.vswitchSelectionPolicy},
+		{Key: tracingKeyName, Value: f.name},
+		{Key: tracingKeyVSwitches, Value: strings.Join(f.switches, " ")},
+		{Key: tracingKeyVSwitchSelectionPolicy, Value: f.vswitchSelectionPolicy},
 	}
 
 	return config
@@ -283,7 +287,7 @@ func (f *eniFactory) Config() []tracing.MapKeyValueEntry {
 
 func (f *eniFactory) Trace() []tracing.MapKeyValueEntry {
 	trace := []tracing.MapKeyValueEntry{
-		{"cache_expire_at", fmt.Sprint(f.tsExpireAt)},
+		{tracingKeyCacheExpireAt, fmt.Sprint(f.tsExpireAt)},
 	}
 
 	for vs, cnt := range f.vswitchIPCntMap {

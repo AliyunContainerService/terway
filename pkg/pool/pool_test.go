@@ -3,7 +3,9 @@ package pool
 import (
 	"context"
 	"fmt"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +24,20 @@ type mockObjectFactory struct {
 	totalDisposed int
 	idGenerator   int
 	lock          sync.Mutex
+}
+
+func (f *mockObjectFactory) GetResourceMapping() ([]tracing.FactoryResourceMapping, error) {
+	var mapping []tracing.FactoryResourceMapping
+
+	for i := 1001; i <= f.idGenerator; i++ {
+		mapping = append(mapping, tracing.FactoryResourceMapping{
+			ResID: fmt.Sprint(i),
+			ENI:   nil,
+			ENIIP: nil,
+		})
+	}
+
+	return mapping, nil
 }
 
 type mockNetworkResource struct {
@@ -252,4 +268,32 @@ func TestReleaseInvalid(t *testing.T) {
 	pool := createPool(factory, 3, 5, 3, 0)
 	err := pool.Release("not-exists")
 	assert.Equal(t, err, ErrInvalidState)
+}
+
+func TestGetResourceMapping(t *testing.T) {
+	factory := &mockObjectFactory{
+		createDelay: 1 * time.Millisecond,
+	}
+	pool := createPool(factory, 3, 5, 3, 2)
+
+	for i := 0; i < 5; i++ {
+		_, err := pool.Acquire(context.Background(), "", "")
+		assert.Equal(t, nil, err)
+	}
+
+	mapping, err := pool.GetResourceMapping()
+	assert.Equal(t, nil, err)
+
+	for _, v := range mapping {
+		//t.Log(v.ResID)
+		resID, err := strconv.Atoi(v.ResID)
+		assert.Equal(t, nil, err)
+
+		if resID >= 1000 { // generated from factory
+			assert.Equal(t, v.Valid, true)
+		} else {
+			assert.Equal(t, v.Valid, false)
+		}
+	}
+
 }
