@@ -287,7 +287,7 @@ func (f *eniFactory) Config() []tracing.MapKeyValueEntry {
 
 func (f *eniFactory) Trace() []tracing.MapKeyValueEntry {
 	trace := []tracing.MapKeyValueEntry{
-		{tracingKeyCacheExpireAt, fmt.Sprint(f.tsExpireAt)},
+		{Key: tracingKeyCacheExpireAt, Value: fmt.Sprint(f.tsExpireAt)},
 	}
 
 	for vs, cnt := range f.vswitchIPCntMap {
