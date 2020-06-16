@@ -3,6 +3,7 @@ package tracing
 import (
 	"context"
 	"fmt"
+
 	"github.com/AliyunContainerService/terway/rpc"
 )
 

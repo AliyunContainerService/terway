@@ -2,12 +2,13 @@ package daemon
 
 import (
 	"fmt"
-	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"math/rand"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/pool"
@@ -303,7 +304,7 @@ func (f *eniFactory) Trace() []tracing.MapKeyValueEntry {
 
 func (f *eniFactory) Execute(cmd string, _ []string, message chan<- string) {
 	switch cmd {
-	case "mapping":
+	case commandMapping:
 		mapping, err := f.GetResourceMapping()
 		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
 	default:

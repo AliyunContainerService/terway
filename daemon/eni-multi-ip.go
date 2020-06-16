@@ -2,14 +2,15 @@ package daemon
 
 import (
 	"fmt"
-	"github.com/AliyunContainerService/terway/pkg/metric"
-	"github.com/AliyunContainerService/terway/pkg/tracing"
-	"github.com/prometheus/client_golang/prometheus"
 	"net"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/pool"
@@ -34,6 +35,8 @@ const (
 	tracingKeyPrimaryIP        = "primary_ip"
 	tracingKeyENICount         = "eni_count"
 	tracingKeySecondaryIPCount = "secondary_ip_count"
+
+	commandCheckAccount = "check_account"
 )
 
 const timeFormat = "2006-01-02 15:04:05"
@@ -560,9 +563,9 @@ func (f *eniIPFactory) Trace() []tracing.MapKeyValueEntry {
 
 func (f *eniIPFactory) Execute(cmd string, _ []string, message chan<- string) {
 	switch cmd {
-	case "check_account": // check account
+	case commandCheckAccount: // check account
 		f.checkAccount(message)
-	case "mapping":
+	case commandMapping:
 		mapping, err := f.GetResourceMapping()
 		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
 	default:

@@ -5,21 +5,21 @@ import (
 	"io"
 )
 
-type Tree struct {
+type tree struct {
 	Key    string
 	Value  string // value only exists in leaf
 	IsLeaf bool
-	Leaves []*Tree
+	Leaves []*tree
 }
 
 // add a leaf to the tree
-func (t *Tree) AddLeaf(path []string, value string) {
+func (t *tree) addLeaf(path []string, value string) {
 	if len(path) == 0 { // noop
 		return
 	}
 
 	if len(path) == 1 { // is leaf
-		t.Leaves = append(t.Leaves, &Tree{
+		t.Leaves = append(t.Leaves, &tree{
 			Key:    path[0],
 			Value:  value,
 			IsLeaf: true,
@@ -29,22 +29,22 @@ func (t *Tree) AddLeaf(path []string, value string) {
 
 	for _, v := range t.Leaves {
 		if v.Key == path[0] && !v.IsLeaf {
-			v.AddLeaf(path[1:], value)
+			v.addLeaf(path[1:], value)
 			return
 		}
 	}
 
-	tree := &Tree{
+	tree := &tree{
 		Key:    path[0],
 		IsLeaf: false,
 		Leaves: nil,
 	}
 	t.Leaves = append(t.Leaves, tree)
 
-	tree.AddLeaf(path[1:], value)
+	tree.addLeaf(path[1:], value)
 }
 
-func (t *Tree) Print(w io.Writer, indent string, level string) {
+func (t *tree) print(w io.Writer, indent string, level string) {
 	_, _ = fmt.Fprint(w, level)
 
 	if t.IsLeaf {
@@ -55,6 +55,6 @@ func (t *Tree) Print(w io.Writer, indent string, level string) {
 	_, _ = fmt.Printf("%s:\n", t.Key)
 
 	for _, v := range t.Leaves {
-		v.Print(w, indent, level+indent)
+		v.print(w, indent, level+indent)
 	}
 }

@@ -3,13 +3,14 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"io/ioutil"
 	"net"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -38,6 +39,8 @@ const (
 	tracingKeyKubeConfig       = "kubeconfig"
 	tracingKeyMaster           = "master"
 	tracingKeyPendingPodsCount = "pending_pods_count"
+
+	commandMapping = "mapping"
 )
 
 type networkService struct {
@@ -604,7 +607,7 @@ func (networkService *networkService) Trace() []tracing.MapKeyValueEntry {
 
 func (networkService *networkService) Execute(cmd string, _ []string, message chan<- string) {
 	switch cmd {
-	case "mapping":
+	case commandMapping:
 		mapping, err := networkService.GetResourceMapping()
 		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
 	default:

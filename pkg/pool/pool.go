@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/AliyunContainerService/terway/pkg/metric"
-	"github.com/AliyunContainerService/terway/pkg/tracing"
-	"github.com/prometheus/client_golang/prometheus"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/AliyunContainerService/terway/types"
 	log "github.com/sirupsen/logrus"

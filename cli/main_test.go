@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/AliyunContainerService/terway/rpc"
 	"testing"
+
+	"github.com/AliyunContainerService/terway/rpc"
 )
 
 func TestPrintTree(t *testing.T) {

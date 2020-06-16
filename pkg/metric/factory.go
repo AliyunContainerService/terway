@@ -3,6 +3,7 @@ package metric
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
+	// ENIIPFactoryENICount amount of allocated terway multi-ip factory eni
 	ENIIPFactoryENICount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "terway_eniip_factory_eni_count",
@@ -11,6 +12,7 @@ var (
 		[]string{"name", "max_eni"},
 	)
 
+	// ENIIPFactoryIPCount amount of allocated terway multi-ip secondary ip
 	ENIIPFactoryIPCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "terway_eniip_factory_ip_count",
@@ -20,6 +22,7 @@ var (
 		[]string{"name", "eni", "max_ip"},
 	)
 
+	// ENIIPFactoryIPAllocCount counter of eniip factory ip allocation
 	ENIIPFactoryIPAllocCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "terway_eniip_factory_ip_alloc_count",
@@ -31,6 +34,8 @@ var (
 )
 
 const (
+	// ENIIPAllocActionSucceed represents a succeeded ip alloc request
 	ENIIPAllocActionSucceed = "succeed"
-	ENIIPAllocActionFail    = "fail"
+	// ENIIPAllocActionFail represents a failed ip alloc request
+	ENIIPAllocActionFail = "fail"
 )

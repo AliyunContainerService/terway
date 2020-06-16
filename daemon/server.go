@@ -2,10 +2,11 @@ package daemon
 
 import (
 	"fmt"
-	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"io/ioutil"
 	"net"
 	"net/http"
+
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/rpc"
@@ -25,7 +26,7 @@ import (
 	"syscall"
 )
 
-// stackTriger Print golang stack trace to log
+// stackTriger print golang stack trace to log
 func stackTriger() {
 	sigchain := make(chan os.Signal, 1)
 	go func(c chan os.Signal) {

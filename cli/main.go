@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/AliyunContainerService/terway/rpc"
-	"google.golang.org/grpc"
 	"io"
 	"net"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/AliyunContainerService/terway/rpc"
+	"google.golang.org/grpc"
 )
 
 const defaultSocketPath = "/var/run/eni/eni.socket"
@@ -42,9 +43,9 @@ var outputColors = map[rpc.ResourceMappingType]string{
 }
 
 const (
-	TableHeaderPodName           = "Pod Name"
-	TableHeaderResourceID        = "Res ID"
-	TableHeaderFactoryResourceID = "Factory Res ID"
+	tableHeaderPodName           = "Pod Name"
+	tableHeaderResourceID        = "Res ID"
+	tableHeaderFactoryResourceID = "Factory Res ID"
 )
 
 func main() {
@@ -161,7 +162,7 @@ func trace(ctx context.Context, c rpc.TerwayTracingClient, args []string) error 
 
 	typ, name := args[0], ""
 	if len(args) == 1 { // only type, select the first resource returned
-		n, err := getFirstNameWithType(c, ctx, typ)
+		n, err := getFirstNameWithType(ctx, c, typ)
 		if err != nil {
 			return err
 		}
@@ -191,7 +192,7 @@ func show(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
 
 	typ, name := args[0], ""
 	if len(args) == 1 { // only type, select the first resource returned
-		n, err := getFirstNameWithType(c, ctx, typ)
+		n, err := getFirstNameWithType(ctx, c, typ)
 		if err != nil {
 			return err
 		}
@@ -267,9 +268,9 @@ func mapping(ctx context.Context, c rpc.TerwayTracingClient, _ []string) error {
 		return err
 	}
 
-	cPod := len(TableHeaderPodName)
-	cResource := len(TableHeaderResourceID)
-	cFactory := len(TableHeaderFactoryResourceID)
+	cPod := len(tableHeaderPodName)
+	cResource := len(tableHeaderResourceID)
+	cFactory := len(tableHeaderFactoryResourceID)
 
 	// calculate the appropriate column length
 	for _, v := range result.Info {
@@ -297,7 +298,7 @@ func mapping(ctx context.Context, c rpc.TerwayTracingClient, _ []string) error {
 
 	fmtString := fmt.Sprintf("%%-%ds%%-%ds%%-%ds\n", cPod+3, cResource+3, cFactory+3)
 	// print table header
-	fmt.Printf(fmtString, TableHeaderPodName, TableHeaderResourceID, TableHeaderFactoryResourceID)
+	fmt.Printf(fmtString, tableHeaderPodName, tableHeaderResourceID, tableHeaderFactoryResourceID)
 	for _, v := range result.Info {
 		fmt.Print(outputColors[v.Type]) // print color
 		fmt.Printf(fmtString, v.PodName, v.ResourceName, v.FactoryResourceName)
@@ -313,7 +314,7 @@ func mapping(ctx context.Context, c rpc.TerwayTracingClient, _ []string) error {
 }
 
 // getFirstNameWithType finds the first resource in the given type
-func getFirstNameWithType(c rpc.TerwayTracingClient, ctx context.Context, typ string) (string, error) {
+func getFirstNameWithType(ctx context.Context, c rpc.TerwayTracingClient, typ string) (string, error) {
 	request := &rpc.ResourceTypeRequest{Name: typ}
 	resource, err := c.GetResources(ctx, request)
 	if err != nil {
@@ -349,13 +350,13 @@ func getFirstNameWithType(c rpc.TerwayTracingClient, ctx context.Context, typ st
 
 func printMapAsTree(m []*rpc.MapKeyValueEntry) {
 	// build a tree
-	t := &Tree{}
+	t := &tree{}
 	for _, v := range m {
-		t.AddLeaf(strings.Split(v.Key, "/"), v.Value)
+		t.addLeaf(strings.Split(v.Key, "/"), v.Value)
 	}
 
 	// print the tree
 	for _, v := range t.Leaves {
-		v.Print(os.Stdout, "    ", "")
+		v.print(os.Stdout, "    ", "")
 	}
 }

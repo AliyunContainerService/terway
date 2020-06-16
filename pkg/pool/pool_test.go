@@ -3,12 +3,13 @@ package pool
 import (
 	"context"
 	"fmt"
-	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"os"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 
 	"github.com/sirupsen/logrus"
 
@@ -27,6 +28,9 @@ type mockObjectFactory struct {
 }
 
 func (f *mockObjectFactory) GetResourceMapping() ([]tracing.FactoryResourceMapping, error) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	var mapping []tracing.FactoryResourceMapping
 
 	for i := 1001; i <= f.idGenerator; i++ {
