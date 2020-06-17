@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/AliyunContainerService/terway/pkg/tracing"
+
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/pkg/errors"
@@ -24,7 +26,7 @@ import (
 	"syscall"
 )
 
-// stackTriger Print golang stack trace to log
+// stackTriger print golang stack trace to log
 func stackTriger() {
 	sigchain := make(chan os.Signal, 1)
 	go func(c chan os.Signal) {
@@ -93,6 +95,8 @@ func Run(pidFilePath, socketFilePath, debugSocketListen, configFilePath, kubecon
 
 	grpcServer := grpc.NewServer()
 	rpc.RegisterTerwayBackendServer(grpcServer, networkService)
+	rpc.RegisterTerwayTracingServer(grpcServer, tracing.DefaultRPCServer())
+
 	stop := make(chan struct{})
 
 	go func() {

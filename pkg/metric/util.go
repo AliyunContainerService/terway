@@ -16,4 +16,12 @@ func RegisterPrometheus() {
 	prometheus.MustRegister(RPCLatency)
 	prometheus.MustRegister(OpenAPILatency)
 	prometheus.MustRegister(MetadataLatency)
+	// ResourcePool
+	prometheus.MustRegister(ResourcePoolTotal)
+	prometheus.MustRegister(ResourcePoolIdle)
+	prometheus.MustRegister(ResourcePoolDisposed)
+	// ENIIP
+	prometheus.MustRegister(ENIIPFactoryIPCount)
+	prometheus.MustRegister(ENIIPFactoryENICount)
+	prometheus.MustRegister(ENIIPFactoryIPAllocCount)
 }

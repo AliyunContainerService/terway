@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/tracing"
+
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk"
@@ -110,10 +112,16 @@ func (f *vethResourceManager) GarbageCollection(inUseSet map[string]interface{},
 	return nil
 }
 
+func (f *vethResourceManager) GetResourceMapping() ([]tracing.ResourceMapping, error) {
+	return []tracing.ResourceMapping{}, nil
+}
+
 func newVPCResourceManager() (ResourceManager, error) {
-	return &vethResourceManager{
+	mgr := &vethResourceManager{
 		runtimeAPI: dockerRuntime{},
-	}, nil
+	}
+
+	return mgr, nil
 }
 
 type containerRuntime interface {

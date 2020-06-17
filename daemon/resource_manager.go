@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/types"
 )
 
@@ -43,4 +44,5 @@ type ResourceManager interface {
 	Allocate(context *networkContext, prefer string) (types.NetworkResource, error)
 	Release(context *networkContext, resID string) error
 	GarbageCollection(inUseResList map[string]interface{}, expireResList map[string]interface{}) error
+	GetResourceMapping() ([]tracing.ResourceMapping, error)
 }

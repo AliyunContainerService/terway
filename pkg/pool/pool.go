@@ -8,6 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/AliyunContainerService/terway/types"
 	log "github.com/sirupsen/logrus"
 )
@@ -25,15 +29,26 @@ const (
 	// CheckIdleInterval the interval of check and process idle eni
 	CheckIdleInterval  = 2 * time.Minute
 	defaultPoolBackoff = 1 * time.Minute
+
+	tracingKeyName     = "name"
+	tracingKeyMaxIdle  = "max_idle"
+	tracingKeyMinIdle  = "min_idle"
+	tracingKeyCapacity = "capacity"
+	tracingKeyIdle     = "idle"
+	tracingKeyInuse    = "inuse"
+
+	commandMapping = "mapping"
 )
 
 // ObjectPool object pool interface
 type ObjectPool interface {
 	Acquire(ctx context.Context, resID, idempotentKey string) (types.NetworkResource, error)
-	ReleaseWithReverse(resID string, reverse time.Duration) error
+	ReleaseWithReservation(resID string, reservation time.Duration) error
 	Release(resID string) error
 	AcquireAny(ctx context.Context, idempotentKey string) (types.NetworkResource, error)
 	Stat(resID string) error
+	GetName() string
+	GetResourceMapping() ([]tracing.ResourceMapping, error)
 }
 
 // ResourceHolder interface to initialize pool
@@ -46,11 +61,13 @@ type ResourceHolder interface {
 type ObjectFactory interface {
 	Create(int) ([]types.NetworkResource, error)
 	Dispose(types.NetworkResource) error
+	GetResourceMapping() ([]tracing.FactoryResourceMapping, error)
 }
 
 type simpleObjectPool struct {
+	name     string
 	inuse    map[string]poolItem
-	idle     *priorityQeueu // Todo: Fix this typo
+	idle     *priorityQueue
 	lock     sync.Mutex
 	factory  ObjectFactory
 	maxIdle  int
@@ -60,10 +77,16 @@ type simpleObjectPool struct {
 	// concurrency to create resource. tokenCh = capacity - (idle + inuse + dispose)
 	tokenCh     chan struct{}
 	backoffTime time.Duration
+	// metrics
+	metricIdle     prometheus.Gauge
+	metricTotal    prometheus.Gauge
+	metricDisposed prometheus.Counter
 }
 
 // Config configuration of pool
 type Config struct {
+	Name        string
+	Type        string
 	Factory     ObjectFactory
 	Initializer Initializer
 	MinIdle     int
@@ -73,12 +96,12 @@ type Config struct {
 
 type poolItem struct {
 	res           types.NetworkResource
-	reverse       time.Time
+	reservation   time.Time
 	idempotentKey string
 }
 
 func (i *poolItem) lessThan(other *poolItem) bool {
-	return i.reverse.Before(other.reverse)
+	return i.reservation.Before(other.reservation)
 }
 
 // Initializer of pool
@@ -95,6 +118,7 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 	}
 
 	pool := &simpleObjectPool{
+		name:        cfg.Name,
 		factory:     cfg.Factory,
 		inuse:       make(map[string]poolItem),
 		idle:        newPriorityQueue(),
@@ -104,6 +128,14 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 		notifyCh:    make(chan interface{}, 1),
 		tokenCh:     make(chan struct{}, cfg.Capacity),
 		backoffTime: defaultPoolBackoff,
+		// create metrics with labels in the pool struct
+		// and it will show in metrics even if it has not been triggered yet
+		metricIdle: metric.ResourcePoolIdle.WithLabelValues(cfg.Name, cfg.Type, fmt.Sprint(cfg.Capacity),
+			fmt.Sprint(cfg.MaxIdle), fmt.Sprint(cfg.MinIdle)),
+		metricTotal: metric.ResourcePoolTotal.WithLabelValues(cfg.Name, cfg.Type, fmt.Sprint(cfg.Capacity),
+			fmt.Sprint(cfg.MaxIdle), fmt.Sprint(cfg.MinIdle)),
+		metricDisposed: metric.ResourcePoolDisposed.WithLabelValues(cfg.Name, cfg.Type, fmt.Sprint(cfg.Capacity),
+			fmt.Sprint(cfg.MaxIdle), fmt.Sprint(cfg.MinIdle)),
 	}
 
 	if cfg.Initializer != nil {
@@ -125,6 +157,7 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 
 	go pool.startCheckIdleTicker()
 
+	_ = tracing.Register(tracing.ResourceTypeResourcePool, pool.name, pool)
 	return pool, nil
 }
 
@@ -152,7 +185,7 @@ func mapKeys(m map[string]poolItem) string {
 	return strings.Join(keys, ", ")
 }
 
-func queueKeys(q *priorityQeueu) string {
+func queueKeys(q *priorityQueue) string {
 	var keys []string
 	for i := 0; i < q.size; i++ {
 		keys = append(keys, q.slots[i].res.GetResourceID())
@@ -187,7 +220,7 @@ func (p *simpleObjectPool) peekOverfullIdle() *poolItem {
 		return nil
 	}
 
-	if item.reverse.After(time.Now()) {
+	if item.reservation.After(time.Now()) {
 		return nil
 	}
 	return p.idle.Pop()
@@ -201,12 +234,17 @@ func (p *simpleObjectPool) checkIdle() {
 			break
 		}
 
+		p.metricIdle.Dec()
+		p.metricTotal.Dec()
+
 		res := item.res
 		log.Infof("try dispose res %+v", res)
 		err := p.factory.Dispose(res)
 		if err == nil {
 			p.tokenCh <- struct{}{}
 			p.backoffTime = defaultPoolBackoff
+			// one item popped from idle and total
+			p.metricDisposed.Inc()
 		} else {
 			log.Warnf("error dispose res: %+v", err)
 			p.backoffTime = p.backoffTime * 2
@@ -300,6 +338,7 @@ func (p *simpleObjectPool) Acquire(ctx context.Context, resID, idempotentKey str
 		p.inuse[res.GetResourceID()] = poolItem{res: res, idempotentKey: idempotentKey}
 		p.lock.Unlock()
 		log.Infof("acquire (expect %s): return idle %s", resID, res.GetResourceID())
+		p.metricIdle.Dec()
 		p.notify()
 		return res, nil
 	}
@@ -348,6 +387,42 @@ func (p *simpleObjectPool) Stat(resID string) error {
 	return ErrNotFound
 }
 
+func (p *simpleObjectPool) GetName() string {
+	return p.name
+}
+
+func (p *simpleObjectPool) Config() []tracing.MapKeyValueEntry {
+	config := []tracing.MapKeyValueEntry{
+		{Key: tracingKeyName, Value: p.name},
+		{Key: tracingKeyMaxIdle, Value: fmt.Sprint(p.maxIdle)},
+		{Key: tracingKeyMinIdle, Value: fmt.Sprint(p.minIdle)},
+		{Key: tracingKeyCapacity, Value: fmt.Sprint(p.capacity)},
+	}
+
+	return config
+}
+
+func (p *simpleObjectPool) Trace() []tracing.MapKeyValueEntry {
+	trace := []tracing.MapKeyValueEntry{
+		{Key: tracingKeyIdle, Value: queueKeys(p.idle)},
+		{Key: tracingKeyInuse, Value: mapKeys(p.inuse)},
+	}
+
+	return trace
+}
+
+func (p *simpleObjectPool) Execute(cmd string, _ []string, message chan<- string) {
+	switch cmd {
+	case commandMapping:
+		mapping, err := p.GetResourceMapping()
+		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
+	default:
+		message <- "can't recognize command\n"
+	}
+
+	close(message)
+}
+
 func (p *simpleObjectPool) notify() {
 	select {
 	case p.notifyCh <- true:
@@ -355,7 +430,7 @@ func (p *simpleObjectPool) notify() {
 	}
 }
 
-func (p *simpleObjectPool) ReleaseWithReverse(resID string, reverse time.Duration) error {
+func (p *simpleObjectPool) ReleaseWithReservation(resID string, reservation time.Duration) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	res, ok := p.inuse[resID]
@@ -364,24 +439,29 @@ func (p *simpleObjectPool) ReleaseWithReverse(resID string, reverse time.Duratio
 		return ErrInvalidState
 	}
 
-	log.Infof("release %s, reverse %v: return success", resID, reverse)
+	log.Infof("release %s, reservation %v: return success", resID, reservation)
 	delete(p.inuse, resID)
-	reverseTo := time.Now()
-	if reverse > 0 {
-		reverseTo = reverseTo.Add(reverse)
+	reserveTo := time.Now()
+	if reservation > 0 {
+		reserveTo = reserveTo.Add(reservation)
 	}
-	p.idle.Push(&poolItem{res: res.res, reverse: reverseTo})
+	p.idle.Push(&poolItem{res: res.res, reservation: reserveTo})
+	p.metricIdle.Inc()
 	p.notify()
 	return nil
 }
 func (p *simpleObjectPool) Release(resID string) error {
-	return p.ReleaseWithReverse(resID, time.Duration(0))
+	return p.ReleaseWithReservation(resID, time.Duration(0))
 }
 
 func (p *simpleObjectPool) AddIdle(resource types.NetworkResource) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.idle.Push(&poolItem{res: resource, reverse: time.Now()})
+	p.idle.Push(&poolItem{res: resource, reservation: time.Now()})
+	// assume AddIdle() adds a resource that not exists in the pool before
+	// both add total and idle gauge
+	p.metricTotal.Inc()
+	p.metricIdle.Inc()
 }
 
 func (p *simpleObjectPool) AddInuse(res types.NetworkResource, idempotentKey string) {
@@ -391,4 +471,62 @@ func (p *simpleObjectPool) AddInuse(res types.NetworkResource, idempotentKey str
 		res:           res,
 		idempotentKey: idempotentKey,
 	}
+	// assume AddInuse() adds a resource that not exists in the pool before
+	p.metricTotal.Inc()
+}
+
+func (p *simpleObjectPool) GetResourceMapping() ([]tracing.ResourceMapping, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	factoryMapping, err := p.factory.GetResourceMapping()
+	if err != nil {
+		return nil, err
+	}
+
+	// Get Resource in Pool
+	mapping := make([]tracing.ResourceMapping, 0)
+
+	poolMap := make(map[string]int)
+
+	// idle
+	for i := 0; i < p.idle.size; i++ {
+		item := p.idle.slots[i]
+		m := tracing.ResourceMapping{
+			ResID: item.res.GetResourceID(),
+		}
+
+		mapping = append(mapping, m)
+		poolMap[m.ResID] = len(mapping) - 1 // the last element index
+	}
+
+	// inuse
+	for _, v := range p.inuse {
+		m := tracing.ResourceMapping{
+			ResID: v.res.GetResourceID(),
+		}
+
+		mapping = append(mapping, m)
+		poolMap[m.ResID] = len(mapping) - 1 // the last element index
+	}
+
+	// map to factory
+	for _, v := range factoryMapping {
+		i, ok := poolMap[v.ResID]
+		if !ok { // resource not exist in factory
+			m := tracing.ResourceMapping{
+				Valid:           false,
+				FactoryResource: v,
+			}
+
+			mapping = append(mapping, m)
+			continue
+		}
+
+		// resource exists in factory
+		mapping[i].FactoryResource = v
+		mapping[i].Valid = true
+	}
+
+	return mapping, nil
 }

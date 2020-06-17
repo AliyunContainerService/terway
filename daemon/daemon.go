@@ -6,8 +6,11 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -28,15 +31,28 @@ const (
 	gcPeriod = 5 * time.Minute
 
 	conditionFalse = "false"
+
+	networkServiceName         = "default"
+	tracingKeyName             = "name"
+	tracingKeyDaemonMode       = "daemon_mode"
+	tracingKeyConfigFilePath   = "config_file_path"
+	tracingKeyKubeConfig       = "kubeconfig"
+	tracingKeyMaster           = "master"
+	tracingKeyPendingPodsCount = "pending_pods_count"
+
+	commandMapping = "mapping"
 )
 
 type networkService struct {
-	daemonMode  string
-	k8s         Kubernetes
-	resourceDB  storage.Storage
-	vethResMgr  ResourceManager
-	eniResMgr   ResourceManager
-	eniIPResMgr ResourceManager
+	daemonMode     string
+	configFilePath string
+	kubeConfig     string
+	master         string
+	k8s            Kubernetes
+	resourceDB     storage.Storage
+	vethResMgr     ResourceManager
+	eniResMgr      ResourceManager
+	eniIPResMgr    ResourceManager
 	//networkResourceMgr ResourceManager
 	mgrForResource  map[string]ResourceManager
 	pendingPods     map[string]interface{}
@@ -548,9 +564,128 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 	}()
 }
 
+// tracing
+func (networkService *networkService) Config() []tracing.MapKeyValueEntry {
+	// name, daemon_mode, configFilePath, kubeconfig, master
+	config := []tracing.MapKeyValueEntry{
+		{Key: tracingKeyName, Value: networkServiceName}, // use a unique name?
+		{Key: tracingKeyDaemonMode, Value: networkService.daemonMode},
+		{Key: tracingKeyConfigFilePath, Value: networkService.configFilePath},
+		{Key: tracingKeyKubeConfig, Value: networkService.kubeConfig},
+		{Key: tracingKeyMaster, Value: networkService.master},
+	}
+
+	return config
+}
+
+func (networkService *networkService) Trace() []tracing.MapKeyValueEntry {
+	trace := []tracing.MapKeyValueEntry{
+		{Key: tracingKeyPendingPodsCount, Value: fmt.Sprint(len(networkService.pendingPods))},
+	}
+
+	resList, err := networkService.resourceDB.List()
+	if err != nil {
+		trace = append(trace, tracing.MapKeyValueEntry{Key: "error", Value: err.Error()})
+		return trace
+	}
+
+	for _, v := range resList {
+		res := v.(PodResources)
+
+		var resources []string
+		for _, v := range res.Resources {
+			resource := fmt.Sprintf("(%s)%s", v.Type, v.ID)
+			resources = append(resources, resource)
+		}
+
+		key := fmt.Sprintf("pods/%s/%s/resources", res.PodInfo.Namespace, res.PodInfo.Name)
+		trace = append(trace, tracing.MapKeyValueEntry{Key: key, Value: strings.Join(resources, " ")})
+	}
+
+	return trace
+}
+
+func (networkService *networkService) Execute(cmd string, _ []string, message chan<- string) {
+	switch cmd {
+	case commandMapping:
+		mapping, err := networkService.GetResourceMapping()
+		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
+	default:
+		message <- "can't recognize command\n"
+	}
+
+	close(message)
+}
+
+func (networkService *networkService) GetResourceMapping() ([]tracing.PodResourceMapping, error) {
+	log.Println("get network_service resource mapping")
+	var resourceMapping []tracing.ResourceMapping
+
+	var err error
+
+	// get []ResourceMapping
+	switch networkService.daemonMode {
+	case daemonModeENIMultiIP:
+		resourceMapping, err = networkService.eniIPResMgr.GetResourceMapping()
+	case daemonModeVPC:
+		return []tracing.PodResourceMapping{}, nil
+	case daemonModeENIOnly:
+		resourceMapping, err = networkService.eniResMgr.GetResourceMapping()
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// get pods
+	mapping := make([]tracing.PodResourceMapping, 0)
+	podMap := make(map[string]int)
+
+	pods, err := networkService.resourceDB.List()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, pod := range pods {
+		p := pod.(PodResources)
+		for _, res := range p.Resources {
+			m := tracing.PodResourceMapping{
+				ResID:   res.ID,
+				PodName: p.PodInfo.Name,
+			}
+
+			mapping = append(mapping, m)
+			podMap[m.ResID] = len(mapping) - 1
+		}
+	}
+
+	for _, res := range resourceMapping {
+		i, ok := podMap[res.ResID]
+		if !ok { // not exists
+			m := tracing.PodResourceMapping{
+				Valid:    false,
+				Resource: res,
+			}
+
+			mapping = append(mapping, m)
+			continue
+		}
+
+		// exists
+		mapping[i].Valid = true
+		mapping[i].Resource = res
+	}
+
+	log.Printf("get network_service resource mapping done: %v\n", mapping)
+	return mapping, nil
+}
+
 func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (rpc.TerwayBackendServer, error) {
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
 	netSrv := &networkService{
+		configFilePath:  configFilePath,
+		kubeConfig:      kubeconfig,
+		master:          master,
 		pendingPods:     map[string]interface{}{},
 		pendingPodsLock: sync.RWMutex{},
 	}
@@ -692,6 +827,10 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 
 	//start gc loop
 	netSrv.startGarbageCollectionLoop()
+
+	// register for tracing
+	_ = tracing.Register(tracing.ResourceTypeNetworkService, "default", netSrv)
+	tracing.RegisterResourceMapping(netSrv)
 
 	return netSrv, nil
 }

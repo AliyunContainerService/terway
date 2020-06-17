@@ -1,10 +1,14 @@
 package daemon
 
 import (
+	"fmt"
 	"math/rand"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/pool"
@@ -18,6 +22,14 @@ import (
 const (
 	// vSwitchIPCntTimeout is the duration for the vswitchIPCntMap content's effectiveness
 	vSwitchIPCntTimeout = 10 * time.Minute
+
+	typeNameENI    = "eni"
+	poolNameENI    = "eni"
+	factoryNameENI = "eni"
+
+	tracingKeyVSwitches              = "vswitches"
+	tracingKeyVSwitchSelectionPolicy = "vswitch_selection_policy"
+	tracingKeyCacheExpireAt          = "cache_expire_at"
 )
 
 type eniResourceManager struct {
@@ -31,6 +43,8 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 	if err != nil {
 		return nil, errors.Wrapf(err, "error create ENI factory")
 	}
+
+	_ = tracing.Register(tracing.ResourceTypeFactory, factoryNameENI, factory)
 
 	capacity, err := ecs.GetInstanceMaxENI(poolConfig.InstanceID)
 	if err != nil {
@@ -52,6 +66,8 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 	}
 
 	poolCfg := pool.Config{
+		Name:     poolNameENI,
+		Type:     typeNameENI,
 		MaxIdle:  poolConfig.MaxPoolSize,
 		MinIdle:  poolConfig.MinPoolSize,
 		Capacity: capacity,
@@ -87,10 +103,12 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 	if err != nil {
 		return nil, err
 	}
-	return &eniResourceManager{
+	mgr := &eniResourceManager{
 		pool: pool,
 		ecs:  ecs,
-	}, nil
+	}
+
+	return mgr, nil
 }
 
 func (m *eniResourceManager) Allocate(ctx *networkContext, prefer string) (types.NetworkResource, error) {
@@ -99,7 +117,7 @@ func (m *eniResourceManager) Allocate(ctx *networkContext, prefer string) (types
 
 func (m *eniResourceManager) Release(context *networkContext, resID string) error {
 	if context != nil && context.pod != nil {
-		return m.pool.ReleaseWithReverse(resID, context.pod.IPStickTime)
+		return m.pool.ReleaseWithReservation(resID, context.pod.IPStickTime)
 	}
 	return m.pool.Release(resID)
 }
@@ -114,6 +132,9 @@ func (m *eniResourceManager) GarbageCollection(inUseSet map[string]interface{}, 
 		}
 	}
 	return nil
+}
+func (m *eniResourceManager) GetResourceMapping() ([]tracing.ResourceMapping, error) {
+	return m.pool.GetResourceMapping()
 }
 
 // MapSorter is a slice container for sorting
@@ -144,6 +165,7 @@ func (ms MapSorter) SortInDescendingOrder() {
 }
 
 type eniFactory struct {
+	name                   string
 	switches               []string
 	securityGroup          string
 	instanceID             string
@@ -163,6 +185,7 @@ func newENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*eniFactory, e
 		poolConfig.SecurityGroup = securityGroup
 	}
 	return &eniFactory{
+		name:                   factoryNameENI,
 		switches:               poolConfig.VSwitch,
 		securityGroup:          poolConfig.SecurityGroup,
 		instanceID:             poolConfig.InstanceID,
@@ -251,4 +274,64 @@ func (f *eniFactory) CreateWithIPCount(count int) ([]types.NetworkResource, erro
 func (f *eniFactory) Dispose(resource types.NetworkResource) error {
 	eni := resource.(*types.ENI)
 	return f.ecs.FreeENI(eni.ID, f.instanceID)
+}
+
+func (f *eniFactory) Config() []tracing.MapKeyValueEntry {
+	config := []tracing.MapKeyValueEntry{
+		{Key: tracingKeyName, Value: f.name},
+		{Key: tracingKeyVSwitches, Value: strings.Join(f.switches, " ")},
+		{Key: tracingKeyVSwitchSelectionPolicy, Value: f.vswitchSelectionPolicy},
+	}
+
+	return config
+}
+
+func (f *eniFactory) Trace() []tracing.MapKeyValueEntry {
+	trace := []tracing.MapKeyValueEntry{
+		{Key: tracingKeyCacheExpireAt, Value: fmt.Sprint(f.tsExpireAt)},
+	}
+
+	for vs, cnt := range f.vswitchIPCntMap {
+		key := fmt.Sprintf("vswitch/%s/ip_count", vs)
+		trace = append(trace, tracing.MapKeyValueEntry{
+			Key:   key,
+			Value: fmt.Sprint(cnt),
+		})
+	}
+
+	return trace
+}
+
+func (f *eniFactory) Execute(cmd string, _ []string, message chan<- string) {
+	switch cmd {
+	case commandMapping:
+		mapping, err := f.GetResourceMapping()
+		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
+	default:
+		message <- "can't recognize command\n"
+	}
+
+	close(message)
+}
+
+func (f *eniFactory) GetResourceMapping() ([]tracing.FactoryResourceMapping, error) {
+	// Get ENIs from Aliyun API
+	enis, err := f.ecs.GetAttachedENIs(f.instanceID, false)
+	if err != nil {
+		return nil, err
+	}
+
+	var mapping []tracing.FactoryResourceMapping
+
+	for _, eni := range enis {
+		m := tracing.FactoryResourceMapping{
+			ResID: eni.GetResourceID(),
+			ENI:   eni,
+			ENIIP: nil,
+		}
+
+		mapping = append(mapping, m)
+	}
+
+	return mapping, nil
 }
