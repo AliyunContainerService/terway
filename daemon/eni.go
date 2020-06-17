@@ -24,8 +24,8 @@ const (
 	vSwitchIPCntTimeout = 10 * time.Minute
 
 	typeNameENI    = "eni"
-	poolNameENI    = "eni-%s"
-	factoryNameENI = "eni-%s"
+	poolNameENI    = "eni"
+	factoryNameENI = "eni"
 
 	tracingKeyVSwitches              = "vswitches"
 	tracingKeyVSwitchSelectionPolicy = "vswitch_selection_policy"
@@ -44,7 +44,7 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 		return nil, errors.Wrapf(err, "error create ENI factory")
 	}
 
-	_ = tracing.Register(tracing.ResourceTypeFactory, "eni", factory)
+	_ = tracing.Register(tracing.ResourceTypeFactory, factoryNameENI, factory)
 
 	capacity, err := ecs.GetInstanceMaxENI(poolConfig.InstanceID)
 	if err != nil {
@@ -66,7 +66,7 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 	}
 
 	poolCfg := pool.Config{
-		Name:     fmt.Sprintf(poolNameENI, randomString()),
+		Name:     poolNameENI,
 		Type:     typeNameENI,
 		MaxIdle:  poolConfig.MaxPoolSize,
 		MinIdle:  poolConfig.MinPoolSize,
@@ -185,7 +185,7 @@ func newENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*eniFactory, e
 		poolConfig.SecurityGroup = securityGroup
 	}
 	return &eniFactory{
-		name:                   fmt.Sprintf(factoryNameENI, randomString()),
+		name:                   factoryNameENI,
 		switches:               poolConfig.VSwitch,
 		securityGroup:          poolConfig.SecurityGroup,
 		instanceID:             poolConfig.InstanceID,

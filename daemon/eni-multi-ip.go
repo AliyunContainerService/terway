@@ -28,15 +28,15 @@ const (
 	eniIPAllocInhibitTimeout = 10 * time.Minute
 
 	typeNameENIIP    = "eniip"
-	poolNameENIIP    = "eniip-%s"
-	factoryNameENIIP = "eniip-%s"
+	poolNameENIIP    = "eniip"
+	factoryNameENIIP = "eniip"
 
 	tracingKeyENIMaxIP         = "eni_max_ip"
 	tracingKeyPrimaryIP        = "primary_ip"
 	tracingKeyENICount         = "eni_count"
 	tracingKeySecondaryIPCount = "secondary_ip_count"
 
-	commandCheckAccount = "check_account"
+	commandAudit = "audit"
 )
 
 const timeFormat = "2006-01-02 15:04:05"
@@ -563,7 +563,7 @@ func (f *eniIPFactory) Trace() []tracing.MapKeyValueEntry {
 
 func (f *eniIPFactory) Execute(cmd string, _ []string, message chan<- string) {
 	switch cmd {
-	case commandCheckAccount: // check account
+	case commandAudit: // check account
 		f.checkAccount(message)
 	case commandMapping:
 		mapping, err := f.GetResourceMapping()
@@ -687,7 +687,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 	}
 
 	factory := &eniIPFactory{
-		name:         fmt.Sprintf(factoryNameENIIP, randomString()),
+		name:         factoryNameENIIP,
 		eniFactory:   eniFactory,
 		enis:         []*ENI{},
 		primaryIP:    primaryIP,
@@ -741,7 +741,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 	factory.metricENICount = metric.ENIIPFactoryENICount.WithLabelValues(factory.name, fmt.Sprint(maxEni))
 
 	poolCfg := pool.Config{
-		Name:     fmt.Sprintf(poolNameENIIP, randomString()),
+		Name:     poolNameENIIP,
 		Type:     typeNameENIIP,
 		MaxIdle:  poolConfig.MaxPoolSize,
 		MinIdle:  poolConfig.MinPoolSize,

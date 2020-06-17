@@ -580,7 +580,7 @@ func (networkService *networkService) Config() []tracing.MapKeyValueEntry {
 
 func (networkService *networkService) Trace() []tracing.MapKeyValueEntry {
 	trace := []tracing.MapKeyValueEntry{
-		{Key: tracingKeyPendingPodsCount, Value: fmt.Sprint(len(networkService.pendingPods))}, // race condition ?
+		{Key: tracingKeyPendingPodsCount, Value: fmt.Sprint(len(networkService.pendingPods))},
 	}
 
 	resList, err := networkService.resourceDB.List()
@@ -638,7 +638,7 @@ func (networkService *networkService) GetResourceMapping() ([]tracing.PodResourc
 	}
 
 	// get pods
-	var mapping []tracing.PodResourceMapping
+	mapping := make([]tracing.PodResourceMapping, 0)
 	podMap := make(map[string]int)
 
 	pods, err := networkService.resourceDB.List()

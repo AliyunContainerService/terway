@@ -36,6 +36,8 @@ const (
 	tracingKeyCapacity = "capacity"
 	tracingKeyIdle     = "idle"
 	tracingKeyInuse    = "inuse"
+
+	commandMapping = "mapping"
 )
 
 // ObjectPool object pool interface
@@ -411,7 +413,7 @@ func (p *simpleObjectPool) Trace() []tracing.MapKeyValueEntry {
 
 func (p *simpleObjectPool) Execute(cmd string, _ []string, message chan<- string) {
 	switch cmd {
-	case "mapping":
+	case commandMapping:
 		mapping, err := p.GetResourceMapping()
 		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
 	default:
@@ -483,7 +485,7 @@ func (p *simpleObjectPool) GetResourceMapping() ([]tracing.ResourceMapping, erro
 	}
 
 	// Get Resource in Pool
-	var mapping []tracing.ResourceMapping
+	mapping := make([]tracing.ResourceMapping, 0)
 
 	poolMap := make(map[string]int)
 

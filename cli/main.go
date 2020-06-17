@@ -17,22 +17,18 @@ import (
 const defaultSocketPath = "/var/run/eni/eni.socket"
 const helpString = `Terway Tracing CLI
     subcommands:
-        list [type] - show types/resources list
-        config <type> [resource_name] - get config of the resource, get the first if name not specified
-        trace <type> [resource_name] - get trace of the resource, get the first if name not specified
-        show  <type> [resource_name] - get both config & trace of the resource
-        exec <type> <resource> <command> args... - send command to the given resource
-		mapping - get terway resource mapping
+        list    [type] - show types/resources list
+        show    <type> [resource_name] - get config and trace info of the resource, get the first if name not specified
+        mapping - get terway resource mapping
+        execute <type> <resource> <command> args... - send command to the given resource
 `
 
 type subcommandHandler func(ctx context.Context, c rpc.TerwayTracingClient, args []string) error
 
 var subcommands = map[string]subcommandHandler{
 	"list":    list,
-	"config":  config,
-	"trace":   trace,
+	"execute": exec,
 	"show":    show,
-	"exec":    exec,
 	"mapping": mapping,
 }
 
@@ -117,71 +113,6 @@ func list(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
 	}
 
 	fmt.Printf("%v\n", resources.ResourceNames)
-	return nil
-}
-
-func config(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
-	if len(args) > 2 {
-		return errors.New("too many arguments")
-	}
-
-	typ, name := args[0], ""
-	if len(args) == 1 { // only type, select the first resource returned
-		request := &rpc.ResourceTypeRequest{Name: typ}
-		resource, err := c.GetResources(ctx, request)
-		if err != nil {
-			return err
-		}
-
-		if len(resource.ResourceNames) == 0 {
-			return errors.New("no resource in the specified type")
-		}
-		name = resource.ResourceNames[0]
-	} else {
-		name = args[1]
-	}
-
-	request := &rpc.ResourceTypeNameRequest{
-		Type: typ,
-		Name: name,
-	}
-
-	cfg, err := c.GetResourceConfig(ctx, request)
-	if err != nil {
-		return err
-	}
-
-	printMapAsTree(cfg.Config)
-	return nil
-}
-
-func trace(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
-	if len(args) > 2 {
-		return errors.New("too many arguments")
-	}
-
-	typ, name := args[0], ""
-	if len(args) == 1 { // only type, select the first resource returned
-		n, err := getFirstNameWithType(ctx, c, typ)
-		if err != nil {
-			return err
-		}
-		name = n
-	} else {
-		name = args[1]
-	}
-
-	request := &rpc.ResourceTypeNameRequest{
-		Type: typ,
-		Name: name,
-	}
-
-	trace, err := c.GetResourceTrace(ctx, request)
-	if err != nil {
-		return err
-	}
-
-	printMapAsTree(trace.Trace)
 	return nil
 }
 
