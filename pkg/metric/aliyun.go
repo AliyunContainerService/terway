@@ -8,7 +8,7 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "aliyun_openapi_latency",
 			Help:    "aliyun openapi latency in ms",
-			Buckets: prometheus.ExponentialBuckets(500, 2, 10),
+			Buckets: prometheus.ExponentialBuckets(50, 2, 10),
 		},
 		[]string{"api", "error"},
 	)
