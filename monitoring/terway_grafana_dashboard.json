@@ -107,7 +107,7 @@
       "type": "bargauge"
     },
     {
-      "datasource": "${DS_LYT-TEST-CLUTSER-PROM_1018023522129950}",
+      "datasource": "${TERWAY-PROM-CLUSTER}",
       "gridPos": {
         "h": 9,
         "w": 12,
@@ -163,7 +163,7 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "${DS_LYT-TEST-CLUTSER-PROM_1018023522129950}",
+      "datasource": "${TERWAY-PROM-CLUSTER}",
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -249,7 +249,7 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "${DS_LYT-TEST-CLUTSER-PROM_1018023522129950}",
+      "datasource": "${TERWAY-PROM-CLUSTER}",
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -335,7 +335,7 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "${DS_LYT-TEST-CLUTSER-PROM_1018023522129950}",
+      "datasource": "${TERWAY-PROM-CLUSTER}",
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -421,7 +421,7 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "${DS_LYT-TEST-CLUTSER-PROM_1018023522129950}",
+      "datasource": "${TERWAY-PROM-CLUSTER}",
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -507,7 +507,7 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "${DS_LYT-TEST-CLUTSER-PROM_1018023522129950}",
+      "datasource": "${TERWAY-PROM-CLUSTER}",
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -592,7 +592,7 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "${DS_LYT-TEST-CLUTSER-PROM_1018023522129950}",
+      "datasource": "${TERWAY-PROM-CLUSTER}",
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -601,7 +601,7 @@
         "x": 12,
         "y": 25
       },
-      "id": 13,
+      "id": 20,
       "legend": {
         "avg": false,
         "current": false,
@@ -618,6 +618,7 @@
         "dataLinks": []
       },
       "percentage": false,
+      "pluginVersion": "6.4.0-pre",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -627,7 +628,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "sum(aliyun_openapi_latency_count) by (error)",
+          "expr": "histogram_quantile(0.95, sum(rate(terway_rpc_latency_bucket[5m])) by (le, rpc_api, error))",
           "refId": "A"
         }
       ],
@@ -635,7 +636,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Aliyun OpenAPI Reqeust Count",
+      "title": "Terway CNI RPC Latency",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -677,7 +678,7 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "${DS_LYT-TEST-CLUTSER-PROM_1018023522129950}",
+      "datasource": "${TERWAY-PROM-CLUSTER}",
       "description": "",
       "fill": 1,
       "fillGradient": 0,
@@ -760,59 +761,92 @@
       }
     },
     {
-      "datasource": "${DS_LYT-TEST-CLUTSER-PROM_1018023522129950}",
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "${TERWAY-PROM-CLUSTER}",
+      "fill": 1,
+      "fillGradient": 0,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
         "y": 33
       },
-      "id": 16,
-      "options": {
-        "displayMode": "gradient",
-        "fieldOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "defaults": {
-            "mappings": [],
-            "max": 100,
-            "min": 0,
-            "thresholds": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ],
-            "title": "",
-            "unit": "none"
-          },
-          "override": {},
-          "values": false
-        },
-        "orientation": "vertical"
+      "id": 13,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
       },
-      "pluginVersion": "6.4.0-pre",
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "dataLinks": []
+      },
+      "percentage": false,
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
       "targets": [
         {
-          "expr": "terway_eniip_factory_eni_count",
-          "format": "time_series",
-          "instant": false,
-          "legendFormat": "{{instance}}({{max_eni}})",
+          "expr": "sum(aliyun_openapi_latency_count) by (error)",
           "refId": "A"
         }
       ],
+      "thresholds": [],
       "timeFrom": null,
+      "timeRegions": [],
       "timeShift": null,
-      "title": "Terway ENIIP Factory ENI Count",
-      "type": "bargauge"
+      "title": "Aliyun OpenAPI Reqeust Count",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
     },
     {
-      "datasource": "${DS_LYT-TEST-CLUTSER-PROM_1018023522129950}",
+      "datasource": "${TERWAY-PROM-CLUSTER}",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -864,18 +898,70 @@
       "type": "bargauge"
     },
     {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": "${DS_LYT-TEST-CLUTSER-PROM_1018023522129950}",
-      "fill": 1,
-      "fillGradient": 0,
+      "datasource": "${TERWAY-PROM-CLUSTER}",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
         "y": 41
+      },
+      "id": 16,
+      "options": {
+        "displayMode": "gradient",
+        "fieldOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "defaults": {
+            "mappings": [],
+            "max": 100,
+            "min": 0,
+            "thresholds": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ],
+            "title": "",
+            "unit": "none"
+          },
+          "override": {},
+          "values": false
+        },
+        "orientation": "vertical"
+      },
+      "pluginVersion": "6.4.0-pre",
+      "targets": [
+        {
+          "expr": "terway_eniip_factory_eni_count",
+          "format": "time_series",
+          "instant": false,
+          "legendFormat": "{{instance}}({{max_eni}})",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Terway ENIIP Factory ENI Count",
+      "type": "bargauge"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "${TERWAY-PROM-CLUSTER}",
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 49
       },
       "id": 18,
       "legend": {
@@ -961,7 +1047,7 @@
     "list": []
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-5m",
     "to": "now"
   },
   "timepicker": {
@@ -981,5 +1067,5 @@
   "timezone": "",
   "title": "Terway Dashboard",
   "uid": "VLtNEKmGz",
-  "version": 9
+  "version": 12
 }

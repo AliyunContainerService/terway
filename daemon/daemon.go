@@ -618,7 +618,6 @@ func (networkService *networkService) Execute(cmd string, _ []string, message ch
 }
 
 func (networkService *networkService) GetResourceMapping() ([]tracing.PodResourceMapping, error) {
-	log.Println("get network_service resource mapping")
 	var resourceMapping []tracing.ResourceMapping
 
 	var err error
@@ -676,7 +675,6 @@ func (networkService *networkService) GetResourceMapping() ([]tracing.PodResourc
 		mapping[i].Resource = res
 	}
 
-	log.Printf("get network_service resource mapping done: %v\n", mapping)
 	return mapping, nil
 }
 
