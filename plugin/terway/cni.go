@@ -155,6 +155,16 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 					IPType:                 allocResult.IPType,
 					Reason:                 fmt.Sprintf("roll back ip for error: %v", err),
 				})
+
+			_, err = terwayBackendClient.RecordEvent(context.Background(),
+				&rpc.EventRequest{
+					EventTarget:     rpc.EventTarget_EventTargetPod,
+					K8SPodName:      string(k8sConfig.K8S_POD_NAME),
+					K8SPodNamespace: string(k8sConfig.K8S_POD_NAMESPACE),
+					EventType:       rpc.EventType_EventTypeWarning,
+					Reason:          "AllocIPFailed",
+					Message:         err.Error(),
+				})
 		}
 	}()
 
@@ -348,6 +358,16 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 			Gateway: allocatedGatewayAddr,
 		}},
 	}
+
+	_, _ = terwayBackendClient.RecordEvent(context.Background(),
+		&rpc.EventRequest{
+			EventTarget:     rpc.EventTarget_EventTargetPod,
+			K8SPodName:      string(k8sConfig.K8S_POD_NAME),
+			K8SPodNamespace: string(k8sConfig.K8S_POD_NAMESPACE),
+			EventType:       rpc.EventType_EventTypeNormal,
+			Reason:          "AllocIPSucceed",
+			Message:         fmt.Sprintf("Alloc IP %s for Pod", allocatedIPAddr.String()),
+		})
 
 	return types.PrintResult(result, confVersion)
 }

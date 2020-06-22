@@ -8,6 +8,8 @@ service TerwayBackend {
     }
     rpc GetIPInfo(GetInfoRequest) returns (GetInfoReply) {
     }
+    rpc RecordEvent(EventRequest) returns (EventReply) {
+    }
 }
 
 message AllocIPRequest {
@@ -110,4 +112,28 @@ message GetInfoReply {
     Pod PodConfig = 2;
     string NodeCidr = 3;
     string PodIP = 4;
+}
+
+enum EventTarget {
+    EventTargetNode = 0;
+    EventTargetPod = 1;
+}
+
+enum EventType {
+    EventTypeNormal = 0;
+    EventTypeWarning = 1;
+}
+
+message EventRequest {
+    EventTarget EventTarget = 1;
+    string K8sPodName = 2;
+    string K8sPodNamespace = 3;
+    EventType EventType = 4;
+    string Reason = 5;
+    string Message = 6;
+}
+
+message EventReply {
+    bool Succeed = 1;
+    string Error = 2;
 }

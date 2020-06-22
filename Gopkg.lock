@@ -184,6 +184,14 @@
   revision = "23def4e6c14b4da8ac2ed8007337bc5eb5007998"
 
 [[projects]]
+  branch = "master"
+  digest = "1:b7cb6054d3dff43b38ad2e92492f220f57ae6087ee797dca298139776749ace8"
+  name = "github.com/golang/groupcache"
+  packages = ["lru"]
+  pruneopts = "UT"
+  revision = "8c9f03a8e57eb486e42badaed3fb287da51807ba"
+
+[[projects]]
   digest = "1:4a32eb57407190eced21a21abee9ce4d4ab6f0bf113ca61cb1cb2d549a65c985"
   name = "github.com/golang/protobuf"
   packages = [
@@ -615,7 +623,7 @@
   revision = "c89978d5f86d7427bef2fc7752732c8c60b1d188"
 
 [[projects]]
-  digest = "1:5306fa4e911383bc8540148123e6a81aea1786dbf592ac051fd572fdd8a173b1"
+  digest = "1:50d6b10125570b7983978820008baca8069ec867d9808a2318243a787ab77b30"
   name = "k8s.io/apimachinery"
   packages = [
     "pkg/api/errors",
@@ -643,15 +651,18 @@
     "pkg/util/framer",
     "pkg/util/intstr",
     "pkg/util/json",
+    "pkg/util/mergepatch",
     "pkg/util/net",
     "pkg/util/runtime",
     "pkg/util/sets",
+    "pkg/util/strategicpatch",
     "pkg/util/validation",
     "pkg/util/validation/field",
     "pkg/util/wait",
     "pkg/util/yaml",
     "pkg/version",
     "pkg/watch",
+    "third_party/forked/golang/json",
     "third_party/forked/golang/reflect",
   ]
   pruneopts = "UT"
@@ -659,7 +670,7 @@
   version = "kubernetes-1.10.2"
 
 [[projects]]
-  digest = "1:6001983c1d8ee92c42439d07ec7e17c4bbc6136e4fd7061b7e31c964e9dcc8c0"
+  digest = "1:646b63ad0c02e84e452417e8ad8b6369f94afe58079d3afeef06d2d78d9c9ed8"
   name = "k8s.io/client-go"
   packages = [
     "discovery",
@@ -705,6 +716,7 @@
     "tools/clientcmd/api/latest",
     "tools/clientcmd/api/v1",
     "tools/metrics",
+    "tools/record",
     "tools/reference",
     "transport",
     "util/cert",
@@ -715,6 +727,14 @@
   pruneopts = "UT"
   revision = "33f2870a2b83179c823ddc90e5513f9e5fe43b38"
   version = "kubernetes-1.10.2"
+
+[[projects]]
+  branch = "feature-serverside-apply"
+  digest = "1:e0d6dcb28c42a53c7243bb6380badd17f92fbd8488a075a07e984f91a07c0d23"
+  name = "k8s.io/kube-openapi"
+  packages = ["pkg/util/proto"]
+  pruneopts = "UT"
+  revision = "f442ecb314a3679150c272e2b9713d8deed5955d"
 
 [[projects]]
   digest = "1:6a15e7ea08b2ddf329857d6611bbc7b17801d34175b0d93088ae1aede3f47872"
@@ -768,6 +788,7 @@
     "k8s.io/apimachinery/pkg/util/wait",
     "k8s.io/client-go/kubernetes",
     "k8s.io/client-go/tools/clientcmd",
+    "k8s.io/client-go/tools/record",
     "k8s.io/kubernetes/pkg/kubelet/apis/deviceplugin/v1beta1",
   ]
   solver-name = "gps-cdcl"

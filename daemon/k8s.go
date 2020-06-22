@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode"
 
+	"k8s.io/client-go/kubernetes/scheme"
+
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
@@ -24,6 +26,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
+	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/record"
 )
 
 const (
@@ -35,6 +39,9 @@ const (
 
 	apiServerTimeout           = 70 * time.Second
 	apiServerReconnectThrottle = 2 * time.Minute
+
+	eventTypeNormal  = corev1.EventTypeNormal
+	eventTypeWarning = corev1.EventTypeWarning
 )
 
 type podInfo struct {
@@ -56,14 +63,19 @@ type Kubernetes interface {
 	GetServiceCidr() *net.IPNet
 	GetNodeCidr() *net.IPNet
 	SetNodeAllocatablePod(count int) error
+	RecordNodeEvent(eventType, reason, message string)
+	RecordPodEvent(podName, podNamespace, eventType, reason, message string) error
 }
 
 type k8s struct {
 	client      kubernetes.Interface
 	storage     storage.Storage
+	broadcaster record.EventBroadcaster
+	recorder    record.EventRecorder
 	mode        string
 	nodeName    string
 	nodeCidr    *net.IPNet
+	node        *corev1.Node
 	svcCidr     *net.IPNet
 	apiConn     *connTracker
 	apiConnTime time.Time
@@ -94,6 +106,13 @@ func newK8S(master, kubeconfig string, svcCidr *net.IPNet, daemonMode string) (K
 		return nil, errors.Wrap(err, "failed getting node name")
 	}
 
+	node, err := client.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{
+		ResourceVersion: "0",
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed getting node")
+	}
+
 	if svcCidr == nil {
 		svcCidr, err = serviceCidrFromAPIServer(client)
 		if err != nil {
@@ -114,18 +133,29 @@ func newK8S(master, kubeconfig string, svcCidr *net.IPNet, daemonMode string) (K
 		return nil, errors.Wrapf(err, "failed init db storage with path %s and bucket %s", dbPath, dbName)
 	}
 
+	broadcaster := record.NewBroadcaster()
+	source := corev1.EventSource{Component: "terway-daemon"}
+	recorder := broadcaster.NewRecorder(scheme.Scheme, source)
+
+	sink := &typedv1.EventSinkImpl{
+		Interface: typedv1.New(client.CoreV1().RESTClient()).Events(""),
+	}
+	broadcaster.StartRecordingToSink(sink)
+
 	k8sObj := &k8s{
 		client:      client,
 		mode:        daemonMode,
+		node:        node,
 		nodeName:    nodeName,
 		nodeCidr:    nodeCidr,
 		svcCidr:     svcCidr,
 		storage:     storage,
 		apiConn:     t,
+		broadcaster: broadcaster,
+		recorder:    recorder,
 		apiConnTime: time.Now(),
 		Locker:      &sync.RWMutex{},
 	}
-
 	go func() {
 		for range time.Tick(storageCleanPeriod) {
 			err := k8sObj.clean()
@@ -476,6 +506,38 @@ func (k *k8s) reconnectOnTimeoutError(err error) {
 		}
 		k.Unlock()
 	}
+}
+
+func (k *k8s) RecordNodeEvent(eventType, reason, message string) {
+	ref := &corev1.ObjectReference{
+		Kind:      "Node",
+		Name:      k.node.Name,
+		UID:       k.node.UID,
+		Namespace: "",
+	}
+
+	k.recorder.Event(ref, eventType, reason, message)
+}
+
+func (k *k8s) RecordPodEvent(podName, podNamespace, eventType, reason, message string) error {
+	pod, err := k.client.CoreV1().Pods(podNamespace).Get(podName, metav1.GetOptions{
+		ResourceVersion: "0",
+	})
+
+	if err != nil {
+		k.reconnectOnTimeoutError(err)
+		return err
+	}
+
+	ref := &corev1.ObjectReference{
+		Kind:      "Pod",
+		Name:      pod.Name,
+		UID:       pod.UID,
+		Namespace: pod.Namespace,
+	}
+
+	k.recorder.Event(ref, eventType, reason, message)
+	return nil
 }
 
 // connTracker is a dialer that tracks all open connections it creates.
