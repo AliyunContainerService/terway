@@ -69,6 +69,12 @@ type ResourceMappingHandler interface {
 	GetResourceMapping() ([]PodResourceMapping, error)
 }
 
+// PodEventRecorder records event on pod
+type PodEventRecorder func(podName, podNamespace, eventType, reason, message string) error
+
+// NodeEventRecorder records event on node
+type NodeEventRecorder func(eventType, reason, message string)
+
 type resourceMap map[string]TraceHandler
 
 // Tracer manages tracing handlers registered from the system
@@ -78,6 +84,8 @@ type Tracer struct {
 	// store TraceHandler by resource name
 	traceMap        map[string]resourceMap
 	resourceMapping ResourceMappingHandler
+	podEvent        PodEventRecorder
+	nodeEvent       NodeEventRecorder
 }
 
 func init() {
@@ -121,13 +129,19 @@ func (t *Tracer) RegisterResourceMapping(mapping ResourceMappingHandler) {
 	t.resourceMapping = mapping
 }
 
+// RegisterEventRecorder registers pod & node event recorder to a tracer
+func (t *Tracer) RegisterEventRecorder(node NodeEventRecorder, pod PodEventRecorder) {
+	t.nodeEvent = node
+	t.podEvent = pod
+}
+
 // GetTypes gets all types registered to the tracer
 func (t *Tracer) GetTypes() []string {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
 	var names []string
-	// may be unordered, do we need a sort?
+
 	for k := range t.traceMap {
 		names = append(names, k)
 	}
@@ -204,6 +218,25 @@ func (t *Tracer) Execute(typ, resourceName, cmd string, args []string) (<-chan s
 	return ch, nil
 }
 
+// RecordPodEvent records pod event via PodEventRecorder
+func (t *Tracer) RecordPodEvent(podName, podNamespace, eventType, reason, message string) error {
+	if t.podEvent == nil {
+		return errors.New("no pod event recorder registered")
+	}
+
+	return t.podEvent(podName, podNamespace, eventType, reason, message)
+}
+
+// RecordNodeEvent records node event via PodEventRecorder
+func (t *Tracer) RecordNodeEvent(eventType, reason, message string) error {
+	if t.nodeEvent == nil {
+		return errors.New("no node event recorder registered")
+	}
+
+	t.nodeEvent(eventType, reason, message)
+	return nil
+}
+
 // GetResourceMapping gives the resource mapping from the handler
 // if the handler has not been registered, there will be error
 func (t *Tracer) GetResourceMapping() ([]PodResourceMapping, error) {
@@ -227,6 +260,21 @@ func RegisterResourceMapping(handler ResourceMappingHandler) {
 // Unregister removes TraceHandler from tracer. do nothing if not found
 func Unregister(typ, resourceName string) {
 	defaultTracer.Unregister(typ, resourceName)
+}
+
+// RegisterEventRecorder registers pod & node event recorder to a tracer
+func RegisterEventRecorder(node NodeEventRecorder, pod PodEventRecorder) {
+	defaultTracer.RegisterEventRecorder(node, pod)
+}
+
+// RecordPodEvent records pod event via PodEventRecorder
+func RecordPodEvent(podName, podNamespace, eventType, reason, message string) error {
+	return defaultTracer.RecordPodEvent(podName, podNamespace, eventType, reason, message)
+}
+
+// RecordNodeEvent records node event via PodEventRecorder
+func RecordNodeEvent(eventType, reason, message string) error {
+	return defaultTracer.RecordNodeEvent(eventType, reason, message)
 }
 
 // NewTracer creates a new tracer

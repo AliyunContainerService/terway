@@ -857,6 +857,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	// register for tracing
 	_ = tracing.Register(tracing.ResourceTypeNetworkService, "default", netSrv)
 	tracing.RegisterResourceMapping(netSrv)
+	tracing.RegisterEventRecorder(netSrv.k8s.RecordNodeEvent, netSrv.k8s.RecordPodEvent)
 
 	return netSrv, nil
 }
