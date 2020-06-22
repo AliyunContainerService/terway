@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/AliyunContainerService/terway/pkg/tracing"
+
 	"k8s.io/client-go/kubernetes/scheme"
 
 	"k8s.io/client-go/tools/clientcmd"
@@ -301,7 +303,9 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 		if ingress, err := parseBandwidth(ingressBandwidth); err == nil {
 			pi.TcIngress = ingress
 		}
-		//TODO write event on pod if parse bandwidth fail
+
+		_ = tracing.RecordPodEvent(pod.Name, pod.Namespace, eventTypeWarning,
+			"ParseFailed", fmt.Sprintf("Parse bandwidth %s failed.", ingressBandwidth))
 	}
 	if egressBandwidth, ok := podAnnotation[podEgressBandwidth]; ok {
 		if egress, err := parseBandwidth(egressBandwidth); err == nil {
