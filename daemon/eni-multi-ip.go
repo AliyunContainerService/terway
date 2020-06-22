@@ -586,6 +586,7 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 
 	message <- fmt.Sprintf("%d enis fetched\n", len(enis))
 
+	f.Lock()
 	// check local enis count
 	if len(f.enis) != len(enis) {
 		message <- fmt.Sprintf("remote eni count not equal to local: remote %d, local: %d\n", len(enis), len(f.enis))
@@ -597,6 +598,7 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 	for _, v := range f.enis {
 		diffMap[v.ID] = v
 	}
+	f.Unlock()
 
 	// range for remote enis
 	for _, v := range enis {

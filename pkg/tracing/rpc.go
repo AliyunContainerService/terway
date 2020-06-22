@@ -72,9 +72,8 @@ func (t *tracingRPC) ResourceExecute(request *rpc.ResourceExecuteRequest, server
 	}
 
 	for message := range c {
-		err = server.Send(&rpc.ResourceExecuteReply{Message: message})
-		if err != nil {
-			return err
+		if err == nil {
+			err = server.Send(&rpc.ResourceExecuteReply{Message: message})
 		}
 	}
 
