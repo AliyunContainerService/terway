@@ -44,6 +44,8 @@ const (
 
 	eventTypeNormal  = corev1.EventTypeNormal
 	eventTypeWarning = corev1.EventTypeWarning
+
+	labelDynamicConfig = "terway-config"
 )
 
 type podInfo struct {
@@ -67,25 +69,43 @@ type Kubernetes interface {
 	SetNodeAllocatablePod(count int) error
 	RecordNodeEvent(eventType, reason, message string)
 	RecordPodEvent(podName, podNamespace, eventType, reason, message string) error
+	GetNodeDynamicConfigLabel() string
+	GetDynamicConfigWithName(name string) (string, error)
+	SetSvcCidr(svcCidr *net.IPNet) error
 }
 
 type k8s struct {
-	client      kubernetes.Interface
-	storage     storage.Storage
-	broadcaster record.EventBroadcaster
-	recorder    record.EventRecorder
-	mode        string
-	nodeName    string
-	nodeCidr    *net.IPNet
-	node        *corev1.Node
-	svcCidr     *net.IPNet
-	apiConn     *connTracker
-	apiConnTime time.Time
+	client          kubernetes.Interface
+	storage         storage.Storage
+	broadcaster     record.EventBroadcaster
+	recorder        record.EventRecorder
+	mode            string
+	nodeName        string
+	daemonNamespace string
+	nodeCidr        *net.IPNet
+	node            *corev1.Node
+	svcCidr         *net.IPNet
+	apiConn         *connTracker
+	apiConnTime     time.Time
 	sync.Locker
 }
 
+func (k *k8s) SetSvcCidr(svcCidr *net.IPNet) error {
+	var err error
+	if svcCidr == nil {
+		svcCidr, err = serviceCidrFromAPIServer(k.client)
+		if err != nil {
+			return errors.Wrap(err, "failed getting service cidr")
+		}
+
+	}
+
+	k.svcCidr = svcCidr
+	return nil
+}
+
 // newK8S return Kubernetes service by pod spec and daemon mode
-func newK8S(master, kubeconfig string, svcCidr *net.IPNet, daemonMode string) (Kubernetes, error) {
+func newK8S(master, kubeconfig string, daemonMode string) (Kubernetes, error) {
 
 	k8sRestConfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
 	if err != nil {
@@ -108,18 +128,17 @@ func newK8S(master, kubeconfig string, svcCidr *net.IPNet, daemonMode string) (K
 		return nil, errors.Wrap(err, "failed getting node name")
 	}
 
+	daemonNamespace := os.Getenv("POD_NAMESPACE")
+	if len(daemonNamespace) == 0 {
+		daemonNamespace = "kube-system"
+		log.Warnf("POD_NAMESPACE is not set in environment variables, use kube-system as default namespace")
+	}
+
 	node, err := client.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{
 		ResourceVersion: "0",
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed getting node")
-	}
-
-	if svcCidr == nil {
-		svcCidr, err = serviceCidrFromAPIServer(client)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed getting service cidr")
-		}
 	}
 
 	var nodeCidr *net.IPNet
@@ -145,18 +164,18 @@ func newK8S(master, kubeconfig string, svcCidr *net.IPNet, daemonMode string) (K
 	broadcaster.StartRecordingToSink(sink)
 
 	k8sObj := &k8s{
-		client:      client,
-		mode:        daemonMode,
-		node:        node,
-		nodeName:    nodeName,
-		nodeCidr:    nodeCidr,
-		svcCidr:     svcCidr,
-		storage:     storage,
-		apiConn:     t,
-		broadcaster: broadcaster,
-		recorder:    recorder,
-		apiConnTime: time.Now(),
-		Locker:      &sync.RWMutex{},
+		client:          client,
+		mode:            daemonMode,
+		node:            node,
+		nodeName:        nodeName,
+		nodeCidr:        nodeCidr,
+		daemonNamespace: daemonNamespace,
+		storage:         storage,
+		apiConn:         t,
+		broadcaster:     broadcaster,
+		recorder:        recorder,
+		apiConnTime:     time.Now(),
+		Locker:          &sync.RWMutex{},
 	}
 	go func() {
 		for range time.Tick(storageCleanPeriod) {
@@ -542,6 +561,36 @@ func (k *k8s) RecordPodEvent(podName, podNamespace, eventType, reason, message s
 
 	k.recorder.Event(ref, eventType, reason, message)
 	return nil
+}
+
+// GetNodeDynamicConfigLabel returns value with label config
+func (k *k8s) GetNodeDynamicConfigLabel() string {
+	// use node cached in newK8s()
+	cfgName, ok := k.node.Labels[labelDynamicConfig]
+	if !ok {
+		return ""
+	}
+
+	return cfgName
+}
+
+// GetDynamicConfigWithName gets the Dynamic Config's content with its ConfigMap name
+func (k *k8s) GetDynamicConfigWithName(name string) (string, error) {
+	cfgMap, err := k.client.CoreV1().ConfigMaps(k.daemonNamespace).Get(name, metav1.GetOptions{
+		TypeMeta:        metav1.TypeMeta{},
+		ResourceVersion: "0",
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	content, ok := cfgMap.Data["eni_conf"]
+	if ok {
+		return content, nil
+	}
+
+	return "", errors.New("configmap not included eni_conf")
 }
 
 // connTracker is a dialer that tracks all open connections it creates.
