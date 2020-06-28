@@ -90,6 +90,7 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 		confVersion string
 		cniNetns    ns.NetNS
 	)
+
 	confVersion, err = versionDecoder.Decode(args.StdinData)
 	if err != nil {
 		return err
@@ -125,6 +126,22 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
 	defer cancel()
 
+	defer func() {
+		if err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+			defer cancel()
+			_, err = terwayBackendClient.RecordEvent(ctx,
+				&rpc.EventRequest{
+					EventTarget:     rpc.EventTarget_EventTargetPod,
+					K8SPodName:      string(k8sConfig.K8S_POD_NAME),
+					K8SPodNamespace: string(k8sConfig.K8S_POD_NAMESPACE),
+					EventType:       rpc.EventType_EventTypeWarning,
+					Reason:          "AllocIPFailed",
+					Message:         err.Error(),
+				})
+		}
+	}()
+
 	allocResult, err := terwayBackendClient.AllocIP(
 		timeoutContext,
 		&rpc.AllocIPRequest{
@@ -147,7 +164,9 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 
 	defer func() {
 		if err != nil {
-			_, err = terwayBackendClient.ReleaseIP(context.Background(),
+			ctx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+			defer cancel()
+			_, err = terwayBackendClient.ReleaseIP(ctx,
 				&rpc.ReleaseIPRequest{
 					K8SPodName:             string(k8sConfig.K8S_POD_NAME),
 					K8SPodNamespace:        string(k8sConfig.K8S_POD_NAMESPACE),
@@ -348,6 +367,18 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 			Gateway: allocatedGatewayAddr,
 		}},
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+	_, _ = terwayBackendClient.RecordEvent(ctx,
+		&rpc.EventRequest{
+			EventTarget:     rpc.EventTarget_EventTargetPod,
+			K8SPodName:      string(k8sConfig.K8S_POD_NAME),
+			K8SPodNamespace: string(k8sConfig.K8S_POD_NAMESPACE),
+			EventType:       rpc.EventType_EventTypeNormal,
+			Reason:          "AllocIPSucceed",
+			Message:         fmt.Sprintf("Alloc IP %s for Pod", allocatedIPAddr.String()),
+		})
 
 	return types.PrintResult(result, confVersion)
 }

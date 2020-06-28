@@ -15,6 +15,11 @@ rules:
 - apiGroups: [""]
   resources: ["pods", "nodes", "namespaces", "configmaps", "serviceaccounts"]
   verbs: ["get", "watch", "list", "update"]
+- apiGroups: [""]
+  resources:
+    - events
+  verbs:
+    - create
 - apiGroups: ["networking.k8s.io"]
   resources:
   - networkpolicies

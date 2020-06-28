@@ -1,0 +1,70 @@
+# use this config to expose terway metrics api on node
+# and register it to prometheus
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: terway-metric-svcmonitor
+  # use your namespace where prometheus in
+  # arms-prom for Aliyun ARMS Prometheus
+  namespace: arms-prom
+spec:
+  jobLabel: terway-metric
+  selector:
+    mathLabels:
+      app: terway-metric-proxy
+  namespaceSelector:
+    matchNames:
+      - kube-system
+  endpoints:
+    - port: metric
+      path: /metrics
+      # pull interval
+      interval: 15s
+
+---
+
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: terway-metric-proxy
+  namespace: kube-system
+spec:
+  template:
+    metadata:
+      labels:
+        app: terway-metric-proxy
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      nodeSelector:
+        beta.kubernetes.io/arch: amd64
+      tolerations:
+      - operator: "Exists"
+      hostNetwork: true
+      containers:
+      - name: proxy
+        image: alpine/socat
+        command: [ "socat", "-d", "-d", "TCP4-LISTEN:15432,fork", "UNIX-CONNECT:/var/run/eni/eni_debug.socket" ]
+        volumeMounts:
+        - name: terway-metric
+          mountPath: /var/run/eni/
+      volumes:
+      - name: terway-metric
+        hostPath:
+          path: /var/run/eni/
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: terway-metric
+  namespace: kube-system
+spec:
+  selector:
+    app: terway-metric-proxy
+  clusterIP: None
+  ports:
+  - name: metric
+    protocol: TCP
+    port: 15432
+    targetPort: 15432

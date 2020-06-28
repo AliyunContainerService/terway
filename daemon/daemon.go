@@ -475,6 +475,34 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 	}
 }
 
+func (networkService *networkService) RecordEvent(_ context.Context, r *rpc.EventRequest) (*rpc.EventReply, error) {
+	eventType := eventTypeNormal
+	if r.EventType == rpc.EventType_EventTypeWarning {
+		eventType = eventTypeWarning
+	}
+
+	reply := &rpc.EventReply{
+		Succeed: true,
+		Error:   "",
+	}
+
+	if r.EventTarget == rpc.EventTarget_EventTargetNode { // Node
+		networkService.k8s.RecordNodeEvent(eventType, r.Reason, r.Message)
+		return reply, nil
+	}
+
+	// Pod
+	err := networkService.k8s.RecordPodEvent(r.K8SPodName, r.K8SPodNamespace, eventType, r.Reason, r.Message)
+	if err != nil {
+		reply.Succeed = false
+		reply.Error = err.Error()
+
+		return reply, err
+	}
+
+	return reply, nil
+}
+
 func (networkService *networkService) verifyPodNetworkType(podNetworkMode string) bool {
 	return (networkService.daemonMode == daemonModeVPC && //vpc
 		(podNetworkMode == podNetworkTypeVPCENI || podNetworkMode == podNetworkTypeVPCIP)) ||
@@ -618,7 +646,6 @@ func (networkService *networkService) Execute(cmd string, _ []string, message ch
 }
 
 func (networkService *networkService) GetResourceMapping() ([]tracing.PodResourceMapping, error) {
-	log.Println("get network_service resource mapping")
 	var resourceMapping []tracing.ResourceMapping
 
 	var err error
@@ -676,7 +703,6 @@ func (networkService *networkService) GetResourceMapping() ([]tracing.PodResourc
 		mapping[i].Resource = res
 	}
 
-	log.Printf("get network_service resource mapping done: %v\n", mapping)
 	return mapping, nil
 }
 
@@ -831,6 +857,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	// register for tracing
 	_ = tracing.Register(tracing.ResourceTypeNetworkService, "default", netSrv)
 	tracing.RegisterResourceMapping(netSrv)
+	tracing.RegisterEventRecorder(netSrv.k8s.RecordNodeEvent, netSrv.k8s.RecordPodEvent)
 
 	return netSrv, nil
 }
