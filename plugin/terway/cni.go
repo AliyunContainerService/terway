@@ -90,6 +90,7 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 		confVersion string
 		cniNetns    ns.NetNS
 	)
+
 	confVersion, err = versionDecoder.Decode(args.StdinData)
 	if err != nil {
 		return err
@@ -125,6 +126,20 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
 	defer cancel()
 
+	defer func() {
+		if err != nil {
+			_, err = terwayBackendClient.RecordEvent(context.Background(),
+				&rpc.EventRequest{
+					EventTarget:     rpc.EventTarget_EventTargetPod,
+					K8SPodName:      string(k8sConfig.K8S_POD_NAME),
+					K8SPodNamespace: string(k8sConfig.K8S_POD_NAMESPACE),
+					EventType:       rpc.EventType_EventTypeWarning,
+					Reason:          "AllocIPFailed",
+					Message:         err.Error(),
+				})
+		}
+	}()
+
 	allocResult, err := terwayBackendClient.AllocIP(
 		timeoutContext,
 		&rpc.AllocIPRequest{
@@ -154,16 +169,6 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 					K8SPodInfraContainerId: string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID),
 					IPType:                 allocResult.IPType,
 					Reason:                 fmt.Sprintf("roll back ip for error: %v", err),
-				})
-
-			_, err = terwayBackendClient.RecordEvent(context.Background(),
-				&rpc.EventRequest{
-					EventTarget:     rpc.EventTarget_EventTargetPod,
-					K8SPodName:      string(k8sConfig.K8S_POD_NAME),
-					K8SPodNamespace: string(k8sConfig.K8S_POD_NAMESPACE),
-					EventType:       rpc.EventType_EventTypeWarning,
-					Reason:          "AllocIPFailed",
-					Message:         err.Error(),
 				})
 		}
 	}()
