@@ -128,7 +128,9 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 
 	defer func() {
 		if err != nil {
-			_, err = terwayBackendClient.RecordEvent(context.Background(),
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+			defer cancel()
+			_, err = terwayBackendClient.RecordEvent(ctx,
 				&rpc.EventRequest{
 					EventTarget:     rpc.EventTarget_EventTargetPod,
 					K8SPodName:      string(k8sConfig.K8S_POD_NAME),
@@ -162,7 +164,9 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 
 	defer func() {
 		if err != nil {
-			_, err = terwayBackendClient.ReleaseIP(context.Background(),
+			ctx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+			defer cancel()
+			_, err = terwayBackendClient.ReleaseIP(ctx,
 				&rpc.ReleaseIPRequest{
 					K8SPodName:             string(k8sConfig.K8S_POD_NAME),
 					K8SPodNamespace:        string(k8sConfig.K8S_POD_NAMESPACE),
@@ -364,7 +368,9 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 		}},
 	}
 
-	_, _ = terwayBackendClient.RecordEvent(context.Background(),
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+	_, _ = terwayBackendClient.RecordEvent(ctx,
 		&rpc.EventRequest{
 			EventTarget:     rpc.EventTarget_EventTargetPod,
 			K8SPodName:      string(k8sConfig.K8S_POD_NAME),
