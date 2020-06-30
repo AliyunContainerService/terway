@@ -557,13 +557,20 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 						inUseSet[res.Type] = make(map[string]interface{})
 						expireSet[res.Type] = make(map[string]interface{})
 					}
+					if podExist {
+						inUseSet[res.Type][res.ID] = struct{}{}
+					}
+				}
+			}
+			for _, resRelateObj := range resRelateList {
+				resRelate := resRelateObj.(PodResources)
+				_, podExist := podKeyMap[podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name)]
+				for _, res := range resRelate.Resources {
 					// already in use by others
 					if _, ok := inUseSet[res.Type][res.ID]; ok {
 						continue
 					}
-					if podExist {
-						inUseSet[res.Type][res.ID] = struct{}{}
-					} else {
+					if !podExist {
 						expireSet[res.Type][res.ID] = struct{}{}
 					}
 				}
