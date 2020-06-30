@@ -197,6 +197,7 @@ func (f *eniIPFactory) submit() error {
 				eni.lock.Unlock()
 				continue
 			}
+			logrus.Debugf("submit eniip to the eni backlog: %+v", eni)
 			eni.pending++
 			eni.lock.Unlock()
 			return nil
@@ -208,6 +209,7 @@ func (f *eniIPFactory) submit() error {
 
 func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 	result := <-f.ipResultChan
+	logrus.Debugf("pop result from resultChan: %+v", result)
 	if result.ENIIP == nil || result.err != nil {
 		// There are two error cases:
 		// Error Case 1. The ENI-associated VSwitch has no available IP for Pod IP allocation.
@@ -391,8 +393,8 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 	return nil
 }
 
-func (f *eniIPFactory) initialENI(eni *ENI) {
-	rawEni, err := f.eniFactory.CreateWithIPCount(eni.pending)
+func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
+	rawEni, err := f.eniFactory.CreateWithIPCount(ipCount)
 	var ips []net.IP
 	// eni operate finished
 	<-f.eniOperChan
@@ -454,7 +456,8 @@ func (f *eniIPFactory) initialENI(eni *ENI) {
 	}
 
 	eni.lock.Lock()
-	extraAlloc := eni.pending - len(ips)
+	logrus.Infof("allocate status on async eni: %+v, pending: %v, ips: %v, backlog: %v",
+		eni, eni.pending, ips, len(eni.ipBacklog))
 	for _, ip := range ips {
 		eniip := &types.ENIIP{
 			Eni:        eni.ENI,
@@ -465,19 +468,6 @@ func (f *eniIPFactory) initialENI(eni *ENI) {
 			ENIIP: eniip,
 			err:   nil,
 		}
-	}
-	for i := 0; i < extraAlloc; i++ {
-		select {
-		case eni.ipBacklog <- struct{}{}:
-		default:
-			f.ipResultChan <- &ENIIP{
-				ENIIP: &types.ENIIP{
-					Eni: nil,
-				},
-				err: errors.Errorf("need retry to allocate eni ip: %v", err),
-			}
-		}
-
 	}
 
 	eni.lock.Unlock()
@@ -503,7 +493,7 @@ func (f *eniIPFactory) createENIAsync(initIPs int) (*ENI, error) {
 			<-f.maxENI
 			return nil, fmt.Errorf("trigger ENI throttle, max operating concurrent: %v", maxEniOperating)
 		}
-		go f.initialENI(eni)
+		go f.initialENI(eni, eni.pending)
 	default:
 		return nil, fmt.Errorf("max ENI exceeded")
 	}
