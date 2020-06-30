@@ -721,8 +721,14 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, fmt.Errorf("unsupport daemon mode")
 	}
 
-	config := &types.Configure{}
+	var err error
 
+	netSrv.k8s, err = newK8S(master, kubeconfig, daemonMode)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error init k8s service")
+	}
+
+	// load default config
 	f, err := os.Open(configFilePath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed open config file")
@@ -733,11 +739,23 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, fmt.Errorf("failed read file %s: %v", configFilePath, err)
 	}
 
-	if err := json.Unmarshal(data, config); err != nil {
+	// load dynamic config
+	dynamicCfg, nodeLabel, err := getDynamicConfig(netSrv.k8s)
+	if err != nil {
+		log.Warnf("get dynamic config error: %s. fallback to default config", err.Error())
+		dynamicCfg = ""
+	}
+
+	config, err := mergeConfigAndUnmarshal([]byte(dynamicCfg), data)
+	if err != nil {
 		return nil, fmt.Errorf("failed parse config: %v", err)
 	}
 
-	log.Infof("got config: %+v from: %+v", config, configFilePath)
+	if len(dynamicCfg) == 0 {
+		log.Infof("got config: %+v from: %+v", config, configFilePath)
+	} else {
+		log.Infof("got config: %+v from %+v, with dynamic config %+v", config, configFilePath, nodeLabel)
+	}
 
 	if err := validateConfig(config); err != nil {
 		return nil, err
@@ -765,9 +783,9 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		}
 	}
 
-	netSrv.k8s, err = newK8S(master, kubeconfig, ipnet, daemonMode)
+	err = netSrv.k8s.SetSvcCidr(ipnet)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error init k8s service")
+		return nil, errors.Wrapf(err, "error set k8s svcCidr")
 	}
 
 	netSrv.resourceDB, err = storage.NewDiskStorage(

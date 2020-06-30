@@ -155,6 +155,14 @@
   version = "v0.4.0"
 
 [[projects]]
+  digest = "1:207708195e9b773fd01735192777cfa24891e350e87f36a1d2ad3472a9be775f"
+  name = "github.com/evanphx/json-patch"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "78cf029964937ffcb67feaeac1fe23d9cef0d26a"
+  version = "v5.0.0"
+
+[[projects]]
   digest = "1:2cd7915ab26ede7d95b8749e6b1f933f1c6d5398030684e6505940a10f31cfda"
   name = "github.com/ghodss/yaml"
   packages = ["."]
@@ -763,6 +771,7 @@
     "github.com/docker/docker/api/types",
     "github.com/docker/docker/api/types/filters",
     "github.com/docker/docker/client",
+    "github.com/evanphx/json-patch",
     "github.com/golang/protobuf/proto",
     "github.com/pkg/errors",
     "github.com/prometheus/client_golang/prometheus",
@@ -777,8 +786,6 @@
     "google.golang.org/grpc",
     "google.golang.org/grpc/codes",
     "google.golang.org/grpc/status",
-    "google.golang.org/protobuf/reflect/protoreflect",
-    "google.golang.org/protobuf/runtime/protoimpl",
     "gopkg.in/yaml.v2",
     "k8s.io/api/core/v1",
     "k8s.io/apimachinery/pkg/api/errors",
@@ -787,6 +794,8 @@
     "k8s.io/apimachinery/pkg/util/net",
     "k8s.io/apimachinery/pkg/util/wait",
     "k8s.io/client-go/kubernetes",
+    "k8s.io/client-go/kubernetes/scheme",
+    "k8s.io/client-go/kubernetes/typed/core/v1",
     "k8s.io/client-go/tools/clientcmd",
     "k8s.io/client-go/tools/record",
     "k8s.io/kubernetes/pkg/kubelet/apis/deviceplugin/v1beta1",
