@@ -740,14 +740,10 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	}
 
 	// load dynamic config
-	dynamicCfg, err := getDynamicConfig(netSrv.k8s)
+	dynamicCfg, nodeLabel, err := getDynamicConfig(netSrv.k8s)
 	if err != nil {
 		log.Warnf("get dynamic config error: %s. fallback to default config", err.Error())
 		dynamicCfg = ""
-	}
-
-	if len(dynamicCfg) != 0 {
-		configFilePath = fmt.Sprintf("%s with dynamic config", configFilePath)
 	}
 
 	config, err := mergeConfigAndUnmarshal([]byte(dynamicCfg), data)
@@ -755,7 +751,11 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, fmt.Errorf("failed parse config: %v", err)
 	}
 
-	log.Infof("got config: %+v from: %+v", config, configFilePath)
+	if len(dynamicCfg) == 0 {
+		log.Infof("got config: %+v from: %+v", config, configFilePath)
+	} else {
+		log.Infof("got config: %+v from %+v, with dynamic config %+v", config, configFilePath, nodeLabel)
+	}
 
 	if err := validateConfig(config); err != nil {
 		return nil, err

@@ -10,7 +10,7 @@ Terway的配置文件是作为 `ConfigMap` 资源对象存放在 `etcd` 中(默�
   "security_group": "sg-xxx",
   "service_cidr": "10.96.0.0/12",
   "vswitches": {
-    "cn-hongkong-b": ["vsw-xxx"]
+    "cn-hangzhou-g": ["vsw-xxx"]
   },
   "max_pool_size": 5,
   "min_pool_size": 0
@@ -44,7 +44,7 @@ daemon 在**启动时**会获得配置文件名，并获取**同命名空间下*
 
 (如 `terway-config`:  `eni-config-node1` 则会获取 `eni-config-node1` 作为动态配置的 `ConfigMap`)
 
-获取到的该动态配置将会**覆盖到**默认配置上。(只替换动态配置中所拥有的部分，其余部分与默认配置保持一致)
+获取到的该动态配置将会以[`MergePatch`](https://tools.ietf.org/html/rfc7396)的形式合并到默认配置上。
 
 如动态配置为：
 
@@ -79,3 +79,51 @@ daemon 在**启动时**会获得配置文件名，并获取**同命名空间下*
 > 注：若在现有节点上设置或更换动态配置，需要对daemon进行重启才能够应用。且daemon之前已经申请到的与配置相关的资源（如ENI等）可能仍旧会保留在daemon中。
 
 可以结合阿里云[容器服务控制台](https://cs.console.aliyun.com/)的节点池功能，批量为多个节点指定不同配置，达到对集群中不同节点的网络分划、资源水位调节、访问控制等精细化配置。
+
+## 关于合并配置
+
+terway 使用了 [`json-patch`](https://github.com/evanphx/json-patch) 库来对配置进行合并，其实现了 RFC7396 中声明的 `MergePatch` 过程。
+
+当遇到多层嵌套的 Object 结构时，也会进行部分合并。如默认配置(部分)
+
+```json
+{
+    "vswitches": {
+      "cn-hangzhou-g": ["vsw-xxx"],
+      "cn-hangzhou-i": ["vsw-yyy"]
+  }
+}
+```
+
+应用动态配置
+
+```json
+{
+    "vswitches": {
+      "cn-hangzhou-g": ["vsw-10000"]
+  }
+}
+```
+
+时，最终得到的结果为
+
+```json
+{
+    "vswitches": {
+      "cn-hangzhou-g": ["vsw-10000"],
+      "cn-hangzhou-i": ["vsw-yyy"]
+    }
+}
+```
+
+若要移除 `cn-hangzhou-i`，请设置动态配置为
+
+```json
+{
+    "vswitches": {
+      "cn-hangzhou-g": ["vsw-10000"],
+      "cn-hangzhou-i": null
+  }
+}
+```
+

@@ -4,45 +4,31 @@ import (
 	"encoding/json"
 
 	"github.com/AliyunContainerService/terway/types"
+	jsonpatch "github.com/evanphx/json-patch"
 )
 
-// getDynamicConfig returns config specified in node labels
-// (nil, nil) for no dynamic config for this node
-func getDynamicConfig(k8s Kubernetes) (string, error) {
+// getDynamicConfig returns (config, label, error) specified in node
+// ("", "", nil) for no dynamic config for this node
+func getDynamicConfig(k8s Kubernetes) (string, string, error) {
 	label := k8s.GetNodeDynamicConfigLabel()
 	if label == "" {
-		return "", nil
+		return "", "", nil
 	}
 
-	return k8s.GetDynamicConfigWithName(label)
+	cfg, err := k8s.GetDynamicConfigWithName(label)
+
+	return cfg, label, err
 }
 
 func mergeConfigAndUnmarshal(topCfg, baseCfg []byte) (*types.Configure, error) {
-	var top, base map[string]interface{}
-
 	if len(topCfg) == 0 { // no topCfg, unmarshal baseCfg and return
 		config := &types.Configure{}
 		err := json.Unmarshal(baseCfg, config)
 		return config, err
 	}
 
-	err := json.Unmarshal(topCfg, &top)
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.Unmarshal(baseCfg, &base)
-	if err != nil {
-		return nil, err
-	}
-
-	// merge
-	for k, v := range top {
-		base[k] = v
-	}
-
-	// marshal back to json
-	jsonBytes, err := json.Marshal(base)
+	// MergePatch in RFC7396
+	jsonBytes, err := jsonpatch.MergePatch(baseCfg, topCfg)
 	if err != nil {
 		return nil, err
 	}
