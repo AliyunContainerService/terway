@@ -226,7 +226,7 @@ func (d *vethDriver) Setup(
 			return errors.Wrapf(err, "vethDriver, fail ensure eni config")
 		}
 
-		ruleList, err := netlink.RuleList(netlink.FAMILY_ALL)
+		ruleList, err := netlink.RuleList(netlink.FAMILY_V4)
 		if err != nil {
 			return errors.Wrapf(err, "vethDriver, fail list rule")
 		}
@@ -383,7 +383,7 @@ func (d *vethDriver) Teardown(hostIfName string,
 	// 2. fixme remove ingress/egress rule for pod ip
 
 	// found table for container
-	ruleList, err := netlink.RuleList(netlink.FAMILY_ALL)
+	ruleList, err := netlink.RuleList(netlink.FAMILY_V4)
 	if err != nil {
 		return errors.Wrapf(err, "failed list ip rule from netlink")
 	}
