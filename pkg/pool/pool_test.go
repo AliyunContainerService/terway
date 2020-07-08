@@ -290,8 +290,11 @@ func TestGetResourceMapping(t *testing.T) {
 
 	for _, v := range mapping {
 		//t.Log(v.ResID)
-		resID, err := strconv.Atoi(v.ResID)
-		assert.Equal(t, nil, err)
+		var resID int
+		if v.ResID != "" {
+			resID, err = strconv.Atoi(v.ResID)
+			assert.Equal(t, nil, err)
+		}
 
 		if resID >= 1000 { // generated from factory
 			assert.Equal(t, v.Valid, true)
