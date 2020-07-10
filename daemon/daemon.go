@@ -31,6 +31,7 @@ const (
 	gcPeriod = 5 * time.Minute
 
 	conditionFalse = "false"
+	conditionTrue  = "true"
 
 	networkServiceName         = "default"
 	tracingKeyName             = "name"
@@ -53,6 +54,7 @@ type networkService struct {
 	vethResMgr     ResourceManager
 	eniResMgr      ResourceManager
 	eniIPResMgr    ResourceManager
+	eipResMgr      ResourceManager
 	//networkResourceMgr ResourceManager
 	mgrForResource  map[string]ResourceManager
 	pendingPods     map[string]interface{}
@@ -142,6 +144,26 @@ func (networkService *networkService) allocateENIMultiIP(ctx *networkContext, ol
 	return res.(*types.ENIIP), nil
 }
 
+func (networkService *networkService) allocateEIP(ctx *networkContext, old *PodResources) (*types.EIP, error) {
+	oldEIPRes := old.GetResourceItemByType(types.ResourceTypeEIP)
+	oldEIPID := ""
+	if old.PodInfo != nil {
+		if len(oldEIPRes) == 0 {
+			ctx.Log().Debugf("eip for pod %s is zero", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
+		} else if len(oldEIPRes) > 1 {
+			ctx.Log().Warnf("eip for pod %s more than one", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
+		} else {
+			oldEIPID = oldEIPRes[0].ID
+		}
+	}
+
+	res, err := networkService.eipResMgr.Allocate(ctx, oldEIPID)
+	if err != nil {
+		return nil, err
+	}
+	return res.(*types.EIP), nil
+}
+
 func (networkService *networkService) AllocIP(grpcContext context.Context, r *rpc.AllocIPRequest) (*rpc.AllocIPReply, error) {
 	log.Infof("alloc ip request: %+v", r)
 	networkService.pendingPodsLock.Lock()
@@ -196,7 +218,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 					networkContext.Log().Warnf("error cleanup allocated network resource %s, %s: %v", res.ID, res.Type, err)
 					continue
 				}
-				err = mgr.Release(networkContext, res.ID)
+				err = mgr.Release(networkContext, res)
 				if err != nil {
 					networkContext.Log().Infof("rollback res error: %+v", err)
 				}
@@ -234,6 +256,25 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 			},
 		}
 		networkContext.resources = append(networkContext.resources, newRes.Resources...)
+		if networkService.eipResMgr != nil && podinfo.EipInfo.PodEip {
+			podinfo.PodIP = eniMultiIP.SecAddress.String()
+			var eipRes *types.EIP
+			eipRes, err = networkService.allocateEIP(networkContext, &oldRes)
+			if err != nil {
+				return nil, fmt.Errorf("error get allocated eip for: %+v, result: %+v", podinfo, err)
+			}
+			eipResItem := ResourceItem{
+				Type: eipRes.GetType(),
+				ID:   eipRes.GetResourceID(),
+				ExtraEipInfo: &ExtraEipInfo{
+					Delete:         eipRes.Delete,
+					AssociateENI:   eipRes.AssociateENI,
+					AssociateENIIP: eipRes.AssociateENIIP,
+				},
+			}
+			newRes.Resources = append(newRes.Resources, eipResItem)
+			networkContext.resources = append(networkContext.resources, eipResItem)
+		}
 		err = networkService.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error put resource into store")
@@ -273,6 +314,29 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 			},
 		}
 		networkContext.resources = append(networkContext.resources, newRes.Resources...)
+		if networkService.eipResMgr != nil && podinfo.EipInfo.PodEip {
+			podinfo.PodIP = vpcEni.Address.IP.String()
+			var eipRes *types.EIP
+			eipRes, err = networkService.allocateEIP(networkContext, &oldRes)
+			if err != nil {
+				return nil, fmt.Errorf("error get allocated eip for: %+v, result: %+v", podinfo, err)
+			}
+			newRes.Resources = append(newRes.Resources, ResourceItem{
+				Type: eipRes.GetType(),
+				ID:   eipRes.GetResourceID(),
+				ExtraEipInfo: &ExtraEipInfo{
+					Delete:         eipRes.Delete,
+					AssociateENI:   eipRes.AssociateENI,
+					AssociateENIIP: eipRes.AssociateENIIP,
+				},
+			})
+			eipResItem := ResourceItem{
+				Type: eipRes.GetType(),
+				ID:   eipRes.GetResourceID(),
+			}
+			newRes.Resources = append(newRes.Resources, eipResItem)
+			networkContext.resources = append(networkContext.resources, eipResItem)
+		}
 		err = networkService.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error put resource into store")
@@ -396,7 +460,7 @@ func (networkService *networkService) ReleaseIP(grpcContext context.Context, r *
 			networkContext.Log().Warnf("error cleanup allocated network resource %s, %s: %v", res.ID, res.Type, err)
 			continue
 		}
-		if err = mgr.Release(networkContext, res.ID); err != nil && err != pool.ErrInvalidState {
+		if err = mgr.Release(networkContext, res); err != nil && err != pool.ErrInvalidState {
 			return nil, errors.Wrapf(err, "error release request network resource for: %+v", r)
 		}
 
@@ -534,8 +598,8 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 			}
 
 			var (
-				inUseSet         = make(map[string]map[string]interface{})
-				expireSet        = make(map[string]map[string]interface{})
+				inUseSet         = make(map[string]map[string]ResourceItem)
+				expireSet        = make(map[string]map[string]ResourceItem)
 				relateExpireList = make([]string, 0)
 			)
 
@@ -554,17 +618,19 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 				}
 				for _, res := range resRelate.Resources {
 					if _, ok := inUseSet[res.Type]; !ok {
-						inUseSet[res.Type] = make(map[string]interface{})
-						expireSet[res.Type] = make(map[string]interface{})
+						inUseSet[res.Type] = make(map[string]ResourceItem)
+						expireSet[res.Type] = make(map[string]ResourceItem)
 					}
 					// already in use by others
 					if _, ok := inUseSet[res.Type][res.ID]; ok {
 						continue
 					}
 					if podExist {
-						inUseSet[res.Type][res.ID] = struct{}{}
+						// remove resource from expirelist
+						delete(expireSet[res.Type], res.ID)
+						inUseSet[res.Type][res.ID] = res
 					} else {
-						expireSet[res.Type][res.ID] = struct{}{}
+						expireSet[res.Type][res.ID] = res
 					}
 				}
 			}
@@ -572,9 +638,10 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 			for mgrType := range inUseSet {
 				mgr, ok := networkService.mgrForResource[mgrType]
 				if ok {
+					log.Debugf("start garbage collection for %v, list: %+v， %+v", mgrType, inUseSet[mgrType], expireSet[mgrType])
 					err = mgr.GarbageCollection(inUseSet[mgrType], expireSet[mgrType])
 					if err != nil {
-						log.Warnf("error do garbage collection for %+v, inuse: %v, expire: %v, err: %v", mgrType, inUseSet, expireSet, err)
+						log.Warnf("error do garbage collection for %+v, inuse: %v, expire: %v, err: %v", mgrType, inUseSet[mgrType], expireSet[mgrType], err)
 						gcDone = false
 					}
 				}
@@ -655,7 +722,7 @@ func (networkService *networkService) GetResourceMapping() ([]tracing.PodResourc
 	case daemonModeENIMultiIP:
 		resourceMapping, err = networkService.eniIPResMgr.GetResourceMapping()
 	case daemonModeVPC:
-		return []tracing.PodResourceMapping{}, nil
+		resourceMapping, err = networkService.eniResMgr.GetResourceMapping()
 	case daemonModeENIOnly:
 		resourceMapping, err = networkService.eniResMgr.GetResourceMapping()
 	}
@@ -853,8 +920,12 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init ENI ip resource manager")
 		}
+		if config.EnableEIPPool == conditionTrue {
+			netSrv.eipResMgr = newEipResourceManager(ecs, netSrv.k8s)
+		}
 		netSrv.mgrForResource = map[string]ResourceManager{
 			types.ResourceTypeENIIP: netSrv.eniIPResMgr,
+			types.ResourceTypeEIP:   netSrv.eipResMgr,
 		}
 	case daemonModeENIOnly:
 		//init eni
@@ -862,8 +933,12 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init eni resource manager")
 		}
+		if config.EnableEIPPool == conditionTrue {
+			netSrv.eipResMgr = newEipResourceManager(ecs, netSrv.k8s)
+		}
 		netSrv.mgrForResource = map[string]ResourceManager{
 			types.ResourceTypeENI: netSrv.eniResMgr,
+			types.ResourceTypeEIP: netSrv.eipResMgr,
 		}
 	default:
 		panic("unsupported daemon mode" + daemonMode)
@@ -935,7 +1010,7 @@ func setDefault(cfg *types.Configure) error {
 	}
 
 	if cfg.HotPlug == "" {
-		cfg.HotPlug = "true"
+		cfg.HotPlug = conditionTrue
 	}
 
 	if cfg.HotPlug == conditionFalse || cfg.HotPlug == "0" {
@@ -961,7 +1036,7 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 		MinENI:                 cfg.MinENI,
 		AccessID:               cfg.AccessID,
 		AccessSecret:           cfg.AccessSecret,
-		HotPlug:                cfg.HotPlug == "true",
+		HotPlug:                cfg.HotPlug == conditionTrue,
 		EniCapRatio:            cfg.EniCapRatio,
 		EniCapShift:            cfg.EniCapShift,
 		SecurityGroup:          cfg.SecurityGroup,

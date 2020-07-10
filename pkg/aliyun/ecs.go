@@ -39,6 +39,11 @@ type ECS interface {
 	GetENIMaxIP(instanceID string, eniID string) (int, error)
 	GetAttachedSecurityGroup(instanceID string) (string, error)
 	DescribeVSwitch(vSwitch string) (availIPCount int, err error)
+	// EIP
+	AllocateEipAddress(bandwidth int, eipID, eniID string, eniIP net.IP) (*types.EIP, error)
+	UnassociateEipAddress(eipID, eniID string, eniIP net.IP) error
+	ReleaseEipAddress(eipID, eniID string, eniIP net.IP) error
+	QueryEniIDByIP(address net.IP) (string, error)
 }
 
 type ecsImpl struct {
@@ -48,6 +53,7 @@ type ecsImpl struct {
 	// avoid conflict on ecs
 	openapiInfoGetter ENIInfoGetter
 	region            common.Region
+	vpcID             string
 }
 
 // NewECS return new ECS implement object
@@ -64,6 +70,10 @@ func NewECS(ak, sk, credentialPath string, region common.Region) (ECS, error) {
 		region = common.Region(regionStr)
 		//RegionId = region
 	}
+	vpcID, err := clientSet.MetaData().VpcID()
+	if err != nil {
+		return nil, errors.Wrapf(err, "error get vpcID")
+	}
 
 	openapiENIInfoGetter := eniOpenAPI{
 		clientSet: clientSet,
@@ -76,6 +86,7 @@ func NewECS(ak, sk, credentialPath string, region common.Region) (ECS, error) {
 		eniInfoGetter:     &eniMetadata{},
 		openapiInfoGetter: &openapiENIInfoGetter,
 		region:            region,
+		vpcID:             vpcID,
 	}, nil
 }
 
@@ -164,6 +175,8 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 	if err != nil {
 		return nil, err
 	}
+
+	logrus.Debugf("wait network interface attach: %v, %v, %v", createNetworkInterfaceResponse.NetworkInterfaceId, createNetworkInterfaceResponse.RequestId, attachNetworkInterfaceArgs.InstanceId)
 
 	start = time.Now()
 	eniStatus, err := e.WaitForNetworkInterface(createNetworkInterfaceResponse.NetworkInterfaceId, eniStatusInUse, eniStateBackoff)
@@ -625,4 +638,17 @@ func (e *ecsImpl) GetInstanceAttributesType(instanceID string) (*ecs.InstanceAtt
 		return nil, fmt.Errorf("error get instanceAttributesType with instanceID %s: expected 1 but got %d", instanceID, len(instanceAttributesTypes))
 	}
 	return &instanceAttributesTypes[0], nil
+}
+
+func (e *ecsImpl) QueryEniIDByIP(address net.IP) (string, error) {
+	args := ecs.DescribeNetworkInterfacesArgs{
+		RegionId:         e.region,
+		PrivateIpAddress: []string{address.String()},
+		VpcID:            e.vpcID,
+	}
+	resp, err := e.clientSet.Ecs().DescribeNetworkInterfaces(&args)
+	if err != nil || len(resp.NetworkInterfaceSets.NetworkInterfaceSet) != 1 {
+		return "", errors.Errorf("error describe network interfaces from ip: %v, %v, %v", address, err, resp)
+	}
+	return resp.NetworkInterfaceSets.NetworkInterfaceSet[0].NetworkInterfaceId, nil
 }

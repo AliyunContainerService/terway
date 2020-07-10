@@ -10,6 +10,7 @@ const (
 	ResourceTypeVeth  = "veth"
 	ResourceTypeENI   = "eni"
 	ResourceTypeENIIP = "eniIp"
+	ResourceTypeEIP   = "eip"
 )
 
 // Vswitch Selection Policy
@@ -70,6 +71,25 @@ func (veth *Veth) GetResourceID() string {
 // GetType return type name
 func (veth *Veth) GetType() string {
 	return ResourceTypeVeth
+}
+
+// EIP Aliyun public ip
+type EIP struct {
+	ID             string
+	Address        net.IP
+	Delete         bool // delete related eip on pod deletion
+	AssociateENI   string
+	AssociateENIIP net.IP
+}
+
+// GetResourceID return eip id
+func (e *EIP) GetResourceID() string {
+	return e.ID
+}
+
+// GetType return type name
+func (e *EIP) GetType() string {
+	return ResourceTypeEIP
 }
 
 // NetworkResource interface of network resources

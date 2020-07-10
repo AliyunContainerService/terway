@@ -115,17 +115,17 @@ func (m *eniResourceManager) Allocate(ctx *networkContext, prefer string) (types
 	return m.pool.Acquire(ctx, prefer, podInfoKey(ctx.pod.Namespace, ctx.pod.Name))
 }
 
-func (m *eniResourceManager) Release(context *networkContext, resID string) error {
+func (m *eniResourceManager) Release(context *networkContext, resItem ResourceItem) error {
 	if context != nil && context.pod != nil {
-		return m.pool.ReleaseWithReservation(resID, context.pod.IPStickTime)
+		return m.pool.ReleaseWithReservation(resItem.ID, context.pod.IPStickTime)
 	}
-	return m.pool.Release(resID)
+	return m.pool.Release(resItem.ID)
 }
 
-func (m *eniResourceManager) GarbageCollection(inUseSet map[string]interface{}, expireResSet map[string]interface{}) error {
-	for expireRes := range expireResSet {
+func (m *eniResourceManager) GarbageCollection(inUseResSet map[string]ResourceItem, expireResSet map[string]ResourceItem) error {
+	for expireRes, expireItem := range expireResSet {
 		if err := m.pool.Stat(expireRes); err == nil {
-			err = m.Release(nil, expireRes)
+			err = m.Release(nil, expireItem)
 			if err != nil {
 				return err
 			}
