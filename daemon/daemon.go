@@ -1060,6 +1060,7 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 		}
 		poolConfig.VSwitch = []string{vSwitch}
 	}
+	poolConfig.ENITags = cfg.ENITags
 
 	if poolConfig.Region, err = aliyun.GetLocalRegion(); err != nil {
 		return nil, err

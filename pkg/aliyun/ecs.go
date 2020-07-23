@@ -25,7 +25,7 @@ const (
 
 // ECS the interface of ecs operation set
 type ECS interface {
-	AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int) (*types.ENI, error)
+	AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int, eniTags map[string]string) (*types.ENI, error)
 	GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error)
 	GetENIByID(instanceID, eniID string) (*types.ENI, error)
 	GetENIByMac(instanceID, mac string) (*types.ENI, error)
@@ -113,7 +113,7 @@ func (e *ecsImpl) DescribeVSwitch(vSwitch string) (availIPCount int, err error) 
 }
 
 // AllocateENI for instance
-func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int) (*types.ENI, error) {
+func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int, eniTags map[string]string) (*types.ENI, error) {
 	if vSwitch == "" || len(securityGroup) == 0 || instanceID == "" {
 		return nil, errors.Errorf("invalid eni args for allocate")
 	}
@@ -131,6 +131,10 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 		Tag: map[string]string{
 			NetworkInterfaceTagCreatorKey: NetworkInterfaceTagCreatorValue,
 		},
+	}
+	// append extra eni tags
+	for k, v := range eniTags {
+		createNetworkInterfaceArgs.Tag[k] = v
 	}
 	createNetworkInterfaceResponse, err := e.clientSet.Ecs().CreateNetworkInterface(createNetworkInterfaceArgs)
 	metric.OpenAPILatency.WithLabelValues("CreateNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))

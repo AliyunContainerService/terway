@@ -10,6 +10,7 @@ type Configure struct {
 	CredentialPath         string              `yaml:"credential_path" json:"credential_path"`
 	ServiceCIDR            string              `yaml:"service_cidr" json:"service_cidr"`
 	VSwitches              map[string][]string `yaml:"vswitches" json:"vswitches"`
+	ENITags                map[string]string   `yaml:"eni_tags" json:"eni_tags"`
 	MaxPoolSize            int                 `yaml:"max_pool_size" json:"max_pool_size"`
 	MinPoolSize            int                 `yaml:"min_pool_size" json:"min_pool_size"`
 	MinENI                 int                 `yaml:"min_eni" json:"min_eni"`
@@ -32,6 +33,7 @@ type PoolConfig struct {
 	VPC                    string
 	Zone                   string
 	VSwitch                []string
+	ENITags                map[string]string
 	Region                 common.Region
 	SecurityGroup          string
 	InstanceID             string
