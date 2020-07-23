@@ -167,6 +167,7 @@ func (ms MapSorter) SortInDescendingOrder() {
 type eniFactory struct {
 	name                   string
 	switches               []string
+	eniTags                map[string]string
 	securityGroup          string
 	instanceID             string
 	ecs                    aliyun.ECS
@@ -187,6 +188,7 @@ func newENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*eniFactory, e
 	return &eniFactory{
 		name:                   factoryNameENI,
 		switches:               poolConfig.VSwitch,
+		eniTags:                poolConfig.ENITags,
 		securityGroup:          poolConfig.SecurityGroup,
 		instanceID:             poolConfig.InstanceID,
 		ecs:                    ecs,
@@ -264,7 +266,7 @@ func (f *eniFactory) Create(int) ([]types.NetworkResource, error) {
 func (f *eniFactory) CreateWithIPCount(count int) ([]types.NetworkResource, error) {
 	vSwitches, _ := f.GetVSwitches()
 	logrus.Infof("adjusted vswitch slice: %+v", vSwitches)
-	eni, err := f.ecs.AllocateENI(vSwitches[0], f.securityGroup, f.instanceID, count)
+	eni, err := f.ecs.AllocateENI(vSwitches[0], f.securityGroup, f.instanceID, count, f.eniTags)
 	if err != nil {
 		return nil, err
 	}
