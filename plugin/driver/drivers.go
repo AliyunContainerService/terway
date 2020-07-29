@@ -211,7 +211,7 @@ func (d *vethDriver) Setup(
 	}
 
 	// 2. config from container routes
-	if deviceID != 0 && deviceID != mainRouteTable {
+	if deviceID != 0 {
 		var parentLink netlink.Link
 		parentLink, err = netlink.LinkByIndex(deviceID)
 		if err != nil {
