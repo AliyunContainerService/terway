@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/link"
@@ -29,7 +30,7 @@ const (
 	defaultCniTimeout      = 120
 	defaultVethForENI      = "veth1"
 	delegateIpam           = "host-local"
-	eniIPVirtualTypeIPVlan = "IPVlan"
+	eniIPVirtualTypeIPVlan = "ipvlan"
 	delegateConf           = `
 {
 	"name": "networks",
@@ -223,8 +224,23 @@ func cmdAdd(args *skel.CmdArgs) (err error) {
 			return fmt.Errorf("eni multi ip return servicecidr(%s) is invaild: %v", serviceCIDRStr, err)
 		}
 
-		if conf.ENIIPVirtualType == eniIPVirtualTypeIPVlan {
-			eniMultiIPDriver = driver.IPVlanDriver
+		if strings.ToLower(conf.ENIIPVirtualType) == eniIPVirtualTypeIPVlan {
+			available, err := driver.CheckIPVLanAvailable()
+			if err != nil {
+				return err
+			}
+			if !available {
+				_, _ = terwayBackendClient.RecordEvent(timeoutContext, &rpc.EventRequest{
+					EventTarget:     rpc.EventTarget_EventTargetPod,
+					K8SPodName:      string(k8sConfig.K8S_POD_NAME),
+					K8SPodNamespace: string(k8sConfig.K8S_POD_NAMESPACE),
+					EventType:       rpc.EventType_EventTypeWarning,
+					Reason:          "VirtualModeChanged",
+					Message:         "IPVLan seems unavailable, use Veth instead",
+				})
+			} else {
+				eniMultiIPDriver = driver.IPVlanDriver
+			}
 		}
 		err = eniMultiIPDriver.Setup(hostVethName, args.IfName, subnet, primaryIP, serviceCIDR, gw, nil, int(deviceID), ingress, egress, cniNetns)
 		if err != nil {
@@ -434,8 +450,15 @@ func cmdDel(args *skel.CmdArgs) error {
 
 	switch infoResult.IPType {
 	case rpc.IPType_TypeENIMultiIP:
-		if conf.ENIIPVirtualType == eniIPVirtualTypeIPVlan {
-			eniMultiIPDriver = driver.IPVlanDriver
+
+		if strings.ToLower(conf.ENIIPVirtualType) == eniIPVirtualTypeIPVlan {
+			available, err := driver.CheckIPVLanAvailable()
+			if err != nil {
+				return err
+			}
+			if available {
+				eniMultiIPDriver = driver.IPVlanDriver
+			}
 		}
 
 		podIP := net.ParseIP(infoResult.GetPodIP())

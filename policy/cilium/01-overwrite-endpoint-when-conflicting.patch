@@ -1,0 +1,26 @@
+From 0317be58930a32d28a7e4971fb6ae85d007ac4e2 Mon Sep 17 00:00:00 2001
+From: Lyt99 <lyt1999131@163.com>
+Date: Thu, 30 Jul 2020 14:26:07 +0800
+Subject: [PATCH] overwrite endpoint when conflicting
+
+---
+ daemon/cmd/endpoint.go | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/daemon/cmd/endpoint.go b/daemon/cmd/endpoint.go
+index ee81aeede..8185f69d1 100644
+--- a/daemon/cmd/endpoint.go
++++ b/daemon/cmd/endpoint.go
+@@ -343,7 +343,8 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
+ 		if err != nil {
+ 			return invalidDataError(ep, err)
+ 		} else if oldEp != nil {
+-			return invalidDataError(ep, fmt.Errorf("IP %s is already in use", id))
++			d.deleteEndpoint(ep)
++			// return invalidDataError(ep, fmt.Errorf("IP %s is already in use", id))
+ 		}
+ 	}
+ 
+-- 
+2.27.0
+

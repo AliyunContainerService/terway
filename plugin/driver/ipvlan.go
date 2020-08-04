@@ -4,6 +4,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"regexp"
+	"strconv"
+	"syscall"
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -13,8 +16,57 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const (
+	ipVlanRequirementMajor = 4
+	ipVlanRequirementMinor = 19
+)
+
+var (
+	regexKernelVersion = regexp.MustCompile(`^(\d+)\.(\d+)`)
+)
+
 type ipvlanDriver struct {
 	name string
+}
+
+func int8ToString(arr []int8) string {
+	var bytes []byte
+	for _, v := range arr {
+		if v == 0 {
+			break
+		}
+
+		bytes = append(bytes, byte(v))
+	}
+
+	return string(bytes)
+}
+
+// CheckIPVLanAvailable checks if current kernel version meet the requirement (>= 4.19)
+func CheckIPVLanAvailable() (bool, error) {
+	var uts syscall.Utsname
+	err := syscall.Uname(&uts)
+	if err != nil {
+		return false, err
+	}
+
+	result := regexKernelVersion.FindStringSubmatch(int8ToString(uts.Release[:]))
+	if len(result) != 3 {
+		return false, errors.New("can't determine linux kernel version")
+	}
+
+	major, err := strconv.Atoi(result[1])
+	if err != nil {
+		return false, err
+	}
+
+	minor, err := strconv.Atoi(result[2])
+	if err != nil {
+		return false, err
+	}
+
+	return (major == ipVlanRequirementMajor && minor >= ipVlanRequirementMinor) ||
+		major > ipVlanRequirementMajor, nil
 }
 
 func newIPVlanDriver() *ipvlanDriver {
