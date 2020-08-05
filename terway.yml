@@ -110,7 +110,7 @@ spec:
       initContainers:
       - name: terway-init
         image: registry.aliyuncs.com/acs/terway:v1.0.10.122-gd0be015-aliyun
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
         command: ['sh', '-c', 'cp /usr/bin/terway /opt/cni/bin/; chmod +x /opt/cni/bin/terway; cp /etc/eni/10-terway.conf /etc/cni/net.d/; modprobe sch_htb || true']
@@ -126,7 +126,7 @@ spec:
       containers:
       - name: terway
         image: registry.aliyuncs.com/acs/terway:v1.0.10.122-gd0be015-aliyun
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
         env:
@@ -156,7 +156,7 @@ spec:
       - name: policy
         image: registry.aliyuncs.com/acs/terway:v1.0.10.122-gd0be015-aliyun
         command: ["/bin/policyinit.sh"]
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         env:
           - name: NODENAME
             valueFrom:

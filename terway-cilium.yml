@@ -152,7 +152,7 @@ spec:
       initContainers:
       - name: terway-init
         image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.0.10.214-ge008649-aliyun
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
         command:
@@ -171,7 +171,7 @@ spec:
       containers:
       - name: terway
         image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.0.10.214-ge008649-aliyun
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         command: ['/usr/bin/terwayd', '-log-level', 'debug', '-daemon-mode', 'ENIMultiIP']
         securityContext:
           privileged: true
@@ -201,7 +201,7 @@ spec:
           name: device-plugin-path
       - name: policy
         image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.0.10.214-ge008649-aliyun
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         command: ["/bin/policyinit.sh"]
         env:
         - name: NODENAME
