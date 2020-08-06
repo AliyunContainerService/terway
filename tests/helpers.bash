@@ -74,6 +74,15 @@ function loadbalancer_ready() {
 	false
 }
 
+function deployment_ready() {
+  run kubectl get $@ -o json
+  if [[ "$status" -eq 0 ]] && [[ ${#lines[@]} -gt 1 ]] && echo $output | jq ".status.replicas == .status.readyReplicas" | grep "true"; then
+		return 0
+	fi
+	echo "deployment $@ not ready, status: $status, lines: ${#lines[@]}"
+	false
+}
+
 # Prepare curl operation
 function prepare_curl_options() {
 	if [ x"$DOCKER_TLS_VERIFY" = x"1" ]; then
