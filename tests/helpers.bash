@@ -51,6 +51,21 @@ function pod_running() {
 	false
 }
 
+function pods_all_running() {
+	run kubectl get $@ --no-headers
+	if [[ "$status" -eq 0 ]] && [[ ${#lines[@]} -gt 0 ]]; then
+	  local running
+	  local all
+	  running=$(echo "$output" | grep -c "Running")
+    all=$(echo "$output" | wc -l)
+		if [[ "$running" -eq "$all" ]]; then
+		  return 0
+		fi
+	fi
+	echo "object $@ not ready, status: $status, lines: ${#lines[@]} output $output"
+	false
+}
+
 function object_not_exist() {
 	run kubectl get $@
 	if [[ "$status" -gt 0 ]] || [[ ${#lines[@]} -eq 1 ]]; then

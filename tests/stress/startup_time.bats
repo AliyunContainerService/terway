@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-load helpers
+load ../helpers
 
-# This testcase for measuring the deployment time of pods
-# see: templates/testcases/network_connection/nginx-pod.yml
+# This testcase for measuring the deployment time of pods for large scale cluster
+# see: templates/testcases/stress/nginx-pod.yml
 
 # get interval of a pod from "Initialized" to "Ready"
 function get_interval() {
@@ -28,16 +28,15 @@ setup() {
     mkdir logs || true
     # clean deployment
     kubectl delete deployment nginx-deployment || true
-    retry 30 3 object_not_exist pod -l app=nginx-test
+    retry 30 5 object_not_exist pod -l app=nginx-test
 }
 
 @test "startup pod" {
   # apply deployment, with name "nginx-deployment" and pod label "app=nginx-test"
-  kubectl apply -f templates/testcases/network_connection/nginx-pod.yml
+  kubectl apply -f ../templates/testcases/stress/nginx-pod.yml
   # wait for all pods ready
   retry 20 5 deployment_ready deployment nginx-deployment
-  # wait for readiness probe to detect the network connectivity
-  sleep 10
+  retry 20 3 pods_all_running pod -l app=nginx-test
   # get intervals
   local file_name="logs/startup_time_$(date "+%m%d.%H-%M-%S").log"
   local count=0
@@ -61,9 +60,6 @@ setup() {
   done
   avg=$((avg / count))
 
-  echo "min: $min, max: $max, avg: $avg" >> $file_name
-
-  # delete resources
-  kubectl delete -f templates/testcases/network_connection/nginx-pod.yml
+  echo "total: $count, min: $min, max: $max, avg: $avg" >> $file_name
 }
 

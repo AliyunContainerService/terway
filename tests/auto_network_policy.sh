@@ -1,5 +1,6 @@
 #!/bin/sh
 
+# auto test network policy continuously with TEST_INTERVAL
 TEST_INTERVAL=300
 
 while true

@@ -35,15 +35,15 @@ spec:
           configMap:
             name: nginx-configmap
       containers:
-      - name: nginx
-        image: registry.aliyuncs.com/acs-sample/nginx
-        volumeMounts:
         - name: nginx
-          mountPath: /etc/nginx
-          readOnly: true
-        readinessProbe:
-          httpGet:
-            path: /healthz
-            port: 80
-          initialDelaySeconds: 0
-          periodSeconds: 1
+          image: registry.aliyuncs.com/acs-sample/nginx
+          volumeMounts:
+            - name: nginx
+              mountPath: /etc/nginx
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 80
+            initialDelaySeconds: 0
+            periodSeconds: 1
