@@ -111,7 +111,7 @@ spec:
   initContainers:
   - name: waiting
     image: registry.aliyuncs.com/acs/alpine:3.6
-    command: ["sh", "-c", "for i in `seq 1 120`; do nslookup policy-svc && nslookup non-policy-svc && wget -T 1 non-policy-svc && exit 0; sleep 1; done"]
+    command: ["sh", "-c", "for i in `seq 1 120`; do nslookup policy-svc && nslookup non-policy-svc && wget -T 1 non-policy-svc && sleep 30 && exit 0; sleep 1; done"]
   containers:
   - name: policy
     image: registry.aliyuncs.com/acs/alpine:3.6
@@ -147,7 +147,7 @@ spec:
   initContainers:
   - name: waiting
     image: registry.aliyuncs.com/acs/alpine:3.6
-    command: ["sh", "-c", "for i in `seq 1 120`; do nslookup policy-svc && nslookup non-policy-svc && wget -T 1 non-policy-svc && exit 0; sleep 1; done"]
+    command: ["sh", "-c", "for i in `seq 1 120`; do nslookup policy-svc && nslookup non-policy-svc && wget -T 1 non-policy-svc && sleep 30 && exit 0; sleep 1; done"]
   containers:
   - name: policy
     image: registry.aliyuncs.com/acs/alpine:3.6
