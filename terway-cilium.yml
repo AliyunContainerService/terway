@@ -151,7 +151,7 @@ spec:
       hostNetwork: true
       initContainers:
       - name: terway-init
-        image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.0.10.214-ge008649-aliyun
+        image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.0.10.221-g8d6386a-aliyun
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
@@ -170,7 +170,7 @@ spec:
           name: host-root
       containers:
       - name: terway
-        image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.0.10.214-ge008649-aliyun
+        image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.0.10.221-g8d6386a-aliyun
         imagePullPolicy: IfNotPresent
         command: ['/usr/bin/terwayd', '-log-level', 'debug', '-daemon-mode', 'ENIMultiIP']
         securityContext:
@@ -200,7 +200,7 @@ spec:
         - mountPath: /var/lib/kubelet/device-plugins
           name: device-plugin-path
       - name: policy
-        image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.0.10.214-ge008649-aliyun
+        image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.0.10.221-g8d6386a-aliyun
         imagePullPolicy: IfNotPresent
         command: ["/bin/policyinit.sh"]
         env:
