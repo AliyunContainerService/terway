@@ -1,0 +1,241 @@
+# nginx deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: nginx
+  name: nginx
+  namespace: stress-connection
+spec:
+  replicas: 50
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - image: registry.aliyuncs.com/acs-sample/nginx
+          imagePullPolicy: IfNotPresent
+          name: nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: nginx
+  name: nginx
+  namespace: stress-connection
+spec:
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: 80
+  selector:
+    app: nginx
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: nginx-headless
+  name: nginx-headless
+  namespace: stress-connection
+spec:
+  clusterIP: None
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: 80
+  selector:
+    app: nginx
+  type: ClusterIP
+---
+# ab deployment
+## ab deploy to pod
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: ab-deploy-pod
+  name: ab-deploy-pod
+  namespace: stress-connection
+spec:
+  replicas: 20
+  selector:
+    matchLabels:
+      app: ab-deploy-pod
+  template:
+    metadata:
+      labels:
+        app: ab-deploy-pod
+    spec:
+      containers:
+        - image: registry.aliyuncs.com/wangbs/netperf
+          imagePullPolicy: IfNotPresent
+          name: ab-deploy-pod
+          resources:
+            limits:
+              memory: 1Gi
+          command:
+            - sh
+            - -c
+            - "ab -c 1 -n 100000000000000 -k http://nginx-headless/"
+---
+## ab deploy to svc
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: ab-deploy-svc
+  name: ab-deploy-svc
+  namespace: stress-connection
+spec:
+  replicas: 20
+  selector:
+    matchLabels:
+      app: ab-deploy-svc
+  template:
+    metadata:
+      labels:
+        app: ab-deploy-svc
+    spec:
+      containers:
+        - image: registry.aliyuncs.com/wangbs/netperf
+          imagePullPolicy: IfNotPresent
+          name: ab-deploy-svc
+          resources:
+            limits:
+              memory: 1Gi
+          command:
+            - sh
+            - -c
+            - "ab -c 1 -n 100000000000000 -k http://nginx/"
+---
+## ab deploy to svc non-keepalive
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: ab-deploy-svc-nk
+  name: ab-deploy-svc-nk
+  namespace: stress-connection
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: ab-deploy-svc-nk
+  template:
+    metadata:
+      labels:
+        app: ab-deploy-svc-nk
+    spec:
+      containers:
+        - image: registry.aliyuncs.com/wangbs/netperf
+          imagePullPolicy: IfNotPresent
+          name: ab-deploy-svc-nk
+          resources:
+            limits:
+              memory: 1Gi
+          command:
+            - sh
+            - -c
+            - "ab -c 1 -n 100000000000000 http://nginx/"
+---
+# blackbox deployment & metric advertise
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blackbox
+  namespace: stress-connection
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: blackbox
+  template:
+    metadata:
+      name: blackbox
+      labels:
+        app: blackbox
+    spec:
+      containers:
+        - name: blackbox
+          image: prom/blackbox-exporter:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: web
+              containerPort: 9115
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: 9115
+            initialDelaySeconds: 15
+            timeoutSeconds: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    prometheus.io/scrape: 'true'
+  labels:
+    app: blackbox
+  name: blackbox
+  namespace: stress-connection
+spec:
+  selector:
+    app: blackbox
+  ports:
+    - name: blackbox
+      protocol: TCP
+      port: 9115
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    k8s-app: prometheus-blackbox-exporter
+  name: prometheus-blackbox-exporter
+  namespace: stress-connection
+spec:
+  endpoints:
+    - interval: 5s
+      port: blackbox
+    - interval: 5s
+      params:
+        module:
+          - http_2xx
+        target:
+          - nginx
+      path: "/probe"
+      targetPort: 9115
+      relabelings:
+        - sourceLabels:
+            - __param_target
+          targetLabel: target
+        - sourceLabels:
+            - __param_module
+          targetLabel: module
+    - interval: 5s
+      params:
+        module:
+          - http_2xx
+        target:
+          - nginx-headless
+      path: "/probe"
+      targetPort: 9115
+      relabelings:
+        - sourceLabels:
+            - __param_target
+          targetLabel: target
+        - sourceLabels:
+            - __param_module
+          targetLabel: module
+  namespaceSelector:
+    matchNames:
+      - stress-connection
+  selector:
+    app: blackbox
