@@ -921,7 +921,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 			return nil, errors.Wrapf(err, "error init ENI ip resource manager")
 		}
 		if config.EnableEIPPool == conditionTrue {
-			netSrv.eipResMgr = newEipResourceManager(ecs, netSrv.k8s)
+			netSrv.eipResMgr = newEipResourceManager(ecs, netSrv.k8s, config.AllowEIPRob == conditionTrue)
 		}
 		netSrv.mgrForResource = map[string]ResourceManager{
 			types.ResourceTypeENIIP: netSrv.eniIPResMgr,
@@ -934,7 +934,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 			return nil, errors.Wrapf(err, "error init eni resource manager")
 		}
 		if config.EnableEIPPool == conditionTrue {
-			netSrv.eipResMgr = newEipResourceManager(ecs, netSrv.k8s)
+			netSrv.eipResMgr = newEipResourceManager(ecs, netSrv.k8s, config.AllowEIPRob == conditionTrue)
 		}
 		netSrv.mgrForResource = map[string]ResourceManager{
 			types.ResourceTypeENI: netSrv.eniResMgr,
