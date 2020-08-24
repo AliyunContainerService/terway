@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-func (e *ecsImpl) AllocateEipAddress(bandwidth int, eipID, eniID string, eniIP net.IP) (*types.EIP, error) {
+func (e *ecsImpl) AllocateEipAddress(bandwidth int, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error) {
 	var (
 		eipInfo *types.EIP
 		err     error
@@ -62,7 +62,34 @@ func (e *ecsImpl) AllocateEipAddress(bandwidth int, eipID, eniID string, eniIP n
 			err = errors.Errorf("error describe eip: %v, %v, %v", eipID, eipList, err)
 			return nil, err
 		}
-		if eipList[0].Status != ecs.EipStatusAvailable {
+		if allowRob && eipList[0].Status == ecs.EipStatusInUse {
+			if eipList[0].InstanceType == ecs.NetworkInterface {
+				// ENI type Unassociate
+				existEipIP := eipList[0].PrivateIpAddress
+				if err = e.UnassociateEipAddress(eipID, eipList[0].InstanceId, existEipIP); err != nil {
+					return nil, errors.Errorf("error unassocicate eip address of eni, %v", err)
+				}
+			} else {
+				// Other type Unassociate
+				start := time.Now()
+				err = e.clientSet.Vpc().NewUnassociateEipAddress(&ecs.UnallocateEipAddressArgs{
+					AllocationId: eipID,
+					InstanceId:   eipList[0].InstanceId,
+					InstanceType: ecs.EipInstanceType(eipList[0].InstanceType),
+				})
+				metric.OpenAPILatency.WithLabelValues("UnallocateEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+				if err != nil {
+					return nil, errors.Errorf("error unassocicate previous eip address, %v", err)
+				}
+			}
+			start = time.Now()
+			_, err = e.WaitForEip(eipID, ecs.EipStatusAvailable, eniStateBackoff)
+			metric.OpenAPILatency.WithLabelValues("UnAssociateEipAddress/Async", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+			if err != nil {
+				logrus.Errorf("wait for eip error: %v", err)
+				return nil, errors.Errorf("wait for eip error: %v", err)
+			}
+		} else if eipList[0].Status != ecs.EipStatusAvailable {
 			err = errors.Errorf("eip id: %v status is not Available", eipID)
 			return nil, err
 		}
@@ -103,7 +130,7 @@ func (e *ecsImpl) AllocateEipAddress(bandwidth int, eipID, eniID string, eniIP n
 	return eipInfo, nil
 }
 
-func (e *ecsImpl) UnassociateEipAddress(eipID, eniID string, eniIP net.IP) error {
+func (e *ecsImpl) UnassociateEipAddress(eipID, eniID, eniIP string) error {
 	logrus.Infof("UnassociateEipAddress: %v, %v, %v", eipID, eniID, eniIP)
 	var innerErr error
 	err := wait.ExponentialBackoff(eniOpBackoff,
@@ -147,7 +174,7 @@ func (e *ecsImpl) UnassociateEipAddress(eipID, eniID string, eniIP net.IP) error
 				// eip allocated to other resources
 				if eipResponse[0].InstanceType != ecs.NetworkInterface ||
 					eipResponse[0].InstanceId != eniID ||
-					eipResponse[0].PrivateIpAddress != eniIP.String() {
+					eipResponse[0].PrivateIpAddress != eniIP {
 					return true, nil
 				}
 			}
@@ -157,7 +184,7 @@ func (e *ecsImpl) UnassociateEipAddress(eipID, eniID string, eniIP net.IP) error
 				AllocationId:     eipID,
 				InstanceId:       eniID,
 				InstanceType:     ecs.NetworkInterface,
-				PrivateIpAddress: eniIP.String(),
+				PrivateIpAddress: eniIP,
 			})
 			metric.OpenAPILatency.WithLabelValues("UnassociateEipAddress", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
 			if innerErr != nil {
@@ -204,10 +231,10 @@ func (e *ecsImpl) ReleaseEipAddress(eipID, eniID string, eniIP net.IP) error {
 	logrus.Infof("got eip info to release: %+v", eipInfo)
 	if eipInfo.Status != ecs.EipStatusAvailable {
 		// detach eip from specify eni
-		err = e.UnassociateEipAddress(eipID, eniID, eniIP)
+		err = e.UnassociateEipAddress(eipID, eniID, eniIP.String())
 		if err == nil {
 			start := time.Now()
-			_, err = e.WaitForEip(eipID, ecs.EipStatusAvailable, eniStateBackoff)
+			eipInfo, err = e.WaitForEip(eipID, ecs.EipStatusAvailable, eniStateBackoff)
 			metric.OpenAPILatency.WithLabelValues("UnassociateEipAddress/Async", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 			if err != nil {
 				logrus.Errorf("wait timeout UnassociateEipAddress for eni: %v, %v, %v", eniID, eniIP, err)
@@ -216,19 +243,21 @@ func (e *ecsImpl) ReleaseEipAddress(eipID, eniID string, eniIP net.IP) error {
 			logrus.Errorf("error UnassociateEipAddress for eni: %v, %v, %v", eniID, eniIP, err)
 		}
 	}
-	err = wait.ExponentialBackoff(eniReleaseBackoff, func() (done bool, err error) {
-		start := time.Now()
-		innerErr = e.clientSet.Ecs().ReleaseEipAddress(eipID)
-		metric.OpenAPILatency.WithLabelValues("ReleaseEipAddress", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
-		if innerErr != nil {
-			logrus.Errorf("error Release eip: %v, %v", eipID, innerErr)
-			return false, nil
+	if eipInfo.Status == ecs.EipStatusAvailable {
+		err = wait.ExponentialBackoff(eniReleaseBackoff, func() (done bool, err error) {
+			start := time.Now()
+			innerErr = e.clientSet.Ecs().ReleaseEipAddress(eipID)
+			metric.OpenAPILatency.WithLabelValues("ReleaseEipAddress", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
+			if innerErr != nil {
+				logrus.Errorf("error Release eip: %v, %v", eipID, innerErr)
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			logrus.Errorf("error release eip: %v, %v, %v", eipID, err, innerErr)
+			return errors.Errorf("error release eip: %v, %v, %v", eipID, err, innerErr)
 		}
-		return true, nil
-	})
-	if err != nil {
-		logrus.Errorf("error release eip: %v, %v, %v", eipID, err, innerErr)
-		return errors.Errorf("error release eip: %v, %v, %v", eipID, err, innerErr)
 	}
 	return nil
 }

@@ -22,6 +22,8 @@ type Configure struct {
 	EniCapShift            int                 `yaml:"eni_cap_shift" json:"eni_cap_shift"`
 	VSwitchSelectionPolicy string              `yaml:"vswitch_selection_policy" json:"vswitch_selection_policy"`
 	EnableEIPPool          string              `yaml:"enable_eip_pool" json:"enable_eip_pool"`
+	// rob the eip instance even the eip already bound to other resource
+	AllowEIPRob string `yaml:"allow_eip_rob" json:"allow_eip_rob"`
 }
 
 // PoolConfig configuration of pool and resource factory

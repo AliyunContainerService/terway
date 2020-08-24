@@ -40,8 +40,8 @@ type ECS interface {
 	GetAttachedSecurityGroup(instanceID string) (string, error)
 	DescribeVSwitch(vSwitch string) (availIPCount int, err error)
 	// EIP
-	AllocateEipAddress(bandwidth int, eipID, eniID string, eniIP net.IP) (*types.EIP, error)
-	UnassociateEipAddress(eipID, eniID string, eniIP net.IP) error
+	AllocateEipAddress(bandwidth int, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error)
+	UnassociateEipAddress(eipID, eniID, eniIP string) error
 	ReleaseEipAddress(eipID, eniID string, eniIP net.IP) error
 	QueryEniIDByIP(address net.IP) (string, error)
 }

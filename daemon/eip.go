@@ -14,14 +14,16 @@ import (
 
 // eip resource manager for pod public ip address
 type eipResourceManager struct {
-	ecs aliyun.ECS
-	k8s Kubernetes
+	ecs         aliyun.ECS
+	k8s         Kubernetes
+	allowEipRob bool
 }
 
-func newEipResourceManager(e aliyun.ECS, k Kubernetes) ResourceManager {
+func newEipResourceManager(e aliyun.ECS, k Kubernetes, allowEipRob bool) ResourceManager {
 	return &eipResourceManager{
-		ecs: e,
-		k8s: k,
+		ecs:         e,
+		k8s:         k,
+		allowEipRob: allowEipRob,
 	}
 }
 
@@ -53,7 +55,7 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 		return nil, fmt.Errorf("pod network mode not support EIP associate")
 	}
 
-	eipInfo, err := e.ecs.AllocateEipAddress(context.pod.EipInfo.PodEipBandWidth, context.pod.EipInfo.PodEipID, eniID, eniIP)
+	eipInfo, err := e.ecs.AllocateEipAddress(context.pod.EipInfo.PodEipBandWidth, context.pod.EipInfo.PodEipID, eniID, eniIP, e.allowEipRob)
 	if err != nil {
 		return nil, errors.Errorf("error allocate eip info: %v", err)
 	}
@@ -80,7 +82,7 @@ func (e *eipResourceManager) Release(context *networkContext, resItem ResourceIt
 			return err
 		}
 	} else {
-		err := e.ecs.UnassociateEipAddress(resItem.ID, resItem.ExtraEipInfo.AssociateENI, resItem.ExtraEipInfo.AssociateENIIP)
+		err := e.ecs.UnassociateEipAddress(resItem.ID, resItem.ExtraEipInfo.AssociateENI, resItem.ExtraEipInfo.AssociateENIIP.String())
 		if err != nil {
 			return err
 		}
@@ -100,7 +102,7 @@ func (e *eipResourceManager) GarbageCollection(inUseResSet map[string]ResourceIt
 				return err
 			}
 		} else {
-			err := e.ecs.UnassociateEipAddress(expireRes, expireItem.ExtraEipInfo.AssociateENI, expireItem.ExtraEipInfo.AssociateENIIP)
+			err := e.ecs.UnassociateEipAddress(expireRes, expireItem.ExtraEipInfo.AssociateENI, expireItem.ExtraEipInfo.AssociateENIIP.String())
 			if err != nil {
 				return err
 			}
