@@ -183,6 +183,8 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 	logrus.Debugf("wait network interface attach: %v, %v, %v", createNetworkInterfaceResponse.NetworkInterfaceId, createNetworkInterfaceResponse.RequestId, attachNetworkInterfaceArgs.InstanceId)
 
 	start = time.Now()
+	// bind status is async api, sleep for first bind status inspect
+	time.Sleep(eniStateBackoff.Duration)
 	eniStatus, err := e.WaitForNetworkInterface(createNetworkInterfaceResponse.NetworkInterfaceId, eniStatusInUse, eniStateBackoff)
 	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceBind/"+eniStatusInUse, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
@@ -248,6 +250,8 @@ func (e *ecsImpl) destroyInterface(eniID string, instanceID string, force bool) 
 	}
 
 	start = time.Now()
+	// detach status is async api, sleep for first detach status inspect
+	time.Sleep(eniReleaseBackoff.Duration)
 	_, err = e.WaitForNetworkInterface(eniID, eniStatusAvailable, eniReleaseBackoff)
 	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceDestroy/"+eniStatusAvailable, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
@@ -454,6 +458,8 @@ func (e *ecsImpl) UnAssignIPForENI(eniID string, ip net.IP) error {
 
 	start = time.Now()
 	var addressesAfter []net.IP
+	// UnassignPrivateIpAddresses is async api, sleep for first ip addr inspect
+	time.Sleep(eniStateBackoff.Duration)
 	// backoff get interface addresses
 	err = wait.ExponentialBackoff(
 		eniStateBackoff,
