@@ -8,7 +8,13 @@ if [ "$DATASTORE_TYPE" = "kubernetes" ]; then
 fi
 
 # kernel version has already checked in initContainer, so just determine whether plugin chaining exists
-if [ -f "/etc/cni/net.d/10-terway.conflist" ]; then
+if [ -f "/etc/cni/net.d/10-terway.conflist" ] && grep -i ipvlan /etc/cni/net.d/10-terway.conflist; then
+  # check kernel version & enable cilium
+  KERNEL_MAJOR_VERSION=$(uname -r | awk -F . '{print $1}')
+  KERNEL_MINOR_VERSION=$(uname -r | awk -F . '{print $2}')
+  # kernel version equal and above 4.19
+  if { [ "$KERNEL_MAJOR_VERSION" -eq 4 ] && [ "$KERNEL_MINOR_VERSION" -ge 19 ]; } ||
+     [ "$KERNEL_MAJOR_VERSION" -gt 4 ]; then
     if [ -z "$DISABLE_POLICY" ] || [ x"$DISABLE_POLICY" = x"false" ] || [ x"$DISABLE_POLICY" = x"0" ]; then
       ENABLE_POLICY="default"
     else
@@ -20,6 +26,7 @@ if [ -f "/etc/cni/net.d/10-terway.conflist" ]; then
          --agent-health-port=9099 --disable-envoy-version-check=true \
          --enable-local-node-route=false --ipv4-range=169.254.10.0/30 \
          --ipam=cluster-pool --bpf-map-dynamic-size-ratio=0.0025
+  fi
 fi
 
   # default for veth
