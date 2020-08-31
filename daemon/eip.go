@@ -62,7 +62,12 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 	context.pod.EipInfo.PodEipIP = eipInfo.Address.String()
 	err = e.k8s.PatchEipInfo(context.pod)
 	if err != nil {
-		err1 := e.ecs.ReleaseEipAddress(eipInfo.ID, eniID, eniIP)
+		var err1 error
+		if eipInfo.Delete {
+			err1 = e.ecs.ReleaseEipAddress(eipInfo.ID, eniID, eniIP)
+		} else {
+			err1 = e.ecs.UnassociateEipAddress(eipInfo.ID, eniID, eniIP.String())
+		}
 		if err1 != nil {
 			logrus.Errorf("error rollback eip: %v", err1)
 		}
