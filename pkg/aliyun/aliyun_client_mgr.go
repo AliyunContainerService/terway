@@ -115,7 +115,7 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 				WithAccessKeySecret(c.token.AccessKeySecret)
 		}
 		if c.ecs == nil {
-			c.ecs = ecs.NewVPCClientWithSecurityToken4RegionalDomain(c.token.AccessKeyId, c.token.AccessKeySecret, c.token.SecurityToken, c.regionID)
+			c.ecs = ecs.NewECSClientWithSecurityToken4RegionalDomain(c.token.AccessKeyId, c.token.AccessKeySecret, c.token.SecurityToken, c.regionID)
 			c.ecs.SetUserAgent(kubernetesAlicloudIdentity)
 		} else {
 			c.ecs.WithSecurityToken(c.token.SecurityToken).
