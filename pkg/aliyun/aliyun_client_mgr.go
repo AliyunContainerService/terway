@@ -106,6 +106,22 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 			return false, errors.Errorf("error refresh auth token: %v", err)
 		}
 		c.tokenUpdateTime = time.Now()
+		if c.vpc == nil {
+			c.vpc = ecs.NewVPCClientWithSecurityToken4RegionalDomain(c.token.AccessKeyId, c.token.AccessKeySecret, c.token.SecurityToken, c.regionID)
+			c.vpc.SetUserAgent(kubernetesAlicloudIdentity)
+		} else {
+			c.vpc.WithSecurityToken(c.token.SecurityToken).
+				WithAccessKeyId(c.token.AccessKeyId).
+				WithAccessKeySecret(c.token.AccessKeySecret)
+		}
+		if c.ecs == nil {
+			c.ecs = ecs.NewVPCClientWithSecurityToken4RegionalDomain(c.token.AccessKeyId, c.token.AccessKeySecret, c.token.SecurityToken, c.regionID)
+			c.ecs.SetUserAgent(kubernetesAlicloudIdentity)
+		} else {
+			c.ecs.WithSecurityToken(c.token.SecurityToken).
+				WithAccessKeyId(c.token.AccessKeyId).
+				WithAccessKeySecret(c.token.AccessKeySecret)
+		}
 		return true, nil
 	}
 	return false, nil
@@ -116,33 +132,21 @@ func (c *ClientMgr) Vpc() *ecs.Client {
 	c.Lock()
 	defer c.Unlock()
 	tokenUpdated, err := c.refreshToken()
+	logrus.Debugf("Token update： %v， %v", tokenUpdated, err)
 	if err != nil {
 		logrus.Errorf("Error refresh OpenAPI token: %v", err)
-	}
-	if c.vpc == nil {
-		c.vpc = ecs.NewVPCClientWithSecurityToken4RegionalDomain(c.token.AccessKeyId, c.token.AccessKeySecret, c.token.SecurityToken, c.regionID)
-		c.vpc.SetUserAgent(kubernetesAlicloudIdentity)
-	} else if tokenUpdated {
-		c.vpc.WithSecurityToken(c.token.SecurityToken).
-			WithAccessKeyId(c.token.AccessKeyId).
-			WithAccessKeySecret(c.token.AccessKeySecret)
 	}
 	return c.vpc
 }
 
 // Ecs Get latest Ecs client
 func (c *ClientMgr) Ecs() *ecs.Client {
+	c.Lock()
+	defer c.Unlock()
 	tokenUpdated, err := c.refreshToken()
+	logrus.Debugf("Token update： %v， %v", tokenUpdated, err)
 	if err != nil {
 		logrus.Errorf("Error refresh OpenAPI token: %v", err)
-	}
-	if c.ecs == nil {
-		c.ecs = ecs.NewECSClientWithSecurityToken4RegionalDomain(c.token.AccessKeyId, c.token.AccessKeySecret, c.token.SecurityToken, c.regionID)
-		c.ecs.SetUserAgent(kubernetesAlicloudIdentity)
-	} else if tokenUpdated {
-		c.ecs.WithSecurityToken(c.token.SecurityToken).
-			WithAccessKeyId(c.token.AccessKeyId).
-			WithAccessKeySecret(c.token.AccessKeySecret)
 	}
 	return c.ecs
 }
