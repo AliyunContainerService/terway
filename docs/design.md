@@ -84,7 +84,7 @@ Terway有多种容器网络的配置通信方式：
 * 容器到专线和共享服务也都是通过VPC的网络转发
 * 容器到公网的访问经过VSwitch配置的SNAT网关直接将源IP转换成EIP的地址到外部网络
 
-##### ipvlan l3s
+##### `ipvlan l2`
 
 ![eniip_conn](images/eniip_connection_ipvlan.png)
 
@@ -113,7 +113,8 @@ Terway通过池化的方式对资源进行缓存，当小于资源的池的最�
 
 ### Network Policy
 
-Terway的NetworkPolicy是通过集成Calico的[Felix](https://github.com/projectcalico/felix)组件来实现
+在基于`Veth`的`VPC`和`ENI多IP的策略路由`模式中Terway的NetworkPolicy是通过集成Calico的[Felix](https://github.com/projectcalico/felix)组件来实现
+在基于`IPvlan`的`ENI多IP的IPvlan`模式中Terway的NetworkPolicy是通过集成[Cilium](https://github.com/cilium/cilium)组件来实现
 
 ### Pod流量控制
 
