@@ -295,6 +295,8 @@ You are welcome to make new issues and pull requests.
 
 [Felix](https://github.com/projectcalico/felix): Terway's NetworkPolicy is implemented by integrating [`ProjectCalico`](https://projectcalico.org)'s `Felix` components. `Felix` watch `NetworkPolicy` configuration and config ACL rules on container `veth`.
 
+[Cilium](https://github.com/cilium/cilium): In the `IPvlan` mode, `Terway` integrate [`Cilium`](https://github.com/cilium/cilium) components to support `NetworkPolicy` and optimize the `Service` performance. `Cilium` watch `NetworkPolicy` and `Service` configuration and inject `ebpf` program into pod's `IPvlan` slave device.
+
 ## Community
 
 ### DingTalk
