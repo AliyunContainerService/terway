@@ -5,7 +5,6 @@ import (
 	"math"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 )
 
@@ -47,7 +46,7 @@ func SetRule(dev netlink.Link, rule *TrafficShapingRule) error {
 	buffer := buffer(rule.Rate, burst)
 	latency := latencyInUsec(latencyInMillis)
 	limit := limit(rule.Rate, latency, burst)
-	log.Infof("set tc qdics add dev %v/%s root tbf rate %d burst %d", dev.Attrs().Namespace, dev.Attrs().Name, rule.Rate, burst)
+	//log.Infof("set tc qdics add dev %v/%s root tbf rate %d burst %d", dev.Attrs().Namespace, dev.Attrs().Name, rule.Rate, burst)
 
 	tbf := &netlink.Tbf{
 		QdiscAttrs: netlink.QdiscAttrs{

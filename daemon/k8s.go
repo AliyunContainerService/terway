@@ -367,14 +367,17 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 	if ingressBandwidth, ok := podAnnotation[podIngressBandwidth]; ok {
 		if ingress, err := parseBandwidth(ingressBandwidth); err == nil {
 			pi.TcIngress = ingress
+		} else {
+			_ = tracing.RecordPodEvent(pod.Name, pod.Namespace, eventTypeWarning,
+				"ParseFailed", fmt.Sprintf("Parse ingress bandwidth %s failed.", ingressBandwidth))
 		}
-
-		_ = tracing.RecordPodEvent(pod.Name, pod.Namespace, eventTypeWarning,
-			"ParseFailed", fmt.Sprintf("Parse bandwidth %s failed.", ingressBandwidth))
 	}
 	if egressBandwidth, ok := podAnnotation[podEgressBandwidth]; ok {
 		if egress, err := parseBandwidth(egressBandwidth); err == nil {
 			pi.TcEgress = egress
+		} else {
+			_ = tracing.RecordPodEvent(pod.Name, pod.Namespace, eventTypeWarning,
+				"ParseFailed", fmt.Sprintf("Parse egress bandwidth %s failed.", egressBandwidth))
 		}
 	}
 
