@@ -498,7 +498,7 @@ func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
 
 			start := time.Now()
 			instanceTypeItems, err := e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
-				InstanceTypeFamily: insType.InstanceTypeFamily,
+				InstanceTypes: []string{insType.InstanceType},
 			})
 			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
@@ -565,7 +565,7 @@ func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 
 			start := time.Now()
 			instanceTypeItems, err := e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
-				InstanceTypeFamily: insType.InstanceTypeFamily,
+				InstanceTypes: []string{insType.InstanceType},
 			})
 			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 

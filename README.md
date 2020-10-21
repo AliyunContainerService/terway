@@ -50,7 +50,7 @@ Terway requires the `access_key` have following [RAM Permissions](https://ram.co
         "ecs:DetachNetworkInterface",
         "ecs:DeleteNetworkInterface",
         "ecs:DescribeInstanceAttribute",
-        "ecs:DescribeInstanceTypesNew",
+        "ecs:DescribeInstanceTypes",
         "ecs:AssignPrivateIpAddresses",
         "ecs:UnassignPrivateIpAddresses",
         "ecs:DescribeInstances"

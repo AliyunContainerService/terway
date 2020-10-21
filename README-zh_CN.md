@@ -45,7 +45,7 @@ Terway需要授权中包含以下 [`RAM 权限`](https://ram.console.aliyun.com/
         "ecs:DetachNetworkInterface",
         "ecs:DeleteNetworkInterface",
         "ecs:DescribeInstanceAttribute",
-        "ecs:DescribeInstanceTypesNew",
+        "ecs:DescribeInstanceTypes",
         "ecs:AssignPrivateIpAddresses",
         "ecs:UnassignPrivateIpAddresses",
         "ecs:DescribeInstances"
