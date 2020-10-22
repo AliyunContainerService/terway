@@ -36,6 +36,8 @@ type ECS interface {
 	UnAssignIPForENI(eniID string, ip net.IP) error
 	GetInstanceMaxENI(instanceID string) (int, error)
 	GetInstanceMaxPrivateIP(intanceID string) (int, error)
+	GetInstanceMaxENIByType(instanceType string) (int, error)
+	GetInstanceMaxPrivateIPByType(instanceType string) (int, error)
 	GetENIMaxIP(instanceID string, eniID string) (int, error)
 	GetAttachedSecurityGroup(instanceID string) (string, error)
 	DescribeVSwitch(vSwitch string) (availIPCount int, err error)
@@ -486,7 +488,7 @@ func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
 		func() (done bool, err error) {
 			insType, err := e.GetInstanceAttributesType(instanceID)
 			if err != nil {
-				// failback to deprecated DescribeInstanceAttribute
+				// fallback to deprecated DescribeInstanceAttribute
 				start := time.Now()
 				insType, err = e.clientSet.Ecs().DescribeInstanceAttribute(instanceID)
 				metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
@@ -503,7 +505,7 @@ func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
 			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 			if err != nil {
-				// failback to preload eni quota
+				// fallback to preload eni quota
 				if quota, ok := ecsEniMatix[insType.InstanceType]; ok {
 					eniCap = quota
 					return true, nil
@@ -553,7 +555,7 @@ func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 		func() (done bool, err error) {
 			insType, err := e.GetInstanceAttributesType(instanceID)
 			if err != nil {
-				// failback to deprecated DescribeInstanceAttribute
+				// fallback to deprecated DescribeInstanceAttribute
 				start := time.Now()
 				insType, err = e.clientSet.Ecs().DescribeInstanceAttribute(instanceID)
 				metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
@@ -619,7 +621,7 @@ func (e *ecsImpl) GetENIByMac(instanceID, mac string) (*types.ENI, error) {
 func (e *ecsImpl) GetAttachedSecurityGroup(instanceID string) (string, error) {
 	insType, err := e.GetInstanceAttributesType(instanceID)
 	if err != nil {
-		// failback to deprecated DescribeInstanceAttribute
+		// fallback to deprecated DescribeInstanceAttribute
 		start := time.Now()
 		insType, err = e.clientSet.Ecs().DescribeInstanceAttribute(instanceID)
 		metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
@@ -661,4 +663,74 @@ func (e *ecsImpl) QueryEniIDByIP(address net.IP) (string, error) {
 		return "", errors.Errorf("error describe network interfaces from ip: %v, %v, %v", address, err, resp)
 	}
 	return resp.NetworkInterfaceSets.NetworkInterfaceSet[0].NetworkInterfaceId, nil
+}
+
+func (e *ecsImpl) GetInstanceMaxENIByType(instanceType string) (int, error) {
+	eniCap := 0
+	err := wait.ExponentialBackoff(
+		eniStateBackoff,
+		func() (done bool, err error) {
+			start := time.Now()
+			instanceTypeItems, err := e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
+				InstanceTypes: []string{instanceType},
+			})
+			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+
+			if err != nil {
+				// fallback to preload eni quota
+				if quota, ok := ecsEniMatix[instanceType]; ok {
+					eniCap = quota
+					return true, nil
+				}
+				logrus.Warnf("error get instance types info: %v， retry...", err)
+				return false, nil
+			}
+
+			for _, instanceTypeSpec := range instanceTypeItems {
+				if instanceTypeSpec.InstanceTypeId == instanceType {
+					eniCap = instanceTypeSpec.EniQuantity
+					break
+				}
+			}
+
+			if eniCap == 0 {
+				logrus.Warnf("error get instance type info: %v", instanceType)
+				return false, errors.Errorf("error get instance type info: %v", instanceType)
+			}
+			return true, nil
+		})
+
+	return eniCap, errors.Wrapf(err, "error get instance max eni: %v", instanceType)
+}
+
+func (e *ecsImpl) GetInstanceMaxPrivateIPByType(instanceType string) (int, error) {
+	eniIPCap := 0
+	err := wait.ExponentialBackoff(
+		eniStateBackoff,
+		func() (done bool, err error) {
+			start := time.Now()
+			instanceTypeItems, err := e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
+				InstanceTypes: []string{instanceType},
+			})
+			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+
+			if err != nil {
+				logrus.Warnf("error get instance info: %v， retry...", err)
+				return false, nil
+			}
+			for _, instanceTypeSpec := range instanceTypeItems {
+				if instanceTypeSpec.InstanceTypeId == instanceType {
+					eniIPCap = instanceTypeSpec.EniPrivateIpAddressQuantity
+					break
+				}
+			}
+
+			if eniIPCap == 0 {
+				logrus.Warnf("error get instance type info: %v", instanceType)
+				return false, errors.Errorf("error get instance type info: %v", instanceType)
+			}
+			return true, nil
+		})
+
+	return eniIPCap, errors.Wrapf(err, "error get instance max eni ip: %v", instanceType)
 }

@@ -14,21 +14,22 @@ import (
 
 // Reference https://help.aliyun.com/knowledge_detail/49122.html
 const (
-	metadataBase    = "http://100.100.100.200/latest/meta-data/"
-	mainEniPath     = "mac"
-	enisPath        = "network/interfaces/macs/"
-	eniIDPath       = "network/interfaces/macs/%s/network-interface-id"
-	eniAddrPath     = "network/interfaces/macs/%s/primary-ip-address"
-	eniNetmaskPath  = "network/interfaces/macs/%s/netmask"
-	eniGatewayPath  = "network/interfaces/macs/%s/gateway"
-	eniPrivateIPs   = "network/interfaces/macs/%s/private-ipv4s"
-	eniVSwitchPath  = "network/interfaces/macs/%s/vswitch-id"
-	instanceIDPath  = "instance-id"
-	regionIDPath    = "region-id"
-	zoneIDPath      = "zone-id"
-	vswitchIDPath   = "vswitch-id"
-	vpcIDPath       = "vpc-id"
-	privateIPV4Path = "private-ipv4"
+	metadataBase     = "http://100.100.100.200/latest/meta-data/"
+	mainEniPath      = "mac"
+	enisPath         = "network/interfaces/macs/"
+	eniIDPath        = "network/interfaces/macs/%s/network-interface-id"
+	eniAddrPath      = "network/interfaces/macs/%s/primary-ip-address"
+	eniNetmaskPath   = "network/interfaces/macs/%s/netmask"
+	eniGatewayPath   = "network/interfaces/macs/%s/gateway"
+	eniPrivateIPs    = "network/interfaces/macs/%s/private-ipv4s"
+	eniVSwitchPath   = "network/interfaces/macs/%s/vswitch-id"
+	instanceIDPath   = "instance-id"
+	instanceTypePath = "instance/instance-type"
+	regionIDPath     = "region-id"
+	zoneIDPath       = "zone-id"
+	vswitchIDPath    = "vswitch-id"
+	vpcIDPath        = "vpc-id"
+	privateIPV4Path  = "private-ipv4"
 )
 
 func metadataValue(url string) (string, error) {
@@ -97,6 +98,11 @@ func metadataArray(url string) ([]string, error) {
 // GetLocalInstanceID get instance id of this node
 func GetLocalInstanceID() (string, error) {
 	return metadataValue(instanceIDPath)
+}
+
+// GetInstanceType get instance type of this node
+func GetInstanceType() (string, error) {
+	return metadataValue(instanceTypePath)
 }
 
 // GetLocalRegion get region id of this node
