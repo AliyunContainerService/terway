@@ -37,19 +37,19 @@ func main() {
 		panic(err)
 	}
 
-	instanceID, err := aliyun.GetLocalInstanceID()
+	instanceType, err := aliyun.GetInstanceType()
 	if err != nil {
 		panic(err)
 	}
 
 	if mode == "terway-eniip" {
-		maxPrivateIP, err := ecs.GetInstanceMaxPrivateIP(instanceID)
+		maxPrivateIP, err := ecs.GetInstanceMaxPrivateIPByType(instanceType)
 		if err != nil {
 			panic(err)
 		}
 		fmt.Println(maxPrivateIP)
 	} else if mode == "terway-eni" {
-		maxPrivateIP, err := ecs.GetInstanceMaxENI(instanceID)
+		maxPrivateIP, err := ecs.GetInstanceMaxENIByType(instanceType)
 		if err != nil {
 			panic(err)
 		}

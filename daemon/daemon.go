@@ -460,12 +460,13 @@ func (networkService *networkService) ReleaseIP(grpcContext context.Context, r *
 			networkContext.Log().Warnf("error cleanup allocated network resource %s, %s: %v", res.ID, res.Type, err)
 			continue
 		}
-		if err = mgr.Release(networkContext, res); err != nil && err != pool.ErrInvalidState {
-			return nil, errors.Wrapf(err, "error release request network resource for: %+v", r)
-		}
-
-		if err = networkService.deletePodResource(podinfo); err != nil {
-			return nil, errors.Wrapf(err, "error delete resource from db: %+v", r)
+		if podinfo.IPStickTime == 0 {
+			if err = mgr.Release(networkContext, res); err != nil && err != pool.ErrInvalidState {
+				return nil, errors.Wrapf(err, "error release request network resource for: %+v", r)
+			}
+			if err = networkService.deletePodResource(podinfo); err != nil {
+				return nil, errors.Wrapf(err, "error delete resource from db: %+v", r)
+			}
 		}
 	}
 
