@@ -464,8 +464,10 @@ func (networkService *networkService) ReleaseIP(grpcContext context.Context, r *
 			return nil, errors.Wrapf(err, "error release request network resource for: %+v", r)
 		}
 
-		if err = networkService.deletePodResource(podinfo); err != nil {
-			return nil, errors.Wrapf(err, "error delete resource from db: %+v", r)
+		if podinfo.IPStickTime == 0 {
+			if err = networkService.deletePodResource(podinfo); err != nil {
+				return nil, errors.Wrapf(err, "error delete resource from db: %+v", r)
+			}
 		}
 	}
 
