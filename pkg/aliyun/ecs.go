@@ -168,10 +168,11 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 		NetworkInterfaceId: createNetworkInterfaceResponse.NetworkInterfaceId,
 		InstanceId:         instanceID,
 	}
+	var innerErr error
 	err = wait.ExponentialBackoff(eniOpBackoff, func() (bool, error) {
-		err = e.clientSet.Ecs().AttachNetworkInterface(attachNetworkInterfaceArgs)
-		if err != nil {
-			logrus.Warnf("attach Network Interface failed: %v, retry...", err)
+		innerErr = e.clientSet.Ecs().AttachNetworkInterface(attachNetworkInterfaceArgs)
+		if innerErr != nil {
+			logrus.Warnf("attach Network Interface failed: %v, retry...", innerErr)
 			return false, nil
 		}
 		return true, nil
@@ -179,7 +180,7 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 
 	metric.OpenAPILatency.WithLabelValues("AttachNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "error attach network interface， %v", innerErr)
 	}
 
 	logrus.Debugf("wait network interface attach: %v, %v, %v", createNetworkInterfaceResponse.NetworkInterfaceId, createNetworkInterfaceResponse.RequestId, attachNetworkInterfaceArgs.InstanceId)
@@ -199,21 +200,21 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 	err = wait.ExponentialBackoff(
 		eniStateBackoff,
 		func() (done bool, err error) {
-			eni, err = e.eniInfoGetter.GetENIConfigByMac(eniStatus.MacAddress)
-			if err != nil || eni.ID != createNetworkInterfaceResponse.NetworkInterfaceId {
-				logrus.Warnf("error get eni config by mac: %v, retrying...", err)
+			eni, innerErr = e.eniInfoGetter.GetENIConfigByMac(eniStatus.MacAddress)
+			if innerErr != nil || eni.ID != createNetworkInterfaceResponse.NetworkInterfaceId {
+				logrus.Warnf("error get eni config by mac: %v, retrying...", innerErr)
 				return false, nil
 			}
 
-			eni.MaxIPs, err = e.GetENIMaxIP(instanceID, eni.ID)
-			if err != nil {
-				logrus.Warnf("error get eni max ips : %v, retrying...", err)
+			eni.MaxIPs, innerErr = e.GetENIMaxIP(instanceID, eni.ID)
+			if innerErr != nil {
+				logrus.Warnf("error get eni max ips : %v, retrying...", innerErr)
 				return false, nil
 			}
 			return true, nil
 		},
 	)
-	return eni, err
+	return eni, errors.Wrapf(err, "error get eni config, %v", innerErr)
 }
 
 func (e *ecsImpl) destroyInterface(eniID string, instanceID string, force bool) error {
@@ -273,6 +274,7 @@ func (e *ecsImpl) destroyInterface(eniID string, instanceID string, force bool) 
 			_, err = e.clientSet.Ecs().DeleteNetworkInterface(deleteNetworkInterfaceArgs)
 			metric.OpenAPILatency.WithLabelValues("DeleteNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 			if err != nil {
+				retryErr = err
 				logrus.Warnf("error delete eni: %v, retrying...", err)
 				return false, nil
 			}
@@ -285,6 +287,7 @@ func (e *ecsImpl) destroyInterface(eniID string, instanceID string, force bool) 
 // WaitForNetworkInterface wait status of eni
 func (e *ecsImpl) WaitForNetworkInterface(eniID, status string, backoff wait.Backoff) (*ecs.NetworkInterfaceType, error) {
 	var eniInfo *ecs.NetworkInterfaceType
+	var innerErr error
 	err := wait.ExponentialBackoff(backoff,
 		func() (done bool, err error) {
 			eniIds := []string{eniID}
@@ -293,10 +296,10 @@ func (e *ecsImpl) WaitForNetworkInterface(eniID, status string, backoff wait.Bac
 				RegionId:           e.region,
 				NetworkInterfaceId: eniIds,
 			}
-
-			nisResponse, err := e.clientSet.Ecs().DescribeNetworkInterfaces(&describeNetworkInterfacesArgs)
-			if err != nil {
-				logrus.Warnf("Failed to describe network interface %v: %v", eniID, err)
+			var nisResponse *ecs.DescribeNetworkInterfacesResponse
+			nisResponse, innerErr = e.clientSet.Ecs().DescribeNetworkInterfaces(&describeNetworkInterfacesArgs)
+			if innerErr != nil {
+				logrus.Warnf("Failed to describe network interface %v: %v", eniID, innerErr)
 				return false, nil
 			}
 
@@ -307,7 +310,7 @@ func (e *ecsImpl) WaitForNetworkInterface(eniID, status string, backoff wait.Bac
 			return false, nil
 		},
 	)
-	return eniInfo, err
+	return eniInfo, errors.Wrapf(err, "error wait for network interface: %v, %v", eniID, innerErr)
 }
 
 // GetAttachedENIs of instanceId
@@ -383,9 +386,9 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 	err = wait.ExponentialBackoff(
 		eniStateBackoff,
 		func() (done bool, err error) {
-			addressesAfter, err = e.openapiInfoGetter.GetENIPrivateAddresses(eniID)
-			if err != nil {
-				logrus.Warnf("error get after eni private address for %s, err: %v", eniID, err)
+			addressesAfter, innerErr = e.openapiInfoGetter.GetENIPrivateAddresses(eniID)
+			if innerErr != nil {
+				logrus.Warnf("error get after eni private address for %s, err: %v", eniID, innerErr)
 				return false, nil
 			}
 
@@ -399,7 +402,7 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 	metric.OpenAPILatency.WithLabelValues("AssignPrivateIpAddressesAsync", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 	if err != nil {
-		return nil, errors.Wrapf(err, "error allocate eni private address for %s", eniID)
+		return nil, errors.Wrapf(err, "error allocate eni private address for %s, %v", eniID, innerErr)
 	}
 	var newIPList []net.IP
 	mb := map[string]bool{}
@@ -440,13 +443,14 @@ func (e *ecsImpl) UnAssignIPForENI(eniID string, ip net.IP) error {
 		PrivateIpAddress:   []string{ip.String()},
 	}
 
+	var innerErr error
 	start := time.Now()
 	err = wait.ExponentialBackoff(
 		eniOpBackoff,
 		func() (bool, error) {
-			_, err = e.clientSet.Ecs().UnassignPrivateIpAddresses(unAssignPrivateIPAddressesArgs)
-			if err != nil {
-				logrus.Warnf("error unassign private ip address: %v, retry...", err)
+			_, innerErr = e.clientSet.Ecs().UnassignPrivateIpAddresses(unAssignPrivateIPAddressesArgs)
+			if innerErr != nil {
+				logrus.Warnf("error unassign private ip address: %v, retry...", innerErr)
 				return false, nil
 			}
 			return true, nil
@@ -455,7 +459,7 @@ func (e *ecsImpl) UnAssignIPForENI(eniID string, ip net.IP) error {
 
 	metric.OpenAPILatency.WithLabelValues("UnassignPrivateIpAddresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
-		return errors.Wrapf(err, "error unassign address for eniID: %v", eniID)
+		return errors.Wrapf(err, "error unassign address for eniID: %v, %v", eniID, innerErr)
 	}
 
 	start = time.Now()
@@ -466,9 +470,10 @@ func (e *ecsImpl) UnAssignIPForENI(eniID string, ip net.IP) error {
 	err = wait.ExponentialBackoff(
 		eniStateBackoff,
 		func() (done bool, err error) {
-			addressesAfter, err = e.openapiInfoGetter.GetENIPrivateAddresses(eniID)
-			if err != nil {
-				return false, errors.Wrapf(err, "error get after eni private address for %s", eniID)
+			addressesAfter, innerErr = e.openapiInfoGetter.GetENIPrivateAddresses(eniID)
+			if innerErr != nil {
+				logrus.Errorf("error get after eni private address for %s, err: %v", eniID, innerErr)
+				return false, nil
 			}
 
 			if len(addressesBefore)-len(addressesAfter) != 1 {
@@ -478,39 +483,42 @@ func (e *ecsImpl) UnAssignIPForENI(eniID string, ip net.IP) error {
 		},
 	)
 	metric.OpenAPILatency.WithLabelValues("UnassignPrivateIpAddressesAsync", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
-	return errors.Wrapf(err, "error unassign eni private address for %s", eniID)
+	return errors.Wrapf(err, "error unassign eni private address for %s, %v", eniID, innerErr)
 }
 
 func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
 	eniCap := 0
+	var innerErr error
 	err := wait.ExponentialBackoff(
 		eniStateBackoff,
 		func() (done bool, err error) {
-			insType, err := e.GetInstanceAttributesType(instanceID)
-			if err != nil {
+			var insType *ecs.InstanceAttributesType
+			insType, innerErr = e.GetInstanceAttributesType(instanceID)
+			if innerErr != nil {
 				// fallback to deprecated DescribeInstanceAttribute
 				start := time.Now()
-				insType, err = e.clientSet.Ecs().DescribeInstanceAttribute(instanceID)
-				metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
-				if err != nil {
-					logrus.Warnf("error get instance info: %s: %v， retry...", instanceID, err)
+				insType, innerErr = e.clientSet.Ecs().DescribeInstanceAttribute(instanceID)
+				metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
+				if innerErr != nil {
+					logrus.Warnf("error get instance info: %s: %v， retry...", instanceID, innerErr)
 					return false, nil
 				}
 			}
 
 			start := time.Now()
-			instanceTypeItems, err := e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
+			var instanceTypeItems []ecs.InstanceTypeItemType
+			instanceTypeItems, innerErr = e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
 				InstanceTypes: []string{insType.InstanceType},
 			})
-			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
 
-			if err != nil {
+			if innerErr != nil {
 				// fallback to preload eni quota
 				if quota, ok := ecsEniMatix[insType.InstanceType]; ok {
 					eniCap = quota
 					return true, nil
 				}
-				logrus.Warnf("error get instance types info: %v， retry...", err)
+				logrus.Warnf("error get instance types info: %v， retry...", innerErr)
 				return false, nil
 			}
 
@@ -528,7 +536,7 @@ func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
 			return true, nil
 		})
 
-	return eniCap, errors.Wrapf(err, "error get instance max eni: %v", instanceID)
+	return eniCap, errors.Wrapf(err, "error get instance max eni: %v, %v", instanceID, innerErr)
 }
 
 func (e *ecsImpl) GetInstanceMaxPrivateIP(instanceID string) (int, error) {
@@ -550,29 +558,32 @@ func (e *ecsImpl) GetInstanceMaxPrivateIP(instanceID string) (int, error) {
 func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 	// fixme: the eniid must bind on specified instanceID
 	eniIPCap := 0
+	var innerErr error
 	err := wait.ExponentialBackoff(
 		eniStateBackoff,
 		func() (done bool, err error) {
-			insType, err := e.GetInstanceAttributesType(instanceID)
-			if err != nil {
+			var insType *ecs.InstanceAttributesType
+			insType, innerErr = e.GetInstanceAttributesType(instanceID)
+			if innerErr != nil {
 				// fallback to deprecated DescribeInstanceAttribute
 				start := time.Now()
-				insType, err = e.clientSet.Ecs().DescribeInstanceAttribute(instanceID)
-				metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
-				if err != nil {
-					logrus.Warnf("error get instance info: %s: %v， retry...", instanceID, err)
+				insType, innerErr = e.clientSet.Ecs().DescribeInstanceAttribute(instanceID)
+				metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
+				if innerErr != nil {
+					logrus.Warnf("error get instance info: %s: %v， retry...", instanceID, innerErr)
 					return false, nil
 				}
 			}
 
 			start := time.Now()
-			instanceTypeItems, err := e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
+			var instanceTypeItems []ecs.InstanceTypeItemType
+			instanceTypeItems, innerErr = e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
 				InstanceTypes: []string{insType.InstanceType},
 			})
-			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
 
-			if err != nil {
-				logrus.Warnf("error get instance info: %v， retry...", err)
+			if innerErr != nil {
+				logrus.Warnf("error get instance info: %v， retry...", innerErr)
 				return false, nil
 			}
 			for _, instanceTypeSpec := range instanceTypeItems {
@@ -589,7 +600,7 @@ func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 			return true, nil
 		})
 
-	return eniIPCap, errors.Wrapf(err, "error get instance max eni ip: %v", instanceID)
+	return eniIPCap, errors.Wrapf(err, "error get instance max eni ip: %v, %v", instanceID, innerErr)
 }
 
 func (e *ecsImpl) GetENIByID(instanceID, eniID string) (*types.ENI, error) {
@@ -667,22 +678,24 @@ func (e *ecsImpl) QueryEniIDByIP(address net.IP) (string, error) {
 
 func (e *ecsImpl) GetInstanceMaxENIByType(instanceType string) (int, error) {
 	eniCap := 0
+	var innerErr error
 	err := wait.ExponentialBackoff(
 		eniStateBackoff,
 		func() (done bool, err error) {
 			start := time.Now()
-			instanceTypeItems, err := e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
+			var instanceTypeItems []ecs.InstanceTypeItemType
+			instanceTypeItems, innerErr = e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
 				InstanceTypes: []string{instanceType},
 			})
-			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
 
-			if err != nil {
+			if innerErr != nil {
 				// fallback to preload eni quota
 				if quota, ok := ecsEniMatix[instanceType]; ok {
 					eniCap = quota
 					return true, nil
 				}
-				logrus.Warnf("error get instance types info: %v， retry...", err)
+				logrus.Warnf("error get instance types info: %v， retry...", innerErr)
 				return false, nil
 			}
 
@@ -700,22 +713,24 @@ func (e *ecsImpl) GetInstanceMaxENIByType(instanceType string) (int, error) {
 			return true, nil
 		})
 
-	return eniCap, errors.Wrapf(err, "error get instance max eni: %v", instanceType)
+	return eniCap, errors.Wrapf(err, "error get instance max eni: %v, %v", instanceType, innerErr)
 }
 
 func (e *ecsImpl) GetInstanceMaxPrivateIPByType(instanceType string) (int, error) {
 	eniIPCap := 0
+	var innerErr error
 	err := wait.ExponentialBackoff(
 		eniStateBackoff,
 		func() (done bool, err error) {
 			start := time.Now()
-			instanceTypeItems, err := e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
+			var instanceTypeItems []ecs.InstanceTypeItemType
+			instanceTypeItems, innerErr = e.clientSet.Ecs().DescribeInstanceTypesNew(&ecs.DescribeInstanceTypesArgs{
 				InstanceTypes: []string{instanceType},
 			})
-			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypesNew", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
 
-			if err != nil {
-				logrus.Warnf("error get instance info: %v， retry...", err)
+			if innerErr != nil {
+				logrus.Warnf("error get instance info: %v， retry...", innerErr)
 				return false, nil
 			}
 			for _, instanceTypeSpec := range instanceTypeItems {
@@ -732,5 +747,5 @@ func (e *ecsImpl) GetInstanceMaxPrivateIPByType(instanceType string) (int, error
 			return true, nil
 		})
 
-	return eniIPCap, errors.Wrapf(err, "error get instance max eni ip: %v", instanceType)
+	return eniIPCap, errors.Wrapf(err, "error get instance max eni ip: %v, %v", instanceType, innerErr)
 }

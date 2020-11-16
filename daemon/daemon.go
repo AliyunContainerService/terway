@@ -125,19 +125,19 @@ func (networkService *networkService) allocateENI(ctx *networkContext, old *PodR
 }
 
 func (networkService *networkService) allocateENIMultiIP(ctx *networkContext, old *PodResources) (*types.ENIIP, error) {
-	oldVethRes := old.GetResourceItemByType(types.ResourceTypeENIIP)
-	oldVethID := ""
+	oldENIIPRes := old.GetResourceItemByType(types.ResourceTypeENIIP)
+	oldENIIPID := ""
 	if old.PodInfo != nil {
-		if len(oldVethRes) == 0 {
+		if len(oldENIIPRes) == 0 {
 			ctx.Log().Debugf("eniip for pod %s is zero", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
-		} else if len(oldVethRes) > 1 {
+		} else if len(oldENIIPRes) > 1 {
 			ctx.Log().Warnf("eniip for pod %s more than one", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else {
-			oldVethID = oldVethRes[0].ID
+			oldENIIPID = oldENIIPRes[0].ID
 		}
 	}
 
-	res, err := networkService.eniIPResMgr.Allocate(ctx, oldVethID)
+	res, err := networkService.eniIPResMgr.Allocate(ctx, oldENIIPID)
 	if err != nil {
 		return nil, err
 	}
@@ -615,7 +615,16 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 				resRelate := resRelateObj.(PodResources)
 				_, podExist := podKeyMap[podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name)]
 				if !podExist {
-					relateExpireList = append(relateExpireList, podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name))
+					if resRelate.PodInfo.IPStickTime != 0 {
+						// delay resource garbage collection for sticky ip
+						resRelate.PodInfo.IPStickTime = 0
+						if err = networkService.resourceDB.Put(podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name),
+							resRelate); err != nil {
+							log.Warnf("error store pod info to resource db")
+						}
+					} else {
+						relateExpireList = append(relateExpireList, podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name))
+					}
 				}
 				for _, res := range resRelate.Resources {
 					if _, ok := inUseSet[res.Type]; !ok {
@@ -631,7 +640,9 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 						delete(expireSet[res.Type], res.ID)
 						inUseSet[res.Type][res.ID] = res
 					} else {
-						expireSet[res.Type][res.ID] = res
+						if _, ok := inUseSet[res.Type][res.ID]; !ok {
+							expireSet[res.Type][res.ID] = res
+						}
 					}
 				}
 			}

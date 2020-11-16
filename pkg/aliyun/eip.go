@@ -63,25 +63,17 @@ func (e *ecsImpl) AllocateEipAddress(bandwidth int, eipID, eniID string, eniIP n
 			return nil, err
 		}
 		if allowRob && eipList[0].Status == ecs.EipStatusInUse {
-			if eipList[0].InstanceType == ecs.NetworkInterface {
-				// ENI type Unassociate
-				existEipIP := eipList[0].PrivateIpAddress
-				if err = e.UnassociateEipAddress(eipID, eipList[0].InstanceId, existEipIP); err != nil {
-					return nil, errors.Errorf("error unassocicate eip address of eni, %v", err)
-				}
-			} else {
-				// Other type Unassociate
-				start := time.Now()
-				err = e.clientSet.Vpc().NewUnassociateEipAddress(&ecs.UnallocateEipAddressArgs{
-					AllocationId: eipID,
-					InstanceId:   eipList[0].InstanceId,
-					InstanceType: ecs.EipInstanceType(eipList[0].InstanceType),
-				})
-				metric.OpenAPILatency.WithLabelValues("UnallocateEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
-				if err != nil {
-					return nil, errors.Errorf("error unassocicate previous eip address, %v", err)
-				}
+
+			// Unassociate By Id
+			start := time.Now()
+			err = e.clientSet.Vpc().NewUnassociateEipAddress(&ecs.UnallocateEipAddressArgs{
+				AllocationId: eipID,
+			})
+			metric.OpenAPILatency.WithLabelValues("UnallocateEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+			if err != nil {
+				return nil, errors.Errorf("error unassocicate previous eip address, %v", err)
 			}
+
 			start = time.Now()
 			_, err = e.WaitForEip(eipID, ecs.EipStatusAvailable, eniStateBackoff)
 			metric.OpenAPILatency.WithLabelValues("UnAssociateEipAddress/Async", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
