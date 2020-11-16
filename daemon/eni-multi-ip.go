@@ -411,6 +411,7 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 			if errDispose != nil {
 				logrus.Errorf("rollback %+v failed", rawEni)
 			}
+			<-f.maxENI
 		} else {
 			ips, err = f.eniFactory.ecs.GetENIIPs(eni.ID)
 			if err != nil {
@@ -419,6 +420,7 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 				if errDispose != nil {
 					logrus.Errorf("rollback %+v failed", rawEni)
 				}
+				<-f.maxENI
 			}
 		}
 	}
