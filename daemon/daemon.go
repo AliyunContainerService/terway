@@ -10,14 +10,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/tracing"
-
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/pkg/storage"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
+
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
