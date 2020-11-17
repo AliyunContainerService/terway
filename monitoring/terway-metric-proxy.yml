@@ -23,12 +23,15 @@ spec:
 
 ---
 
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: terway-metric-proxy
   namespace: kube-system
 spec:
+  selector:
+    matchLabels:
+      app: terway-metric-proxy
   template:
     metadata:
       labels:

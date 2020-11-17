@@ -156,13 +156,6 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 	}()
 
 	start = time.Now()
-	_, err = e.WaitForNetworkInterface(createNetworkInterfaceResponse.NetworkInterfaceId, eniStatusAvailable, eniStateBackoff)
-	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceCreate/"+eniStatusAvailable, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
-	if err != nil {
-		return nil, err
-	}
-
-	start = time.Now()
 	attachNetworkInterfaceArgs := &ecs.AttachNetworkInterfaceArgs{
 		RegionId:           e.region,
 		NetworkInterfaceId: createNetworkInterfaceResponse.NetworkInterfaceId,
@@ -351,10 +344,6 @@ func (e *ecsImpl) AssignIPForENI(eniID string) (net.IP, error) {
 func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 	e.privateIPMutex.Lock()
 	defer e.privateIPMutex.Unlock()
-	addressesBefore, err := e.openapiInfoGetter.GetENIPrivateAddresses(eniID)
-	if err != nil {
-		return nil, errors.Wrapf(err, "error get before address for eniID: %v", eniID)
-	}
 
 	assignPrivateIPAddressesArgs := &ecs.AssignPrivateIpAddressesArgs{
 		RegionId:                       e.region,
@@ -364,8 +353,9 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 
 	start := time.Now()
 	var innerErr error
-	err = wait.ExponentialBackoff(eniOpBackoff, func() (bool, error) {
-		_, innerErr = e.clientSet.Ecs().AssignPrivateIpAddresses(assignPrivateIPAddressesArgs)
+	var assignPrivateIPAddressesResponse *ecs.AssignPrivateIpAddressesResponse
+	err := wait.ExponentialBackoff(eniOpBackoff, func() (bool, error) {
+		assignPrivateIPAddressesResponse, innerErr = e.clientSet.Ecs().AssignPrivateIpAddresses(assignPrivateIPAddressesArgs)
 		if innerErr != nil {
 			logrus.Warnf("Assign private ip address failed: %+v, retrying", innerErr)
 			if strings.Contains(innerErr.Error(), InvalidVSwitchIDIPNotEnough) {
@@ -380,39 +370,17 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 		return nil, errors.Wrapf(err, "error assign address for eniID: %v, %v", eniID, innerErr)
 	}
 
-	start = time.Now()
-	var addressesAfter []net.IP
-	// backoff get interface addresses
-	err = wait.ExponentialBackoff(
-		eniStateBackoff,
-		func() (done bool, err error) {
-			addressesAfter, innerErr = e.openapiInfoGetter.GetENIPrivateAddresses(eniID)
-			if innerErr != nil {
-				logrus.Warnf("error get after eni private address for %s, err: %v", eniID, innerErr)
-				return false, nil
-			}
-
-			if len(addressesAfter)-len(addressesBefore) != count {
-				logrus.Debugf("waiting address allocate, before: %+v, after: %+v", addressesBefore, addressesAfter)
-				return false, nil
-			}
-			return true, nil
-		},
-	)
-	metric.OpenAPILatency.WithLabelValues("AssignPrivateIpAddressesAsync", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
-
-	if err != nil {
-		return nil, errors.Wrapf(err, "error allocate eni private address for %s, %v", eniID, innerErr)
-	}
 	var newIPList []net.IP
-	mb := map[string]bool{}
-	for _, beforeIP := range addressesBefore {
-		mb[beforeIP.String()] = true
-	}
-	for _, afterIP := range addressesAfter {
-		if _, ok := mb[afterIP.String()]; !ok {
-			newIPList = append(newIPList, afterIP)
+
+	for _, ipStr := range assignPrivateIPAddressesResponse.AssignedPrivateIpAddressesSet.PrivateIpSet.PrivateIpAddress {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
 		}
+		newIPList = append(newIPList, ip)
+	}
+	if count != len(newIPList) {
+		return nil, fmt.Errorf("incorrect count,want %d got %d", count, len(newIPList))
 	}
 	return newIPList, err
 }
