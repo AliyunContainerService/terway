@@ -376,7 +376,7 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 		return fmt.Errorf("ip to be release is primary ip of ENI")
 	}
 
-	err = f.eniFactory.ecs.UnAssignIPForENI(ip.Eni.ID, ip.SecAddress)
+	err = f.eniFactory.ecs.UnAssignIPsForENI(ip.Eni.ID, []net.IP{ip.SecAddress})
 	if err != nil {
 		return fmt.Errorf("error unassign eniip, %v", err)
 	}

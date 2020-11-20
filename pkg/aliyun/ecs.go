@@ -33,7 +33,7 @@ type ECS interface {
 	GetENIIPs(eniID string) ([]net.IP, error)
 	AssignIPForENI(eniID string) (net.IP, error)
 	AssignNIPsForENI(eniID string, count int) ([]net.IP, error)
-	UnAssignIPForENI(eniID string, ip net.IP) error
+	UnAssignIPsForENI(eniID string, ips []net.IP) error
 	GetInstanceMaxENI(instanceID string) (int, error)
 	GetInstanceMaxPrivateIP(intanceID string) (int, error)
 	GetInstanceMaxENIByType(instanceType string) (int, error)
@@ -385,39 +385,26 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 	return newIPList, err
 }
 
-func (e *ecsImpl) UnAssignIPForENI(eniID string, ip net.IP) error {
+func (e *ecsImpl) UnAssignIPsForENI(eniID string, ips []net.IP) error {
 	e.privateIPMutex.Lock()
 	defer e.privateIPMutex.Unlock()
-
-	addressesBefore, err := e.openapiInfoGetter.GetENIPrivateAddresses(eniID)
-	if err != nil {
-		return errors.Wrapf(err, "error get before address for eniID: %v", eniID)
-	}
-
-	found := false
-	for _, addr := range addressesBefore {
-		if addr.Equal(ip) {
-			found = true
-		}
-	}
-	// ip not exist on eni
-	if !found {
-		return nil
-	}
 
 	unAssignPrivateIPAddressesArgs := &ecs.UnassignPrivateIpAddressesArgs{
 		RegionId:           e.region,
 		NetworkInterfaceId: eniID,
-		PrivateIpAddress:   []string{ip.String()},
+		PrivateIpAddress:   ips2str(ips),
 	}
 
 	var innerErr error
 	start := time.Now()
-	err = wait.ExponentialBackoff(
+	err := wait.ExponentialBackoff(
 		eniOpBackoff,
 		func() (bool, error) {
 			_, innerErr = e.clientSet.Ecs().UnassignPrivateIpAddresses(unAssignPrivateIPAddressesArgs)
 			if innerErr != nil {
+				if ErrAssert(ErrInvalidIPIPUnassigned, innerErr) {
+					return true, innerErr
+				}
 				logrus.Warnf("error unassign private ip address: %v, retry...", innerErr)
 				return false, nil
 			}
@@ -427,6 +414,9 @@ func (e *ecsImpl) UnAssignIPForENI(eniID string, ip net.IP) error {
 
 	metric.OpenAPILatency.WithLabelValues("UnassignPrivateIpAddresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
+		if ErrAssert(ErrInvalidIPIPUnassigned, innerErr) {
+			return nil
+		}
 		return errors.Wrapf(err, "error unassign address for eniID: %v, %v", eniID, innerErr)
 	}
 
@@ -444,7 +434,7 @@ func (e *ecsImpl) UnAssignIPForENI(eniID string, ip net.IP) error {
 				return false, nil
 			}
 
-			if len(addressesBefore)-len(addressesAfter) != 1 {
+			if ipIntersect(addressesAfter, ips) {
 				return false, nil
 			}
 			return true, nil
