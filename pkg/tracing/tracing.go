@@ -16,6 +16,11 @@ const (
 	ResourceTypeResourcePool = "resource_pool"
 	// ResourceTypeFactory represents resource of a factory(eniip/eni)
 	ResourceTypeFactory = "factory"
+
+	// DisposeResourceFailed DisposeResourceFailed
+	DisposeResourceFailed = "DisposeResourceFailed"
+	// AllocResourceFailed AllocResourceFailed
+	AllocResourceFailed = "AllocResourceFailed"
 )
 
 // PodResourceMapping shows the mapping from pod to ResourceMapping

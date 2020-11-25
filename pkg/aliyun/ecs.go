@@ -8,11 +8,14 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/types"
+
 	"github.com/denverdino/aliyungo/common"
 	"github.com/denverdino/aliyungo/ecs"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -150,7 +153,10 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 				ID: createNetworkInterfaceResponse.NetworkInterfaceId,
 			}
 			if err = e.destroyInterface(eniDestroy.ID, instanceID, true); err != nil {
-				logrus.Errorf("error rollback interface, may cause eni leak: %+v", err)
+				fmtErr := fmt.Sprintf("error rollback interface, may cause eni leak: %+v", err)
+				_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
+					tracing.AllocResourceFailed, fmtErr)
+				logrus.Error(fmtErr)
 			}
 		}
 	}()
@@ -173,7 +179,10 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 
 	metric.OpenAPILatency.WithLabelValues("AttachNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
-		return nil, errors.Wrapf(err, "error attach network interface， %v", innerErr)
+		fmtErr := fmt.Sprintf("error attach network interface， %v", innerErr)
+		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
+			tracing.AllocResourceFailed, fmtErr)
+		return nil, errors.Wrap(err, fmtErr)
 	}
 
 	logrus.Debugf("wait network interface attach: %v, %v, %v", createNetworkInterfaceResponse.NetworkInterfaceId, createNetworkInterfaceResponse.RequestId, attachNetworkInterfaceArgs.InstanceId)
@@ -242,7 +251,10 @@ func (e *ecsImpl) destroyInterface(eniID string, instanceID string, force bool) 
 		},
 	)
 	if err != nil && !force {
-		return errors.Wrapf(err, "cannot detach eni: %v", retryErr)
+		fmtErr := fmt.Sprintf("cannot detach eni,  %+v", retryErr)
+		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
+			tracing.DisposeResourceFailed, fmtErr)
+		return errors.Wrap(err, fmtErr)
 	}
 
 	start = time.Now()
@@ -252,7 +264,10 @@ func (e *ecsImpl) destroyInterface(eniID string, instanceID string, force bool) 
 	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceDestroy/"+eniStatusAvailable, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 	if err != nil && !force {
-		return errors.Wrapf(err, "cannot wait detach network interface")
+		fmtErr := fmt.Sprintf("cannot wait detach network interface %+v", err)
+		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
+			tracing.DisposeResourceFailed, fmtErr)
+		return errors.Wrap(err, fmtErr)
 	}
 
 	deleteNetworkInterfaceArgs := &ecs.DeleteNetworkInterfaceArgs{
@@ -274,7 +289,13 @@ func (e *ecsImpl) destroyInterface(eniID string, instanceID string, force bool) 
 			return true, nil
 		},
 	)
-	return errors.Wrapf(err, "cannot detach eni: %v", retryErr)
+	if err != nil {
+		fmtErr := fmt.Sprintf("cannot detach eni: %v", retryErr)
+		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
+			tracing.DisposeResourceFailed, fmtErr)
+		return errors.Wrap(err, fmtErr)
+	}
+	return nil
 }
 
 // WaitForNetworkInterface wait status of eni
@@ -367,7 +388,10 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 	})
 	metric.OpenAPILatency.WithLabelValues("AssignPrivateIpAddresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
-		return nil, errors.Wrapf(err, "error assign address for eniID: %v, %v", eniID, innerErr)
+		fmtErr := fmt.Sprintf("error assign address for eniID: %v, %v", eniID, innerErr)
+		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
+			tracing.AllocResourceFailed, fmtErr)
+		return nil, errors.Wrap(err, fmtErr)
 	}
 
 	var newIPList []net.IP
@@ -417,7 +441,10 @@ func (e *ecsImpl) UnAssignIPsForENI(eniID string, ips []net.IP) error {
 		if ErrAssert(ErrInvalidIPIPUnassigned, innerErr) {
 			return nil
 		}
-		return errors.Wrapf(err, "error unassign address for eniID: %v, %v", eniID, innerErr)
+		fmtErr := fmt.Sprintf("error unassign address for eniID: %v, %v", eniID, innerErr)
+		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
+			tracing.DisposeResourceFailed, fmtErr)
+		return errors.Wrap(err, fmtErr)
 	}
 
 	start = time.Now()
@@ -441,7 +468,13 @@ func (e *ecsImpl) UnAssignIPsForENI(eniID string, ips []net.IP) error {
 		},
 	)
 	metric.OpenAPILatency.WithLabelValues("UnassignPrivateIpAddressesAsync", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
-	return errors.Wrapf(err, "error unassign eni private address for %s, %v", eniID, innerErr)
+	if err != nil {
+		fmtErr := fmt.Sprintf("error unassign eni private address for %s, %v", eniID, innerErr)
+		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
+			tracing.DisposeResourceFailed, fmtErr)
+		return errors.Wrap(err, fmtErr)
+	}
+	return nil
 }
 
 func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
