@@ -85,14 +85,14 @@ var networkDriver = driver.VethDriver
 var eniMultiIPDriver = driver.VethDriver
 var nicDriver = driver.NicDriver
 
-func cmdAdd(args *skel.CmdArgs) (err error) {
+func cmdAdd(args *skel.CmdArgs) error {
 	versionDecoder := &cniversion.ConfigDecoder{}
 	var (
 		confVersion string
 		cniNetns    ns.NetNS
 	)
 
-	confVersion, err = versionDecoder.Decode(args.StdinData)
+	confVersion, err := versionDecoder.Decode(args.StdinData)
 	if err != nil {
 		return err
 	}
