@@ -70,6 +70,9 @@ type NetConf struct {
 
 	// eniIPVirtualType is the ipvlan for container
 	ENIIPVirtualType string `json:"eniip_virtual_type"`
+
+	// EbpfOffload whether to load eBPF offload. enable or disable
+	EbpfOffload string `json:"ebpf_offload"`
 }
 
 // K8SArgs is cni args of kubernetes
@@ -326,6 +329,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		if allocResult.GetVpcEni().GetEniConfig().GetMacAddr() == "" {
 			return fmt.Errorf("error get devicenumber from alloc result: %v", allocResult.GetVpcEni().GetEniConfig().GetMacAddr())
 		}
+
 		var linkList []netlink.Link
 		linkList, err = netlink.LinkList()
 		found := false
@@ -343,28 +347,29 @@ func cmdAdd(args *skel.CmdArgs) error {
 		if deviceNumber == 0 {
 			return fmt.Errorf("invaild device number: %v", deviceNumber)
 		}
-
-		extraRoutes := []*types.Route{
-			{
-				Dst: *srvSubnet,
-				GW:  net.ParseIP("169.254.1.1"),
-			},
-		}
-
-		ingress := allocResult.GetVpcEni().GetPodConfig().GetIngress()
-		egress := allocResult.GetVpcEni().GetPodConfig().GetEgress()
-		err = networkDriver.Setup(hostVethName, defaultVethForENI, eniAddrSubnet, nil, nil, gw, extraRoutes, 0, ingress, egress, cniNetns)
-		if err != nil {
-			return fmt.Errorf("setup veth network for eni failed: %v", err)
-		}
-
-		defer func() {
-			if err != nil {
-				if e := networkDriver.Teardown(hostVethName, args.IfName, cniNetns, nil); e != nil {
-					err = errors.Wrapf(err, "tear down veth network for eni failed: %v", e)
-				}
+		if conf.EbpfOffload != "enable" {
+			extraRoutes := []*types.Route{
+				{
+					Dst: *srvSubnet,
+					GW:  net.ParseIP("169.254.1.1"),
+				},
 			}
-		}()
+
+			ingress := allocResult.GetVpcEni().GetPodConfig().GetIngress()
+			egress := allocResult.GetVpcEni().GetPodConfig().GetEgress()
+			err = networkDriver.Setup(hostVethName, defaultVethForENI, eniAddrSubnet, nil, nil, gw, extraRoutes, 0, ingress, egress, cniNetns)
+			if err != nil {
+				return fmt.Errorf("setup veth network for eni failed: %v", err)
+			}
+
+			defer func() {
+				if err != nil {
+					if e := networkDriver.Teardown(hostVethName, args.IfName, cniNetns, nil); e != nil {
+						err = errors.Wrapf(err, "tear down veth network for eni failed: %v", e)
+					}
+				}
+			}()
+		}
 
 		err = nicDriver.Setup(hostVethName, args.IfName, eniAddrSubnet, nil, nil, gw, nil, int(deviceNumber), 0, 0, cniNetns)
 		if err != nil {

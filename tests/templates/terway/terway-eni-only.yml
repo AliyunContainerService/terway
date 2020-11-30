@@ -79,7 +79,8 @@ data:
     {
       "cniVersion": "0.3.0",
       "name": "terway",
-      "type": "terway"
+      "type": "terway",
+      "ebpf_offload": "enable"
     }
 
 ---
