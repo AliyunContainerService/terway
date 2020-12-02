@@ -62,7 +62,7 @@ type ecsImpl struct {
 }
 
 // NewECS return new ECS implement object
-func NewECS(ak, sk, credentialPath string, region common.Region) (ECS, error) {
+func NewECS(ak, sk, credentialPath string, region common.Region, ignoreLinkNotExist bool) (ECS, error) {
 	clientSet, err := NewClientMgr(ak, sk, credentialPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get clientset")
@@ -86,9 +86,11 @@ func NewECS(ak, sk, credentialPath string, region common.Region) (ECS, error) {
 	}
 
 	return &ecsImpl{
-		privateIPMutex:    sync.RWMutex{},
-		clientSet:         clientSet,
-		eniInfoGetter:     &eniMetadata{},
+		privateIPMutex: sync.RWMutex{},
+		clientSet:      clientSet,
+		eniInfoGetter: &eniMetadata{
+			ignoreLinkNotExist: ignoreLinkNotExist,
+		},
 		openapiInfoGetter: &openapiENIInfoGetter,
 		region:            region,
 		vpcID:             vpcID,

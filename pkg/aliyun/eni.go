@@ -7,9 +7,11 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/types"
+
 	"github.com/denverdino/aliyungo/common"
 	"github.com/denverdino/aliyungo/ecs"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 // ENIInfoGetter interface to get eni information
@@ -21,6 +23,7 @@ type ENIInfoGetter interface {
 }
 
 type eniMetadata struct {
+	ignoreLinkNotExist bool
 }
 
 func (e *eniMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
@@ -74,12 +77,18 @@ func (e *eniMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
 
 	eni.Name, err = link.GetDeviceName(mac)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get device name for eni: %s", mac)
+		if !e.ignoreLinkNotExist {
+			return nil, errors.Wrapf(err, "error get device name for eni: %s", mac)
+		}
+		logrus.Warnf("error get device name for eni: %v", err)
 	}
 
 	eni.DeviceNumber, err = link.GetDeviceNumber(mac)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get device number for eni: %s", mac)
+		if !e.ignoreLinkNotExist {
+			return nil, errors.Wrapf(err, "error get device number for eni: %s", mac)
+		}
+		logrus.Warnf("error get device number for eni: %s", mac)
 	}
 
 	return &eni, nil

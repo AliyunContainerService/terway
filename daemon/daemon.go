@@ -849,7 +849,11 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, errors.Wrapf(err, "error get region-id")
 	}
 
-	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, regionID)
+	ignoreLinkNotExist := false
+	if daemonMode == daemonModeENIOnly {
+		ignoreLinkNotExist = true
+	}
+	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, regionID, ignoreLinkNotExist)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get aliyun client")
 	}

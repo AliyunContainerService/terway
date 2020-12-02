@@ -32,7 +32,7 @@ func main() {
 	flag.Parse()
 	log.SetOutput(ioutil.Discard)
 	logrus.SetOutput(ioutil.Discard)
-	ecs, err := aliyun.NewECS(accessKeyID, accessKeySecret, credentialPath, common.Region(region))
+	ecs, err := aliyun.NewECS(accessKeyID, accessKeySecret, credentialPath, common.Region(region), false)
 	if err != nil {
 		panic(err)
 	}
