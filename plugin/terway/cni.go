@@ -51,7 +51,7 @@ func init() {
 }
 
 func main() {
-	skel.PluginMain(cmdAdd, cmdDel, version.GetSpecVersionSupported())
+	skel.PluginMain(cmdAdd, cmdCheck, cmdDel, version.GetSpecVersionSupported(), "")
 }
 
 // NetConf is the cni network config
@@ -524,6 +524,10 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 
 	return types.PrintResult(result, confVersion)
+}
+
+func cmdCheck(args *skel.CmdArgs) error {
+	return nil
 }
 
 func getNetworkClient() (rpc.TerwayBackendClient, func(), error) {

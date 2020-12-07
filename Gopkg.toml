@@ -27,11 +27,11 @@
 
 [[constraint]]
   name = "github.com/containernetworking/cni"
-  version = "0.6.0"
+  version = "0.8.0"
 
 [[constraint]]
   name = "github.com/containernetworking/plugins"
-  version = "0.7.0"
+  version = "0.8.7"
 
 [[constraint]]
   name = "github.com/coreos/go-iptables"
