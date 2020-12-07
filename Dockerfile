@@ -1,4 +1,4 @@
-FROM golang:1.11 as builder
+FROM golang:1.13 as builder
 WORKDIR /go/src/github.com/AliyunContainerService/terway/
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X \"main.gitVer=`git rev-parse --short HEAD 2>/dev/null`\" " -o terwayd .

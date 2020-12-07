@@ -17,7 +17,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
-	pluginapi "k8s.io/kubernetes/pkg/kubelet/apis/deviceplugin/v1beta1"
+	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 const (
@@ -104,7 +104,7 @@ func (m *EniDevicePlugin) Start() error {
 
 // GetDevicePluginOptions return device plugin options
 func (m *EniDevicePlugin) GetDevicePluginOptions(context.Context, *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
-	return &pluginapi.DevicePluginOptions{}, nil
+	return &pluginapi.DevicePluginOptions{GetPreferredAllocationAvailable: false}, nil
 }
 
 // PreStartContainer return container prestart hook
@@ -287,4 +287,8 @@ func (m *EniDevicePlugin) Serve(resourceName string) error {
 	go m.watchKubeletRestart()
 
 	return nil
+}
+
+func (m *EniDevicePlugin) GetPreferredAllocation(ctx context.Context, request *pluginapi.PreferredAllocationRequest) (*pluginapi.PreferredAllocationResponse, error) {
+	panic("GetPreferredAllocation not implemented")
 }

@@ -690,8 +690,8 @@ func (c *connTracker) closeAllConns() {
 	}
 }
 
-func (c *connTracker) Dial(network, address string) (net.Conn, error) {
-	return c.DialContext(context.Background(), network, address)
+func (c *connTracker) Dial(context context.Context, network, address string) (net.Conn, error) {
+	return c.DialContext(context, network, address)
 }
 
 func (c *connTracker) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
