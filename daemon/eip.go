@@ -116,6 +116,6 @@ func (e *eipResourceManager) GarbageCollection(inUseResSet map[string]ResourceIt
 	return nil
 }
 
-func (e *eipResourceManager) GetResourceMapping() ([]tracing.ResourceMapping, error) {
-	return nil, fmt.Errorf("eip resource manager store network resource")
+func (e *eipResourceManager) GetResourceMapping() (tracing.ResourcePoolStats, error) {
+	return nil, errors.New("eip resource manager store network resource")
 }

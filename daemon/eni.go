@@ -99,12 +99,12 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 		return nil, errors.Wrapf(err, "error set deviceplugin on node")
 	}
 
-	pool, err := pool.NewSimpleObjectPool(poolCfg)
+	p, err := pool.NewSimpleObjectPool(poolCfg)
 	if err != nil {
 		return nil, err
 	}
 	mgr := &eniResourceManager{
-		pool: pool,
+		pool: p,
 		ecs:  ecs,
 	}
 
@@ -133,7 +133,8 @@ func (m *eniResourceManager) GarbageCollection(inUseResSet map[string]ResourceIt
 	}
 	return nil
 }
-func (m *eniResourceManager) GetResourceMapping() ([]tracing.ResourceMapping, error) {
+
+func (m *eniResourceManager) GetResourceMapping() (tracing.ResourcePoolStats, error) {
 	return m.pool.GetResourceMapping()
 }
 
@@ -307,7 +308,7 @@ func (f *eniFactory) Trace() []tracing.MapKeyValueEntry {
 func (f *eniFactory) Execute(cmd string, _ []string, message chan<- string) {
 	switch cmd {
 	case commandMapping:
-		mapping, err := f.GetResourceMapping()
+		mapping, err := f.GetResource()
 		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
 	default:
 		message <- "can't recognize command\n"
@@ -316,23 +317,24 @@ func (f *eniFactory) Execute(cmd string, _ []string, message chan<- string) {
 	close(message)
 }
 
-func (f *eniFactory) GetResourceMapping() ([]tracing.FactoryResourceMapping, error) {
+func (f *eniFactory) Get(res types.NetworkResource) (types.NetworkResource, error) {
+	eni := res.(*types.ENI)
+	return f.ecs.GetENIByID(f.instanceID, eni.ID)
+}
+
+func (f *eniFactory) GetResource() (map[string]types.FactoryResIf, error) {
 	// Get ENIs from Aliyun API
 	enis, err := f.ecs.GetAttachedENIs(f.instanceID, false)
 	if err != nil {
 		return nil, err
 	}
 
-	var mapping []tracing.FactoryResourceMapping
-
-	for _, eni := range enis {
-		m := tracing.FactoryResourceMapping{
-			ResID: eni.GetResourceID(),
-			ENI:   eni,
-			ENIIP: nil,
+	mapping := make(map[string]types.FactoryResIf, len(enis))
+	for i := 0; i < len(enis); i++ {
+		mapping[enis[i].GetResourceID()] = &types.FactoryRes{
+			ID:   enis[i].GetResourceID(),
+			Type: enis[i].GetType(),
 		}
-
-		mapping = append(mapping, m)
 	}
 
 	return mapping, nil

@@ -112,8 +112,8 @@ func (f *vethResourceManager) GarbageCollection(inUseResSet map[string]ResourceI
 	return nil
 }
 
-func (f *vethResourceManager) GetResourceMapping() ([]tracing.ResourceMapping, error) {
-	return []tracing.ResourceMapping{}, nil
+func (f *vethResourceManager) GetResourceMapping() (tracing.ResourcePoolStats, error) {
+	return nil, nil
 }
 
 func newVPCResourceManager() (ResourceManager, error) {

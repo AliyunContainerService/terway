@@ -97,3 +97,20 @@ type NetworkResource interface {
 	GetResourceID() string
 	GetType() string
 }
+
+// Res is the func for res
+type Res interface {
+	GetID() string
+	GetType() string
+	GetStatus() ResStatus
+}
+
+// ResStatus ResStatus
+type ResStatus int
+
+// ResStatus
+const (
+	ResStatusInvalid ResStatus = iota
+	ResStatusIdle
+	ResStatusInUse
+)

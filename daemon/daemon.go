@@ -21,6 +21,8 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 const (
@@ -28,7 +30,8 @@ const (
 	daemonModeENIMultiIP = "ENIMultiIP"
 	daemonModeENIOnly    = "ENIOnly"
 
-	gcPeriod = 5 * time.Minute
+	gcPeriod        = 5 * time.Minute
+	poolCheckPeriod = 10 * time.Minute
 
 	conditionFalse = "false"
 	conditionTrue  = "true"
@@ -671,6 +674,21 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 	}()
 }
 
+func (networkService *networkService) startPeriodCheck() {
+	log.Debugf("compare poll with metadata")
+	podMapping, err := networkService.GetResourceMapping()
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	for _, res := range podMapping {
+		if res.Valid {
+			continue
+		}
+		_ = tracing.RecordPodEvent(res.Name, res.Namespace, corev1.EventTypeWarning, "ResourceInvalid", fmt.Sprintf("resource %s", res.LocalResID))
+	}
+}
+
 // tracing
 func (networkService *networkService) Config() []tracing.MapKeyValueEntry {
 	// name, daemon_mode, configFilePath, kubeconfig, master
@@ -724,62 +742,59 @@ func (networkService *networkService) Execute(cmd string, _ []string, message ch
 	close(message)
 }
 
-func (networkService *networkService) GetResourceMapping() ([]tracing.PodResourceMapping, error) {
-	var resourceMapping []tracing.ResourceMapping
-
+func (networkService *networkService) GetResourceMapping() ([]tracing.PodMapping, error) {
+	var poolStats tracing.ResourcePoolStats
 	var err error
 
+	networkService.RLock()
 	// get []ResourceMapping
 	switch networkService.daemonMode {
 	case daemonModeENIMultiIP:
-		resourceMapping, err = networkService.eniIPResMgr.GetResourceMapping()
+		poolStats, err = networkService.eniIPResMgr.GetResourceMapping()
 	case daemonModeVPC:
-		resourceMapping, err = networkService.eniResMgr.GetResourceMapping()
+		poolStats, err = networkService.eniResMgr.GetResourceMapping()
 	case daemonModeENIOnly:
-		resourceMapping, err = networkService.eniResMgr.GetResourceMapping()
+		poolStats, err = networkService.eniResMgr.GetResourceMapping()
 	}
-
 	if err != nil {
+		networkService.RUnlock()
 		return nil, err
 	}
-
-	// get pods
-	mapping := make([]tracing.PodResourceMapping, 0)
-	podMap := make(map[string]int)
-
+	// pod related res
 	pods, err := networkService.resourceDB.List()
+	networkService.RUnlock()
 	if err != nil {
 		return nil, err
 	}
+
+	mapping := make([]tracing.PodMapping, 0, len(pods))
+
+	// three way compare
+	// pod pool metadata
 
 	for _, pod := range pods {
 		p := pod.(PodResources)
 		for _, res := range p.Resources {
-			m := tracing.PodResourceMapping{
-				ResID:   res.ID,
-				PodName: p.PodInfo.Name,
+			loID := ""
+			RemoteID := ""
+			lo, ok1 := poolStats.GetLocal()[res.ID]
+			if ok1 {
+				loID = lo.GetID()
 			}
-
-			mapping = append(mapping, m)
-			podMap[m.ResID] = len(mapping) - 1
-		}
-	}
-
-	for _, res := range resourceMapping {
-		i, ok := podMap[res.ResID]
-		if !ok { // not exists
-			m := tracing.PodResourceMapping{
-				Valid:    false,
-				Resource: res,
+			remote, ok2 := poolStats.GetRemote()[res.ID]
+			if ok2 {
+				RemoteID = remote.GetID()
 			}
-
+			m := tracing.PodMapping{
+				Name:         p.PodInfo.Name,
+				Namespace:    p.PodInfo.Namespace,
+				Valid:        ok1 && ok2,
+				PodBindResID: res.ID,
+				LocalResID:   loID,
+				RemoteResID:  RemoteID,
+			}
 			mapping = append(mapping, m)
-			continue
 		}
-
-		// exists
-		mapping[i].Valid = true
-		mapping[i].Resource = res
 	}
 
 	return mapping, nil
@@ -962,6 +977,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 
 	//start gc loop
 	netSrv.startGarbageCollectionLoop()
+	go wait.JitterUntil(netSrv.startPeriodCheck, poolCheckPeriod, 1, true, wait.NeverStop)
 
 	// register for tracing
 	_ = tracing.Register(tracing.ResourceTypeNetworkService, "default", netSrv)

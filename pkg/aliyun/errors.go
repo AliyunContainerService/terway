@@ -1,6 +1,10 @@
 package aliyun
 
-import "github.com/denverdino/aliyungo/common"
+import (
+	"errors"
+
+	"github.com/denverdino/aliyungo/common"
+)
 
 const (
 	// InvalidVSwitchIDIPNotEnough AssignPrivateIpAddresses const error message
@@ -11,11 +15,25 @@ const (
 	ErrInvalidIPIPUnassigned = "InvalidIp.IpUnassigned"
 )
 
+// define well known err
+var (
+	ErrNotFound = errors.New("not found")
+)
+
 // ErrAssert check err is match errCode
 func ErrAssert(errCode string, err error) bool {
 	respErr, ok := err.(*common.Error)
 	if ok {
 		return respErr.Code == errCode
+	}
+	return false
+}
+
+// ErrStatusCodeAssert check err is match errCode
+func ErrStatusCodeAssert(code int, err error) bool {
+	respErr, ok := err.(*common.Error)
+	if ok {
+		return respErr.StatusCode == code
 	}
 	return false
 }
