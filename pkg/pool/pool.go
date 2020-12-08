@@ -10,6 +10,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/AliyunContainerService/terway/pkg/queue"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/types"
 
@@ -109,7 +110,7 @@ type ObjectFactory interface {
 type simpleObjectPool struct {
 	name     string
 	inuse    map[string]poolItem
-	idle     *priorityQueue
+	idle     queue.Interface
 	lock     sync.Mutex
 	factory  ObjectFactory
 	maxIdle  int
@@ -142,6 +143,7 @@ type Config struct {
 	MinIdle     int
 	MaxIdle     int
 	Capacity    int
+	KeyFunc     func(obj interface{}) (string, error)
 }
 
 type poolItem struct {
@@ -150,9 +152,23 @@ type poolItem struct {
 	idempotentKey string
 }
 
-func (i *poolItem) lessThan(other *poolItem) bool {
-	return i.reservation.Before(other.reservation)
-}
+var (
+	FilterOutReservationFunc = func(item queue.Item) bool {
+		poolItem := item.Val.(*poolItem)
+		if poolItem.reservation.Before(time.Now()) {
+			return true
+		}
+		return false
+	}
+
+	// keep obj in pool at least 1min
+	FilterOutTooHotFunc = func(item queue.Item) bool {
+		if item.TimeStamp.Before(time.Now().Add(1 * time.Minute)) {
+			return true
+		}
+		return false
+	}
+)
 
 // Initializer of pool
 type Initializer func(holder ResourceHolder) error
@@ -171,7 +187,7 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 		name:        cfg.Name,
 		factory:     cfg.Factory,
 		inuse:       make(map[string]poolItem),
-		idle:        newPriorityQueue(),
+		idle:        queue.NewQueue(cfg.KeyFunc),
 		maxIdle:     cfg.MaxIdle,
 		minIdle:     cfg.MinIdle,
 		capacity:    cfg.Capacity,
@@ -239,22 +255,18 @@ func mapKeys(m map[string]poolItem) string {
 	return strings.Join(keys, ", ")
 }
 
-func queueKeys(q *priorityQueue) string {
-	var keys []string
-	for i := 0; i < q.size; i++ {
-		keys = append(keys, q.slots[i].res.GetResourceID())
-	}
-	return strings.Join(keys, ", ")
+func queueKeys(q queue.Interface) string {
+	return strings.Join(q.ListKeys(), ", ")
 }
 
 func (p *simpleObjectPool) tooManyIdleLocked() bool {
-	return p.idle.Size() > p.maxIdle || (p.idle.Size() > 0 && p.sizeLocked() > p.capacity)
+	return p.idle.Len() > p.maxIdle || (p.idle.Len() > 0 && p.sizeLocked() > p.capacity)
 }
 
 func (p *simpleObjectPool) needAddition() int {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	addition := p.minIdle - p.idle.Size()
+	addition := p.minIdle - p.idle.Len()
 	if addition > (p.capacity - p.sizeLocked()) {
 		return p.capacity - p.sizeLocked()
 	}
@@ -269,15 +281,12 @@ func (p *simpleObjectPool) peekOverfullIdle() *poolItem {
 		return nil
 	}
 
-	item := p.idle.Peek()
-	if item == nil {
+	item, ok := p.idle.Pop(FilterOutReservationFunc, FilterOutTooHotFunc)
+	if !ok {
 		return nil
 	}
 
-	if item.reservation.After(time.Now()) {
-		return nil
-	}
-	return p.idle.Pop()
+	return item.(*poolItem)
 }
 
 //found resources that can be disposed, put them into dispose channel
@@ -367,17 +376,21 @@ func (p *simpleObjectPool) preload() error {
 }
 
 func (p *simpleObjectPool) sizeLocked() int {
-	return p.idle.Size() + len(p.inuse)
+	return p.idle.Len() + len(p.inuse)
 }
 
-func (p *simpleObjectPool) getOneLocked(resID string) *poolItem {
+func (p *simpleObjectPool) getOneLocked(resID string, fcs ...queue.FilterOutFunc) (*poolItem, bool) {
 	if len(resID) > 0 {
-		item := p.idle.Rob(resID)
-		if item != nil {
-			return item
+		v, ok := p.idle.PopByID(resID)
+		if ok {
+			return v.(*poolItem), true
 		}
 	}
-	return p.idle.Pop()
+	v, ok := p.idle.Pop(fcs...)
+	if !ok {
+		return nil, false
+	}
+	return v.(*poolItem), true
 }
 
 func (p *simpleObjectPool) Acquire(ctx context.Context, resID, idempotentKey string) (types.NetworkResource, error) {
@@ -387,8 +400,38 @@ func (p *simpleObjectPool) Acquire(ctx context.Context, resID, idempotentKey str
 		return resItem.res, nil
 	}
 
-	if p.idle.Size() > 0 {
-		res := p.getOneLocked(resID).res
+	if p.idle.Len() > 0 {
+		var item *poolItem
+		// 1. if resID set, pop by id
+		if len(resID) > 0 {
+			v, ok := p.idle.PopByID(resID)
+			if ok {
+				item = v.(*poolItem)
+			}
+		}
+		// 2. alloc IP with affinity to Pod
+		if item == nil {
+			v, ok := p.idle.Pop(func(item queue.Item) bool {
+				// only pop resource have idempotentKey matched
+				if item.Val.(*poolItem).idempotentKey != idempotentKey {
+					return true
+				}
+				return false
+			})
+			if ok {
+				item = v.(*poolItem)
+			} else {
+				// 3. pop any way,but should honour reservation
+				v, ok := p.idle.Pop(FilterOutReservationFunc)
+				if !ok {
+					p.lock.Unlock()
+					return nil, fmt.Errorf("unable to get pool item, no avaliable resource")
+				}
+				item = v.(*poolItem)
+			}
+		}
+
+		res := item.res
 		p.inuse[res.GetResourceID()] = poolItem{res: res, idempotentKey: idempotentKey}
 		p.lock.Unlock()
 		log.Infof("acquire (expect %s): return idle %s", resID, res.GetResourceID())
@@ -434,7 +477,7 @@ func (p *simpleObjectPool) Stat(resID string) error {
 		return nil
 	}
 
-	if p.idle.Find(resID) != nil {
+	if p.idle.StatByID(resID) {
 		return nil
 	}
 
@@ -502,11 +545,14 @@ func (p *simpleObjectPool) ReleaseWithReservation(resID string, reservation time
 		return nil
 	}
 
-	reserveTo := time.Now()
+	reserveTo := time.Time{}
 	if reservation > 0 {
-		reserveTo = reserveTo.Add(reservation)
+		reserveTo = time.Now().Add(reservation)
 	}
-	p.idle.Push(&poolItem{res: res.res, reservation: reserveTo})
+	err = p.idle.Push(&poolItem{res: res.res, reservation: reserveTo})
+	if err != nil {
+		return err
+	}
 	p.metricIdle.Inc()
 	p.notify()
 	return nil
@@ -519,7 +565,11 @@ func (p *simpleObjectPool) Release(resID string) error {
 func (p *simpleObjectPool) AddIdle(resource types.NetworkResource) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.idle.Push(&poolItem{res: resource, reservation: time.Now()})
+	err := p.idle.Push(&poolItem{res: resource, reservation: time.Now()})
+	if err != nil {
+		log.Error(err)
+		return
+	}
 	// assume AddIdle() adds a resource that not exists in the pool before
 	// both add total and idle gauge
 	p.metricTotal.Inc()
@@ -566,7 +616,7 @@ func (p *simpleObjectPool) checkResSync() {
 		// res store in pool but can not found in remote(metadata)
 		if r.GetStatus() == types.ResStatusIdle {
 			// safe to remove
-			p.idle.Rob(r.GetID())
+			p.idle.PopByID(r.GetID())
 			log.Warnf("res %s, type %s is removed from remote,remove from pool", r.GetID(), r.GetType())
 			continue
 		}
@@ -578,14 +628,15 @@ func (p *simpleObjectPool) checkResSync() {
 func (p *simpleObjectPool) getResUsage() (*Usage, error) {
 	localRes := make(map[string]types.Res)
 	// idle
-	for i := 0; i < p.idle.size; i++ {
-		item := p.idle.slots[i]
+	for _, v := range p.idle.List() {
+		item := v.(*poolItem)
 		localRes[item.res.GetResourceID()] = &ResUsage{
 			ID:     item.res.GetResourceID(),
 			Type:   item.res.GetType(),
 			Status: types.ResStatusIdle,
 		}
 	}
+
 	// inuse
 	for _, v := range p.inuse {
 		localRes[v.res.GetResourceID()] = &ResUsage{

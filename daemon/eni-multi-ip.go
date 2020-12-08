@@ -821,6 +821,13 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 			}
 			return nil
 		},
+		KeyFunc: func(obj interface{}) (string, error) {
+			res, ok := obj.(types.NetworkResource)
+			if !ok {
+				return "", fmt.Errorf("type assert want types.NetworkResource, got %T", obj)
+			}
+			return res.GetResourceID(), nil
+		},
 	}
 	p, err := pool.NewSimpleObjectPool(poolCfg)
 	if err != nil {

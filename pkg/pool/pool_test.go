@@ -129,6 +129,13 @@ func createPool(factory ObjectFactory, minIdle, maxIdle, initIdle, initInuse int
 		MinIdle:  minIdle,
 		MaxIdle:  maxIdle,
 		Capacity: 10,
+		KeyFunc: func(obj interface{}) (string, error) {
+			res, ok := obj.(types.NetworkResource)
+			if !ok {
+				return "", fmt.Errorf("type assert want types.NetworkResource, got %T", obj)
+			}
+			return res.GetResourceID(), nil
+		},
 	}
 	pool, err := NewSimpleObjectPool(cfg)
 	if err != nil {

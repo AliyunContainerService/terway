@@ -455,7 +455,7 @@ func (networkService *networkService) ReleaseIP(ctx context.Context, r *rpc.Rele
 	}
 
 	if !networkService.verifyPodNetworkType(podinfo.PodNetworkType) {
-		networkContext.Log().Warnf("unexpect pod network type release, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
+		networkContext.Log().Warnf("unexpected pod network type release, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
 		return releaseReply, nil
 	}
 

@@ -90,6 +90,13 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 			}
 			return nil
 		},
+		KeyFunc: func(obj interface{}) (string, error) {
+			res, ok := obj.(types.NetworkResource)
+			if !ok {
+				return "", fmt.Errorf("type assert want types.NetworkResource, got %T", obj)
+			}
+			return res.GetResourceID(), nil
+		},
 	}
 
 	//init deviceplugin for ENI

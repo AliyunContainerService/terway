@@ -33,12 +33,12 @@ type ENI struct {
 }
 
 // GetResourceID return mac address of eni
-func (eni *ENI) GetResourceID() string {
-	return eni.MAC
+func (e *ENI) GetResourceID() string {
+	return e.MAC
 }
 
 // GetType return type name
-func (eni *ENI) GetType() string {
+func (e *ENI) GetType() string {
 	return ResourceTypeENI
 }
 
@@ -50,12 +50,12 @@ type ENIIP struct {
 }
 
 // GetResourceID return mac address of eni and secondary ip address
-func (eniIP *ENIIP) GetResourceID() string {
-	return fmt.Sprintf("%s.%s", eniIP.Eni.GetResourceID(), eniIP.SecAddress)
+func (e *ENIIP) GetResourceID() string {
+	return fmt.Sprintf("%s.%s", e.Eni.GetResourceID(), e.SecAddress)
 }
 
 // GetType return type name
-func (eniIP *ENIIP) GetType() string {
+func (e *ENIIP) GetType() string {
 	return ResourceTypeENIIP
 }
 
@@ -65,12 +65,12 @@ type Veth struct {
 }
 
 // GetResourceID return host veth name of veth resource
-func (veth *Veth) GetResourceID() string {
-	return veth.HostVeth
+func (v *Veth) GetResourceID() string {
+	return v.HostVeth
 }
 
 // GetType return type name
-func (veth *Veth) GetType() string {
+func (v *Veth) GetType() string {
 	return ResourceTypeVeth
 }
 
@@ -92,6 +92,11 @@ func (e *EIP) GetResourceID() string {
 func (e *EIP) GetType() string {
 	return ResourceTypeEIP
 }
+
+var _ NetworkResource = (*ENI)(nil)
+var _ NetworkResource = (*ENIIP)(nil)
+var _ NetworkResource = (*Veth)(nil)
+var _ NetworkResource = (*EIP)(nil)
 
 // NetworkResource interface of network resources
 type NetworkResource interface {
