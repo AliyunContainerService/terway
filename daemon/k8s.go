@@ -20,6 +20,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/storage"
+	"github.com/denverdino/aliyungo/common"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
@@ -50,10 +51,11 @@ const (
 )
 
 type podEipInfo struct {
-	PodEip          bool
-	PodEipID        string
-	PodEipIP        string
-	PodEipBandWidth int
+	PodEip           bool
+	PodEipID         string
+	PodEipIP         string
+	PodEipBandWidth  int
+	PodEipChargeType common.InternetChargeType
 }
 
 type podInfo struct {
@@ -312,6 +314,7 @@ const podEgressBandwidth = "k8s.aliyun.com/egress-bandwidth"
 const podWithEip = "k8s.aliyun.com/pod-with-eip"
 const eciWithEip = "k8s.aliyun.com/eci-with-eip" // to adopt ask annotation
 const podEipBandwidth = "k8s.aliyun.com/eip-bandwidth"
+const podEipChargeType = "k8s.aliyun.com/eip-charge-type"
 const podEciEipInstanceID = "k8s.aliyun.com/eci-eip-instanceid" // to adopt ask annotation
 const podPodEipInstanceID = "k8s.aliyun.com/pod-eip-instanceid"
 const podEipAddress = "k8s.aliyun.com/allocated-eipAddress"
@@ -384,10 +387,12 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 	if eipAnnotation, ok := podAnnotation[podWithEip]; ok && eipAnnotation == conditionTrue {
 		pi.EipInfo.PodEip = true
 		pi.EipInfo.PodEipBandWidth = 5
+		pi.EipInfo.PodEipChargeType = common.PayByTraffic
 	}
 	if eipAnnotation, ok := podAnnotation[eciWithEip]; ok && eipAnnotation == conditionTrue {
 		pi.EipInfo.PodEip = true
 		pi.EipInfo.PodEipBandWidth = 5
+		pi.EipInfo.PodEipChargeType = common.PayByTraffic
 	}
 
 	if eipAnnotation, ok := podAnnotation[podEipBandwidth]; ok {
@@ -397,6 +402,10 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 		} else {
 			pi.EipInfo.PodEipBandWidth = eipBandwidth
 		}
+	}
+
+	if eipAnnotation, ok := podAnnotation[podEipChargeType]; ok {
+		pi.EipInfo.PodEipChargeType = common.InternetChargeType(eipAnnotation)
 	}
 
 	if eipAnnotation, ok := podAnnotation[podEciEipInstanceID]; ok && eipAnnotation != "" {

@@ -7,13 +7,14 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/denverdino/aliyungo/common"
 	"github.com/denverdino/aliyungo/ecs"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-func (e *ecsImpl) AllocateEipAddress(bandwidth int, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error) {
+func (e *ecsImpl) AllocateEipAddress(bandwidth int, chargeType common.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error) {
 	var (
 		eipInfo *types.EIP
 		err     error
@@ -23,7 +24,7 @@ func (e *ecsImpl) AllocateEipAddress(bandwidth int, eipID, eniID string, eniIP n
 		start := time.Now()
 		var eipAddressStr, allocationID string
 		eipAddressStr, allocationID, err = e.clientSet.Vpc().AllocateEipAddress(
-			&ecs.AllocateEipAddressArgs{RegionId: e.region, Bandwidth: bandwidth},
+			&ecs.AllocateEipAddressArgs{RegionId: e.region, Bandwidth: bandwidth, InternetChargeType: chargeType},
 		)
 		metric.OpenAPILatency.WithLabelValues("AllocateEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 		logrus.Debugf("AllocateEipAddress: %v, %v, %v", eipAddressStr, allocationID, err)
