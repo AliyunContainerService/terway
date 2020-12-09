@@ -10,7 +10,7 @@ metadata:
 spec:
   jobLabel: terway-metric
   selector:
-    mathLabels:
+    matchLabels:
       app: terway-metric-proxy
   namespaceSelector:
     matchNames:
@@ -28,6 +28,8 @@ kind: DaemonSet
 metadata:
   name: terway-metric-proxy
   namespace: kube-system
+  labels:
+    app: terway-metric-proxy
 spec:
   selector:
     matchLabels:
