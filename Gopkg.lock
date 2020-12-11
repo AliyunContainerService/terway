@@ -37,7 +37,7 @@
   version = "v1.3.1"
 
 [[projects]]
-  digest = "1:36f7c45919b24712f4969256c868b711b982605f2772a4c739da51a16533d17f"
+  digest = "1:0e25f0418b2033caa87910f045089fde397cd8fe3745a133e69093fe22e609c6"
   name = "github.com/containernetworking/cni"
   packages = [
     "pkg/invoke",
@@ -45,14 +45,15 @@
     "pkg/types",
     "pkg/types/020",
     "pkg/types/current",
+    "pkg/utils",
     "pkg/version",
   ]
   pruneopts = "UT"
-  revision = "a7885cb6f8ab03fba07852ded351e4f5e7a112bf"
-  version = "v0.6.0"
+  revision = "11db36c11b015c1d84fa6f46496796d193fa8d43"
+  version = "v0.8.0"
 
 [[projects]]
-  digest = "1:655f985b4f51c86ada28bdcc716124f26e8870a0d255c4198fea8462173fe842"
+  digest = "1:93ff3ca96f562a59f7ba9395ea7c8c46c8136ffbdabe08bf18e95b2b25b13bdc"
   name = "github.com/containernetworking/plugins"
   packages = [
     "pkg/ip",
@@ -64,8 +65,8 @@
     "plugins/ipam/host-local/backend/disk",
   ]
   pruneopts = "UT"
-  revision = "9f96827c7cabb03f21d86326000c00f61e181f6a"
-  version = "v0.7.6"
+  revision = "9b8de6a613657df14a3a5958642872fa9855d570"
+  version = "v0.8.7"
 
 [[projects]]
   digest = "1:28b08a595e8175642973ad80d5ff1f2410e4a3c205095ed150993dbc2cde7b17"
@@ -367,6 +368,14 @@
   pruneopts = "UT"
   revision = "6d489fc7f1d9cd890a250f3ea3431b1744b9623f"
   version = "v0.0.8"
+
+[[projects]]
+  branch = "master"
+  digest = "1:bf52b591db9784c16bcb4bbb47b879b8aa703177714504c6decdc21ebf6afbee"
+  name = "github.com/safchain/ethtool"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "874930cb3ce012efd5e6ce9d84679ce3430a85da"
 
 [[projects]]
   digest = "1:04457f9f6f3ffc5fea48e71d62f2ca256637dee0a04d710288e27e05c8b41976"

@@ -3,7 +3,6 @@ package tracing
 import (
 	"errors"
 	"fmt"
-	"net"
 	"sync"
 
 	"github.com/AliyunContainerService/terway/types"
@@ -23,29 +22,15 @@ const (
 	AllocResourceFailed = "AllocResourceFailed"
 )
 
-// PodResourceMapping shows the mapping from pod to ResourceMapping
-type PodResourceMapping struct {
-	Valid    bool
-	ResID    string
-	PodName  string
-	Resource ResourceMapping
-}
+// PodMapping PodMapping
+type PodMapping struct {
+	Name      string
+	Namespace string
+	Valid     bool
 
-// FactoryResourceMapping actually get resources from aliyun api
-type FactoryResourceMapping struct {
-	// ResID: mac / mac:ip
-	ResID string
-	ENI   *types.ENI
-	ENIIP *types.ENIIP
-}
-
-// ResourceMapping shows the mapping from resource in the pool to FactoryResource
-type ResourceMapping struct {
-	Valid           bool
-	ResID           string
-	ENI             *types.ENI
-	IP              net.IP
-	FactoryResource FactoryResourceMapping
+	PodBindResID string
+	LocalResID   string
+	RemoteResID  string
 }
 
 var (
@@ -69,9 +54,20 @@ type TraceHandler interface {
 	Execute(cmd string, args []string, message chan<- string)
 }
 
+// ResourcePoolStats define two pool lo and remote
+type ResourcePoolStats interface {
+	GetLocal() map[string]types.Res
+	GetRemote() map[string]types.Res
+}
+
 // ResourceMappingHandler get resource mapping
 type ResourceMappingHandler interface {
-	GetResourceMapping() ([]PodResourceMapping, error)
+	GetResourceMapping() (ResourcePoolStats, error)
+}
+
+// ResMapping ResMapping
+type ResMapping interface {
+	GetResourceMapping() ([]PodMapping, error)
 }
 
 // PodEventRecorder records event on pod
@@ -88,7 +84,7 @@ type Tracer struct {
 	mtx sync.Mutex
 	// store TraceHandler by resource name
 	traceMap        map[string]resourceMap
-	resourceMapping ResourceMappingHandler
+	resourceMapping ResMapping
 	podEvent        PodEventRecorder
 	nodeEvent       NodeEventRecorder
 }
@@ -130,7 +126,7 @@ func (t *Tracer) Unregister(typ, resourceName string) {
 }
 
 // RegisterResourceMapping registers handler to the tracer
-func (t *Tracer) RegisterResourceMapping(mapping ResourceMappingHandler) {
+func (t *Tracer) RegisterResourceMapping(mapping ResMapping) {
 	t.resourceMapping = mapping
 }
 
@@ -244,7 +240,7 @@ func (t *Tracer) RecordNodeEvent(eventType, reason, message string) error {
 
 // GetResourceMapping gives the resource mapping from the handler
 // if the handler has not been registered, there will be error
-func (t *Tracer) GetResourceMapping() ([]PodResourceMapping, error) {
+func (t *Tracer) GetResourceMapping() ([]PodMapping, error) {
 	if t.resourceMapping == nil {
 		return nil, errors.New("no resource mapping handler registered")
 	}
@@ -258,7 +254,7 @@ func Register(typ, resourceName string, handler TraceHandler) error {
 }
 
 // RegisterResourceMapping register resource mapping handler to the default tracer
-func RegisterResourceMapping(handler ResourceMappingHandler) {
+func RegisterResourceMapping(handler ResMapping) {
 	defaultTracer.RegisterResourceMapping(handler)
 }
 

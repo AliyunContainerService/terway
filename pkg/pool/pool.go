@@ -8,11 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/AliyunContainerService/terway/types"
+
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -40,6 +41,44 @@ const (
 	commandMapping = "mapping"
 )
 
+type UsageIf interface {
+	types.FactoryResIf
+	GetStatus() types.ResStatus
+}
+
+// ResUsage
+type ResUsage struct {
+	ID     string
+	Type   string
+	Status types.ResStatus
+}
+
+func (r *ResUsage) GetID() string {
+	return r.ID
+}
+
+func (r *ResUsage) GetType() string {
+	return r.Type
+}
+
+func (r *ResUsage) GetStatus() types.ResStatus {
+	return r.Status
+}
+
+// Usage store res booth local and remote
+type Usage struct {
+	Local  map[string]types.Res
+	Remote map[string]types.Res
+}
+
+func (u *Usage) GetLocal() map[string]types.Res {
+	return u.Local
+}
+
+func (u *Usage) GetRemote() map[string]types.Res {
+	return u.Remote
+}
+
 // ObjectPool object pool interface
 type ObjectPool interface {
 	Acquire(ctx context.Context, resID, idempotentKey string) (types.NetworkResource, error)
@@ -48,7 +87,7 @@ type ObjectPool interface {
 	AcquireAny(ctx context.Context, idempotentKey string) (types.NetworkResource, error)
 	Stat(resID string) error
 	GetName() string
-	GetResourceMapping() ([]tracing.ResourceMapping, error)
+	tracing.ResourceMappingHandler
 }
 
 // ResourceHolder interface to initialize pool
@@ -61,7 +100,8 @@ type ResourceHolder interface {
 type ObjectFactory interface {
 	Create(int) ([]types.NetworkResource, error)
 	Dispose(types.NetworkResource) error
-	GetResourceMapping() ([]tracing.FactoryResourceMapping, error)
+	GetResource() (map[string]types.FactoryResIf, error)
+	Get(types.NetworkResource) (types.NetworkResource, error)
 }
 
 type simpleObjectPool struct {
@@ -81,6 +121,14 @@ type simpleObjectPool struct {
 	metricIdle     prometheus.Gauge
 	metricTotal    prometheus.Gauge
 	metricDisposed prometheus.Counter
+
+	// reconcile is a delegate ,called when pool try to sync local cache witch remote
+	// pod     pool     metadata     action
+	// ☑️       ☑️       ☑️          -
+	// ☑️       ☑️       -           try recreate（only ENIIP）
+	// ☑️       -        -           put in pool (should not happen)
+	// -        ☑️       ☑️          delete from pool
+	//reconcile func()
 }
 
 // Config configuration of pool
@@ -168,6 +216,7 @@ func (p *simpleObjectPool) startCheckIdleTicker() {
 	for {
 		select {
 		case <-ticker.C:
+			p.checkResSync() // make sure pool is synced
 			p.checkIdle()
 			p.checkInsufficient()
 		case <-p.notifyCh:
@@ -438,9 +487,16 @@ func (p *simpleObjectPool) ReleaseWithReservation(resID string, reservation time
 		log.Infof("release %s: return err %v", resID, ErrInvalidState)
 		return ErrInvalidState
 	}
-
 	log.Infof("release %s, reservation %v: return success", resID, reservation)
 	delete(p.inuse, resID)
+
+	// check metadata
+	_, err := p.factory.Get(res.res)
+	if errors.Is(err, aliyun.ErrNotFound) {
+		log.Warnf("release %s, resource not exist in metadata, ignored", resID)
+		return nil
+	}
+
 	reserveTo := time.Now()
 	if reservation > 0 {
 		reserveTo = reserveTo.Add(reservation)
@@ -450,6 +506,7 @@ func (p *simpleObjectPool) ReleaseWithReservation(resID string, reservation time
 	p.notify()
 	return nil
 }
+
 func (p *simpleObjectPool) Release(resID string) error {
 	return p.ReleaseWithReservation(resID, time.Duration(0))
 }
@@ -475,58 +532,86 @@ func (p *simpleObjectPool) AddInuse(res types.NetworkResource, idempotentKey str
 	p.metricTotal.Inc()
 }
 
-func (p *simpleObjectPool) GetResourceMapping() ([]tracing.ResourceMapping, error) {
+func (p *simpleObjectPool) GetResourceMapping() (tracing.ResourcePoolStats, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	factoryMapping, err := p.factory.GetResourceMapping()
+	usage, err := p.getResUsage()
 	if err != nil {
 		return nil, err
 	}
 
-	// Get Resource in Pool
-	mapping := make([]tracing.ResourceMapping, 0)
+	return usage, nil
+}
 
-	poolMap := make(map[string]int)
+// checkResSync will check pool res witch metadata. make sure pool is synced
+func (p *simpleObjectPool) checkResSync() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	usage, err := p.getResUsage()
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	for _, r := range usage.Local {
+		_, ok := usage.Remote[r.GetID()]
+		if ok {
+			continue
+		}
+		// res store in pool but can not found in remote(metadata)
+		if r.GetStatus() == types.ResStatusIdle {
+			// safe to remove
+			p.idle.Rob(r.GetID())
+			log.Warnf("res %s, type %s is removed from remote,remove from pool", r.GetID(), r.GetType())
+			continue
+		}
+		log.Errorf("res %s, type %s is removed from remote,but is in use", r.GetID(), r.GetType())
+	}
+}
 
+// getResUsage get current usage
+func (p *simpleObjectPool) getResUsage() (*Usage, error) {
+	localRes := make(map[string]types.Res)
 	// idle
 	for i := 0; i < p.idle.size; i++ {
 		item := p.idle.slots[i]
-		m := tracing.ResourceMapping{
-			ResID: item.res.GetResourceID(),
+		localRes[item.res.GetResourceID()] = &ResUsage{
+			ID:     item.res.GetResourceID(),
+			Type:   item.res.GetType(),
+			Status: types.ResStatusIdle,
 		}
-
-		mapping = append(mapping, m)
-		poolMap[m.ResID] = len(mapping) - 1 // the last element index
 	}
-
 	// inuse
 	for _, v := range p.inuse {
-		m := tracing.ResourceMapping{
-			ResID: v.res.GetResourceID(),
+		localRes[v.res.GetResourceID()] = &ResUsage{
+			ID:     v.res.GetResourceID(),
+			Type:   v.res.GetType(),
+			Status: types.ResStatusInUse,
 		}
-
-		mapping = append(mapping, m)
-		poolMap[m.ResID] = len(mapping) - 1 // the last element index
 	}
+
+	factoryRes, err := p.factory.GetResource()
+	if err != nil {
+		return nil, err
+	}
+	remoteRes := make(map[string]types.Res)
 
 	// map to factory
-	for _, v := range factoryMapping {
-		i, ok := poolMap[v.ResID]
-		if !ok { // resource not exist in factory
-			m := tracing.ResourceMapping{
-				Valid:           false,
-				FactoryResource: v,
-			}
-
-			mapping = append(mapping, m)
-			continue
+	for _, v := range factoryRes {
+		status := types.ResStatusInvalid
+		lo, ok := localRes[v.GetID()]
+		if ok {
+			status = lo.GetStatus()
 		}
 
-		// resource exists in factory
-		mapping[i].FactoryResource = v
-		mapping[i].Valid = true
+		remoteRes[v.GetID()] = &ResUsage{
+			ID:     v.GetID(),
+			Status: status,
+		}
 	}
 
-	return mapping, nil
+	return &Usage{
+		Local:  localRes,
+		Remote: remoteRes,
+	}, nil
 }

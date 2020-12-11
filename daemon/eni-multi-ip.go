@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	goerr "errors"
 	"fmt"
 	"net"
 	"sort"
@@ -8,14 +9,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/metric"
-	"github.com/AliyunContainerService/terway/pkg/tracing"
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/pool"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/types"
+
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 )
 
@@ -393,6 +394,21 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 	return nil
 }
 
+func (f *eniIPFactory) Get(res types.NetworkResource) (types.NetworkResource, error) {
+	eniIP := res.(*types.ENIIP)
+
+	ips, err := f.eniFactory.ecs.GetENIIPs(eniIP.Eni.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, ip := range ips {
+		if ip.Equal(eniIP.SecAddress) {
+			return res, nil
+		}
+	}
+	return nil, aliyun.ErrNotFound
+}
+
 func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 	rawEni, err := f.eniFactory.CreateWithIPCount(ipCount)
 	var ips []net.IP
@@ -558,7 +574,7 @@ func (f *eniIPFactory) Execute(cmd string, _ []string, message chan<- string) {
 	case commandAudit: // check account
 		f.checkAccount(message)
 	case commandMapping:
-		mapping, err := f.GetResourceMapping()
+		mapping, err := f.GetResource()
 		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
 	default:
 		message <- "can't recognize command\n"
@@ -628,36 +644,35 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 	message <- "done.\n"
 }
 
-func (f *eniIPFactory) GetResourceMapping() ([]tracing.FactoryResourceMapping, error) {
+func (f *eniIPFactory) GetResource() (map[string]types.FactoryResIf, error) {
 	// Get ENIs from Aliyun API
 	enis, err := f.eniFactory.ecs.GetAttachedENIs(f.eniFactory.instanceID, false)
 	if err != nil {
 		return nil, err
 	}
 
-	var mapping []tracing.FactoryResourceMapping
-
+	mapping := make(map[string]types.FactoryResIf, len(enis))
 	for _, eni := range enis {
 		// get secondary ips from one eni
 		ips, err := f.eniFactory.ecs.GetENIIPs(eni.ID)
 		if err != nil {
+			if goerr.Is(err, aliyun.ErrNotFound) {
+				continue
+			}
 			return nil, err
 		}
 
 		for _, ip := range ips {
-			eniip := types.ENIIP{
+			eniIP := types.ENIIP{
 				Eni:        eni,
 				SecAddress: ip,
 				PrimaryIP:  eni.Address.IP,
 			}
 
-			m := tracing.FactoryResourceMapping{
-				ResID: eniip.GetResourceID(),
-				ENI:   nil,
-				ENIIP: &eniip,
+			mapping[eniIP.GetResourceID()] = &types.FactoryRes{
+				ID:   eniIP.GetResourceID(),
+				Type: eniIP.GetType(),
 			}
-
-			mapping = append(mapping, m)
 		}
 	}
 
@@ -798,12 +813,12 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 			return nil
 		},
 	}
-	pool, err := pool.NewSimpleObjectPool(poolCfg)
+	p, err := pool.NewSimpleObjectPool(poolCfg)
 	if err != nil {
 		return nil, err
 	}
 	mgr := &eniIPResourceManager{
-		pool: pool,
+		pool: p,
 	}
 	_ = tracing.Register(tracing.ResourceTypeFactory, factory.name, factory)
 	return mgr, nil
@@ -832,6 +847,6 @@ func (m *eniIPResourceManager) GarbageCollection(inUseResSet map[string]Resource
 	return nil
 }
 
-func (m *eniIPResourceManager) GetResourceMapping() ([]tracing.ResourceMapping, error) {
+func (m *eniIPResourceManager) GetResourceMapping() (tracing.ResourcePoolStats, error) {
 	return m.pool.GetResourceMapping()
 }

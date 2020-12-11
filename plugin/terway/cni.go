@@ -51,7 +51,7 @@ func init() {
 }
 
 func main() {
-	skel.PluginMain(cmdAdd, cmdDel, version.GetSpecVersionSupported())
+	skel.PluginMain(cmdAdd, cmdCheck, cmdDel, version.GetSpecVersionSupported(), "")
 }
 
 // NetConf is the cni network config
@@ -76,9 +76,9 @@ type NetConf struct {
 type K8SArgs struct {
 	types.CommonArgs
 	IP                         net.IP
-	K8S_POD_NAME               types.UnmarshallableString
-	K8S_POD_NAMESPACE          types.UnmarshallableString
-	K8S_POD_INFRA_CONTAINER_ID types.UnmarshallableString
+	K8S_POD_NAME               types.UnmarshallableString // nolint
+	K8S_POD_NAMESPACE          types.UnmarshallableString // nolint
+	K8S_POD_INFRA_CONTAINER_ID types.UnmarshallableString // nolint
 }
 
 var networkDriver = driver.VethDriver
@@ -524,6 +524,10 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 
 	return types.PrintResult(result, confVersion)
+}
+
+func cmdCheck(args *skel.CmdArgs) error {
+	return nil
 }
 
 func getNetworkClient() (rpc.TerwayBackendClient, func(), error) {

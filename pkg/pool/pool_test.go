@@ -4,12 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/AliyunContainerService/terway/pkg/tracing"
 
 	"github.com/sirupsen/logrus"
 
@@ -27,18 +24,15 @@ type mockObjectFactory struct {
 	lock          sync.Mutex
 }
 
-func (f *mockObjectFactory) GetResourceMapping() ([]tracing.FactoryResourceMapping, error) {
+func (f *mockObjectFactory) GetResource() (map[string]types.FactoryResIf, error) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
-	var mapping []tracing.FactoryResourceMapping
-
+	mapping := make(map[string]types.FactoryResIf)
 	for i := 1001; i <= f.idGenerator; i++ {
-		mapping = append(mapping, tracing.FactoryResourceMapping{
-			ResID: fmt.Sprint(i),
-			ENI:   nil,
-			ENIIP: nil,
-		})
+		mapping[fmt.Sprint(i)] = &types.FactoryRes{
+			ID: fmt.Sprint(i),
+		}
 	}
 
 	return mapping, nil
@@ -81,6 +75,10 @@ func (f *mockObjectFactory) Dispose(types.NetworkResource) error {
 	defer f.lock.Unlock()
 	f.totalDisposed++
 	return f.err
+}
+
+func (f *mockObjectFactory) Get(types.NetworkResource) (types.NetworkResource, error) {
+	return nil, nil
 }
 
 func (f *mockObjectFactory) getTotalDisposed() int {
@@ -179,6 +177,7 @@ func TestAutoAddition(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	assert.Equal(t, 6, factory.getTotalCreated())
 }
+
 func TestAcquireNonExists(t *testing.T) {
 	factory := &mockObjectFactory{}
 	pool := createPool(factory, 0, 5, 3, 0)
@@ -287,20 +286,6 @@ func TestGetResourceMapping(t *testing.T) {
 
 	mapping, err := pool.GetResourceMapping()
 	assert.Equal(t, nil, err)
-
-	for _, v := range mapping {
-		//t.Log(v.ResID)
-		var resID int
-		if v.ResID != "" {
-			resID, err = strconv.Atoi(v.ResID)
-			assert.Equal(t, nil, err)
-		}
-
-		if resID >= 1000 { // generated from factory
-			assert.Equal(t, v.Valid, true)
-		} else {
-			assert.Equal(t, v.Valid, false)
-		}
-	}
-
+	assert.NotNil(t, mapping.GetLocal())
+	assert.NotNil(t, mapping.GetRemote())
 }

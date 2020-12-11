@@ -80,6 +80,9 @@ func metadataArray(url string) ([]string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrNotFound
+	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return []string{}, fmt.Errorf("error get url: %s from metaserver, code: %v", url, resp.StatusCode)
 	}

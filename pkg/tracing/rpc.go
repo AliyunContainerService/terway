@@ -97,21 +97,15 @@ func (t *tracingRPC) GetResourceMapping(_ context.Context, _ *rpc.Placeholder) (
 	}, nil
 }
 
-func toRPCMapping(mapping PodResourceMapping) *rpc.PodResourceMapping {
+func toRPCMapping(res PodMapping) *rpc.PodResourceMapping {
 	rMapping := rpc.PodResourceMapping{
 		Type:                rpc.ResourceMappingType_MappingTypeNormal,
-		PodName:             mapping.PodName,
-		ResourceName:        mapping.Resource.ResID,
-		FactoryResourceName: mapping.Resource.FactoryResource.ResID,
+		PodName:             res.Name,
+		ResourceName:        res.PodBindResID,
+		FactoryResourceName: res.RemoteResID,
 	}
-
-	if !mapping.Valid {
-		// FactoryResourceName == "" for case resource has been in the pool but not found via API
-		if !mapping.Resource.Valid || rMapping.FactoryResourceName == "" {
-			rMapping.Type = rpc.ResourceMappingType_MappingTypeError
-		} else {
-			rMapping.Type = rpc.ResourceMappingType_MappingTypeIdle
-		}
+	if !res.Valid {
+		rMapping.Type = rpc.ResourceMappingType_MappingTypeError
 	}
 
 	return &rMapping

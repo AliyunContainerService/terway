@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/types"
@@ -108,7 +109,7 @@ func (e *eniMetadata) GetENIConfigByID(eniID string) (*types.ENI, error) {
 			return e.GetENIConfigByMac(mac)
 		}
 	}
-	return nil, errors.Errorf("not found eni id: %s", eniID)
+	return nil, errors.Wrapf(ErrNotFound, fmt.Sprintf("eni id: %s", eniID))
 }
 
 func (e *eniMetadata) GetENIPrivateAddresses(eniID string) ([]net.IP, error) {
@@ -185,6 +186,9 @@ func (eoa *eniOpenAPI) GetENIPrivateAddresses(eniID string) ([]net.IP, error) {
 	}
 	resp, err := eoa.clientSet.Ecs().DescribeNetworkInterfaces(describeNetworkInterfacesArgs)
 	if err != nil {
+		if ErrStatusCodeAssert(http.StatusNotFound, err) {
+			return nil, ErrNotFound
+		}
 		return nil, errors.Wrapf(err, "error get info from openapi: eniid: %s", eniID)
 	}
 
