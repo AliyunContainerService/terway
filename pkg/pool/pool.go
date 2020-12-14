@@ -15,6 +15,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // Errors of pool
@@ -210,12 +211,14 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 }
 
 func (p *simpleObjectPool) startCheckIdleTicker() {
-	p.checkIdle()
-	p.checkInsufficient()
-	ticker := time.NewTicker(CheckIdleInterval)
+	tick := make(chan struct{})
+	go wait.JitterUntil(func() {
+		tick <- struct{}{}
+	}, CheckIdleInterval, 0.2, true, wait.NeverStop)
+
 	for {
 		select {
-		case <-ticker.C:
+		case <-tick:
 			p.checkResSync() // make sure pool is synced
 			p.checkIdle()
 			p.checkInsufficient()
