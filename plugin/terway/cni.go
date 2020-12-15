@@ -70,6 +70,9 @@ type NetConf struct {
 
 	// eniIPVirtualType is the ipvlan for container
 	ENIIPVirtualType string `json:"eniip_virtual_type"`
+
+	// HostStackCIDRs is a list of CIDRs, all traffic targeting these CIDRs will be redirected to host network stack
+	HostStackCIDRs []string `json:"host_stack_cidrs"`
 }
 
 // K8SArgs is cni args of kubernetes
@@ -224,6 +227,16 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return fmt.Errorf("eni multi ip return servicecidr(%s) is invaild: %v", serviceCIDRStr, err)
 		}
 
+		hostStackCIDRs := make([]*net.IPNet, 0)
+		for _, v := range conf.HostStackCIDRs {
+			_, cidr, err := net.ParseCIDR(v)
+			if err != nil {
+				return fmt.Errorf("host_stack_cidrs(%s) is invaild: %v", v, err)
+
+			}
+			hostStackCIDRs = append(hostStackCIDRs, cidr)
+		}
+
 		if strings.ToLower(conf.ENIIPVirtualType) == eniIPVirtualTypeIPVlan {
 			available, err := driver.CheckIPVLanAvailable()
 			if err != nil {
@@ -242,7 +255,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 				eniMultiIPDriver = driver.IPVlanDriver
 			}
 		}
-		err = eniMultiIPDriver.Setup(hostVethName, args.IfName, subnet, primaryIP, serviceCIDR, gw, nil, int(deviceID), ingress, egress, cniNetns)
+		err = eniMultiIPDriver.Setup(hostVethName, args.IfName, subnet, primaryIP, serviceCIDR, hostStackCIDRs, gw, nil, int(deviceID), ingress, egress, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network failed: %v", err)
 		}
@@ -286,7 +299,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		ingress := allocResult.GetVpcIp().GetPodConfig().GetIngress()
 		egress := allocResult.GetVpcIp().GetPodConfig().GetEgress()
 
-		err = networkDriver.Setup(hostVethName, args.IfName, &podIPAddr, nil, nil, gateway, nil, 0, ingress, egress, cniNetns)
+		err = networkDriver.Setup(hostVethName, args.IfName, &podIPAddr, nil, nil, nil, gateway, nil, 0, ingress, egress, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network failed: %v", err)
 		}
@@ -353,7 +366,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 		ingress := allocResult.GetVpcEni().GetPodConfig().GetIngress()
 		egress := allocResult.GetVpcEni().GetPodConfig().GetEgress()
-		err = networkDriver.Setup(hostVethName, defaultVethForENI, eniAddrSubnet, nil, nil, gw, extraRoutes, 0, ingress, egress, cniNetns)
+		err = networkDriver.Setup(hostVethName, defaultVethForENI, eniAddrSubnet, nil, nil, nil, gw, extraRoutes, 0, ingress, egress, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup veth network for eni failed: %v", err)
 		}
@@ -366,7 +379,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			}
 		}()
 
-		err = nicDriver.Setup(hostVethName, args.IfName, eniAddrSubnet, nil, nil, gw, nil, int(deviceNumber), 0, 0, cniNetns)
+		err = nicDriver.Setup(hostVethName, args.IfName, eniAddrSubnet, nil, nil, nil, gw, nil, int(deviceNumber), 0, 0, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network for vpc eni failed: %v", err)
 		}

@@ -81,6 +81,7 @@ func (driver *ipvlanDriver) Setup(
 	ipv4Addr *net.IPNet,
 	primaryIpv4Addr net.IP,
 	serviceCIDR *net.IPNet,
+	hostStackCIDRs []*net.IPNet,
 	gateway net.IP,
 	extraRoutes []*types.Route,
 	deviceID int,
@@ -181,7 +182,7 @@ func (driver *ipvlanDriver) Setup(
 		return errors.Wrapf(err, "%s, set container link/address/route error", driver.name)
 	}
 
-	if err := driver.setupInitNamespace(parentLink, primaryIpv4Addr, ipv4Addr, serviceCIDR); err != nil {
+	if err := driver.setupInitNamespace(parentLink, primaryIpv4Addr, ipv4Addr, serviceCIDR, hostStackCIDRs); err != nil {
 		return errors.Wrapf(err, "%s, configure init namespace error.", driver.name)
 	}
 
@@ -480,22 +481,32 @@ func (rule *redirectRule) toU32Filter() *netlink.U32 {
 	}
 }
 
-func (driver *ipvlanDriver) setupFilters(link netlink.Link, ip *net.IPNet, dstIndex int) error {
+func (driver *ipvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIndex int) error {
 	parent := uint32(netlink.HANDLE_CLSACT&0xffff0000 | netlink.HANDLE_MIN_EGRESS&0x0000ffff)
 	filters, err := netlink.FilterList(link, parent)
 	if err != nil {
 		return errors.Wrapf(err, "%s, list egress filter for %s error", driver.name, link.Attrs().Name)
 	}
 
-	rule, err := dstIPRule(link.Attrs().Index, ip, dstIndex, netlink.TCA_INGRESS_REDIR)
-	if err != nil {
-		return errors.Wrapf(err, "%s, create redirect rule error", driver.name)
+	ruleInFilter := make(map[*redirectRule]bool)
+	for _, v := range cidrs {
+		rule, err := dstIPRule(link.Attrs().Index, v, dstIndex, netlink.TCA_INGRESS_REDIR)
+		if err != nil {
+			return errors.Wrapf(err, "%s, create redirect rule error", driver.name)
+		}
+		ruleInFilter[rule] = false
 	}
 
-	found := false
 	for _, filter := range filters {
-		if rule.isMatch(filter) {
-			found = true
+		matchAny := false
+		for rule := range ruleInFilter {
+			if rule.isMatch(filter) {
+				ruleInFilter[rule] = true
+				matchAny = true
+				break
+			}
+		}
+		if matchAny {
 			continue
 		}
 		if err := netlink.FilterDel(filter); err != nil {
@@ -503,14 +514,14 @@ func (driver *ipvlanDriver) setupFilters(link netlink.Link, ip *net.IPNet, dstIn
 		}
 	}
 
-	if found {
-		return nil
-	}
-
-	u32 := rule.toU32Filter()
-	u32.Parent = parent
-	if err := netlink.FilterAdd(u32); err != nil {
-		return errors.Wrapf(err, "%s, add filter for %s error", driver.name, link.Attrs().Name)
+	for rule, in := range ruleInFilter {
+		if !in {
+			u32 := rule.toU32Filter()
+			u32.Parent = parent
+			if err := netlink.FilterAdd(u32); err != nil {
+				return errors.Wrapf(err, "%s, add filter for %s error", driver.name, link.Attrs().Name)
+			}
+		}
 	}
 
 	return nil
@@ -521,6 +532,7 @@ func (driver *ipvlanDriver) setupInitNamespace(
 	hostIP net.IP,
 	containerIP *net.IPNet,
 	serviceCIDR *net.IPNet,
+	hostStackCIDRs []*net.IPNet,
 ) error {
 	// setup slave nic
 	slaveName := driver.initSlaveName(parentLink.Attrs().Index)
@@ -551,7 +563,10 @@ func (driver *ipvlanDriver) setupInitNamespace(
 	if err := driver.setupClsActQsic(parentLink); err != nil {
 		return err
 	}
-	if err := driver.setupFilters(parentLink, serviceCIDR, slaveLink.Attrs().Index); err != nil {
+
+	redirectCIDRs := append(hostStackCIDRs, serviceCIDR)
+
+	if err := driver.setupFilters(parentLink, redirectCIDRs, slaveLink.Attrs().Index); err != nil {
 		return err
 	}
 
