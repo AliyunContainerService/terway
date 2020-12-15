@@ -16,6 +16,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	errors2 "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -42,8 +44,9 @@ type ECS interface {
 	GetInstanceMaxENIByType(instanceType string) (int, error)
 	GetInstanceMaxPrivateIPByType(instanceType string) (int, error)
 	GetENIMaxIP(instanceID string, eniID string) (int, error)
-	GetAttachedSecurityGroup(instanceID string) (string, error)
+	GetAttachedSecurityGroups(instanceID string) ([]string, error)
 	DescribeVSwitch(vSwitch string) (availIPCount int, err error)
+	FixEniSecurityGroup(sgIDs []string) error
 	// EIP
 	AllocateEipAddress(bandwidth int, chargeType common.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error)
 	UnassociateEipAddress(eipID, eniID, eniIP string) error
@@ -60,6 +63,9 @@ type ecsImpl struct {
 	region            common.Region
 	vpcID             string
 }
+
+// 单个 eni 最多绑定安全组个数
+const maxSGPerEni = 5
 
 // NewECS return new ECS implement object
 func NewECS(ak, sk, credentialPath string, region common.Region, ignoreLinkNotExist bool) (ECS, error) {
@@ -622,7 +628,7 @@ func (e *ecsImpl) GetENIByMac(instanceID, mac string) (*types.ENI, error) {
 	return eni, nil
 }
 
-func (e *ecsImpl) GetAttachedSecurityGroup(instanceID string) (string, error) {
+func (e *ecsImpl) GetAttachedSecurityGroups(instanceID string) ([]string, error) {
 	insType, err := e.GetInstanceAttributesType(instanceID)
 	if err != nil {
 		// fallback to deprecated DescribeInstanceAttribute
@@ -630,13 +636,13 @@ func (e *ecsImpl) GetAttachedSecurityGroup(instanceID string) (string, error) {
 		insType, err = e.clientSet.Ecs().DescribeInstanceAttribute(instanceID)
 		metric.OpenAPILatency.WithLabelValues("DescribeInstanceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 		if err != nil {
-			return "", errors.Wrapf(err, "error describe instance attribute for security group: %s", instanceID)
+			return nil, errors.Wrapf(err, "error describe instance attribute for security group: %s", instanceID)
 		}
 	}
 	if len(insType.SecurityGroupIds.SecurityGroupId) > 0 {
-		return insType.SecurityGroupIds.SecurityGroupId[0], nil
+		return insType.SecurityGroupIds.SecurityGroupId, nil
 	}
-	return "", fmt.Errorf("error get instance security groups: %s", instanceID)
+	return nil, fmt.Errorf("error get instance security groups: %s", instanceID)
 }
 
 func (e *ecsImpl) GetInstanceAttributesType(instanceID string) (*ecs.InstanceAttributesType, error) {
@@ -741,4 +747,51 @@ func (e *ecsImpl) GetInstanceMaxPrivateIPByType(instanceType string) (int, error
 		})
 
 	return eniIPCap, errors.Wrapf(err, "error get instance max eni ip: %v, %v", instanceType, innerErr)
+}
+
+// FixEniSecurityGroup will sync eni's security with ecs's security group
+func (e *ecsImpl) FixEniSecurityGroup(sg []string) error {
+	var err error
+	instanceID, err := GetLocalInstanceID()
+	if err != nil {
+		return err
+	}
+
+	// get all attached eni id (only Secondary eni)
+	eniList, err := e.openapiInfoGetter.GetAttachedENIs(instanceID, false)
+	if err != nil {
+		return err
+	}
+	sgSet := sets.NewString(sg...)
+
+	var errs []error
+	for _, eni := range eniList {
+		eniSgSet := sets.NewString(eni.SecurityGroupIDs...)
+		if sgSet.Intersection(eniSgSet).Len() > 0 {
+			continue
+		}
+		errStr := fmt.Sprintf("found eni %s security group [%s] mismatch witch ecs security group [%s]", eni.ID,
+			strings.Join(eni.SecurityGroupIDs, ","), strings.Join(sg, ","))
+		logrus.Warn(errStr)
+		// check eni sg limit
+		if len(eni.SecurityGroupIDs) > maxSGPerEni {
+			errs = append(errs, errors.New(errStr))
+			continue
+		}
+		// try add eni to one of ecs sg
+		eniSgSet.Insert(sg[0])
+		req := &ecs.ModifyNetworkInterfaceAttributeArgs{
+			RegionId:           e.region,
+			NetworkInterfaceId: eni.ID,
+			SecurityGroupId:    eniSgSet.List(),
+		}
+		logrus.Infof("try update eni %s security group to [%s]", eni.ID,
+			strings.Join(eniSgSet.List(), ","))
+		_, err := e.clientSet.Ecs().ModifyNetworkInterfaceAttribute(req)
+		if err != nil {
+			// this can make sure event is aggregated
+			errs = append(errs, errors.New(errStr), fmt.Errorf("code %s message %s", err.(*common.Error).Code, err.(*common.Error).Message))
+		}
+	}
+	return errors2.NewAggregate(errs)
 }

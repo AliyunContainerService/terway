@@ -103,6 +103,7 @@ type ObjectFactory interface {
 	Dispose(types.NetworkResource) error
 	GetResource() (map[string]types.FactoryResIf, error)
 	Get(types.NetworkResource) (types.NetworkResource, error)
+	Reconcile()
 }
 
 type simpleObjectPool struct {
@@ -222,6 +223,7 @@ func (p *simpleObjectPool) startCheckIdleTicker() {
 			p.checkResSync() // make sure pool is synced
 			p.checkIdle()
 			p.checkInsufficient()
+			p.factory.Reconcile()
 		case <-p.notifyCh:
 			p.checkIdle()
 			p.checkInsufficient()

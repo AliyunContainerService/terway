@@ -21,14 +21,15 @@ const (
 
 // ENI aliyun ENI resource
 type ENI struct {
-	ID           string
-	Name         string
-	Address      net.IPNet
-	MAC          string
-	Gateway      net.IP
-	DeviceNumber int32
-	MaxIPs       int
-	VSwitch      string
+	ID               string
+	Name             string
+	Address          net.IPNet
+	MAC              string
+	Gateway          net.IP
+	DeviceNumber     int32
+	MaxIPs           int
+	VSwitch          string
+	SecurityGroupIDs []string
 }
 
 // GetResourceID return mac address of eni

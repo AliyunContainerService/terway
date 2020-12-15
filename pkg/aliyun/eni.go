@@ -15,6 +15,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const maxSinglePageSize = 100
+
 // ENIInfoGetter interface to get eni information
 type ENIInfoGetter interface {
 	GetENIConfigByMac(mac string) (*types.ENI, error)
@@ -175,16 +177,42 @@ type eniOpenAPI struct {
 	region    common.Region
 }
 
-func (*eniOpenAPI) GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error) {
-	panic("implement me")
+// GetAttachedENIs
+func (e *eniOpenAPI) GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error) {
+	describeNetworkInterfacesArgs := &ecs.DescribeNetworkInterfacesArgs{
+		RegionId:   e.region,
+		InstanceId: instanceID,
+		PageSize:   maxSinglePageSize,
+	}
+	resp, err := e.clientSet.Ecs().DescribeNetworkInterfaces(describeNetworkInterfacesArgs)
+	if err != nil {
+		if ErrStatusCodeAssert(http.StatusNotFound, err) {
+			return nil, ErrNotFound
+		}
+		return nil, errors.Wrapf(err, "error get info from openapi: instanceID: %s", instanceID)
+	}
+	var result []*types.ENI
+	for _, i := range resp.NetworkInterfaceSets.NetworkInterfaceSet {
+		if !containsMainENI {
+			if i.Type == "Primary" {
+				continue
+			}
+		}
+		result = append(result, &types.ENI{
+			ID:               i.NetworkInterfaceId,
+			Name:             i.NetworkInterfaceName,
+			SecurityGroupIDs: i.SecurityGroupIds.SecurityGroupId,
+		})
+	}
+	return result, nil
 }
 
-func (eoa *eniOpenAPI) GetENIPrivateAddresses(eniID string) ([]net.IP, error) {
+func (e *eniOpenAPI) GetENIPrivateAddresses(eniID string) ([]net.IP, error) {
 	describeNetworkInterfacesArgs := &ecs.DescribeNetworkInterfacesArgs{
-		RegionId:           eoa.region,
+		RegionId:           e.region,
 		NetworkInterfaceId: []string{eniID},
 	}
-	resp, err := eoa.clientSet.Ecs().DescribeNetworkInterfaces(describeNetworkInterfacesArgs)
+	resp, err := e.clientSet.Ecs().DescribeNetworkInterfaces(describeNetworkInterfacesArgs)
 	if err != nil {
 		if ErrStatusCodeAssert(http.StatusNotFound, err) {
 			return nil, ErrNotFound
