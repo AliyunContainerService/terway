@@ -29,7 +29,7 @@ func (f *mockObjectFactory) GetResource() (map[string]types.FactoryResIf, error)
 	defer f.lock.Unlock()
 
 	mapping := make(map[string]types.FactoryResIf)
-	for i := 1001; i <= f.idGenerator; i++ {
+	for i := 1; i <= f.idGenerator; i++ {
 		mapping[fmt.Sprint(i)] = &types.FactoryRes{
 			ID: fmt.Sprint(i),
 		}
@@ -77,8 +77,8 @@ func (f *mockObjectFactory) Dispose(types.NetworkResource) error {
 	return f.err
 }
 
-func (f *mockObjectFactory) Get(types.NetworkResource) (types.NetworkResource, error) {
-	return nil, nil
+func (f *mockObjectFactory) Get(in types.NetworkResource) (types.NetworkResource, error) {
+	return in, nil
 }
 
 func (f *mockObjectFactory) getTotalDisposed() int {
@@ -94,7 +94,7 @@ func (f *mockObjectFactory) getTotalCreated() int {
 }
 
 func TestInitializerWithoutAutoCreate(t *testing.T) {
-	factory := &mockObjectFactory{}
+	factory := &mockObjectFactory{idGenerator: 20}
 	createPool(factory, 3, 5, 3, 0)
 	time.Sleep(time.Second)
 	assert.Equal(t, 0, factory.getTotalCreated())
@@ -102,7 +102,7 @@ func TestInitializerWithoutAutoCreate(t *testing.T) {
 }
 
 func TestInitializerWithAutoCreate(t *testing.T) {
-	factory := &mockObjectFactory{}
+	factory := &mockObjectFactory{idGenerator: 20}
 	createPool(factory, 3, 5, 0, 0)
 	time.Sleep(time.Second)
 	assert.Equal(t, 3, factory.getTotalCreated())
@@ -141,7 +141,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestInitializerExceedMaxIdle(t *testing.T) {
-	factory := &mockObjectFactory{}
+	factory := &mockObjectFactory{idGenerator: 20}
 	createPool(factory, 3, 5, 6, 0)
 	time.Sleep(1 * time.Second)
 	assert.Equal(t, 0, factory.getTotalCreated())
@@ -149,7 +149,7 @@ func TestInitializerExceedMaxIdle(t *testing.T) {
 }
 
 func TestInitializerExceedCapacity(t *testing.T) {
-	factory := &mockObjectFactory{}
+	factory := &mockObjectFactory{idGenerator: 20}
 	createPool(factory, 3, 5, 1, 10)
 	time.Sleep(time.Second)
 	assert.Equal(t, 0, factory.getTotalCreated())
@@ -165,7 +165,7 @@ func TestAcquireIdle(t *testing.T) {
 }
 
 func TestAutoAddition(t *testing.T) {
-	factory := &mockObjectFactory{}
+	factory := &mockObjectFactory{idGenerator: 20}
 	pool := createPool(factory, 3, 5, 0, 0)
 	time.Sleep(1 * time.Second)
 	_, err := pool.Acquire(context.Background(), "", "")
@@ -179,7 +179,7 @@ func TestAutoAddition(t *testing.T) {
 }
 
 func TestAcquireNonExists(t *testing.T) {
-	factory := &mockObjectFactory{}
+	factory := &mockObjectFactory{idGenerator: 20}
 	pool := createPool(factory, 0, 5, 3, 0)
 	_, err := pool.Acquire(context.Background(), "1000", "")
 	assert.Nil(t, err)
@@ -187,7 +187,7 @@ func TestAcquireNonExists(t *testing.T) {
 }
 
 func TestAcquireExists(t *testing.T) {
-	factory := &mockObjectFactory{}
+	factory := &mockObjectFactory{idGenerator: 20}
 	pool := createPool(factory, 0, 5, 3, 0)
 	res, err := pool.Acquire(context.Background(), "2", "")
 	assert.Nil(t, err)
@@ -198,6 +198,7 @@ func TestAcquireExists(t *testing.T) {
 func TestConcurrencyAcquireNoMoreThanCapacity(t *testing.T) {
 	factory := &mockObjectFactory{
 		createDelay: 2 * time.Millisecond,
+		idGenerator: 20,
 	}
 	pool := createPool(factory, 0, 5, 1, 0)
 	wg := sync.WaitGroup{}
@@ -217,6 +218,7 @@ func TestConcurrencyAcquireNoMoreThanCapacity(t *testing.T) {
 func TestConcurrencyAcquireMoreThanCapacity(t *testing.T) {
 	factory := &mockObjectFactory{
 		createDelay: 2 * time.Millisecond,
+		idGenerator: 20,
 	}
 	pool := createPool(factory, 3, 5, 3, 0)
 	wg := sync.WaitGroup{}
@@ -237,6 +239,7 @@ func TestConcurrencyAcquireMoreThanCapacity(t *testing.T) {
 func TestRelease(t *testing.T) {
 	factory := &mockObjectFactory{
 		createDelay: 1 * time.Millisecond,
+		idGenerator: 20,
 	}
 	pool := createPool(factory, 0, 5, 3, 0)
 	n1, _ := pool.Acquire(context.Background(), "", "")
@@ -267,7 +270,7 @@ func TestRelease(t *testing.T) {
 }
 
 func TestReleaseInvalid(t *testing.T) {
-	factory := &mockObjectFactory{}
+	factory := &mockObjectFactory{idGenerator: 20}
 	pool := createPool(factory, 3, 5, 3, 0)
 	err := pool.Release("not-exists")
 	assert.Equal(t, err, ErrInvalidState)
@@ -276,6 +279,7 @@ func TestReleaseInvalid(t *testing.T) {
 func TestGetResourceMapping(t *testing.T) {
 	factory := &mockObjectFactory{
 		createDelay: 1 * time.Millisecond,
+		idGenerator: 20,
 	}
 	pool := createPool(factory, 3, 5, 3, 2)
 
