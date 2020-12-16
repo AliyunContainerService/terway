@@ -121,7 +121,8 @@ data:
       "cniVersion": "0.3.0",
       "name": "terway",
       "type": "terway",
-      "eniip_virtual_type": "IPVlan"
+      "eniip_virtual_type": "IPVlan",
+      "host_stack_cidrs": ["169.254.0.0/16"]
     }
   # eniip_virtual_type: virtual type for eni multi ip "Veth" || "IPVlan"
   disable_network_policy: "false"
