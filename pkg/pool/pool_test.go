@@ -81,6 +81,8 @@ func (f *mockObjectFactory) Get(in types.NetworkResource) (types.NetworkResource
 	return in, nil
 }
 
+func (f *mockObjectFactory) Reconcile() {}
+
 func (f *mockObjectFactory) getTotalDisposed() int {
 	f.lock.Lock()
 	defer f.lock.Unlock()
