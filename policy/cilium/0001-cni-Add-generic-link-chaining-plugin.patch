@@ -1,3 +1,11 @@
+From 096fcbeac046cd5d90fe8d7012b68883b6fd22e0 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Mon, 30 Nov 2020 15:36:51 +0800
+Subject: [PATCH] cni: Add generic link chaining plugin
+
+This generic plugin identifies generic link (other than lo) in the container namespace and extracts all relevant information from it, creates a Cilium endpoint and instructs Cilium to install ingress and egress programs.
+It can be used to do offload on eni.
+
 diff --git a/pkg/datapath/connector/ipvlan.go b/pkg/datapath/connector/ipvlan.go
 index a82a35786..b9d7b87b6 100644
 --- a/pkg/datapath/connector/ipvlan.go
@@ -131,10 +139,10 @@ index a82a35786..b9d7b87b6 100644
  
  		return nil
 diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
-index 215eb39d8..fb88e783e 100644
+index 1d0e376e9..e864eaed2 100644
 --- a/pkg/datapath/linux/config/config.go
 +++ b/pkg/datapath/linux/config/config.go
-@@ -529,10 +529,12 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, e datapath.Endp
+@@ -543,10 +543,12 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, e datapath.Endp
  		}
  	}
  
@@ -151,10 +159,10 @@ index 215eb39d8..fb88e783e 100644
  		}
  
 diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
-index abce41005..fec8ddee6 100644
+index 328f79f31..c5862ea0c 100644
 --- a/pkg/datapath/loader/loader.go
 +++ b/pkg/datapath/loader/loader.go
-@@ -286,7 +286,7 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs
+@@ -289,7 +289,7 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs
  			return err
  		}
  	} else if ep.HasIpvlanDataPath() {
@@ -163,7 +171,7 @@ index abce41005..fec8ddee6 100644
  			scopedLog := ep.Logger(Subsystem).WithFields(logrus.Fields{
  				logfields.Path: objPath,
  			})
-@@ -298,6 +298,20 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs
+@@ -301,6 +301,20 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs
  			}
  			return err
  		}
@@ -185,7 +193,7 @@ index abce41005..fec8ddee6 100644
  		if err := l.replaceDatapath(ctx, ep.InterfaceName(), objPath, symbolFromEndpoint, dirIngress); err != nil {
  			scopedLog := ep.Logger(Subsystem).WithFields(logrus.Fields{
 diff --git a/pkg/datapath/loader/netlink.go b/pkg/datapath/loader/netlink.go
-index 72f3e337e..83eae337a 100644
+index d7291790c..17fb893dc 100644
 --- a/pkg/datapath/loader/netlink.go
 +++ b/pkg/datapath/loader/netlink.go
 @@ -17,6 +17,7 @@ package loader
@@ -215,63 +223,43 @@ index 72f3e337e..83eae337a 100644
  		"obj", objPath, "sec", progSec,
  	}
  	cmd = exec.CommandContext(ctx, "tc", args...).WithFilters(libbpfFixupMsg)
-diff --git a/plugins/cilium-cni/chaining/terway/terway.go b/plugins/cilium-cni/chaining/terway/terway.go
+diff --git a/plugins/cilium-cni/chaining/generic-link/generic-link.go b/plugins/cilium-cni/chaining/generic-link/generic-link.go
 new file mode 100644
-index 000000000..55e91fe7c
+index 000000000..141ab6c32
 --- /dev/null
-+++ b/plugins/cilium-cni/chaining/terway/terway.go
-@@ -0,0 +1,183 @@
-+// Copyright 2019 Authors of Cilium
-+//
-+// Licensed under the Apache License, Version 2.0 (the "License");
-+// you may not use this file except in compliance with the License.
-+// You may obtain a copy of the License at
-+//
-+//     http://www.apache.org/licenses/LICENSE-2.0
-+//
-+// Unless required by applicable law or agreed to in writing, software
-+// distributed under the License is distributed on an "AS IS" BASIS,
-+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-+// See the License for the specific language governing permissions and
-+// limitations under the License.
-+
-+package terway
++++ b/plugins/cilium-cni/chaining/generic-link/generic-link.go
+@@ -0,0 +1,164 @@
++package generic_link
 +
 +import (
 +	"context"
 +	"fmt"
 +
-+	"golang.org/x/sys/unix"
-+
 +	"github.com/cilium/cilium/api/v1/models"
 +	"github.com/cilium/cilium/pkg/datapath/connector"
 +	endpointid "github.com/cilium/cilium/pkg/endpoint/id"
-+	"github.com/cilium/cilium/pkg/logging"
 +	"github.com/cilium/cilium/pkg/logging/logfields"
 +	chainingapi "github.com/cilium/cilium/plugins/cilium-cni/chaining/api"
++
 +	cniTypesVer "github.com/containernetworking/cni/pkg/types/current"
 +	cniVersion "github.com/containernetworking/cni/pkg/version"
 +	"github.com/containernetworking/plugins/pkg/ns"
 +	"github.com/sirupsen/logrus"
 +	"github.com/vishvananda/netlink"
++	"golang.org/x/sys/unix"
 +)
 +
-+var (
-+	name             = "terway-chainer"
-+	log              = logging.DefaultLogger.WithField(logfields.LogSubsys, name)
-+	vpcNetGatewayMac = "ee:ff:ff:ff:ff:ff"
-+)
++const name = "generic-link"
 +
-+// TerwayChainer is terway chain object
-+type TerwayChainer struct{}
++type GenericLink struct{}
 +
 +// ImplementsAdd returns true if method 'add' is available
-+func (f *TerwayChainer) ImplementsAdd() bool {
++func (g *GenericLink) ImplementsAdd() bool {
 +	return true
 +}
 +
 +// Add setups the ipvlan port's tc-bpf
-+func (f *TerwayChainer) Add(ctx context.Context, pluginCtx chainingapi.PluginContext) (res *cniTypesVer.Result, err error) {
++func (g *GenericLink) Add(ctx context.Context, pluginCtx chainingapi.PluginContext) (res *cniTypesVer.Result, err error) {
 +	err = cniVersion.ParsePrevResult(&pluginCtx.NetConf.NetConf)
 +	if err != nil {
 +		err = fmt.Errorf("unable to understand network config: %s", err)
@@ -304,7 +292,6 @@ index 000000000..55e91fe7c
 +		disabled                  = false
 +		containerIP, containerMac string
 +		containerIfIndex          int
-+		hostMac                   = vpcNetGatewayMac
 +	)
 +
 +	if err = netNs.Do(func(_ ns.NetNS) error {
@@ -313,7 +300,9 @@ index 000000000..55e91fe7c
 +			return fmt.Errorf("failed to list link %s", pluginCtx.Args.Netns)
 +		}
 +		for _, link := range links {
-+			if link.Type() != "ipvlan" {
++			pluginCtx.Logger.Debugf("Found interface in container %+v", link.Attrs())
++
++			if link.Attrs().Name == "lo" {
 +				continue
 +			}
 +
@@ -356,7 +345,7 @@ index 000000000..55e91fe7c
 +		},
 +		ContainerID:       pluginCtx.Args.ContainerID,
 +		State:             models.EndpointStateWaitingForIdentity,
-+		HostMac:           hostMac,
++		HostMac:           "ee:ff:ff:ff:ff:ff",
 +		InterfaceIndex:    int64(containerIfIndex),
 +		Mac:               containerMac,
 +		InterfaceName:     ifName,
@@ -388,31 +377,34 @@ index 000000000..55e91fe7c
 +}
 +
 +// ImplementsDelete return true if method 'delete' is available
-+func (f *TerwayChainer) ImplementsDelete() bool {
++func (g *GenericLink) ImplementsDelete() bool {
 +	return true
 +}
 +
 +// Delete deletes cilium endpoint
-+func (f *TerwayChainer) Delete(ctx context.Context, pluginCtx chainingapi.PluginContext) (err error) {
++func (g *GenericLink) Delete(ctx context.Context, pluginCtx chainingapi.PluginContext) (err error) {
 +	id := endpointid.NewID(endpointid.ContainerIdPrefix, pluginCtx.Args.ContainerID)
 +	if err := pluginCtx.Client.EndpointDelete(id); err != nil {
-+		log.WithError(err).Warning("Errors encountered while deleting endpoint")
++		pluginCtx.Logger.WithError(err).Warning("Errors encountered while deleting endpoint")
 +	}
 +	return nil
 +}
 +
 +func init() {
-+	chainingapi.Register(name, &TerwayChainer{})
++	chainingapi.Register(name, &GenericLink{})
 +}
 diff --git a/plugins/cilium-cni/cilium-cni.go b/plugins/cilium-cni/cilium-cni.go
-index 0e63ccc81..a19b71b9c 100644
+index 0e63ccc81..3291ce004 100644
 --- a/plugins/cilium-cni/cilium-cni.go
 +++ b/plugins/cilium-cni/cilium-cni.go
-@@ -44,6 +44,7 @@ import (
+@@ -42,6 +42,7 @@ import (
+ 	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/awscni"
+ 	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/azure"
  	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/flannel"
++	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/generic-link"
  	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/generic-veth"
  	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/portmap"
-+	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/terway"
  	"github.com/cilium/cilium/plugins/cilium-cni/types"
- 
- 	"github.com/containernetworking/cni/pkg/skel"
+-- 
+2.29.2
+

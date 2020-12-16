@@ -7,8 +7,10 @@ if [ "$DATASTORE_TYPE" = "kubernetes" ]; then
     fi
 fi
 
+EBPF_ENABLE=$(jq .plugins[].ebpf_offload? -r < /etc/cni/net.d/10-terway.conflist | tr '[:upper:]' '[:lower:]' | grep "enable")
+
 # kernel version has already checked in initContainer, so just determine whether plugin chaining exists
-if [ -f "/etc/cni/net.d/10-terway.conflist" ] && grep -i ipvlan /etc/cni/net.d/10-terway.conflist; then
+if [ -f "/etc/cni/net.d/10-terway.conflist" ] && [ "$EBPF_ENABLE" = "enable" ]; then
   # check kernel version & enable cilium
   KERNEL_MAJOR_VERSION=$(uname -r | awk -F . '{print $1}')
   KERNEL_MINOR_VERSION=$(uname -r | awk -F . '{print $2}')
