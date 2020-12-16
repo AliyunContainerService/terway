@@ -12,14 +12,10 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/AliyunContainerService/terway/pkg/tracing"
-
-	"k8s.io/client-go/kubernetes/scheme"
-
-	"k8s.io/client-go/tools/clientcmd"
-
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/storage"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
+
 	"github.com/denverdino/aliyungo/common"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -30,7 +26,9 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	apiTypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -157,7 +155,7 @@ func newK8S(master, kubeconfig string, daemonMode string) (Kubernetes, error) {
 		dialer: &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second},
 		conns:  make(map[*closableConn]struct{}),
 	}
-	k8sRestConfig.Dial = t.Dial
+	k8sRestConfig.Dial = t.DialContext
 
 	client, err := kubernetes.NewForConfig(k8sRestConfig)
 	if err != nil {

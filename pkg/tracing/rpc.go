@@ -9,7 +9,11 @@ import (
 
 type tracingRPC struct {
 	tracer *Tracer
+
+	rpc.UnimplementedTerwayTracingServer
 }
+
+var _ rpc.TerwayTracingServer = (*tracingRPC)(nil)
 
 // DefaultRPCServer returns the RPC server for default tracer
 func DefaultRPCServer() rpc.TerwayTracingServer {
