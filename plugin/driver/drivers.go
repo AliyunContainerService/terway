@@ -21,6 +21,22 @@ var (
 	IPVlanDriver NetnsDriver = newIPVlanDriver()
 )
 
+type RecordPodEvent func(msg string)
+
+type CheckConfig struct {
+	RecordPodEvent
+
+	NetNS ns.NetNS
+
+	HostVethName string
+	DeviceID     int32
+
+	ContainerIFName string
+	// for pod
+	IPv4Addr *net.IPNet
+	Gateway  net.IP
+}
+
 // NetnsDriver to config container netns interface and routes
 type NetnsDriver interface {
 	Setup(hostVeth string,
@@ -40,6 +56,8 @@ type NetnsDriver interface {
 		containerVeth string,
 		netNS ns.NetNS,
 		containerIP net.IP) error
+
+	Check(cfg *CheckConfig) error
 }
 
 type vethDriver struct {
@@ -428,6 +446,10 @@ func (d *vethDriver) Teardown(hostIfName string,
 
 	// 4. remove container veth
 	return netlink.LinkDel(hostVeth)
+}
+
+func (d *vethDriver) Check(cfg *CheckConfig) error {
+	return nil
 }
 
 func setupVethPair(contVethName, pairName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {

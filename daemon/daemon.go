@@ -18,6 +18,8 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/containernetworking/cni/libcni"
+	containertypes "github.com/containernetworking/cni/pkg/types"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -45,6 +47,11 @@ const (
 	tracingKeyPendingPodsCount = "pending_pods_count"
 
 	commandMapping = "mapping"
+
+	cniDefaultPath = "/opt/cni/bin"
+	// this file is generated from configmap
+	terwayCNIConf  = "/etc/eni/10-terway.conf"
+	cniExecTimeout = 10 * time.Second
 )
 
 type networkService struct {
@@ -63,6 +70,8 @@ type networkService struct {
 	pendingPods     map[string]interface{}
 	pendingPodsLock sync.RWMutex
 	sync.RWMutex
+
+	cniBinPath string
 
 	rpc.UnimplementedTerwayBackendServer
 }
@@ -261,6 +270,9 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 					Type: eniMultiIP.GetType(),
 				},
 			},
+			NetNs: func(s string) *string {
+				return &s
+			}(r.Netns),
 		}
 		networkContext.resources = append(networkContext.resources, newRes.Resources...)
 		if networkService.eipResMgr != nil && podinfo.EipInfo.PodEip {
@@ -319,6 +331,9 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 					Type: vpcEni.GetType(),
 				},
 			},
+			NetNs: func(s string) *string {
+				return &s
+			}(r.Netns),
 		}
 		networkContext.resources = append(networkContext.resources, newRes.Resources...)
 		if networkService.eipResMgr != nil && podinfo.EipInfo.PodEip {
@@ -381,6 +396,9 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 					Type: vpcVeth.GetType(),
 				},
 			},
+			NetNs: func(s string) *string {
+				return &s
+			}(r.Netns),
 		}
 		networkContext.resources = append(networkContext.resources, newRes.Resources...)
 		err = networkService.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
@@ -679,18 +697,73 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 }
 
 func (networkService *networkService) startPeriodCheck() {
-	log.Debugf("compare poll with metadata")
-	podMapping, err := networkService.GetResourceMapping()
-	if err != nil {
-		log.Error(err)
-		return
-	}
-	for _, res := range podMapping {
-		if res.Valid {
-			continue
+	// check pool
+	func() {
+		log.Debugf("compare poll with metadata")
+		podMapping, err := networkService.GetResourceMapping()
+		if err != nil {
+			log.Error(err)
+			return
 		}
-		_ = tracing.RecordPodEvent(res.Name, res.Namespace, corev1.EventTypeWarning, "ResourceInvalid", fmt.Sprintf("resource %s", res.LocalResID))
-	}
+		for _, res := range podMapping {
+			if res.Valid {
+				continue
+			}
+			_ = tracing.RecordPodEvent(res.Name, res.Namespace, corev1.EventTypeWarning, "ResourceInvalid", fmt.Sprintf("resource %s", res.LocalResID))
+		}
+	}()
+	// call CNI CHECK, make sure all dev is ok
+	func() {
+		log.Debugf("call CNI CHECK")
+		defer func() {
+			log.Debugf("call CNI CHECK end")
+		}()
+		networkService.RLock()
+		podResList, err := networkService.resourceDB.List()
+		networkService.RUnlock()
+		if err != nil {
+			log.Error(err)
+			return
+		}
+		ff, err := ioutil.ReadFile(terwayCNIConf)
+		if err != nil {
+			log.Error(err)
+			return
+		}
+		for _, v := range podResList {
+			res := v.(PodResources)
+			if res.NetNs == nil {
+				continue
+			}
+			log.Debugf("checking pod name %s", res.PodInfo.Name)
+			cniCfg := libcni.NewCNIConfig([]string{networkService.cniBinPath}, nil)
+			func() {
+				ctx, cancel := context.WithTimeout(context.Background(), cniExecTimeout)
+				defer cancel()
+				err := cniCfg.CheckNetwork(ctx, &libcni.NetworkConfig{
+					Network: &containertypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					Bytes: ff,
+				}, &libcni.RuntimeConf{
+					ContainerID: "fake", // must provide
+					NetNS:       *res.NetNs,
+					IfName:      "eth0",
+					Args: [][2]string{
+						{"K8S_POD_NAME", res.PodInfo.Name},
+						{"K8S_POD_NAMESPACE", res.PodInfo.Namespace},
+					},
+				})
+				if err != nil {
+					log.Error(err)
+					return
+				}
+			}()
+		}
+	}()
+
 }
 
 // tracing
@@ -806,12 +879,17 @@ func (networkService *networkService) GetResourceMapping() ([]tracing.PodMapping
 
 func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (rpc.TerwayBackendServer, error) {
 	log.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
+	cniBinPath := os.Getenv("CNI_PATH")
+	if cniBinPath == "" {
+		cniBinPath = cniDefaultPath
+	}
 	netSrv := &networkService{
 		configFilePath:  configFilePath,
 		kubeConfig:      kubeconfig,
 		master:          master,
 		pendingPods:     map[string]interface{}{},
 		pendingPodsLock: sync.RWMutex{},
+		cniBinPath:      cniBinPath,
 	}
 	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC || daemonMode == daemonModeENIOnly {
 		netSrv.daemonMode = daemonMode

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/AliyunContainerService/terway/pkg/sysctl"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/pkg/errors"
@@ -94,12 +95,10 @@ func (driver *ipvlanDriver) Setup(
 	if err != nil {
 		return errors.Wrapf(err, "%s, get device by index %d error.", driver.name, deviceID)
 	}
-	if parentLink.Attrs().OperState != netlink.OperUp {
-		if err := netlink.LinkSetUp(parentLink); err != nil {
-			return errors.Wrapf(err, "%s, set device %s up error", driver.name, parentLink.Attrs().Name)
-		}
+	_, err = EnsureLinkUp(parentLink)
+	if err != nil {
+		return errors.Wrapf(err, "%s, set device %s up error", driver.name, parentLink.Attrs().Name)
 	}
-
 	slaveIPVlan := &netlink.IPVlan{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:        hostIPVlan,
@@ -150,13 +149,12 @@ func (driver *ipvlanDriver) Setup(
 				}
 			}
 		}
-
 		defLink, err := netlink.LinkByName(containerIPVlan)
 		if err != nil {
 			return errors.Wrapf(err, "%s, get device %s error", name, defLink.Attrs().Name)
 		}
 
-		if err := netlink.LinkSetUp(defLink); err != nil {
+		if _, err := EnsureLinkUp(defLink); err != nil {
 			return errors.Wrapf(err, "%s, set device %s up error", name, defLink.Attrs().Name)
 		}
 
@@ -235,6 +233,56 @@ func (driver *ipvlanDriver) Teardown(hostIPVlan string,
 
 	delete(parents, 0)
 	return driver.teardownInitNamespace(parents, containerIP)
+}
+
+func (driver *ipvlanDriver) Check(cfg *CheckConfig) error {
+	// 1. check parent link ( this is called in every setup it is safe)
+	parentLink, err := netlink.LinkByIndex(int(cfg.DeviceID))
+	if err != nil {
+		return errors.Wrapf(err, "%s, get device by index %d error.", driver.name, cfg.DeviceID)
+	}
+	changed, err := EnsureLinkUp(parentLink)
+	if err != nil {
+		return err
+	}
+	if changed {
+		cfg.RecordPodEvent(fmt.Sprintf("parent link id %d set to up", int(cfg.DeviceID)))
+	}
+
+	// 2. check addr and default route
+	err = cfg.NetNS.Do(func(netNS ns.NetNS) error {
+		link, err := netlink.LinkByName(cfg.ContainerIFName)
+		if err != nil {
+			return err
+		}
+
+		changed, err := EnsureLinkUp(link)
+		if err != nil {
+			return err
+		}
+
+		if changed {
+			cfg.RecordPodEvent(fmt.Sprintf("link %s set to up", cfg.ContainerIFName))
+		}
+		changed, err = EnsureDefaultRoute(link, cfg.Gateway)
+		if err != nil {
+			return err
+		}
+		if changed {
+			Log.Debugf("route is changed")
+			cfg.RecordPodEvent("default route is updated")
+		}
+		err = sysctl.Enable(fmt.Sprintf("net.ipv4.conf.%s.forwarding", cfg.ContainerIFName))
+		if err != nil {
+			return err
+		}
+		err = sysctl.Disable(fmt.Sprintf("net.ipv4.conf.%s.rp_filter", cfg.ContainerIFName))
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return err
 }
 
 func (driver *ipvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slaveName string) (netlink.Link, error) {

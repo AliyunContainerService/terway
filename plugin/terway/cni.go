@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/AliyunContainerService/terway/plugin/driver"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/version"
+
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
@@ -20,14 +22,14 @@ import (
 	"github.com/containernetworking/plugins/pkg/ipam"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/pkg/errors"
-	"github.com/vishvananda/netlink"
 	"google.golang.org/grpc"
 )
 
 const (
 	defaultSocketPath      = "/var/run/eni/eni.socket"
 	defaultVethPrefix      = "cali"
-	defaultCniTimeout      = 120
+	defaultCniTimeout      = 120 * time.Second
+	defaultEventTimeout    = 10 * time.Second
 	defaultVethForENI      = "veth1"
 	delegateIpam           = "host-local"
 	eniIPVirtualTypeIPVlan = "ipvlan"
@@ -44,6 +46,9 @@ const (
 	}
 }
 `
+
+	terwayCNILock         = "/var/run/eni/terway_cni.lock"
+	terwayCNIDebugLogPath = "/tmp/terway_debug.log"
 )
 
 func init() {
@@ -73,6 +78,9 @@ type NetConf struct {
 
 	// HostStackCIDRs is a list of CIDRs, all traffic targeting these CIDRs will be redirected to host network stack
 	HostStackCIDRs []string `json:"host_stack_cidrs"`
+
+	// Debug
+	Debug bool `json:"debug"`
 }
 
 // K8SArgs is cni args of kubernetes
@@ -84,38 +92,53 @@ type K8SArgs struct {
 	K8S_POD_INFRA_CONTAINER_ID types.UnmarshallableString // nolint
 }
 
-var networkDriver = driver.VethDriver
+var vethDriver = driver.VethDriver
 var eniMultiIPDriver = driver.VethDriver
 var nicDriver = driver.NicDriver
 
-func cmdAdd(args *skel.CmdArgs) error {
+func parseCmdArgs(args *skel.CmdArgs) (string, ns.NetNS, *NetConf, *K8SArgs, error) {
 	versionDecoder := &cniversion.ConfigDecoder{}
-	var (
-		confVersion string
-		cniNetns    ns.NetNS
-	)
-
 	confVersion, err := versionDecoder.Decode(args.StdinData)
 	if err != nil {
-		return err
+		return "", nil, nil, nil, err
 	}
-
-	cniNetns, err = ns.GetNS(args.Netns)
+	netNS, err := ns.GetNS(args.Netns)
 	if err != nil {
-		return err
+		return "", nil, nil, nil, err
 	}
 
 	conf := NetConf{}
 	if err = json.Unmarshal(args.StdinData, &conf); err != nil {
-		return errors.Wrap(err, "add cmd: error loading config from args")
+		return "", nil, nil, nil, errors.Wrap(err, "error loading config from args")
 	}
 
 	k8sConfig := K8SArgs{}
 	if err = types.LoadArgs(args.Args, &k8sConfig); err != nil {
-		return errors.Wrap(err, "add cmd: failed to load k8s config from args")
+		return "", nil, nil, nil, errors.Wrap(err, "error loading config from args")
 	}
 
-	if err = driver.EnsureHostNsConfig(); err != nil {
+	return confVersion, netNS, &conf, &k8sConfig, nil
+}
+
+func cmdAdd(args *skel.CmdArgs) error {
+	confVersion, cniNetns, conf, k8sConfig, err := parseCmdArgs(args)
+	if err != nil {
+		return err
+	}
+	defer cniNetns.Close()
+
+	if conf.Debug {
+		fd, err := os.OpenFile(terwayCNIDebugLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err == nil {
+			defer fd.Close()
+			driver.Log.SetDebug(true, fd)
+		}
+	}
+	driver.Log.Debugf("args: %s", driver.JSONStr(args))
+	driver.Log.Debugf("cmdAdd: ns %s , k8s %s, cni std %s", cniNetns.Path(), driver.JSONStr(k8sConfig), driver.JSONStr(conf))
+
+	err = driver.EnsureHostNsConfig()
+	if err != nil {
 		return errors.Wrapf(err, "add cmd: failed setup host namespace configs")
 	}
 
@@ -127,14 +150,14 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	defer closeConn()
 
-	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout)
 	defer cancel()
 
 	defer func() {
 		if err != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+			ctx, cancel := context.WithTimeout(context.Background(), defaultEventTimeout)
 			defer cancel()
-			_, err = terwayBackendClient.RecordEvent(ctx,
+			_, _ = terwayBackendClient.RecordEvent(ctx,
 				&rpc.EventRequest{
 					EventTarget:     rpc.EventTarget_EventTargetPod,
 					K8SPodName:      string(k8sConfig.K8S_POD_NAME),
@@ -168,9 +191,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	defer func() {
 		if err != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout)
 			defer cancel()
-			_, err = terwayBackendClient.ReleaseIP(ctx,
+			_, _ = terwayBackendClient.ReleaseIP(ctx,
 				&rpc.ReleaseIPRequest{
 					K8SPodName:             string(k8sConfig.K8S_POD_NAME),
 					K8SPodNamespace:        string(k8sConfig.K8S_POD_NAMESPACE),
@@ -255,13 +278,18 @@ func cmdAdd(args *skel.CmdArgs) error {
 				eniMultiIPDriver = driver.IPVlanDriver
 			}
 		}
+		l, err := driver.GrabFileLock(terwayCNILock)
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+		defer l.Close()
 		err = eniMultiIPDriver.Setup(hostVethName, args.IfName, subnet, primaryIP, serviceCIDR, hostStackCIDRs, gw, nil, int(deviceID), ingress, egress, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network failed: %v", err)
 		}
 		allocatedIPAddr = *subnet
 		allocatedGatewayAddr = gw
-
 	case rpc.IPType_TypeVPCIP:
 		if allocResult.GetVpcIp() == nil || allocResult.GetVpcIp().GetPodConfig() == nil ||
 			allocResult.GetVpcIp().NodeCidr == "" {
@@ -298,8 +326,13 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 		ingress := allocResult.GetVpcIp().GetPodConfig().GetIngress()
 		egress := allocResult.GetVpcIp().GetPodConfig().GetEgress()
-
-		err = networkDriver.Setup(hostVethName, args.IfName, &podIPAddr, nil, nil, nil, gateway, nil, 0, ingress, egress, cniNetns)
+		l, err := driver.GrabFileLock(terwayCNILock)
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+		defer l.Close()
+		err = vethDriver.Setup(hostVethName, args.IfName, &podIPAddr, nil, nil, nil, gateway, nil, 0, ingress, egress, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network failed: %v", err)
 		}
@@ -335,26 +368,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return fmt.Errorf("error get gw from alloc result: %s", allocResult.GetVpcEni().GetEniConfig().GetGateway())
 		}
 
-		deviceNumber := 0
-		if allocResult.GetVpcEni().GetEniConfig().GetMacAddr() == "" {
-			return fmt.Errorf("error get devicenumber from alloc result: %v", allocResult.GetVpcEni().GetEniConfig().GetMacAddr())
-		}
-		var linkList []netlink.Link
-		linkList, err = netlink.LinkList()
-		found := false
-		for _, enilink := range linkList {
-			if enilink.Attrs().HardwareAddr.String() == allocResult.GetVpcEni().GetEniConfig().GetMacAddr() {
-				deviceNumber = enilink.Attrs().Index
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("error get allocated mac address for eni: %s", allocResult.GetVpcEni().GetEniConfig().GetMacAddr())
-		}
-
-		if deviceNumber == 0 {
-			return fmt.Errorf("invaild device number: %v", deviceNumber)
+		deviceNumber, err := link.GetDeviceNumber(allocResult.GetVpcEni().GetEniConfig().GetMacAddr())
+		if err != nil {
+			return err
 		}
 
 		extraRoutes := []*types.Route{
@@ -366,14 +382,20 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 		ingress := allocResult.GetVpcEni().GetPodConfig().GetIngress()
 		egress := allocResult.GetVpcEni().GetPodConfig().GetEgress()
-		err = networkDriver.Setup(hostVethName, defaultVethForENI, eniAddrSubnet, nil, nil, nil, gw, extraRoutes, 0, ingress, egress, cniNetns)
+		l, err := driver.GrabFileLock(terwayCNILock)
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+		defer l.Close()
+		err = vethDriver.Setup(hostVethName, defaultVethForENI, eniAddrSubnet, nil, nil, nil, gw, extraRoutes, 0, ingress, egress, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup veth network for eni failed: %v", err)
 		}
 
 		defer func() {
 			if err != nil {
-				if e := networkDriver.Teardown(hostVethName, args.IfName, cniNetns, nil); e != nil {
+				if e := vethDriver.Teardown(hostVethName, args.IfName, cniNetns, nil); e != nil {
 					err = errors.Wrapf(err, "tear down veth network for eni failed: %v", e)
 				}
 			}
@@ -397,7 +419,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		}},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultEventTimeout)
 	defer cancel()
 	_, _ = terwayBackendClient.RecordEvent(ctx,
 		&rpc.EventRequest{
@@ -413,36 +435,31 @@ func cmdAdd(args *skel.CmdArgs) error {
 }
 
 func cmdDel(args *skel.CmdArgs) error {
-	versionDecoder := &cniversion.ConfigDecoder{}
-	confVersion, err := versionDecoder.Decode(args.StdinData)
+	confVersion, cniNetns, conf, k8sConfig, err := parseCmdArgs(args)
 	if err != nil {
 		return err
 	}
+	defer cniNetns.Close()
 
-	cniNetns, err := ns.GetNS(args.Netns)
-	if err != nil {
-		return err
+	if conf.Debug {
+		fd, err := os.OpenFile(terwayCNIDebugLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err == nil {
+			defer fd.Close()
+			driver.Log.SetDebug(true, fd)
+		}
 	}
-
-	conf := NetConf{}
-	if err := json.Unmarshal(args.StdinData, &conf); err != nil {
-		return errors.Wrap(err, "add cmd: error loading config from args")
-	}
-
-	k8sConfig := K8SArgs{}
-	if err := types.LoadArgs(args.Args, &k8sConfig); err != nil {
-		return errors.Wrap(err, "add cmd: failed to load k8s config from args")
-	}
+	driver.Log.Debugf("args: %s", driver.JSONStr(args))
+	driver.Log.Debugf("cmdDel: ns %s , k8s %s, cni std %s", cniNetns.Path(), driver.JSONStr(k8sConfig), driver.JSONStr(conf))
 
 	terwayBackendClient, closeConn, err := getNetworkClient()
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("add cmd: create grpc client, pod: %s-%s",
+		return errors.Wrap(err, fmt.Sprintf("del cmd: create grpc client, pod: %s-%s",
 			string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME),
 		))
 	}
 	defer closeConn()
 
-	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout)
 	defer cancel()
 
 	infoResult, err := terwayBackendClient.GetIPInfo(
@@ -454,7 +471,7 @@ func cmdDel(args *skel.CmdArgs) error {
 		})
 
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("add cmd: error get ip info from grpc call, pod: %s-%s",
+		return errors.Wrap(err, fmt.Sprintf("del cmd: error get ip info from grpc call, pod: %s-%s",
 			string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME),
 		))
 	}
@@ -478,7 +495,12 @@ func cmdDel(args *skel.CmdArgs) error {
 		if podIP == nil {
 			return errors.Wrapf(err, "invalid pod ip %s", infoResult.GetPodIP())
 		}
-
+		l, err := driver.GrabFileLock(terwayCNILock)
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+		defer l.Close()
 		err = eniMultiIPDriver.Teardown(hostVethName, args.IfName, cniNetns, podIP)
 		if err != nil {
 			return errors.Wrapf(err, "error teardown network for pod: %s-%s",
@@ -490,7 +512,13 @@ func cmdDel(args *skel.CmdArgs) error {
 		if err != nil {
 			return fmt.Errorf("get info return subnet is not vaild: %v", infoResult.GetNodeCidr())
 		}
-		err = networkDriver.Teardown(hostVethName, args.IfName, cniNetns, nil)
+		l, err := driver.GrabFileLock(terwayCNILock)
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+		defer l.Close()
+		err = vethDriver.Teardown(hostVethName, args.IfName, cniNetns, nil)
 		if err != nil {
 			return errors.Wrapf(err, "error teardown network for pod: %s-%s",
 				string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME))
@@ -503,7 +531,13 @@ func cmdDel(args *skel.CmdArgs) error {
 		}
 
 	case rpc.IPType_TypeVPCENI:
-		_ = networkDriver.Teardown(hostVethName, defaultVethForENI, cniNetns, nil)
+		l, err := driver.GrabFileLock(terwayCNILock)
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+		defer l.Close()
+		_ = vethDriver.Teardown(hostVethName, defaultVethForENI, cniNetns, nil)
 		// ignore ENI veth release error
 		//if err != nil {
 		//	// ignore ENI veth release error
@@ -540,11 +574,169 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func cmdCheck(args *skel.CmdArgs) error {
+	_, cniNetns, conf, k8sConfig, err := parseCmdArgs(args)
+	if err != nil {
+		return err
+	}
+	defer cniNetns.Close()
+
+	if conf.Debug {
+		fd, err := os.OpenFile(terwayCNIDebugLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err == nil {
+			defer fd.Close()
+			driver.Log.SetDebug(true, fd)
+		}
+	}
+	driver.Log.Debugf("args: %s", driver.JSONStr(args))
+	driver.Log.Debugf("cmdCheck: ns %s , k8s %s, cni std %s", cniNetns.Path(), driver.JSONStr(k8sConfig), driver.JSONStr(conf))
+
+	terwayBackendClient, closeConn, err := getNetworkClient()
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprintf("add cmd: create grpc client, pod: %s-%s",
+			string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME),
+		))
+	}
+	defer closeConn()
+
+	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout)
+	defer cancel()
+	allocResult, err := terwayBackendClient.AllocIP(
+		timeoutContext,
+		&rpc.AllocIPRequest{
+			Netns:                  args.Netns,
+			K8SPodName:             string(k8sConfig.K8S_POD_NAME),
+			K8SPodNamespace:        string(k8sConfig.K8S_POD_NAMESPACE),
+			K8SPodInfraContainerId: string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID),
+			IfName:                 args.IfName,
+		})
+
+	if err != nil {
+		driver.Log.Debug(err)
+		return nil
+	}
+	if !allocResult.Success {
+		return fmt.Errorf("error on alloc eip from terway backend")
+	}
+
+	hostVethName, _ := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
+
+	switch allocResult.IPType {
+	case rpc.IPType_TypeENIMultiIP:
+		if allocResult.GetENIMultiIP() == nil ||
+			allocResult.GetENIMultiIP().GetEniConfig() == nil {
+			return nil
+		}
+		containerIPv4Addr, err := ParseAddr(allocResult.GetENIMultiIP().GetEniConfig().GetIPv4Addr(), allocResult.GetENIMultiIP().GetEniConfig().GetIPv4Subnet())
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+
+		gw, err := ParesIP(allocResult.GetENIMultiIP().GetEniConfig().GetGateway())
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+
+		cfg := driver.CheckConfig{
+			RecordPodEvent: func(msg string) {
+				ctx, cancel := context.WithTimeout(context.Background(), defaultEventTimeout)
+				defer cancel()
+				_, _ = terwayBackendClient.RecordEvent(ctx,
+					&rpc.EventRequest{
+						EventTarget:     rpc.EventTarget_EventTargetPod,
+						K8SPodName:      string(k8sConfig.K8S_POD_NAME),
+						K8SPodNamespace: string(k8sConfig.K8S_POD_NAMESPACE),
+						EventType:       rpc.EventType_EventTypeWarning,
+						Reason:          "ConfigCheck",
+						Message:         msg,
+					})
+			},
+			NetNS:           cniNetns,
+			ContainerIFName: args.IfName,
+			HostVethName:    hostVethName,
+			IPv4Addr:        containerIPv4Addr,
+			Gateway:         gw,
+			DeviceID:        allocResult.GetENIMultiIP().GetEniConfig().GetDeviceNumber(),
+		}
+		if strings.ToLower(conf.ENIIPVirtualType) == eniIPVirtualTypeIPVlan {
+			ok, err := driver.CheckIPVLanAvailable()
+			if err != nil {
+				driver.Log.Debug(err)
+				return nil
+			}
+			if ok {
+				eniMultiIPDriver = driver.IPVlanDriver
+			}
+		}
+		l, err := driver.GrabFileLock(terwayCNILock)
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+		defer l.Close()
+		err = eniMultiIPDriver.Check(&cfg)
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+	case rpc.IPType_TypeVPCIP:
+		return nil
+	case rpc.IPType_TypeVPCENI:
+		if allocResult.GetVpcEni() == nil ||
+			allocResult.GetVpcEni().GetServiceCidr() == "" ||
+			allocResult.GetVpcEni().GetEniConfig() == nil {
+			return nil
+		}
+
+		containerIPv4Addr, err := ParseAddr(allocResult.GetVpcEni().GetEniConfig().GetIPv4Addr(), allocResult.GetVpcEni().GetEniConfig().GetIPv4Subnet())
+		if err != nil {
+			return nil
+		}
+
+		gw, err := ParesIP(allocResult.GetVpcEni().GetEniConfig().GetGateway())
+		if err != nil {
+			return nil
+		}
+
+		cfg := &driver.CheckConfig{
+			RecordPodEvent: func(msg string) {
+				ctx, cancel := context.WithTimeout(context.Background(), defaultEventTimeout)
+				defer cancel()
+				_, _ = terwayBackendClient.RecordEvent(ctx,
+					&rpc.EventRequest{
+						EventTarget:     rpc.EventTarget_EventTargetPod,
+						K8SPodName:      string(k8sConfig.K8S_POD_NAME),
+						K8SPodNamespace: string(k8sConfig.K8S_POD_NAMESPACE),
+						EventType:       rpc.EventType_EventTypeWarning,
+						Reason:          "ConfigCheck",
+						Message:         msg,
+					})
+			},
+			NetNS:           cniNetns,
+			ContainerIFName: args.IfName,
+			IPv4Addr:        containerIPv4Addr,
+			Gateway:         gw,
+		}
+		l, err := driver.GrabFileLock(terwayCNILock)
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+		defer l.Close()
+		err = nicDriver.Check(cfg)
+		if err != nil {
+			driver.Log.Debug(err)
+			return nil
+		}
+	default:
+		return nil
+	}
 	return nil
 }
 
 func getNetworkClient() (rpc.TerwayBackendClient, func(), error) {
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout)
 	grpcConn, err := grpc.DialContext(timeoutCtx, defaultSocketPath, grpc.WithInsecure(), grpc.WithContextDialer(
 		func(ctx context.Context, s string) (net.Conn, error) {
 			unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
@@ -564,4 +756,27 @@ func getNetworkClient() (rpc.TerwayBackendClient, func(), error) {
 		grpcConn.Close()
 		cancel()
 	}, nil
+}
+
+// ParseAddr build with ip and subnet
+func ParseAddr(ip string, subnet string) (*net.IPNet, error) {
+	i, err := ParesIP(ip)
+	if err != nil {
+		return nil, err
+	}
+	_, s, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return nil, fmt.Errorf("parseCIDR failed [%s]", subnet)
+	}
+	s.IP = i
+	return s, nil
+}
+
+// ParesIP return ip or err
+func ParesIP(ip string) (net.IP, error) {
+	i := net.ParseIP(ip)
+	if i == nil {
+		return nil, fmt.Errorf("parseIP failed [%s]", i)
+	}
+	return i, nil
 }
