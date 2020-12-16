@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -20,7 +21,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
@@ -63,7 +63,11 @@ type networkService struct {
 	pendingPods     map[string]interface{}
 	pendingPodsLock sync.RWMutex
 	sync.RWMutex
+
+	rpc.UnimplementedTerwayBackendServer
 }
+
+var _ rpc.TerwayBackendServer = (*networkService)(nil)
 
 func (networkService *networkService) getResourceManagerForRes(resType string) ResourceManager {
 	return networkService.mgrForResource[resType]
@@ -167,7 +171,7 @@ func (networkService *networkService) allocateEIP(ctx *networkContext, old *PodR
 	return res.(*types.EIP), nil
 }
 
-func (networkService *networkService) AllocIP(grpcContext context.Context, r *rpc.AllocIPRequest) (*rpc.AllocIPReply, error) {
+func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*rpc.AllocIPReply, error) {
 	log.Infof("alloc ip request: %+v", r)
 	networkService.pendingPodsLock.Lock()
 	_, ok := networkService.pendingPods[podInfoKey(r.K8SPodNamespace, r.K8SPodName)]
@@ -202,7 +206,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 
 	// 1. Init Context
 	networkContext := &networkContext{
-		Context:    grpcContext,
+		Context:    ctx,
 		resources:  []ResourceItem{},
 		pod:        podinfo,
 		k8sService: networkService.k8s,
@@ -400,8 +404,8 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 	}
 
 	// 3. grpc connection
-	if grpcContext.Err() != nil {
-		err = grpcContext.Err()
+	if ctx.Err() != nil {
+		err = ctx.Err()
 		return nil, errors.Wrapf(err, "error on grpc connection")
 	}
 
@@ -409,7 +413,7 @@ func (networkService *networkService) AllocIP(grpcContext context.Context, r *rp
 	return allocIPReply, err
 }
 
-func (networkService *networkService) ReleaseIP(grpcContext context.Context, r *rpc.ReleaseIPRequest) (*rpc.ReleaseIPReply, error) {
+func (networkService *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest) (*rpc.ReleaseIPReply, error) {
 	log.Infof("release ip request: %+v", r)
 	networkService.RLock()
 	defer networkService.RUnlock()
@@ -429,7 +433,7 @@ func (networkService *networkService) ReleaseIP(grpcContext context.Context, r *
 
 	// 1. Init Context
 	networkContext := &networkContext{
-		Context:    grpcContext,
+		Context:    ctx,
 		resources:  []ResourceItem{},
 		pod:        podinfo,
 		k8sService: networkService.k8s,
@@ -474,7 +478,7 @@ func (networkService *networkService) ReleaseIP(grpcContext context.Context, r *
 	}
 
 	if networkContext.Err() != nil {
-		err = grpcContext.Err()
+		err = ctx.Err()
 		return nil, errors.Wrapf(err, "error on grpc connection")
 	}
 
