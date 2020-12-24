@@ -549,7 +549,7 @@ func getNetworkClient() (rpc.TerwayBackendClient, func(), error) {
 		func(ctx context.Context, s string) (net.Conn, error) {
 			unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
 			if err != nil {
-				return nil, nil
+				return nil, fmt.Errorf("error while resolve unix addr:%w", err)
 			}
 			d := net.Dialer{}
 			return d.DialContext(timeoutCtx, "unix", unixAddr.String())
