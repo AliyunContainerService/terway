@@ -19,7 +19,7 @@ func GetDeviceNumber(mac string) (int32, error) {
 			return int32(link.Attrs().Index), nil
 		}
 	}
-	return 0, errors.Errorf("cannot found mac address: %s", mac)
+	return 0, errors.Wrapf(ErrNotFound, "can't found dev by mac %s", mac)
 }
 
 // GetDeviceName get interface device name by mac address
@@ -34,5 +34,5 @@ func GetDeviceName(mac string) (string, error) {
 			return link.Attrs().Name, nil
 		}
 	}
-	return "", errors.Errorf("cannot found mac address: %s", mac)
+	return "", errors.Wrapf(ErrNotFound, "can't found dev by mac %s", mac)
 }

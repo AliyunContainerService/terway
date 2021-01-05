@@ -2,20 +2,24 @@ package driver
 
 import (
 	"encoding/hex"
+	"fmt"
 	"math/rand"
 	"net"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/sysctl"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 )
 
+// rawNicDriver put nic in net ns
 type rawNicDriver struct {
 }
 
-func (r *rawNicDriver) Setup(hostVeth string,
+func (r *rawNicDriver) Setup(
+	hostVeth string,
 	containerVeth string,
 	ipv4Addr *net.IPNet,
 	primaryIpv4Addr net.IP,
@@ -191,6 +195,40 @@ func (r *rawNicDriver) Teardown(hostVeth string,
 	if err != nil {
 		return errors.Wrapf(err, "NicDriver, error move nic out")
 	}
+	return nil
+}
+
+func (r *rawNicDriver) Check(cfg *CheckConfig) error {
+	_ = cfg.NetNS.Do(func(netNS ns.NetNS) error {
+		link, err := netlink.LinkByName(cfg.ContainerIFName)
+		if err != nil {
+			return err
+		}
+		changed, err := EnsureLinkUp(link)
+		if err != nil {
+			return err
+		}
+		if changed {
+			cfg.RecordPodEvent(fmt.Sprintf("link %s set to up", cfg.ContainerIFName))
+		}
+		changed, err = EnsureDefaultRoute(link, cfg.Gateway)
+		if err != nil {
+			return err
+		}
+		if changed {
+			Log.Debugf("route is changed")
+			cfg.RecordPodEvent("default route is updated")
+		}
+		err = sysctl.Enable(fmt.Sprintf("net.ipv4.conf.%s.forwarding", cfg.ContainerIFName))
+		if err != nil {
+			return err
+		}
+		err = sysctl.Disable(fmt.Sprintf("net.ipv4.conf.%s.rp_filter", cfg.ContainerIFName))
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	return nil
 }
 

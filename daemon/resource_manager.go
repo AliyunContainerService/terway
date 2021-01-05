@@ -32,6 +32,7 @@ type ResourceItem struct {
 type PodResources struct {
 	Resources []ResourceItem
 	PodInfo   *podInfo
+	NetNs     *string
 }
 
 type resourceManagerInitItem struct {
