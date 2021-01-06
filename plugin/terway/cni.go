@@ -380,6 +380,18 @@ func cmdAdd(args *skel.CmdArgs) error {
 			},
 		}
 
+		for _, v := range conf.HostStackCIDRs {
+			_, cidr, err := net.ParseCIDR(v)
+			if err != nil {
+				return fmt.Errorf("host_stack_cidrs(%s) is invaild: %v", v, err)
+
+			}
+			extraRoutes = append(extraRoutes, &types.Route{
+				Dst: *cidr,
+				GW:  net.ParseIP("169.254.1.1"),
+			})
+		}
+
 		ingress := allocResult.GetVpcEni().GetPodConfig().GetIngress()
 		egress := allocResult.GetVpcEni().GetPodConfig().GetEgress()
 		l, err := driver.GrabFileLock(terwayCNILock)
