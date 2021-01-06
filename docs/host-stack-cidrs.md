@@ -1,10 +1,11 @@
-# Terway IPVLAN 主机网络栈路由
+# Terway 主机网络栈路由
 
 ## 背景
 
 - 在 Terway IPVLAN 模式中，使用 Terway 网络的 Pod 网络流量会被转发至主机网络中 IPVLAN 接口，通过其 `tc egress filter` 策略转发流量。
 - 默认情况下，`tc egress` 仅会将 `ServiceCIDR` 的流量转发至主机网络栈，交由 IPVS 等策略进行处理。如果希望将部分网段额外路由至主机网络栈，您可以参考本文进行设置。
 - 常见场景：DNS 缓存方案 `node-local-dns` 中，Local DNS 缓存作为 DaemonSet 部署在每个集群节点上，通过 Link-Local Address 暴露缓存服务。如需在 IPVLAN 模式下使用本地 DNS 缓存，可以将 Link-Local Address 设置到主机网络栈路由中。
+- 在 Terway ENIONLY 模式中，使用 Terway 网络的 Pod 中会默认添加 `ServiceCIDR` 路由至主机，通过设置主机网络栈，可以将指定网络同样路由至主机，配置方式同下。
 
 ![host_stack_cidrs](images/host_stack_cidrs.png)
 
