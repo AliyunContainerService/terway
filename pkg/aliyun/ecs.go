@@ -734,7 +734,7 @@ func (e *ecsImpl) GetInstanceMaxPrivateIPByType(instanceType string) (int, error
 			}
 			for _, instanceTypeSpec := range instanceTypeItems {
 				if instanceTypeSpec.InstanceTypeId == instanceType {
-					eniIPCap = instanceTypeSpec.EniPrivateIpAddressQuantity
+					eniIPCap = (instanceTypeSpec.EniQuantity - 1) * instanceTypeSpec.EniPrivateIpAddressQuantity
 					break
 				}
 			}
