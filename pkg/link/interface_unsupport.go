@@ -11,3 +11,13 @@ func GetDeviceNumber(mac string) (int32, error) {
 func GetDeviceName(mac string) (string, error) {
 	return "", ErrUnsupported
 }
+
+// DeleteIPRulesByIP delete all ip rule related to the addr
+func DeleteIPRulesByIP(addr *net.IPNet) error {
+	return ErrUnsupported
+}
+
+// DeleteRouteByIP delete all route related to the addr
+func DeleteRouteByIP(addr *net.IPNet) error {
+	return ErrUnsupported
+}

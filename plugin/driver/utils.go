@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -22,24 +23,6 @@ import (
 const (
 	fileLockTimeOut = 11 * time.Second
 )
-
-func deleteRoutesForAddr(addr *net.IPNet, tableID int) error {
-	routeList, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
-		Dst:   addr,
-		Table: tableID,
-	}, netlink.RT_FILTER_DST|netlink.RT_FILTER_TABLE)
-	if err != nil {
-		return errors.Wrapf(err, "error get route list")
-	}
-
-	for _, route := range routeList {
-		err = netlink.RouteDel(&route)
-		if err != nil {
-			return errors.Wrapf(err, "error cleanup route: %v", route)
-		}
-	}
-	return nil
-}
 
 // add 1000 to link index to avoid route table conflict
 func getRouteTableID(linkIndex int) int {
@@ -130,6 +113,62 @@ func EnsureDefaultRoute(link netlink.Link, gw net.IP) (bool, error) {
 		Gw:        gw,
 	})
 	return true, err
+}
+
+// EnsureHostToContainerRoute create policy route
+func EnsureHostToContainerRoute(addr *net.IPNet, linkIndex int) error {
+	family := netlink.FAMILY_V4
+	if addr.IP.To4() == nil {
+		family = netlink.FAMILY_V6
+	}
+	routes, err := netlink.RouteListFiltered(family, nil, 0)
+	if err != nil {
+		Log.Debugf("error list route: %v", err)
+		return fmt.Errorf("error list route: %v", err)
+	}
+	// 1. create host to veth route
+	found := false
+	for _, r := range routes {
+		if r.Table != mainRouteTable {
+			continue
+		}
+		if r.Scope != netlink.SCOPE_LINK {
+			continue
+		}
+		if r.Dst == nil {
+			continue
+		}
+		if !r.Dst.IP.Equal(addr.IP) {
+			continue
+		}
+		if r.LinkIndex != linkIndex || !bytes.Equal(r.Dst.Mask, addr.Mask) {
+			// del link
+			Log.Debugf("delete route %#v ,linkIndex %d", r, linkIndex)
+			err := netlink.RouteDel(&r)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+			}
+		}
+		found = true
+	}
+	if !found {
+		newRoute := &netlink.Route{
+			LinkIndex: linkIndex,
+			Scope:     netlink.SCOPE_LINK,
+			Dst:       addr,
+		}
+		Log.Debugf("add route %s", newRoute.String())
+		err := netlink.RouteAdd(newRoute)
+		if err != nil {
+			if os.IsExist(err) {
+				return nil
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 var Log = MyLog{
