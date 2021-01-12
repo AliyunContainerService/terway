@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/pkg/storage"
@@ -19,8 +20,8 @@ import (
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/containernetworking/cni/libcni"
-	containertypes "github.com/containernetworking/cni/pkg/types"
 
+	containertypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -649,6 +650,31 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 						}
 					} else {
 						relateExpireList = append(relateExpireList, podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name))
+
+						// delete resource first
+						func() {
+							if networkService.daemonMode != daemonModeENIMultiIP {
+								return
+							}
+							// try clean ip rules
+							if resRelate.PodInfo.PodIP == "" {
+								return
+							}
+							_, addr, err := net.ParseCIDR(fmt.Sprintf("%s/32", resRelate.PodInfo.PodIP))
+							if err != nil {
+								log.Errorf("failed parse ip %s", resRelate.PodInfo.PodIP)
+								return
+							}
+							// try clean all
+							err = link.DeleteIPRulesByIP(addr)
+							if err != nil {
+								log.Errorf("failed release ip rules %v", err)
+							}
+							err = link.DeleteRouteByIP(addr)
+							if err != nil {
+								log.Errorf("failed delete route %v", err)
+							}
+						}()
 					}
 				}
 				for _, res := range resRelate.Resources {
@@ -671,6 +697,7 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 					}
 				}
 			}
+
 			gcDone := true
 			for mgrType := range inUseSet {
 				mgr, ok := networkService.mgrForResource[mgrType]
@@ -763,7 +790,6 @@ func (networkService *networkService) startPeriodCheck() {
 			}()
 		}
 	}()
-
 }
 
 // tracing

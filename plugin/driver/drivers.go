@@ -29,7 +29,7 @@ type CheckConfig struct {
 	NetNS ns.NetNS
 
 	HostVethName string
-	DeviceID     int32
+	DeviceID     int32 // phy device
 	MTU          int
 
 	ContainerIFName string
@@ -209,17 +209,9 @@ func (d *vethDriver) Setup(
 		IP:   ipv4Addr.IP,
 		Mask: net.CIDRMask(32, 32),
 	}
-	err = deleteRoutesForAddr(containerDst, 0)
+	err = EnsureHostToContainerRoute(containerDst, hostLink.Attrs().Index)
 	if err != nil {
-		return errors.Wrap(err, "vethDriver, error set route to container veth")
-	}
-	err = netlink.RouteAdd(&netlink.Route{
-		LinkIndex: hostLink.Attrs().Index,
-		Scope:     netlink.SCOPE_LINK,
-		Dst:       containerDst,
-	})
-	if err != nil {
-		return errors.Wrap(err, "vethDriver, error setup route to container veth")
+		return err
 	}
 
 	if len(extraRoutes) != 0 {
@@ -309,11 +301,9 @@ func (d *vethDriver) setupTC(dev netlink.Link, bandwidthInBytes uint64) error {
 func (d *vethDriver) ensureEniConfig(eni netlink.Link, mtu, tableID int, gw net.IP) error {
 	var err error
 	// set link up
-	if eni.Attrs().OperState != netlink.OperUp {
-		err = netlink.LinkSetUp(eni)
-		if err != nil {
-			return errors.Wrapf(err, "error set eni parent link up")
-		}
+	_, err = EnsureLinkUp(eni)
+	if err != nil {
+		return errors.Wrapf(err, "error set eni parent link up")
 	}
 	nodeIPNet := *linkIP
 	if nodeIP, err := k8snet.ChooseBindAddress(nil); err == nil {
@@ -457,6 +447,131 @@ func (d *vethDriver) Teardown(hostIfName string,
 }
 
 func (d *vethDriver) Check(cfg *CheckConfig) error {
+	err := cfg.NetNS.Do(func(netNS ns.NetNS) error {
+		link, err := netlink.LinkByName(cfg.ContainerIFName)
+		if err != nil {
+			return err
+		}
+		if link.Type() != "veth" {
+			return fmt.Errorf("link type mismatch want veth, got %s", link.Type())
+		}
+		return nil
+	})
+	if err != nil {
+		cfg.RecordPodEvent(fmt.Sprintf("veth driver failed to check nic %#v", err))
+		return nil
+	}
+	containerDst := &net.IPNet{
+		IP:   cfg.IPv4Addr.IP,
+		Mask: net.CIDRMask(32, 32),
+	}
+
+	vethHostLink, err := netlink.LinkByName(cfg.HostVethName)
+	if err != nil {
+		Log.Debugf("can't found veth %s on host", cfg.HostVethName)
+		if os.IsNotExist(err) {
+			cfg.RecordPodEvent(fmt.Sprintf("can't found veth %s on host", cfg.HostVethName))
+		}
+		return nil
+	}
+
+	err = EnsureHostToContainerRoute(containerDst, vethHostLink.Attrs().Index)
+	if err != nil {
+		return nil
+	}
+	if cfg.DeviceID == 0 {
+		Log.Debugf("device id=0 invalid")
+		return nil
+	}
+
+	// sync policy route
+	parentLink, err := netlink.LinkByIndex(int(cfg.DeviceID))
+	if err != nil {
+		cfg.RecordPodEvent(fmt.Sprintf("failed to get nic by id %d %#v", cfg.DeviceID, err))
+		Log.Debugf("failed to get nic by id %d %#v", cfg.DeviceID, err)
+		return nil
+	}
+	tableID := getRouteTableID(parentLink.Attrs().Index)
+	// ensure eni config
+	err = d.ensureEniConfig(parentLink, cfg.MTU, tableID, cfg.Gateway)
+	if err != nil {
+		Log.Debug(errors.Wrapf(err, "vethDriver, fail ensure eni config"))
+		return nil
+	}
+
+	ruleList, err := netlink.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		Log.Debug(errors.Wrapf(err, "vethDriver, fail list rule"))
+		return nil
+	}
+
+	// to container rule
+	toContainerRule := netlink.NewRule()
+	toContainerRule.Dst = containerDst
+	toContainerRule.Table = mainRouteTable
+	toContainerRule.Priority = toContainerPriority
+
+	found := false
+	for _, got := range ruleList {
+		if !ipNetEqual(containerDst, got.Dst) {
+			continue
+		}
+		if got.Table != toContainerRule.Table ||
+			got.Priority != toContainerRule.Priority {
+			Log.Debugf("del %s", got.String())
+			err := netlink.RuleDel(&got)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				Log.Debugf("failed to del rule %s, %v", got.String(), err)
+				continue
+			}
+		}
+		found = true
+	}
+	if !found {
+		Log.Debugf("add %s", toContainerRule.String())
+		err := netlink.RuleAdd(toContainerRule)
+		if err != nil {
+			return errors.Wrapf(err, "vethDriver, fail add container add rule")
+		}
+	}
+
+	// from container rule
+	fromContainerRule := netlink.NewRule()
+	fromContainerRule.IifName = cfg.HostVethName
+	fromContainerRule.Src = containerDst
+	fromContainerRule.Table = tableID
+	fromContainerRule.Priority = fromContainerPriority
+	found = false
+	for _, got := range ruleList {
+		if !ipNetEqual(fromContainerRule.Src, got.Src) {
+			continue
+		}
+		if got.IifName != fromContainerRule.IifName ||
+			got.Table != fromContainerRule.Table ||
+			got.Priority != fromContainerRule.Priority {
+			Log.Debugf("del %s", got.String())
+			err := netlink.RuleDel(&got)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				Log.Debugf("failed to del rule %s, %v", got.String(), err)
+				continue
+			}
+		}
+		found = true
+	}
+	if !found {
+		Log.Debugf("add %s", fromContainerRule.String())
+		err := netlink.RuleAdd(fromContainerRule)
+		if err != nil {
+			return errors.Wrapf(err, "vethDriver, fail add container add rule")
+		}
+	}
+
 	return nil
 }
 
