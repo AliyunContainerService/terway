@@ -98,6 +98,14 @@ func EnsureLinkUp(link netlink.Link) (bool, error) {
 	return true, netlink.LinkSetUp(link)
 }
 
+// EnsureLinkMTU set link mtu,return changed and err
+func EnsureLinkMTU(link netlink.Link, mtu int) (bool, error) {
+	if link.Attrs().MTU == mtu {
+		return false, nil
+	}
+	return true, netlink.LinkSetMTU(link, mtu)
+}
+
 // EnsureDefaultRoute
 func EnsureDefaultRoute(link netlink.Link, gw net.IP) (bool, error) {
 	err := ip.ValidateExpectedRoute([]*types.Route{

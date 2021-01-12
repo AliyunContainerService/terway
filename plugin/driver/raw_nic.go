@@ -30,6 +30,7 @@ func (r *rawNicDriver) Setup(
 	deviceID int,
 	ingress uint64,
 	egress uint64,
+	mtu int,
 	netNS ns.NetNS) error {
 	// 1. move link in
 	nicLink, err := netlink.LinkByIndex(deviceID)
@@ -115,6 +116,11 @@ func (r *rawNicDriver) Setup(
 		err = netlink.LinkSetUp(nicLink)
 		if err != nil {
 			return errors.Wrapf(err, "setup set nic link up")
+		}
+
+		_, err = EnsureLinkMTU(nicLink, mtu)
+		if err != nil {
+			return errors.Wrapf(err, "setup set nic link mtu to %v", mtu)
 		}
 
 		err = netlink.AddrAdd(nicLink, &netlink.Addr{
@@ -210,6 +216,14 @@ func (r *rawNicDriver) Check(cfg *CheckConfig) error {
 		}
 		if changed {
 			cfg.RecordPodEvent(fmt.Sprintf("link %s set to up", cfg.ContainerIFName))
+		}
+		changed, err = EnsureLinkMTU(link, cfg.MTU)
+		if err != nil {
+			return err
+		}
+
+		if changed {
+			cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", cfg.ContainerIFName, cfg.MTU))
 		}
 		changed, err = EnsureDefaultRoute(link, cfg.Gateway)
 		if err != nil {

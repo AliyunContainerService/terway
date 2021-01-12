@@ -27,7 +27,7 @@ func setUpNetlinkTest(t *testing.T) tearDownNetlinkTest {
 	var err error
 	ns, err := netns.New()
 	if err != nil {
-		t.Fatal("Failed to create newns", ns)
+		t.Fatal("Failed to create netns", ns)
 	}
 
 	return func() {

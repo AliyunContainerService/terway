@@ -30,6 +30,7 @@ type CheckConfig struct {
 
 	HostVethName string
 	DeviceID     int32
+	MTU          int
 
 	ContainerIFName string
 	// for pod
@@ -50,6 +51,7 @@ type NetnsDriver interface {
 		deviceID int,
 		ingress uint64,
 		egress uint64,
+		mtu int,
 		netNS ns.NetNS) error
 
 	Teardown(hostVeth string,
@@ -64,8 +66,6 @@ type vethDriver struct {
 }
 
 const (
-	// MTU to config interfaces
-	MTU = 1500
 	// mainRouteTable the system "main" route table id
 	mainRouteTable        = 254
 	toContainerPriority   = 512
@@ -92,6 +92,7 @@ func (d *vethDriver) Setup(
 	deviceID int,
 	ingress uint64,
 	egress uint64,
+	mtu int,
 	netNS ns.NetNS) error {
 	var err error
 	preHostLink, err := netlink.LinkByName(hostIfName)
@@ -114,7 +115,7 @@ func (d *vethDriver) Setup(
 	// config in container netns
 	err = netNS.Do(func(_ ns.NetNS) error {
 		// 1. create veth pair
-		hostVeth, contVeth, err = setupVethPair(containerVeth, hostIfName, MTU, hostNs)
+		hostVeth, contVeth, err = setupVethPair(containerVeth, hostIfName, mtu, hostNs)
 		if err != nil {
 			return errors.Wrap(err, "vethDriver, error create veth pair for container")
 		}
@@ -241,7 +242,7 @@ func (d *vethDriver) Setup(
 		tableID := getRouteTableID(parentLink.Attrs().Index)
 
 		// ensure eni config
-		err = d.ensureEniConfig(parentLink, tableID, gateway)
+		err = d.ensureEniConfig(parentLink, mtu, tableID, gateway)
 		if err != nil {
 			return errors.Wrapf(err, "vethDriver, fail ensure eni config")
 		}
@@ -305,7 +306,7 @@ func (d *vethDriver) setupTC(dev netlink.Link, bandwidthInBytes uint64) error {
 	return tc.SetRule(dev, rule)
 }
 
-func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableID int, gw net.IP) error {
+func (d *vethDriver) ensureEniConfig(eni netlink.Link, mtu, tableID int, gw net.IP) error {
 	var err error
 	// set link up
 	if eni.Attrs().OperState != netlink.OperUp {
@@ -317,6 +318,13 @@ func (d *vethDriver) ensureEniConfig(eni netlink.Link, tableID int, gw net.IP) e
 	nodeIPNet := *linkIP
 	if nodeIP, err := k8snet.ChooseBindAddress(nil); err == nil {
 		nodeIPNet.IP = nodeIP
+	}
+
+	// ensure mtu setting
+	if eni.Attrs().MTU != mtu {
+		if err = netlink.LinkSetMTU(eni, mtu); err != nil {
+			return errors.Wrapf(err, "error set eni parent link mtu to %v", mtu)
+		}
 	}
 
 	// remove eni extra address
