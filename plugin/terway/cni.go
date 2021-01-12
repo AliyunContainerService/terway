@@ -33,6 +33,7 @@ const (
 	defaultVethForENI      = "veth1"
 	delegateIpam           = "host-local"
 	eniIPVirtualTypeIPVlan = "ipvlan"
+	defaultMTU             = 1500
 	delegateConf           = `
 {
 	"name": "networks",
@@ -79,6 +80,9 @@ type NetConf struct {
 	// HostStackCIDRs is a list of CIDRs, all traffic targeting these CIDRs will be redirected to host network stack
 	HostStackCIDRs []string `json:"host_stack_cidrs"`
 
+	// MTU is container and ENI network interface MTU
+	MTU int `json:"mtu"`
+
 	// Debug
 	Debug bool `json:"debug"`
 }
@@ -110,6 +114,10 @@ func parseCmdArgs(args *skel.CmdArgs) (string, ns.NetNS, *NetConf, *K8SArgs, err
 	conf := NetConf{}
 	if err = json.Unmarshal(args.StdinData, &conf); err != nil {
 		return "", nil, nil, nil, errors.Wrap(err, "error loading config from args")
+	}
+
+	if conf.MTU == 0 {
+		conf.MTU = defaultMTU
 	}
 
 	k8sConfig := K8SArgs{}
@@ -284,7 +292,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return nil
 		}
 		defer l.Close()
-		err = eniMultiIPDriver.Setup(hostVethName, args.IfName, subnet, primaryIP, serviceCIDR, hostStackCIDRs, gw, nil, int(deviceID), ingress, egress, cniNetns)
+		err = eniMultiIPDriver.Setup(hostVethName, args.IfName, subnet, primaryIP, serviceCIDR, hostStackCIDRs, gw, nil, int(deviceID), ingress, egress, conf.MTU, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network failed: %v", err)
 		}
@@ -332,7 +340,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return nil
 		}
 		defer l.Close()
-		err = vethDriver.Setup(hostVethName, args.IfName, &podIPAddr, nil, nil, nil, gateway, nil, 0, ingress, egress, cniNetns)
+		err = vethDriver.Setup(hostVethName, args.IfName, &podIPAddr, nil, nil, nil, gateway, nil, 0, ingress, egress, conf.MTU, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network failed: %v", err)
 		}
@@ -388,7 +396,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return nil
 		}
 		defer l.Close()
-		err = vethDriver.Setup(hostVethName, defaultVethForENI, eniAddrSubnet, nil, nil, nil, gw, extraRoutes, 0, ingress, egress, cniNetns)
+		err = vethDriver.Setup(hostVethName, defaultVethForENI, eniAddrSubnet, nil, nil, nil, gw, extraRoutes, 0, ingress, egress, conf.MTU, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup veth network for eni failed: %v", err)
 		}
@@ -401,7 +409,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			}
 		}()
 
-		err = nicDriver.Setup(hostVethName, args.IfName, eniAddrSubnet, nil, nil, nil, gw, nil, int(deviceNumber), 0, 0, cniNetns)
+		err = nicDriver.Setup(hostVethName, args.IfName, eniAddrSubnet, nil, nil, nil, gw, nil, int(deviceNumber), 0, 0, conf.MTU, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network for vpc eni failed: %v", err)
 		}
@@ -658,6 +666,7 @@ func cmdCheck(args *skel.CmdArgs) error {
 			IPv4Addr:        containerIPv4Addr,
 			Gateway:         gw,
 			DeviceID:        allocResult.GetENIMultiIP().GetEniConfig().GetDeviceNumber(),
+			MTU:             conf.MTU,
 		}
 		if strings.ToLower(conf.ENIIPVirtualType) == eniIPVirtualTypeIPVlan {
 			ok, err := driver.CheckIPVLanAvailable()
@@ -717,6 +726,7 @@ func cmdCheck(args *skel.CmdArgs) error {
 			ContainerIFName: args.IfName,
 			IPv4Addr:        containerIPv4Addr,
 			Gateway:         gw,
+			MTU:             conf.MTU,
 		}
 		l, err := driver.GrabFileLock(terwayCNILock)
 		if err != nil {

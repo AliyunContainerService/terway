@@ -88,6 +88,7 @@ func (driver *ipvlanDriver) Setup(
 	deviceID int,
 	ingress uint64,
 	egress uint64,
+	mtu int,
 	netNS ns.NetNS) error {
 	var err error
 
@@ -99,11 +100,16 @@ func (driver *ipvlanDriver) Setup(
 	if err != nil {
 		return errors.Wrapf(err, "%s, set device %s up error", driver.name, parentLink.Attrs().Name)
 	}
+	_, err = EnsureLinkMTU(parentLink, mtu)
+	if err != nil {
+		return errors.Wrapf(err, "%s, set device %s mtu to %v error", driver.name, parentLink.Attrs().Name, mtu)
+	}
+
 	slaveIPVlan := &netlink.IPVlan{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:        hostIPVlan,
 			ParentIndex: deviceID,
-			MTU:         MTU,
+			MTU:         mtu,
 		},
 		Mode: netlink.IPVLAN_MODE_L2,
 	}
@@ -180,7 +186,7 @@ func (driver *ipvlanDriver) Setup(
 		return errors.Wrapf(err, "%s, set container link/address/route error", driver.name)
 	}
 
-	if err := driver.setupInitNamespace(parentLink, primaryIpv4Addr, ipv4Addr, serviceCIDR, hostStackCIDRs); err != nil {
+	if err := driver.setupInitNamespace(parentLink, primaryIpv4Addr, ipv4Addr, serviceCIDR, hostStackCIDRs, mtu); err != nil {
 		return errors.Wrapf(err, "%s, configure init namespace error.", driver.name)
 	}
 
@@ -248,6 +254,14 @@ func (driver *ipvlanDriver) Check(cfg *CheckConfig) error {
 	if changed {
 		cfg.RecordPodEvent(fmt.Sprintf("parent link id %d set to up", int(cfg.DeviceID)))
 	}
+	changed, err = EnsureLinkMTU(parentLink, cfg.MTU)
+	if err != nil {
+		return err
+	}
+
+	if changed {
+		cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", parentLink.Attrs().Name, cfg.MTU))
+	}
 
 	// 2. check addr and default route
 	err = cfg.NetNS.Do(func(netNS ns.NetNS) error {
@@ -264,6 +278,16 @@ func (driver *ipvlanDriver) Check(cfg *CheckConfig) error {
 		if changed {
 			cfg.RecordPodEvent(fmt.Sprintf("link %s set to up", cfg.ContainerIFName))
 		}
+
+		changed, err = EnsureLinkMTU(link, cfg.MTU)
+		if err != nil {
+			return err
+		}
+
+		if changed {
+			cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", cfg.ContainerIFName, cfg.MTU))
+		}
+
 		changed, err = EnsureDefaultRoute(link, cfg.Gateway)
 		if err != nil {
 			return err
@@ -285,13 +309,16 @@ func (driver *ipvlanDriver) Check(cfg *CheckConfig) error {
 	return err
 }
 
-func (driver *ipvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slaveName string) (netlink.Link, error) {
+func (driver *ipvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slaveName string, mtu int) (netlink.Link, error) {
 	slaveLink, err := netlink.LinkByName(slaveName)
 	if err != nil {
 		if _, ok := err.(netlink.LinkNotFoundError); !ok {
 			return nil, errors.Wrapf(err, "%s, get device %s error", driver.name, slaveName)
 		}
 	} else {
+		if _, err = EnsureLinkMTU(slaveLink, mtu); err != nil {
+			return nil, errors.Wrapf(err, "%s, set slave link %s mtu to %v error", driver.name, slaveName, mtu)
+		}
 		return slaveLink, nil
 	}
 
@@ -299,7 +326,7 @@ func (driver *ipvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slave
 		LinkAttrs: netlink.LinkAttrs{
 			Name:        slaveName,
 			ParentIndex: parentLink.Attrs().Index,
-			MTU:         MTU,
+			MTU:         mtu,
 		},
 		Mode: netlink.IPVLAN_MODE_L2,
 	})
@@ -581,10 +608,11 @@ func (driver *ipvlanDriver) setupInitNamespace(
 	containerIP *net.IPNet,
 	serviceCIDR *net.IPNet,
 	hostStackCIDRs []*net.IPNet,
+	mtu int,
 ) error {
 	// setup slave nic
 	slaveName := driver.initSlaveName(parentLink.Attrs().Index)
-	slaveLink, err := driver.createSlaveIfNotExist(parentLink, slaveName)
+	slaveLink, err := driver.createSlaveIfNotExist(parentLink, slaveName, mtu)
 	if err != nil {
 		return err
 	}
