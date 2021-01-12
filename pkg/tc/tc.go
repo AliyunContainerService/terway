@@ -35,6 +35,7 @@ func latencyInUsec(latencyInMillis float64) float64 {
 }
 
 const latencyInMillis = 25
+const hardwareHeaderLen = 1500
 
 // SetRule set the traffic rule on interface
 func SetRule(dev netlink.Link, rule *TrafficShapingRule) error {
@@ -42,7 +43,7 @@ func SetRule(dev netlink.Link, rule *TrafficShapingRule) error {
 		return fmt.Errorf("invalid rate %d", rule.Rate)
 	}
 
-	burst := burst(rule.Rate, dev.Attrs().MTU)
+	burst := burst(rule.Rate, dev.Attrs().MTU+hardwareHeaderLen)
 	buffer := buffer(rule.Rate, burst)
 	latency := latencyInUsec(latencyInMillis)
 	limit := limit(rule.Rate, latency, burst)
