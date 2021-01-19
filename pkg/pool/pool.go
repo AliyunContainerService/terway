@@ -499,7 +499,13 @@ func (p *simpleObjectPool) ReleaseWithReservation(resID string, reservation time
 	_, err := p.factory.Get(res.res)
 	if errors.Is(err, aliyun.ErrNotFound) {
 		log.Warnf("release %s, resource not exist in metadata, ignored", resID)
-		return nil
+		if err = p.factory.Dispose(res.res); err == nil {
+			p.tokenCh <- struct{}{}
+			p.metricTotal.Dec()
+			p.metricDisposed.Inc()
+			return nil
+		}
+		log.Warnf("release %s, err %v", resID, err)
 	}
 
 	reserveTo := time.Now()
