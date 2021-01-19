@@ -855,6 +855,7 @@ func (networkService *networkService) GetResourceMapping() ([]tracing.PodMapping
 	case daemonModeENIMultiIP:
 		poolStats, err = networkService.eniIPResMgr.GetResourceMapping()
 	case daemonModeVPC:
+		networkService.RUnlock()
 		return nil, nil
 	case daemonModeENIOnly:
 		poolStats, err = networkService.eniResMgr.GetResourceMapping()
