@@ -13,6 +13,9 @@ const (
 
 	// ErrInvalidIPIPUnassigned see https://help.aliyun.com/document_detail/85919.html
 	ErrInvalidIPIPUnassigned = "InvalidIp.IpUnassigned"
+
+	// ErrInvalidENINotFound
+	ErrInvalidENINotFound = "InvalidEniId.NotFound"
 )
 
 // define well known err

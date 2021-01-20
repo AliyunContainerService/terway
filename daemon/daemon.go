@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -736,7 +737,12 @@ func (networkService *networkService) startPeriodCheck() {
 			if res.Valid {
 				continue
 			}
-			_ = tracing.RecordPodEvent(res.Name, res.Namespace, corev1.EventTypeWarning, "ResourceInvalid", fmt.Sprintf("resource %s", res.LocalResID))
+			if res.Name == "" || res.Namespace == "" {
+				// just log
+				log.Warnf("found resource invalid %s %s", res.LocalResID, res.RemoteResID)
+			} else {
+				_ = tracing.RecordPodEvent(res.Name, res.Namespace, corev1.EventTypeWarning, "ResourceInvalid", fmt.Sprintf("resource %s", res.LocalResID))
+			}
 		}
 	}()
 	// call CNI CHECK, make sure all dev is ok
@@ -845,7 +851,7 @@ func (networkService *networkService) Execute(cmd string, _ []string, message ch
 	close(message)
 }
 
-func (networkService *networkService) GetResourceMapping() ([]tracing.PodMapping, error) {
+func (networkService *networkService) GetResourceMapping() ([]*tracing.PodMapping, error) {
 	var poolStats tracing.ResourcePoolStats
 	var err error
 
@@ -871,36 +877,73 @@ func (networkService *networkService) GetResourceMapping() ([]tracing.PodMapping
 		return nil, err
 	}
 
-	mapping := make([]tracing.PodMapping, 0, len(pods))
+	return toResMapping(poolStats, pods)
+}
 
-	// three way compare
-	// pod pool metadata
+// toResMapping toResMapping
+func toResMapping(poolStats tracing.ResourcePoolStats, pods []interface{}) ([]*tracing.PodMapping, error) {
+	// three way compare, use resource id as key
+
+	all := map[string]*tracing.PodMapping{}
+
+	for _, res := range poolStats.GetLocal() {
+		old, ok := all[res.GetID()]
+		if !ok {
+			all[res.GetID()] = &tracing.PodMapping{
+				LocalResID: res.GetID(),
+			}
+			continue
+		}
+		old.LocalResID = res.GetID()
+	}
+
+	for _, res := range poolStats.GetRemote() {
+		old, ok := all[res.GetID()]
+		if !ok {
+			all[res.GetID()] = &tracing.PodMapping{
+				RemoteResID: res.GetID(),
+			}
+			continue
+		}
+		old.RemoteResID = res.GetID()
+	}
 
 	for _, pod := range pods {
 		p := pod.(PodResources)
 		for _, res := range p.Resources {
-			loID := ""
-			RemoteID := ""
-			lo, ok1 := poolStats.GetLocal()[res.ID]
-			if ok1 {
-				loID = lo.GetID()
+			old, ok := all[res.ID]
+			if !ok {
+				all[res.ID] = &tracing.PodMapping{
+					Name:         p.PodInfo.Name,
+					Namespace:    p.PodInfo.Namespace,
+					PodBindResID: res.ID,
+				}
+				continue
 			}
-			remote, ok2 := poolStats.GetRemote()[res.ID]
-			if ok2 {
-				RemoteID = remote.GetID()
+			old.Name = p.PodInfo.Name
+			old.Namespace = p.PodInfo.Namespace
+			old.PodBindResID = res.ID
+			if old.PodBindResID == old.LocalResID && old.LocalResID == old.RemoteResID {
+				old.Valid = true
 			}
-			m := tracing.PodMapping{
-				Name:         p.PodInfo.Name,
-				Namespace:    p.PodInfo.Namespace,
-				Valid:        ok1 && ok2,
-				PodBindResID: res.ID,
-				LocalResID:   loID,
-				RemoteResID:  RemoteID,
-			}
-			mapping = append(mapping, m)
 		}
 	}
 
+	mapping := make([]*tracing.PodMapping, 0, len(all))
+	for _, res := range all {
+		// idle
+		if res.Name == "" && res.LocalResID == res.RemoteResID {
+			res.Valid = true
+		}
+		mapping = append(mapping, res)
+	}
+
+	sort.Slice(mapping, func(i, j int) bool {
+		if mapping[i].Name != mapping[j].Name {
+			return mapping[i].Name > mapping[j].Name
+		}
+		return mapping[i].RemoteResID < mapping[j].RemoteResID
+	})
 	return mapping, nil
 }
 

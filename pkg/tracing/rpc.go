@@ -93,7 +93,7 @@ func (t *tracingRPC) GetResourceMapping(_ context.Context, _ *rpc.Placeholder) (
 
 	var info []*rpc.PodResourceMapping
 	for _, m := range mapping {
-		info = append(info, toRPCMapping(m))
+		info = append(info, toRPCMapping(*m))
 	}
 
 	return &rpc.PodResourceMappingReply{
@@ -105,7 +105,7 @@ func toRPCMapping(res PodMapping) *rpc.PodResourceMapping {
 	rMapping := rpc.PodResourceMapping{
 		Type:                rpc.ResourceMappingType_MappingTypeNormal,
 		PodName:             res.Name,
-		ResourceName:        res.PodBindResID,
+		ResourceName:        res.LocalResID,
 		FactoryResourceName: res.RemoteResID,
 	}
 	if !res.Valid {

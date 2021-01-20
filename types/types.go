@@ -115,3 +115,25 @@ const (
 	ResStatusIdle
 	ResStatusInUse
 )
+
+// FakeRes for test
+type FakeRes struct {
+	ID     string
+	Type   string
+	Status ResStatus
+}
+
+// GetID GetID
+func (r *FakeRes) GetID() string {
+	return r.ID
+}
+
+// GetType GetType
+func (r *FakeRes) GetType() string {
+	return r.Type
+}
+
+// GetStatus GetStatus
+func (r *FakeRes) GetStatus() ResStatus {
+	return r.Status
+}
