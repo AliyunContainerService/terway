@@ -60,6 +60,22 @@ type ResourcePoolStats interface {
 	GetRemote() map[string]types.Res
 }
 
+// FakeResourcePoolStats for test
+type FakeResourcePoolStats struct {
+	Local  map[string]types.Res
+	Remote map[string]types.Res
+}
+
+// GetLocal GetLocal
+func (f *FakeResourcePoolStats) GetLocal() map[string]types.Res {
+	return f.Local
+}
+
+// GetRemote GetRemote
+func (f *FakeResourcePoolStats) GetRemote() map[string]types.Res {
+	return f.Remote
+}
+
 // ResourceMappingHandler get resource mapping
 type ResourceMappingHandler interface {
 	GetResourceMapping() (ResourcePoolStats, error)
@@ -67,7 +83,7 @@ type ResourceMappingHandler interface {
 
 // ResMapping ResMapping
 type ResMapping interface {
-	GetResourceMapping() ([]PodMapping, error)
+	GetResourceMapping() ([]*PodMapping, error)
 }
 
 // PodEventRecorder records event on pod
@@ -240,7 +256,7 @@ func (t *Tracer) RecordNodeEvent(eventType, reason, message string) error {
 
 // GetResourceMapping gives the resource mapping from the handler
 // if the handler has not been registered, there will be error
-func (t *Tracer) GetResourceMapping() ([]PodMapping, error) {
+func (t *Tracer) GetResourceMapping() ([]*PodMapping, error) {
 	if t.resourceMapping == nil {
 		return nil, errors.New("no resource mapping handler registered")
 	}

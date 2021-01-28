@@ -434,6 +434,9 @@ func (e *ecsImpl) UnAssignIPsForENI(eniID string, ips []net.IP) error {
 				if ErrAssert(ErrInvalidIPIPUnassigned, innerErr) {
 					return true, innerErr
 				}
+				if ErrAssert(ErrInvalidENINotFound, innerErr) {
+					return true, innerErr
+				}
 				logrus.Warnf("error unassign private ip address: %v, retry...", innerErr)
 				return false, nil
 			}
@@ -444,6 +447,9 @@ func (e *ecsImpl) UnAssignIPsForENI(eniID string, ips []net.IP) error {
 	metric.OpenAPILatency.WithLabelValues("UnassignPrivateIpAddresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		if ErrAssert(ErrInvalidIPIPUnassigned, innerErr) {
+			return nil
+		}
+		if ErrAssert(ErrInvalidENINotFound, innerErr) {
 			return nil
 		}
 		fmtErr := fmt.Sprintf("error unassign address for eniID: %v, %v", eniID, innerErr)

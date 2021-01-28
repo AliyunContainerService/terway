@@ -2,6 +2,10 @@
 
 package link
 
+import (
+	"net"
+)
+
 // GetDeviceNumber get interface device number by mac address
 func GetDeviceNumber(mac string) (int32, error) {
 	return 0, ErrUnsupported
