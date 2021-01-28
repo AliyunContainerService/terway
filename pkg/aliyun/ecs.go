@@ -46,7 +46,7 @@ type ECS interface {
 	GetENIMaxIP(instanceID string, eniID string) (int, error)
 	GetAttachedSecurityGroups(instanceID string) ([]string, error)
 	DescribeVSwitch(vSwitch string) (availIPCount int, err error)
-	FixEniSecurityGroup(sgIDs []string) error
+	CheckEniSecurityGroup(sgIDs []string) error
 	// EIP
 	AllocateEipAddress(bandwidth int, chargeType common.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error)
 	UnassociateEipAddress(eipID, eniID, eniIP string) error
@@ -63,9 +63,6 @@ type ecsImpl struct {
 	region            common.Region
 	vpcID             string
 }
-
-// 单个 eni 最多绑定安全组个数
-const maxSGPerEni = 5
 
 // NewECS return new ECS implement object
 func NewECS(ak, sk, credentialPath string, region common.Region, ignoreLinkNotExist bool) (ECS, error) {
@@ -749,8 +746,8 @@ func (e *ecsImpl) GetInstanceMaxPrivateIPByType(instanceType string) (int, error
 	return eniIPCap, errors.Wrapf(err, "error get instance max eni ip: %v, %v", instanceType, innerErr)
 }
 
-// FixEniSecurityGroup will sync eni's security with ecs's security group
-func (e *ecsImpl) FixEniSecurityGroup(sg []string) error {
+// CheckEniSecurityGroup will sync eni's security with ecs's security group
+func (e *ecsImpl) CheckEniSecurityGroup(sg []string) error {
 	var err error
 	instanceID, err := GetLocalInstanceID()
 	if err != nil {
@@ -770,28 +767,11 @@ func (e *ecsImpl) FixEniSecurityGroup(sg []string) error {
 		if sgSet.Intersection(eniSgSet).Len() > 0 {
 			continue
 		}
-		errStr := fmt.Sprintf("found eni %s security group [%s] mismatch witch ecs security group [%s]", eni.ID,
+		err := fmt.Errorf("found eni %s security group [%s] mismatch witch ecs security group [%s]", eni.ID,
 			strings.Join(eni.SecurityGroupIDs, ","), strings.Join(sg, ","))
-		logrus.Warn(errStr)
-		// check eni sg limit
-		if len(eni.SecurityGroupIDs) > maxSGPerEni {
-			errs = append(errs, errors.New(errStr))
-			continue
-		}
-		// try add eni to one of ecs sg
-		eniSgSet.Insert(sg[0])
-		req := &ecs.ModifyNetworkInterfaceAttributeArgs{
-			RegionId:           e.region,
-			NetworkInterfaceId: eni.ID,
-			SecurityGroupId:    eniSgSet.List(),
-		}
-		logrus.Infof("try update eni %s security group to [%s]", eni.ID,
-			strings.Join(eniSgSet.List(), ","))
-		_, err := e.clientSet.Ecs().ModifyNetworkInterfaceAttribute(req)
-		if err != nil {
-			// this can make sure event is aggregated
-			errs = append(errs, errors.New(errStr), fmt.Errorf("code %s message %s", err.(*common.Error).Code, err.(*common.Error).Message))
-		}
+		logrus.Warn(err)
+
+		errs = append(errs, err)
 	}
 	return errors2.NewAggregate(errs)
 }
