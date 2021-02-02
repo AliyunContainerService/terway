@@ -620,39 +620,32 @@ func cmdCheck(args *skel.CmdArgs) error {
 
 	timeoutContext, cancel := context.WithTimeout(context.Background(), defaultCniTimeout)
 	defer cancel()
-	allocResult, err := terwayBackendClient.AllocIP(
+	getResult, err := terwayBackendClient.GetIPInfo(
 		timeoutContext,
-		&rpc.AllocIPRequest{
-			Netns:                  args.Netns,
+		&rpc.GetInfoRequest{
 			K8SPodName:             string(k8sConfig.K8S_POD_NAME),
 			K8SPodNamespace:        string(k8sConfig.K8S_POD_NAMESPACE),
 			K8SPodInfraContainerId: string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID),
-			IfName:                 args.IfName,
 		})
-
 	if err != nil {
 		driver.Log.Debug(err)
 		return nil
 	}
-	if !allocResult.Success {
-		return fmt.Errorf("error on alloc eip from terway backend")
-	}
-
 	hostVethName, _ := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
 
-	switch allocResult.IPType {
+	switch getResult.IPType {
 	case rpc.IPType_TypeENIMultiIP:
-		if allocResult.GetENIMultiIP() == nil ||
-			allocResult.GetENIMultiIP().GetEniConfig() == nil {
+		if getResult.GetENIMultiIP() == nil ||
+			getResult.GetENIMultiIP().GetEniConfig() == nil {
 			return nil
 		}
-		containerIPv4Addr, err := ParseAddr(allocResult.GetENIMultiIP().GetEniConfig().GetIPv4Addr(), allocResult.GetENIMultiIP().GetEniConfig().GetIPv4Subnet())
+		containerIPv4Addr, err := ParseAddr(getResult.GetENIMultiIP().GetEniConfig().GetIPv4Addr(), getResult.GetENIMultiIP().GetEniConfig().GetIPv4Subnet())
 		if err != nil {
 			driver.Log.Debug(err)
 			return nil
 		}
 
-		gw, err := ParesIP(allocResult.GetENIMultiIP().GetEniConfig().GetGateway())
+		gw, err := ParesIP(getResult.GetENIMultiIP().GetEniConfig().GetGateway())
 		if err != nil {
 			driver.Log.Debug(err)
 			return nil
@@ -677,7 +670,7 @@ func cmdCheck(args *skel.CmdArgs) error {
 			HostVethName:    hostVethName,
 			IPv4Addr:        containerIPv4Addr,
 			Gateway:         gw,
-			DeviceID:        allocResult.GetENIMultiIP().GetEniConfig().GetDeviceNumber(),
+			DeviceID:        getResult.GetENIMultiIP().EniConfig.DeviceNumber,
 			MTU:             conf.MTU,
 		}
 		if strings.ToLower(conf.ENIIPVirtualType) == eniIPVirtualTypeIPVlan {
@@ -704,18 +697,18 @@ func cmdCheck(args *skel.CmdArgs) error {
 	case rpc.IPType_TypeVPCIP:
 		return nil
 	case rpc.IPType_TypeVPCENI:
-		if allocResult.GetVpcEni() == nil ||
-			allocResult.GetVpcEni().GetServiceCidr() == "" ||
-			allocResult.GetVpcEni().GetEniConfig() == nil {
+		if getResult.GetVpcEni() == nil ||
+			getResult.GetVpcEni().GetServiceCidr() == "" ||
+			getResult.GetVpcEni().GetEniConfig() == nil {
 			return nil
 		}
 
-		containerIPv4Addr, err := ParseAddr(allocResult.GetVpcEni().GetEniConfig().GetIPv4Addr(), allocResult.GetVpcEni().GetEniConfig().GetIPv4Subnet())
+		containerIPv4Addr, err := ParseAddr(getResult.PodIP, getResult.GetVpcEni().GetEniConfig().GetIPv4Subnet())
 		if err != nil {
 			return nil
 		}
 
-		gw, err := ParesIP(allocResult.GetVpcEni().GetEniConfig().GetGateway())
+		gw, err := ParesIP(getResult.GetVpcEni().GetEniConfig().GetGateway())
 		if err != nil {
 			return nil
 		}
@@ -738,6 +731,7 @@ func cmdCheck(args *skel.CmdArgs) error {
 			ContainerIFName: args.IfName,
 			IPv4Addr:        containerIPv4Addr,
 			Gateway:         gw,
+			DeviceID:        getResult.GetVpcEni().EniConfig.DeviceNumber,
 			MTU:             conf.MTU,
 		}
 		l, err := driver.GrabFileLock(terwayCNILock)

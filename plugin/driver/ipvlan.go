@@ -242,34 +242,14 @@ func (driver *ipvlanDriver) Teardown(hostIPVlan string,
 }
 
 func (driver *ipvlanDriver) Check(cfg *CheckConfig) error {
-	// 1. check parent link ( this is called in every setup it is safe)
-	parentLink, err := netlink.LinkByIndex(int(cfg.DeviceID))
-	if err != nil {
-		return errors.Wrapf(err, "%s, get device by index %d error.", driver.name, cfg.DeviceID)
-	}
-	changed, err := EnsureLinkUp(parentLink)
-	if err != nil {
-		return err
-	}
-	if changed {
-		cfg.RecordPodEvent(fmt.Sprintf("parent link id %d set to up", int(cfg.DeviceID)))
-	}
-	changed, err = EnsureLinkMTU(parentLink, cfg.MTU)
-	if err != nil {
-		return err
-	}
-
-	if changed {
-		cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", parentLink.Attrs().Name, cfg.MTU))
-	}
-
-	// 2. check addr and default route
-	err = cfg.NetNS.Do(func(netNS ns.NetNS) error {
+	parentLinkIndex := 0
+	// 1. check addr and default route
+	err := cfg.NetNS.Do(func(netNS ns.NetNS) error {
 		link, err := netlink.LinkByName(cfg.ContainerIFName)
 		if err != nil {
 			return err
 		}
-
+		parentLinkIndex = link.Attrs().ParentIndex
 		changed, err := EnsureLinkUp(link)
 		if err != nil {
 			return err
@@ -306,6 +286,31 @@ func (driver *ipvlanDriver) Check(cfg *CheckConfig) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	// 2. check parent link ( this is called in every setup it is safe)
+	Log.Debugf("parent link is %d", parentLinkIndex)
+	parentLink, err := netlink.LinkByIndex(parentLinkIndex)
+	if err != nil {
+		return errors.Wrapf(err, "%s, get device by index %d error.", driver.name, cfg.DeviceID)
+	}
+	changed, err := EnsureLinkUp(parentLink)
+	if err != nil {
+		return err
+	}
+	if changed {
+		cfg.RecordPodEvent(fmt.Sprintf("parent link id %d set to up", int(cfg.DeviceID)))
+	}
+	changed, err = EnsureLinkMTU(parentLink, cfg.MTU)
+	if err != nil {
+		return err
+	}
+
+	if changed {
+		cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", parentLink.Attrs().Name, cfg.MTU))
+	}
+
 	return err
 }
 

@@ -116,6 +116,13 @@ func (f *vethResourceManager) GetResourceMapping() (tracing.ResourcePoolStats, e
 	return nil, nil
 }
 
+func (f *vethResourceManager) Stat(context *networkContext, resID string) (types.NetworkResource, error) {
+	vethName, _ := link.VethNameForPod(context.pod.Name, context.pod.Namespace, defaultPrefix)
+	return &types.Veth{
+		HostVeth: vethName,
+	}, nil
+}
+
 func newVPCResourceManager() (ResourceManager, error) {
 	mgr := &vethResourceManager{
 		runtimeAPI: dockerRuntime{},

@@ -86,7 +86,7 @@ type ObjectPool interface {
 	ReleaseWithReservation(resID string, reservation time.Duration) error
 	Release(resID string) error
 	AcquireAny(ctx context.Context, idempotentKey string) (types.NetworkResource, error)
-	Stat(resID string) error
+	Stat(resID string) (types.NetworkResource, error)
 	GetName() string
 	tracing.ResourceMappingHandler
 }
@@ -426,19 +426,19 @@ func (p *simpleObjectPool) AcquireAny(ctx context.Context, idempotentKey string)
 	return p.Acquire(ctx, "", idempotentKey)
 }
 
-func (p *simpleObjectPool) Stat(resID string) error {
+func (p *simpleObjectPool) Stat(resID string) (types.NetworkResource, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	_, ok := p.inuse[resID]
+	v, ok := p.inuse[resID]
 	if ok {
-		return nil
+		return v.res, nil
+	}
+	vv := p.idle.Find(resID)
+	if vv != nil {
+		return vv.res, nil
 	}
 
-	if p.idle.Find(resID) != nil {
-		return nil
-	}
-
-	return ErrNotFound
+	return nil, ErrNotFound
 }
 
 func (p *simpleObjectPool) GetName() string {

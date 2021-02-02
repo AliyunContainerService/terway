@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -531,16 +532,53 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 		networkContext.Log().Infof("getIpInfo result: %+v", getIPInfoResult)
 	}()
 
+	networkService.RLock()
+	podRes, err := networkService.getPodResource(podinfo)
+	networkService.RUnlock()
+	if err != nil {
+		networkContext.Log().Errorf("failed to get pod info : %+v", err)
+		return getIPInfoResult, err
+	}
+
 	// 2. return network info for pod
 	switch podinfo.PodNetworkType {
 	case podNetworkTypeENIMultiIP:
+		var reply *rpc.GetInfoReply_ENIMultiIP
+		resItems := podRes.GetResourceItemByType(types.ResourceTypeENIIP)
+		if len(resItems) > 0 {
+			// only have one
+			res, err := networkService.eniIPResMgr.Stat(networkContext, resItems[0].ID)
+			if err == nil {
+				eniMultiIP := res.(*types.ENIIP)
+				reply = &rpc.GetInfoReply_ENIMultiIP{
+					ENIMultiIP: &rpc.ENIMultiIP{
+						EniConfig: &rpc.ENI{
+							IPv4Addr:        eniMultiIP.SecAddress.String(),
+							IPv4Subnet:      eniMultiIP.Eni.Address.String(),
+							MacAddr:         eniMultiIP.Eni.MAC,
+							Gateway:         eniMultiIP.Eni.Gateway.String(),
+							DeviceNumber:    eniMultiIP.Eni.DeviceNumber,
+							PrimaryIPv4Addr: eniMultiIP.PrimaryIP.String(),
+						},
+						PodConfig: &rpc.Pod{
+							Ingress: podinfo.TcIngress,
+							Egress:  podinfo.TcEgress,
+						},
+						ServiceCidr: networkService.k8s.GetServiceCidr().String(),
+					},
+				}
+			} else {
+				log.Debugf("failed to get res stat %s", resItems[0].ID)
+			}
+		}
 		getIPInfoResult = &rpc.GetInfoReply{
 			IPType: rpc.IPType_TypeENIMultiIP,
 			PodConfig: &rpc.Pod{
 				Ingress: podinfo.TcIngress,
 				Egress:  podinfo.TcEgress,
 			},
-			PodIP: podinfo.PodIP,
+			PodIP:       podinfo.PodIP,
+			NetworkInfo: reply,
 		}
 		return getIPInfoResult, nil
 	case podNetworkTypeVPCIP:
@@ -554,12 +592,41 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 		}
 		return getIPInfoResult, nil
 	case podNetworkTypeVPCENI:
+		var reply *rpc.GetInfoReply_VpcEni
+		resItems := podRes.GetResourceItemByType(types.ResourceTypeENI)
+		if len(resItems) > 0 {
+			// only have one
+			res, err := networkService.eniResMgr.Stat(networkContext, resItems[0].ID)
+			if err == nil {
+				vpcEni := res.(*types.ENI)
+				reply = &rpc.GetInfoReply_VpcEni{
+					VpcEni: &rpc.VPCENI{
+						EniConfig: &rpc.ENI{
+							IPv4Addr:        vpcEni.Address.IP.String(),
+							IPv4Subnet:      vpcEni.Address.String(),
+							MacAddr:         vpcEni.MAC,
+							Gateway:         vpcEni.Gateway.String(),
+							DeviceNumber:    vpcEni.DeviceNumber,
+							PrimaryIPv4Addr: vpcEni.Address.IP.String(),
+						},
+						PodConfig: &rpc.Pod{
+							Ingress: podinfo.TcIngress,
+							Egress:  podinfo.TcEgress,
+						},
+						ServiceCidr: networkService.k8s.GetServiceCidr().String(),
+					},
+				}
+			} else {
+				log.Debugf("failed to get res stat %s", resItems[0].ID)
+			}
+		}
 		getIPInfoResult = &rpc.GetInfoReply{
 			IPType: rpc.IPType_TypeVPCENI,
 			PodConfig: &rpc.Pod{
 				Ingress: podinfo.TcIngress,
 				Egress:  podinfo.TcEgress,
 			},
+			NetworkInfo: reply,
 		}
 		return getIPInfoResult, nil
 	default:
@@ -1129,7 +1196,14 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 
 	//start gc loop
 	netSrv.startGarbageCollectionLoop()
-	go wait.JitterUntil(netSrv.startPeriodCheck, poolCheckPeriod, 1, true, wait.NeverStop)
+	period := poolCheckPeriod
+	periodCfg := os.Getenv("POOL_CHECK_PERIOD_SECONDS")
+	periodSeconds, err := strconv.Atoi(periodCfg)
+	if err == nil {
+		period = time.Duration(periodSeconds) * time.Second
+	}
+
+	go wait.JitterUntil(netSrv.startPeriodCheck, period, 1, true, wait.NeverStop)
 
 	// register for tracing
 	_ = tracing.Register(tracing.ResourceTypeNetworkService, "default", netSrv)
