@@ -113,6 +113,12 @@ message GetInfoReply {
     Pod PodConfig = 2;
     string NodeCidr = 3;
     string PodIP = 4;
+    oneof NetworkInfo {
+        VPCIP VpcIp = 5;
+        VPCENI VpcEni = 6;
+        ManagedK8SENI ManagedK8S = 7;
+        ENIMultiIP ENIMultiIP = 8;
+    }
 }
 
 enum EventTarget {

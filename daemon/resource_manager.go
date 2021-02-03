@@ -57,5 +57,6 @@ type ResourceManager interface {
 	Allocate(context *networkContext, prefer string) (types.NetworkResource, error)
 	Release(context *networkContext, resItem ResourceItem) error
 	GarbageCollection(inUseResSet map[string]ResourceItem, expireResSet map[string]ResourceItem) error
+	Stat(context *networkContext, resID string) (types.NetworkResource, error)
 	tracing.ResourceMappingHandler
 }

@@ -846,7 +846,7 @@ func (m *eniIPResourceManager) Release(context *networkContext, resItem Resource
 
 func (m *eniIPResourceManager) GarbageCollection(inUseResSet map[string]ResourceItem, expireResSet map[string]ResourceItem) error {
 	for expireRes, expireItem := range expireResSet {
-		if err := m.pool.Stat(expireRes); err == nil {
+		if _, err := m.pool.Stat(expireRes); err == nil {
 			err = m.Release(nil, expireItem)
 			if err != nil {
 				return err
@@ -854,6 +854,10 @@ func (m *eniIPResourceManager) GarbageCollection(inUseResSet map[string]Resource
 		}
 	}
 	return nil
+}
+
+func (m *eniIPResourceManager) Stat(context *networkContext, resID string) (types.NetworkResource, error) {
+	return m.pool.Stat(resID)
 }
 
 func (m *eniIPResourceManager) GetResourceMapping() (tracing.ResourcePoolStats, error) {

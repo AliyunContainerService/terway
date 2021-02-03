@@ -124,7 +124,7 @@ func (m *eniResourceManager) Release(context *networkContext, resItem ResourceIt
 
 func (m *eniResourceManager) GarbageCollection(inUseResSet map[string]ResourceItem, expireResSet map[string]ResourceItem) error {
 	for expireRes, expireItem := range expireResSet {
-		if err := m.pool.Stat(expireRes); err == nil {
+		if _, err := m.pool.Stat(expireRes); err == nil {
 			err = m.Release(nil, expireItem)
 			if err != nil {
 				return err
@@ -132,6 +132,10 @@ func (m *eniResourceManager) GarbageCollection(inUseResSet map[string]ResourceIt
 		}
 	}
 	return nil
+}
+
+func (m *eniResourceManager) Stat(context *networkContext, resID string) (types.NetworkResource, error) {
+	return m.pool.Stat(resID)
 }
 
 func (m *eniResourceManager) GetResourceMapping() (tracing.ResourcePoolStats, error) {
