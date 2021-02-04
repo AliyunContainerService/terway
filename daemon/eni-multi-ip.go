@@ -293,7 +293,7 @@ func (f *eniIPFactory) Create(count int) ([]types.NetworkResource, error) {
 
 	// no ip has been created
 	if waiting == 0 {
-		return ipResult, errors.Errorf("error submit ip create request: %+v", err)
+		return ipResult, errors.Errorf("error submit ip create request: %v", err)
 	}
 
 	var ip *types.ENIIP
@@ -306,7 +306,7 @@ func (f *eniIPFactory) Create(count int) ([]types.NetworkResource, error) {
 		}
 	}
 	if len(ipResult) == 0 {
-		return ipResult, errors.Errorf("error allocate ip address: %+v", err)
+		return ipResult, errors.Errorf("error allocate ip address: %v", err)
 	}
 
 	return ipResult, nil
