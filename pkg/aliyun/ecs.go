@@ -385,7 +385,7 @@ func (e *ecsImpl) AssignNIPsForENI(eniID string, count int) ([]net.IP, error) {
 		if innerErr != nil {
 			logrus.Warnf("Assign private ip address failed: %+v, retrying", innerErr)
 			if strings.Contains(innerErr.Error(), InvalidVSwitchIDIPNotEnough) {
-				return false, errors.Errorf("Assign private ip address failed: %+v", innerErr)
+				return false, errors.Errorf("Assign private ip address failed: %v", innerErr)
 			}
 			return false, nil
 		}
