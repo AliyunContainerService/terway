@@ -32,7 +32,7 @@ jobs:
       - run:
           name: validate go code
           command: |
-            golangci-lint run --disable-all --skip-dirs-use-default -E goconst -E gofmt -E ineffassign -E goimports -E golint -E misspell -E vet -E deadcode
+            golangci-lint run --timeout 120s --disable-all --skip-dirs-use-default -E goconst -E gofmt -E ineffassign -E goimports -E golint -E misspell -E vet -E deadcode
       - run:
           name: use ShellCheck (https://github.com/koalaman/shellcheck) to check the validateness of shell scripts
           command: |
@@ -71,7 +71,7 @@ jobs:
       - run:
           name: golangci-lint
           command: |
-            golangci-lint run --skip-dirs-use-default -v
+            golangci-lint run --timeout 120s --skip-dirs-use-default -v
 
 workflows:
   ci:
