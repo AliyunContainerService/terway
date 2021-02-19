@@ -716,33 +716,9 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 							resRelate); err != nil {
 							log.Warnf("error store pod info to resource db")
 						}
+						podExist = true
 					} else {
 						relateExpireList = append(relateExpireList, podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name))
-
-						// delete resource first
-						func() {
-							if networkService.daemonMode != daemonModeENIMultiIP {
-								return
-							}
-							// try clean ip rules
-							if resRelate.PodInfo.PodIP == "" {
-								return
-							}
-							_, addr, err := net.ParseCIDR(fmt.Sprintf("%s/32", resRelate.PodInfo.PodIP))
-							if err != nil {
-								log.Errorf("failed parse ip %s", resRelate.PodInfo.PodIP)
-								return
-							}
-							// try clean all
-							err = link.DeleteIPRulesByIP(addr)
-							if err != nil {
-								log.Errorf("failed release ip rules %v", err)
-							}
-							err = link.DeleteRouteByIP(addr)
-							if err != nil {
-								log.Errorf("failed delete route %v", err)
-							}
-						}()
 					}
 				}
 				for _, res := range resRelate.Resources {
@@ -765,7 +741,6 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 					}
 				}
 			}
-
 			gcDone := true
 			for mgrType := range inUseSet {
 				mgr, ok := networkService.mgrForResource[mgrType]
@@ -779,6 +754,36 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 				}
 			}
 			if gcDone {
+				func() {
+					resMap, ok := expireSet[types.ResourceTypeENIIP]
+					if !ok {
+						return
+					}
+					for resID := range resMap {
+						// try clean ip rules
+						list := strings.SplitAfterN(resID, ".", 2)
+						if len(list) <= 1 {
+							log.Debugf("skip gc res id %s", resID)
+							continue
+						}
+						log.Debugf("checking ip %s", list[1])
+						_, addr, err := net.ParseCIDR(fmt.Sprintf("%s/32", list[1]))
+						if err != nil {
+							log.Errorf("failed parse ip %s", list[1])
+							return
+						}
+						// try clean all
+						err = link.DeleteIPRulesByIP(addr)
+						if err != nil {
+							log.Errorf("failed release ip rules %v", err)
+						}
+						err = link.DeleteRouteByIP(addr)
+						if err != nil {
+							log.Errorf("failed delete route %v", err)
+						}
+					}
+				}()
+
 				for _, relate := range relateExpireList {
 					err = networkService.resourceDB.Delete(relate)
 					if err != nil {
