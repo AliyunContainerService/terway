@@ -1,4 +1,4 @@
-From ac9871aa25545bf8c0214d8330ac57bc3d959ab9 Mon Sep 17 00:00:00 2001
+From dabea256f753132f9d71a9b829a91cccb88fa0bf Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Thu, 18 Feb 2021 10:56:28 +0800
 Subject: [PATCH] period gc cilium identity
@@ -64,7 +64,7 @@ index 785e2e9fb..37fafca95 100644
  	// datapath.NodeAddressing is used consistently across the code base.
 diff --git a/daemon/cmd/gc.go b/daemon/cmd/gc.go
 new file mode 100644
-index 000000000..9d851f512
+index 000000000..a86d3f439
 --- /dev/null
 +++ b/daemon/cmd/gc.go
 @@ -0,0 +1,156 @@
@@ -159,12 +159,12 @@ index 000000000..9d851f512
 +	identityHeartbeat := identity.NewIdentityHeartbeatStore(2 * c.GCInterval)
 +
 +	wait.JitterUntil(func() {
-+		identities, err := c.CiliumClient.CiliumV2().CiliumIdentities().List(context.TODO(), v1.ListOptions{})
++		identities, err := c.CiliumClient.CiliumV2().CiliumIdentities().List(context.TODO(), v1.ListOptions{ResourceVersion: "0", TimeoutSeconds: func(t int64) *int64 { return &t }(60)})
 +		if err != nil {
 +			logrus.WithError(err).Error("Unable to list cilium identities")
 +			return
 +		}
-+		eps, err := c.CiliumClient.CiliumV2().CiliumEndpoints("").List(context.TODO(), v1.ListOptions{})
++		eps, err := c.CiliumClient.CiliumV2().CiliumEndpoints("").List(context.TODO(), v1.ListOptions{ResourceVersion: "0", TimeoutSeconds: func(t int64) *int64 { return &t }(60)})
 +		if err != nil {
 +			logrus.WithError(err).Error("Unable to list cilium endpoints")
 +			return
