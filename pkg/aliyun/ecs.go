@@ -757,13 +757,15 @@ func (e *ecsImpl) CheckEniSecurityGroup(sg []string) error {
 	var err error
 	instanceID, err := GetLocalInstanceID()
 	if err != nil {
-		return err
+		logrus.WithField("instance", instanceID).Warn(err)
+		return nil
 	}
 
 	// get all attached eni id (only Secondary eni)
 	eniList, err := e.openapiInfoGetter.GetAttachedENIs(instanceID, false)
 	if err != nil {
-		return err
+		logrus.WithField("instance", instanceID).Warn(err)
+		return nil
 	}
 	sgSet := sets.NewString(sg...)
 
@@ -773,9 +775,10 @@ func (e *ecsImpl) CheckEniSecurityGroup(sg []string) error {
 		if sgSet.Intersection(eniSgSet).Len() > 0 {
 			continue
 		}
-		err := fmt.Errorf("found eni %s security group [%s] mismatch witch ecs security group [%s]", eni.ID,
+		err := fmt.Errorf("found eni %s security group [%s] mismatch witch ecs security group [%s]."+
+			"If you can confirm config is correct, you can ignore this", eni.ID,
 			strings.Join(eni.SecurityGroupIDs, ","), strings.Join(sg, ","))
-		logrus.Warn(err)
+		logrus.WithField("instance", instanceID).Warn(err)
 
 		errs = append(errs, err)
 	}
