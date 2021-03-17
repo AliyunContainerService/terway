@@ -646,16 +646,14 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 }
 
 func (f *eniIPFactory) GetResource() (map[string]types.FactoryResIf, error) {
-	// Get ENIs from Aliyun API
-	enis, err := f.eniFactory.ecs.GetAttachedENIs(f.eniFactory.instanceID, false)
+	macs, err := f.eniFactory.ecs.GetSecondaryENIMACs()
 	if err != nil {
 		return nil, err
 	}
-
-	mapping := make(map[string]types.FactoryResIf, len(enis))
-	for _, eni := range enis {
-		// get secondary ips from one eni
-		ips, err := f.eniFactory.ecs.GetENIIPs(eni.ID)
+	mapping := make(map[string]types.FactoryResIf, len(macs))
+	for _, mac := range macs {
+		// get secondary ips from one mac
+		ips, err := f.eniFactory.ecs.GetPrivateIPv4ByMAC(mac)
 		if err != nil {
 			if goerr.Is(err, aliyun.ErrNotFound) {
 				continue
@@ -665,9 +663,10 @@ func (f *eniIPFactory) GetResource() (map[string]types.FactoryResIf, error) {
 
 		for _, ip := range ips {
 			eniIP := types.ENIIP{
-				Eni:        eni,
-				SecAddress: ip,
-				PrimaryIP:  eni.Address.IP,
+				Eni: &types.ENI{
+					MAC: mac,
+				},
+				SecAddress: net.ParseIP(ip),
 			}
 
 			mapping[eniIP.GetResourceID()] = &types.FactoryRes{

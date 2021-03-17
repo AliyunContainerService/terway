@@ -41,6 +41,14 @@ var (
 		Jitter:   0.5,
 		Steps:    8,
 	}
+
+	// ecsBackOff
+	ecsBackOff = wait.Backoff{
+		Duration: 30 * time.Second,
+		Factor:   1.1,
+		Jitter:   2,
+		Steps:    8,
+	}
 )
 
 func generateEniName() string {

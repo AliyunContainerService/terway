@@ -32,6 +32,8 @@ const (
 type ECS interface {
 	AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int, eniTags map[string]string) (*types.ENI, error)
 	GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error)
+	GetSecondaryENIMACs() ([]string, error)
+	GetPrivateIPv4ByMAC(mac string) ([]string, error)
 	GetENIByID(instanceID, eniID string) (*types.ENI, error)
 	GetENIByMac(instanceID, mac string) (*types.ENI, error)
 	FreeENI(eniID string, instanceID string) error
@@ -62,6 +64,11 @@ type ecsImpl struct {
 	openapiInfoGetter ENIInfoGetter
 	region            common.Region
 	vpcID             string
+
+	// mutex to protect obj below
+	sync.Mutex
+	eniCap   int
+	eniIPCap int
 }
 
 // NewECS return new ECS implement object
@@ -349,6 +356,14 @@ func (e *ecsImpl) GetAttachedENIs(instanceID string, containsMainENI bool) ([]*t
 	return enis, nil
 }
 
+func (e *ecsImpl) GetSecondaryENIMACs() ([]string, error) {
+	return e.eniInfoGetter.GetSecondaryENIMACs()
+}
+
+func (e *ecsImpl) GetPrivateIPv4ByMAC(mac string) ([]string, error) {
+	return e.eniInfoGetter.GetPrivateIPv4ByMAC(mac)
+}
+
 func (e *ecsImpl) FreeENI(eniID, instanceID string) error {
 	return e.destroyInterface(eniID, instanceID, true)
 }
@@ -489,10 +504,15 @@ func (e *ecsImpl) UnAssignIPsForENI(eniID string, ips []net.IP) error {
 }
 
 func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
-	eniCap := 0
+	e.Lock()
+	eniCap := e.eniCap
+	e.Unlock()
+	if eniCap != 0 {
+		return eniCap, nil
+	}
 	var innerErr error
 	err := wait.ExponentialBackoff(
-		eniStateBackoff,
+		ecsBackOff,
 		func() (done bool, err error) {
 			var insType *ecs.InstanceAttributesType
 			insType, innerErr = e.GetInstanceAttributesType(instanceID)
@@ -537,7 +557,9 @@ func (e *ecsImpl) GetInstanceMaxENI(instanceID string) (int, error) {
 			}
 			return true, nil
 		})
-
+	e.Lock()
+	e.eniCap = eniCap
+	e.Unlock()
 	return eniCap, errors.Wrapf(err, "error get instance max eni: %v, %v", instanceID, innerErr)
 }
 
@@ -559,10 +581,15 @@ func (e *ecsImpl) GetInstanceMaxPrivateIP(instanceID string) (int, error) {
 
 func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 	// fixme: the eniid must bind on specified instanceID
-	eniIPCap := 0
+	e.Lock()
+	eniIPCap := e.eniIPCap
+	e.Unlock()
+	if eniIPCap != 0 {
+		return eniIPCap, nil
+	}
 	var innerErr error
 	err := wait.ExponentialBackoff(
-		eniStateBackoff,
+		ecsBackOff,
 		func() (done bool, err error) {
 			var insType *ecs.InstanceAttributesType
 			insType, innerErr = e.GetInstanceAttributesType(instanceID)
@@ -601,7 +628,9 @@ func (e *ecsImpl) GetENIMaxIP(instanceID string, eniID string) (int, error) {
 			}
 			return true, nil
 		})
-
+	e.Lock()
+	e.eniIPCap = eniIPCap
+	e.Unlock()
 	return eniIPCap, errors.Wrapf(err, "error get instance max eni ip: %v, %v", instanceID, innerErr)
 }
 

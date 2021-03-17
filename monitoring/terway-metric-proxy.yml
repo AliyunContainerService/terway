@@ -40,6 +40,9 @@ spec:
         app: terway-metric-proxy
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "15432"
     spec:
       nodeSelector:
         beta.kubernetes.io/arch: amd64

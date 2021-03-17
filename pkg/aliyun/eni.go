@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/link"
+	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/types"
 
 	"github.com/denverdino/aliyungo/common"
@@ -23,6 +25,8 @@ type ENIInfoGetter interface {
 	GetENIConfigByID(eniID string) (*types.ENI, error)
 	GetENIPrivateAddresses(eniID string) ([]net.IP, error)
 	GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error)
+	GetSecondaryENIMACs() ([]string, error)
+	GetPrivateIPv4ByMAC(mac string) ([]string, error)
 }
 
 type eniMetadata struct {
@@ -172,6 +176,39 @@ func (e *eniMetadata) GetAttachedENIs(instanceID string, containsMainENI bool) (
 	return enis, nil
 }
 
+// GetAttachedMACs return secondary ENI macs
+func (e *eniMetadata) GetSecondaryENIMACs() ([]string, error) {
+	var result []string
+	mainENIMac, err := metadataValue(metadataBase + mainEniPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error get main eni form metadata")
+	}
+	macs, err := e.getAttachMACList()
+	if err != nil {
+		return nil, err
+	}
+	for _, mac := range macs {
+		if mac == mainENIMac {
+			continue
+		}
+		result = append(result, mac)
+	}
+	return result, nil
+}
+
+func (e *eniMetadata) GetPrivateIPv4ByMAC(mac string) ([]string, error) {
+	addressStrList := &[]string{}
+	ipsStr, err := metadataValue(fmt.Sprintf(metadataBase+eniPrivateIPs, mac))
+	if err != nil {
+		return nil, errors.Wrapf(err, "error get private ips from metadata")
+	}
+	err = json.Unmarshal([]byte(ipsStr), addressStrList)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error get eni private address for eni: %s from metadata", mac)
+	}
+	return *addressStrList, nil
+}
+
 type eniOpenAPI struct {
 	clientSet *ClientMgr
 	region    common.Region
@@ -184,7 +221,9 @@ func (e *eniOpenAPI) GetAttachedENIs(instanceID string, containsMainENI bool) ([
 		InstanceId: instanceID,
 		PageSize:   maxSinglePageSize,
 	}
+	start := time.Now()
 	resp, err := e.clientSet.Ecs().DescribeNetworkInterfaces(describeNetworkInterfacesArgs)
+	metric.OpenAPILatency.WithLabelValues("DescribeNetworkInterfaces", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		if ErrStatusCodeAssert(http.StatusNotFound, err) {
 			return nil, ErrNotFound
@@ -212,7 +251,9 @@ func (e *eniOpenAPI) GetENIPrivateAddresses(eniID string) ([]net.IP, error) {
 		RegionId:           e.region,
 		NetworkInterfaceId: []string{eniID},
 	}
+	start := time.Now()
 	resp, err := e.clientSet.Ecs().DescribeNetworkInterfaces(describeNetworkInterfacesArgs)
+	metric.OpenAPILatency.WithLabelValues("DescribeNetworkInterfaces", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		if ErrStatusCodeAssert(http.StatusNotFound, err) {
 			return nil, ErrNotFound
@@ -241,6 +282,15 @@ func (*eniOpenAPI) GetENIConfigByMac(mac string) (*types.ENI, error) {
 
 func (*eniOpenAPI) GetENIConfigByID(eniID string) (*types.ENI, error) {
 	panic("implement me")
+}
+
+// GetAttachedMACs return secondary ENI macs
+func (e *eniOpenAPI) GetSecondaryENIMACs() ([]string, error) {
+	return nil, fmt.Errorf("unimpled")
+}
+
+func (e *eniOpenAPI) GetPrivateIPv4ByMAC(mac string) ([]string, error) {
+	return nil, fmt.Errorf("unimpled")
 }
 
 var ecsEniMatix = map[string]int{
