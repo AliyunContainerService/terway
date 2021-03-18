@@ -216,17 +216,21 @@ func (p *simpleObjectPool) startCheckIdleTicker() {
 	go wait.JitterUntil(func() {
 		tick <- struct{}{}
 	}, CheckIdleInterval, 0.2, true, wait.NeverStop)
-
+	reconcileTick := make(chan struct{})
+	go wait.JitterUntil(func() {
+		reconcileTick <- struct{}{}
+	}, time.Hour, 0.2, true, wait.NeverStop)
 	for {
 		select {
 		case <-tick:
 			p.checkResSync() // make sure pool is synced
 			p.checkIdle()
 			p.checkInsufficient()
-			p.factory.Reconcile()
 		case <-p.notifyCh:
 			p.checkIdle()
 			p.checkInsufficient()
+		case <-reconcileTick:
+			p.factory.Reconcile()
 		}
 	}
 }
