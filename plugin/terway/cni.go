@@ -596,6 +596,9 @@ func cmdDel(args *skel.CmdArgs) error {
 func cmdCheck(args *skel.CmdArgs) error {
 	_, cniNetns, conf, k8sConfig, err := parseCmdArgs(args)
 	if err != nil {
+		if _, ok := err.(ns.NSPathNotExistErr); ok {
+			return nil
+		}
 		return err
 	}
 	defer cniNetns.Close()
