@@ -5,6 +5,17 @@ import (
 	"net"
 )
 
+type InternetChargeType string
+
+const (
+	PayByBandwidth = InternetChargeType("PayByBandwidth")
+	PayByTraffic   = InternetChargeType("PayByTraffic")
+)
+
+type EIPInstanceType string
+
+const EIPInstanceTypeNetworkInterface EIPInstanceType = "NetworkInterface"
+
 // network resource type
 const (
 	ResourceTypeVeth  = "veth"

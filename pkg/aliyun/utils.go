@@ -13,8 +13,10 @@ const (
 	eniNamePrefix  = "eni-cni-"
 	eniDescription = "interface create by terway"
 
-	eniStatusInUse     = "InUse"
-	eniStatusAvailable = "Available"
+	eniStatusInUse = "InUse"
+
+	eipStatusInUse     = "InUse"
+	eipStatusAvailable = "Available"
 )
 
 var (
@@ -39,14 +41,6 @@ var (
 		Duration: time.Second * 4,
 		Factor:   2,
 		Jitter:   0.5,
-		Steps:    8,
-	}
-
-	// ecsBackOff
-	ecsBackOff = wait.Backoff{
-		Duration: 30 * time.Second,
-		Factor:   1.1,
-		Jitter:   2,
 		Steps:    8,
 	}
 )

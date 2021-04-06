@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	aliyunErrors "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
@@ -223,7 +225,7 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 				if eni.MAC == result.Eni.MAC {
 					eni.pending--
 					// if an error message with InvalidVSwitchIDIPNotEnough returned, then mark the ENI as IP allocation inhibited.
-					if strings.Contains(result.err.Error(), aliyun.InvalidVSwitchIDIPNotEnough) {
+					if strings.Contains(result.err.Error(), aliyunErrors.InvalidVSwitchIDIPNotEnough) {
 						eni.ipAllocInhibitExpireAt = time.Now().Add(eniIPAllocInhibitTimeout)
 						logrus.Infof("eni's associated vswitch %s has no available IP, set eni ipAllocInhibitExpireAt = %s",
 							eni.VSwitch, eni.ipAllocInhibitExpireAt.Format(timeFormat))
@@ -407,7 +409,7 @@ func (f *eniIPFactory) Get(res types.NetworkResource) (types.NetworkResource, er
 			return res, nil
 		}
 	}
-	return nil, aliyun.ErrNotFound
+	return nil, aliyunErrors.ErrNotFound
 }
 
 func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
@@ -655,7 +657,7 @@ func (f *eniIPFactory) GetResource() (map[string]types.FactoryResIf, error) {
 		// get secondary ips from one mac
 		ips, err := f.eniFactory.ecs.GetPrivateIPv4ByMAC(mac)
 		if err != nil {
-			if goerr.Is(err, aliyun.ErrNotFound) {
+			if goerr.Is(err, aliyunErrors.ErrNotFound) {
 				continue
 			}
 			return nil, err
@@ -666,7 +668,7 @@ func (f *eniIPFactory) GetResource() (map[string]types.FactoryResIf, error) {
 				Eni: &types.ENI{
 					MAC: mac,
 				},
-				SecAddress: net.ParseIP(ip),
+				SecAddress: ip,
 			}
 
 			mapping[eniIP.GetResourceID()] = &types.FactoryRes{
@@ -692,7 +694,7 @@ type eniIPResourceManager struct {
 }
 
 func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []resourceManagerInitItem) (ResourceManager, error) {
-	primaryIP, err := aliyun.GetPrivateIPV4()
+	primaryIP, err := metadata.GetPrivateIPV4()
 	if err != nil {
 		return nil, errors.Wrapf(err, "get primary ip error")
 	}
@@ -711,18 +713,13 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 		eniOperChan:  make(chan struct{}, maxEniOperating),
 		ipResultChan: make(chan *ENIIP, maxIPBacklog),
 	}
-
-	maxEni, err := ecs.GetInstanceMaxENI(poolConfig.InstanceID)
-	if err != nil {
+	limit, ok := aliyun.GetLimit(aliyun.GetInstanceMeta().InstanceType)
+	if !ok {
 		return nil, errors.Wrapf(err, "error get max eni for eniip factory")
 	}
-	maxEni = maxEni - 1
+	maxEni := limit.Adapters - 1
 
-	ipPerENI, err := ecs.GetENIMaxIP(poolConfig.InstanceID, "")
-	if err != nil {
-		return nil, errors.Wrapf(err, "error get max ip per eni for eniip factory")
-	}
-
+	ipPerENI := limit.IPv4PerAdapter
 	factory.eniMaxIP = ipPerENI
 
 	if poolConfig.MaxENI != 0 && poolConfig.MaxENI < maxEni {

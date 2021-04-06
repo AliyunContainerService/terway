@@ -46,11 +46,11 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 
 	_ = tracing.Register(tracing.ResourceTypeFactory, factoryNameENI, factory)
 
-	capacity, err := ecs.GetInstanceMaxENI(poolConfig.InstanceID)
-	if err != nil {
-		return nil, errors.Wrapf(err, "error get ENI max capacity for ENI factory")
+	limit, ok := aliyun.GetLimit(aliyun.GetInstanceMeta().InstanceType)
+	if !ok {
+		return nil, errors.Wrapf(err, "error get max eni for eni factory")
 	}
-
+	capacity := limit.Adapters
 	capacity = int(float64(capacity)*poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
 
 	if poolConfig.MaxENI != 0 && poolConfig.MaxENI < capacity {

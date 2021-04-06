@@ -1,6 +1,7 @@
-package aliyun
+package metadata
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -8,8 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/metric"
-	"github.com/denverdino/aliyungo/common"
 )
 
 // Reference https://help.aliyun.com/knowledge_detail/49122.html
@@ -32,7 +34,7 @@ const (
 	privateIPV4Path  = "private-ipv4"
 )
 
-func metadataValue(url string) (string, error) {
+func getValue(url string) (string, error) {
 	if !strings.HasPrefix(url, metadataBase) {
 		url = metadataBase + url
 	}
@@ -62,7 +64,7 @@ func metadataValue(url string) (string, error) {
 	return trimResult, nil
 }
 
-func metadataArray(url string) ([]string, error) {
+func getArray(url string) ([]string, error) {
 	if !strings.HasPrefix(url, metadataBase) {
 		url = metadataBase + url
 	}
@@ -81,7 +83,7 @@ func metadataArray(url string) ([]string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, ErrNotFound
+		return nil, errors.ErrNotFound
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return []string{}, fmt.Errorf("error get url: %s from metaserver, code: %v", url, resp.StatusCode)
@@ -100,38 +102,38 @@ func metadataArray(url string) ([]string, error) {
 
 // GetLocalInstanceID get instance id of this node
 func GetLocalInstanceID() (string, error) {
-	return metadataValue(instanceIDPath)
+	return getValue(instanceIDPath)
 }
 
 // GetInstanceType get instance type of this node
 func GetInstanceType() (string, error) {
-	return metadataValue(instanceTypePath)
+	return getValue(instanceTypePath)
 }
 
 // GetLocalRegion get region id of this node
-func GetLocalRegion() (common.Region, error) {
-	region, err := metadataValue(regionIDPath)
-	return common.Region(region), err
+func GetLocalRegion() (string, error) {
+	region, err := getValue(regionIDPath)
+	return region, err
 }
 
 // GetLocalZone get zone of this node
 func GetLocalZone() (string, error) {
-	return metadataValue(zoneIDPath)
+	return getValue(zoneIDPath)
 }
 
 // GetLocalVswitch get vswitch id of this node
 func GetLocalVswitch() (string, error) {
-	return metadataValue(vswitchIDPath)
+	return getValue(vswitchIDPath)
 }
 
 // GetLocalVPC get vpc id of this node
 func GetLocalVPC() (string, error) {
-	return metadataValue(vpcIDPath)
+	return getValue(vpcIDPath)
 }
 
 // GetPrivateIPV4 get private ip for master nic
 func GetPrivateIPV4() (net.IP, error) {
-	value, err := metadataValue(privateIPV4Path)
+	value, err := getValue(privateIPV4Path)
 	if err != nil {
 		return nil, err
 	}
@@ -140,4 +142,69 @@ func GetPrivateIPV4() (net.IP, error) {
 		return nil, fmt.Errorf("invalid ip format: %s", value)
 	}
 	return ip, nil
+}
+
+// GetENIID by mac
+func GetENIID(mac string) (string, error) {
+	return getValue(fmt.Sprintf(metadataBase+eniIDPath, mac))
+}
+
+// GetENIPrimaryIP by mac
+func GetENIPrimaryIP(mac string) (net.IP, error) {
+	addr, err := getValue(fmt.Sprintf(metadataBase+eniAddrPath, mac))
+	if err != nil {
+		return nil, err
+	}
+	return ip.ToIP(addr)
+}
+
+// GetENIPrivateIPs by mac
+func GetENIPrivateIPs(mac string) ([]net.IP, error) {
+	addressStrList := &[]string{}
+	ipsStr, err := getValue(fmt.Sprintf(metadataBase+eniPrivateIPs, mac))
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal([]byte(ipsStr), addressStrList)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ip, %s, %w", ipsStr, err)
+	}
+	var ips []net.IP
+	for _, ipStr := range *addressStrList {
+		i, err := ip.ToIP(ipStr)
+		if err != nil {
+			return nil, err
+		}
+		ips = append(ips, i)
+	}
+	return ips, nil
+}
+
+// GetENINetMask by mac
+func GetENINetMask(mac string) (string, error) {
+	return getValue(fmt.Sprintf(metadataBase+eniNetmaskPath, mac))
+}
+
+// GetENIGateway return gateway ip by mac
+func GetENIGateway(mac string) (net.IP, error) {
+	addr, err := getValue(fmt.Sprintf(metadataBase+eniGatewayPath, mac))
+	if err != nil {
+		return nil, err
+	}
+	return ip.ToIP(addr)
+}
+
+// GetENIVSwitch by mac
+func GetENIVSwitch(mac string) (string, error) {
+	return getValue(fmt.Sprintf(metadataBase+eniVSwitchPath, mac))
+}
+
+// GetENIsMAC get attached ENIs
+func GetENIsMAC() ([]string, error) {
+	return getArray(metadataBase + enisPath)
+}
+
+// GetPrimaryENIMAC get the main ENI's mac
+func GetPrimaryENIMAC() (string, error) {
+	return getValue(metadataBase + mainEniPath)
 }

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	errors2 "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/types"
@@ -501,7 +501,7 @@ func (p *simpleObjectPool) ReleaseWithReservation(resID string, reservation time
 
 	// check metadata
 	_, err := p.factory.Get(res.res)
-	if errors.Is(err, aliyun.ErrNotFound) {
+	if errors.Is(err, errors2.ErrNotFound) {
 		log.Warnf("release %s, resource not exist in metadata, ignored", resID)
 		if err = p.factory.Dispose(res.res); err == nil {
 			p.tokenCh <- struct{}{}

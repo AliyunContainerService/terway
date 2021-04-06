@@ -5,18 +5,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-
-	"github.com/AliyunContainerService/terway/pkg/tracing"
-
-	"github.com/AliyunContainerService/terway/pkg/metric"
-	"github.com/AliyunContainerService/terway/rpc"
-	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	log "github.com/sirupsen/logrus"
-	"google.golang.org/grpc"
-
-	//import pprof for diagnose
-	_ "net/http/pprof"
+	_ "net/http/pprof" //import pprof for diagnose
 	"os"
 	"os/signal"
 	"path"
@@ -24,6 +13,15 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+
+	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
+	"github.com/AliyunContainerService/terway/rpc"
+
+	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 )
 
 // stackTriger print golang stack trace to log

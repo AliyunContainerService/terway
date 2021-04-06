@@ -21,8 +21,8 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
-	"github.com/containernetworking/cni/libcni"
 
+	"github.com/containernetworking/cni/libcni"
 	containertypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -1083,16 +1083,13 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, err
 	}
 
-	regionID, err := aliyun.GetLocalRegion()
-	if err != nil {
-		return nil, errors.Wrapf(err, "error get region-id")
-	}
+	ins := aliyun.GetInstanceMeta()
 
 	ignoreLinkNotExist := false
 	if daemonMode == daemonModeENIOnly {
 		ignoreLinkNotExist = true
 	}
-	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, regionID, ignoreLinkNotExist)
+	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, ignoreLinkNotExist, ins)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get aliyun client")
 	}
@@ -1305,11 +1302,8 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 		SecurityGroup:          cfg.SecurityGroup,
 		VSwitchSelectionPolicy: cfg.VSwitchSelectionPolicy,
 	}
-
-	zone, err := aliyun.GetLocalZone()
-	if err != nil {
-		return nil, err
-	}
+	ins := aliyun.GetInstanceMeta()
+	zone := ins.ZoneID
 	if cfg.VSwitches != nil {
 		zoneVswitchs, ok := cfg.VSwitches[zone]
 		if ok && len(zoneVswitchs) > 0 {
@@ -1317,25 +1311,11 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 		}
 	}
 	if len(poolConfig.VSwitch) == 0 {
-		vSwitch, err := aliyun.GetLocalVswitch()
-		if err != nil {
-			return nil, err
-		}
-		poolConfig.VSwitch = []string{vSwitch}
+		poolConfig.VSwitch = []string{ins.VSwitchID}
 	}
 	poolConfig.ENITags = cfg.ENITags
-
-	if poolConfig.Region, err = aliyun.GetLocalRegion(); err != nil {
-		return nil, err
-	}
-
-	if poolConfig.VPC, err = aliyun.GetLocalVPC(); err != nil {
-		return nil, err
-	}
-
-	if poolConfig.InstanceID, err = aliyun.GetLocalInstanceID(); err != nil {
-		return nil, err
-	}
+	poolConfig.VPC = ins.VPCID
+	poolConfig.InstanceID = ins.InstanceID
 
 	return poolConfig, nil
 }
