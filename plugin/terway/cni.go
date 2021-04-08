@@ -795,7 +795,7 @@ func ParseAddr(ip string, subnet string) (*net.IPNet, error) {
 func ParesIP(ip string) (net.IP, error) {
 	i := net.ParseIP(ip)
 	if i == nil {
-		return nil, fmt.Errorf("parseIP failed [%s]", i)
+		return nil, fmt.Errorf("parseIP failed [%s]", ip)
 	}
 	return i, nil
 }
