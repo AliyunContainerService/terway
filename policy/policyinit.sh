@@ -7,8 +7,14 @@ if [ "$DATASTORE_TYPE" = "kubernetes" ]; then
     fi
 fi
 
+terway_config_val() {
+  config_key="$1"
+  if [ ! -f /etc/cni/net.d/10-terway.conflist ]; then return; fi
+  jq -r ".plugins[] | select(.type == \"terway\") | .${config_key}" /etc/cni/net.d/10-terway.conflist | sed 's/^null$//'
+}
+
 # kernel version has already checked in initContainer, so just determine whether plugin chaining exists
-if [ -f "/etc/cni/net.d/10-terway.conflist" ] && grep -i ipvlan /etc/cni/net.d/10-terway.conflist; then
+if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = "ipvlan" ]; then
   # check kernel version & enable cilium
   KERNEL_MAJOR_VERSION=$(uname -r | awk -F . '{print $1}')
   KERNEL_MINOR_VERSION=$(uname -r | awk -F . '{print $2}')
@@ -21,11 +27,25 @@ if [ -f "/etc/cni/net.d/10-terway.conflist" ] && grep -i ipvlan /etc/cni/net.d/1
       ENABLE_POLICY="never"
     fi
 
+    extra_args=""
+    if [ "$(terway_config_val 'cilium_enable_hubble' | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+      cilium_hubble_metrics=$(terway_config_val 'cilium_hubble_metrics')
+      cilium_hubble_metrics=${cilium_hubble_metrics:="drop"}
+      cilium_hubble_listen_address=$(terway_config_val 'cilium_hubble_listen_address')
+      cilium_hubble_listen_address=${cilium_hubble_listen_address:=":4244"}
+      cilium_hubble_metrics_server=$(terway_config_val 'cilium_hubble_metrics_server')
+      cilium_hubble_metrics_server=${cilium_hubble_metrics_server:=":9091"}
+      extra_args="${extra_args} --enable-hubble=true --hubble-metrics=${cilium_hubble_metrics}"
+      extra_args="${extra_args} --hubble-listen-address=${cilium_hubble_listen_address} --hubble-metrics-server=${cilium_hubble_metrics_server}"
+      echo "turning up hubble, passing args \"${extra_args}\""
+    fi
+
     echo "using cilium as network routing & policy"
+    # shellcheck disable=SC2086
     exec cilium-agent --tunnel=disabled --masquerade=false --enable-ipv6=false --enable-policy=$ENABLE_POLICY \
          --agent-health-port=9099 --disable-envoy-version-check=true \
          --enable-local-node-route=false --ipv4-range=169.254.10.0/30 --enable-endpoint-health-checking=false \
-         --ipam=cluster-pool --bpf-map-dynamic-size-ratio=0.0025
+         --ipam=cluster-pool --bpf-map-dynamic-size-ratio=0.0025 ${extra_args}
   fi
 fi
 
