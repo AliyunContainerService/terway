@@ -1,7 +1,5 @@
 package types
 
-import "github.com/denverdino/aliyungo/common"
-
 // Configure configuration of terway daemon
 type Configure struct {
 	Version                string              `yaml:"version" json:"version"`
@@ -36,7 +34,6 @@ type PoolConfig struct {
 	Zone                   string
 	VSwitch                []string
 	ENITags                map[string]string
-	Region                 common.Region
 	SecurityGroup          string
 	InstanceID             string
 	AccessID               string

@@ -54,8 +54,12 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 	if eniID == "" && eniIP == nil {
 		return nil, fmt.Errorf("pod network mode not support EIP associate")
 	}
-
-	eipInfo, err := e.ecs.AllocateEipAddress(context.pod.EipInfo.PodEipBandWidth, context.pod.EipInfo.PodEipChargeType, context.pod.EipInfo.PodEipID, eniID, eniIP, e.allowEipRob)
+	eipID := context.pod.EipInfo.PodEipID
+	if eipID == "" {
+		eipID = prefer
+	}
+	eipInfo, err := e.ecs.AllocateEipAddress(context.pod.EipInfo.PodEipBandWidth, context.pod.EipInfo.PodEipChargeType,
+		eipID, eniID, eniIP, e.allowEipRob)
 	if err != nil {
 		return nil, errors.Errorf("error allocate eip info: %v", err)
 	}

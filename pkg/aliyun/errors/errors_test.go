@@ -1,10 +1,10 @@
-package aliyun
+package errors
 
 import (
 	"errors"
 	"testing"
 
-	"github.com/denverdino/aliyungo/common"
+	apiErr "github.com/aliyun/alibaba-cloud-sdk-go/sdk/errors"
 )
 
 func TestErrAssert(t *testing.T) {
@@ -21,24 +21,14 @@ func TestErrAssert(t *testing.T) {
 			name: "common err",
 			args: args{
 				errCode: "err",
-				err: &common.Error{
-					ErrorResponse: common.ErrorResponse{
-						Code: "err",
-					},
-					StatusCode: 403,
-				},
+				err:     apiErr.NewServerError(403, "{\"Code\": \"err\"}", ""),
 			},
 			want: true,
 		}, {
 			name: "code not match",
 			args: args{
 				errCode: "errNotMatch",
-				err: &common.Error{
-					ErrorResponse: common.ErrorResponse{
-						Code: "err",
-					},
-					StatusCode: 403,
-				},
+				err:     apiErr.NewServerError(403, "{\"Code\": \"err\"}", ""),
 			},
 			want: false,
 		}, {

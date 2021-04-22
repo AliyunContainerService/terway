@@ -9,7 +9,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
-	"github.com/denverdino/aliyungo/common"
 )
 
 var (
@@ -32,27 +31,22 @@ func main() {
 	flag.Parse()
 	log.SetOutput(ioutil.Discard)
 	logrus.SetOutput(ioutil.Discard)
-	ecs, err := aliyun.NewECS(accessKeyID, accessKeySecret, credentialPath, common.Region(region), false)
-	if err != nil {
-		panic(err)
-	}
-
-	instanceType, err := aliyun.GetInstanceType()
+	_, err := aliyun.NewECS(accessKeyID, accessKeySecret, credentialPath, false, aliyun.GetInstanceMeta())
 	if err != nil {
 		panic(err)
 	}
 
 	if mode == "terway-eniip" {
-		maxPrivateIP, err := ecs.GetInstanceMaxPrivateIPByType(instanceType)
-		if err != nil {
+		limit, ok := aliyun.GetLimit(aliyun.GetInstanceMeta().InstanceType)
+		if !ok {
 			panic(err)
 		}
-		fmt.Println(maxPrivateIP)
+		fmt.Println(limit.IPv4PerAdapter * (limit.Adapters - 1))
 	} else if mode == "terway-eni" {
-		maxPrivateIP, err := ecs.GetInstanceMaxENIByType(instanceType)
-		if err != nil {
+		limit, ok := aliyun.GetLimit(aliyun.GetInstanceMeta().InstanceType)
+		if !ok {
 			panic(err)
 		}
-		fmt.Println(maxPrivateIP - 1)
+		fmt.Println(limit.Adapters - 1)
 	}
 }

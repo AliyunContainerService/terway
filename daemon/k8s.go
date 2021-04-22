@@ -15,8 +15,8 @@ import (
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
+	"github.com/AliyunContainerService/terway/types"
 
-	"github.com/denverdino/aliyungo/common"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
@@ -53,7 +53,7 @@ type podEipInfo struct {
 	PodEipID         string
 	PodEipIP         string
 	PodEipBandWidth  int
-	PodEipChargeType common.InternetChargeType
+	PodEipChargeType types.InternetChargeType
 }
 
 type podInfo struct {
@@ -385,12 +385,12 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 	if eipAnnotation, ok := podAnnotation[podWithEip]; ok && eipAnnotation == conditionTrue {
 		pi.EipInfo.PodEip = true
 		pi.EipInfo.PodEipBandWidth = 5
-		pi.EipInfo.PodEipChargeType = common.PayByTraffic
+		pi.EipInfo.PodEipChargeType = types.PayByTraffic
 	}
 	if eipAnnotation, ok := podAnnotation[eciWithEip]; ok && eipAnnotation == conditionTrue {
 		pi.EipInfo.PodEip = true
 		pi.EipInfo.PodEipBandWidth = 5
-		pi.EipInfo.PodEipChargeType = common.PayByTraffic
+		pi.EipInfo.PodEipChargeType = types.PayByTraffic
 	}
 
 	if eipAnnotation, ok := podAnnotation[podEipBandwidth]; ok {
@@ -403,7 +403,7 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 	}
 
 	if eipAnnotation, ok := podAnnotation[podEipChargeType]; ok {
-		pi.EipInfo.PodEipChargeType = common.InternetChargeType(eipAnnotation)
+		pi.EipInfo.PodEipChargeType = types.InternetChargeType(eipAnnotation)
 	}
 
 	if eipAnnotation, ok := podAnnotation[podEciEipInstanceID]; ok && eipAnnotation != "" {

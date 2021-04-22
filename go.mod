@@ -3,6 +3,7 @@ module github.com/AliyunContainerService/terway
 go 1.15
 
 require (
+	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1004
 	github.com/boltdb/bolt v1.3.1
 	github.com/containerd/containerd v1.4.3 // indirect
 	github.com/containernetworking/cni v0.8.0
@@ -14,7 +15,6 @@ require (
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/evanphx/json-patch v4.9.0+incompatible
 	github.com/gorilla/mux v1.8.0 // indirect
-	github.com/magiconair/properties v1.8.4 // indirect
 	github.com/moby/term v0.0.0-20201216013528-df9cb8a40635 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
