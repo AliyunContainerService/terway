@@ -983,6 +983,9 @@ func toResMapping(poolStats tracing.ResourcePoolStats, pods []interface{}) ([]*t
 	for _, pod := range pods {
 		p := pod.(PodResources)
 		for _, res := range p.Resources {
+			if res.Type == types.ResourceTypeEIP {
+				continue
+			}
 			old, ok := all[res.ID]
 			if !ok {
 				all[res.ID] = &tracing.PodMapping{
