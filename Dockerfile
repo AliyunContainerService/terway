@@ -1,4 +1,4 @@
-FROM golang:1.15 as builder
+FROM golang:1.16 as builder
 WORKDIR /go/src/github.com/AliyunContainerService/terway/
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build \

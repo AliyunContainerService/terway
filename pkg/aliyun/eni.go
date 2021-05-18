@@ -6,11 +6,9 @@ import (
 
 	errors2 "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
-	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/types"
 
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 const maxSinglePageSize = 100
@@ -18,79 +16,88 @@ const maxSinglePageSize = 100
 // ENIInfoGetter interface to get eni information
 type ENIInfoGetter interface {
 	GetENIConfigByMac(mac string) (*types.ENI, error)
-	GetENIConfigByID(eniID string) (*types.ENI, error)
-	GetENIPrivateAddresses(eniID string) ([]net.IP, error)
-	GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error)
+	GetENIPrivateAddressesByMAC(mac string) ([]net.IP, error)
+	GetENIPrivateIPv6AddressesByMAC(mac string) ([]net.IP, error)
+	GetAttachedENIs(containsMainENI bool) ([]*types.ENI, error)
 	GetSecondaryENIMACs() ([]string, error)
 }
 
-type eniMetadata struct {
+type ENIMetadata struct {
 	ignoreLinkNotExist bool
+	ipFamily           *types.IPFamily
 }
 
-func (e *eniMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
-	var (
-		eni types.ENI
-		err error
-	)
+func NewENIMetadata(ignoreLinkNotExist bool, ipFamily *types.IPFamily) *ENIMetadata {
+	return &ENIMetadata{
+		ignoreLinkNotExist: ignoreLinkNotExist,
+		ipFamily:           ipFamily,
+	}
+}
+
+func (e *ENIMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
+	eni := types.ENI{
+		MAC: mac,
+	}
+	var err error
 
 	eni.ID, err = metadata.GetENIID(mac)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get eni id from metaserver, mac: %s", mac)
+		return nil, fmt.Errorf("error get eni by id %s, %w", eni.ID, err)
 	}
-	eni.MAC = mac
 
 	ip, err := metadata.GetENIPrimaryIP(mac)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get eni address from metaserver, mac: %s", mac)
-	}
-	netmask, err := metadata.GetENINetMask(mac)
-	if err != nil {
-		return nil, errors.Wrapf(err, "error get eni netmask from metaserver, mac: %s", mac)
+		return nil, fmt.Errorf("error get eni primary ip by %s, %w", mac, err)
 	}
 
-	mask := net.ParseIP(netmask)
-	if mask == nil {
-		return nil, errors.Errorf("error parse eni mask: %s from metadata", netmask)
-	}
-	eni.Address = net.IPNet{
-		IP: ip,
-		// fixme: dual stack support
-		Mask: net.IPv4Mask(mask[12], mask[13], mask[14], mask[15]),
+	eni.PrimaryIP = types.IPSet{
+		IPv4: ip,
 	}
 	gw, err := metadata.GetENIGateway(mac)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get eni gateway from metaserver, mac: %s", mac)
+		return nil, fmt.Errorf("error get eni gateway by mac %s, %w", mac, err)
 	}
-	eni.Gateway = gw
 
-	vswitch, err := metadata.GetENIVSwitch(mac)
+	vSwitchCIDR, err := metadata.GetVSwitchCIDR(mac)
+	if err != nil {
+		return nil, fmt.Errorf("error get eni vSwitchCIDR from metaserver, mac: %s, %w", mac, err)
+	}
+
+	var v6gw net.IP
+	var vSwitchIPv6CIDR *net.IPNet
+	if e.ipFamily.IPv6 {
+		v6gw, err = metadata.GetENIV6Gateway(mac)
+		if err != nil {
+			return nil, fmt.Errorf("error get eni ipv6 gateway from metaserver, mac: %s, %w", mac, err)
+		}
+
+		vSwitchIPv6CIDR, err = metadata.GetVSwitchIPv6CIDR(mac)
+		if err != nil {
+			return nil, fmt.Errorf("error get eni vSwitchIPv6CIDR from metaserver, mac: %s, %w", mac, err)
+		}
+	}
+
+	eni.VSwitchCIDR = types.IPNetSet{
+		IPv4: vSwitchCIDR,
+		IPv6: vSwitchIPv6CIDR,
+	}
+
+	eni.GatewayIP = types.IPSet{
+		IPv4: gw,
+		IPv6: v6gw,
+	}
+
+	vswitch, err := metadata.GetENIVSwitchID(mac)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get eni vswitch from metaserver, mac: %s", mac)
 	}
 	eni.VSwitch = vswitch
 
-	eni.Name, err = link.GetDeviceName(mac)
-	if err != nil {
-		if !e.ignoreLinkNotExist {
-			return nil, errors.Wrapf(err, "error get device name for eni: %s", mac)
-		}
-		logrus.Warnf("error get device name for eni: %v", err)
-	}
-
-	eni.DeviceNumber, err = link.GetDeviceNumber(mac)
-	if err != nil {
-		if !e.ignoreLinkNotExist {
-			return nil, errors.Wrapf(err, "error get device number for eni: %s", mac)
-		}
-		logrus.Warnf("error get device number for eni: %s", mac)
-	}
-
 	return &eni, nil
 }
 
-func (e *eniMetadata) GetENIConfigByID(eniID string) (*types.ENI, error) {
-	macs, err := e.getAttachMACList()
+func (e *ENIMetadata) GetENIConfigByID(eniID string) (*types.ENI, error) {
+	macs, err := metadata.GetENIsMAC()
 	if err != nil {
 		return nil, err
 	}
@@ -106,30 +113,20 @@ func (e *eniMetadata) GetENIConfigByID(eniID string) (*types.ENI, error) {
 	return nil, errors.Wrapf(errors2.ErrNotFound, fmt.Sprintf("eni id: %s", eniID))
 }
 
-func (e *eniMetadata) GetENIPrivateAddresses(eniID string) ([]net.IP, error) {
-	var addressList []net.IP
-	eni, err := e.GetENIConfigByID(eniID)
-	if err != nil {
-		return addressList, err
-	}
-
-	return metadata.GetENIPrivateIPs(eni.MAC)
+func (e *ENIMetadata) GetENIPrivateAddressesByMAC(mac string) ([]net.IP, error) {
+	return metadata.GetENIPrivateIPs(mac)
 }
 
-func (e *eniMetadata) getAttachMACList() ([]string, error) {
-	macs, err := metadata.GetENIsMAC()
-	return macs, errors.Wrapf(err, "error get eni list from metadata")
+func (e *ENIMetadata) GetENIPrivateIPv6AddressesByMAC(mac string) ([]net.IP, error) {
+	return metadata.GetENIPrivateIPv6IPs(mac)
 }
 
-func (e *eniMetadata) GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error) {
+func (e *ENIMetadata) GetAttachedENIs(containsMainENI bool) ([]*types.ENI, error) {
 	var enis []*types.ENI
 
-	mainENIMac, err := metadata.GetPrimaryENIMAC()
-	if err != nil {
-		return enis, errors.Wrapf(err, "error get main eni form metadata")
-	}
+	mainENIMac := GetInstanceMeta().PrimaryMAC
 
-	macs, err := e.getAttachMACList()
+	macs, err := metadata.GetENIsMAC()
 	if err != nil {
 		return nil, err
 	}
@@ -149,13 +146,12 @@ func (e *eniMetadata) GetAttachedENIs(instanceID string, containsMainENI bool) (
 }
 
 // GetSecondaryENIMACs return secondary ENI macs
-func (e *eniMetadata) GetSecondaryENIMACs() ([]string, error) {
+func (e *ENIMetadata) GetSecondaryENIMACs() ([]string, error) {
 	var result []string
-	mainENIMac, err := metadata.GetPrimaryENIMAC()
-	if err != nil {
-		return nil, errors.Wrapf(err, "error get main eni form metadata")
-	}
-	macs, err := e.getAttachMACList()
+
+	mainENIMac := GetInstanceMeta().PrimaryMAC
+
+	macs, err := metadata.GetENIsMAC()
 	if err != nil {
 		return nil, err
 	}
@@ -166,30 +162,4 @@ func (e *eniMetadata) GetSecondaryENIMACs() ([]string, error) {
 		result = append(result, mac)
 	}
 	return result, nil
-}
-
-type eniOpenAPI struct {
-	clientSet *ClientMgr
-}
-
-// GetAttachedENIs GetAttachedENIs
-func (e *eniOpenAPI) GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error) {
-	return nil, fmt.Errorf("unimpled")
-}
-
-func (e *eniOpenAPI) GetENIPrivateAddresses(eniID string) ([]net.IP, error) {
-	return nil, fmt.Errorf("unimpled")
-}
-
-func (*eniOpenAPI) GetENIConfigByMac(mac string) (*types.ENI, error) {
-	panic("implement me")
-}
-
-func (*eniOpenAPI) GetENIConfigByID(eniID string) (*types.ENI, error) {
-	panic("implement me")
-}
-
-// GetSecondaryENIMACs return secondary ENI macs
-func (e *eniOpenAPI) GetSecondaryENIMACs() ([]string, error) {
-	return nil, fmt.Errorf("unimpled")
 }

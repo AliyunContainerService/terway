@@ -20,6 +20,7 @@ type Configure struct {
 	EniCapShift            int                 `yaml:"eni_cap_shift" json:"eni_cap_shift"`
 	VSwitchSelectionPolicy string              `yaml:"vswitch_selection_policy" json:"vswitch_selection_policy"`
 	EnableEIPPool          string              `yaml:"enable_eip_pool" json:"enable_eip_pool"`
+	IPStack                string              `yaml:"ip_stack" json:"ip_stack"` // default ipv4 , support ipv4 dual
 	// rob the eip instance even the eip already bound to other resource
 	AllowEIPRob string `yaml:"allow_eip_rob" json:"allow_eip_rob"`
 }

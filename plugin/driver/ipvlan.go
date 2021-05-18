@@ -9,7 +9,8 @@ import (
 	"syscall"
 
 	"github.com/AliyunContainerService/terway/pkg/sysctl"
-	"github.com/containernetworking/cni/pkg/types"
+	terwayTypes "github.com/AliyunContainerService/terway/types"
+
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
@@ -26,222 +27,140 @@ var (
 	regexKernelVersion = regexp.MustCompile(`^(\d+)\.(\d+)`)
 )
 
-type ipvlanDriver struct {
+type IPvlanDriver struct {
 	name string
+	ipv4 bool
+	ipv6 bool
 }
 
-func int8ToString(arr []int8) string {
-	var bytes []byte
-	for _, v := range arr {
-		if v == 0 {
-			break
-		}
-
-		bytes = append(bytes, byte(v))
-	}
-
-	return string(bytes)
-}
-
-// CheckIPVLanAvailable checks if current kernel version meet the requirement (>= 4.19)
-func CheckIPVLanAvailable() (bool, error) {
-	var uts syscall.Utsname
-	err := syscall.Uname(&uts)
-	if err != nil {
-		return false, err
-	}
-
-	result := regexKernelVersion.FindStringSubmatch(int8ToString(uts.Release[:]))
-	if len(result) != 3 {
-		return false, errors.New("can't determine linux kernel version")
-	}
-
-	major, err := strconv.Atoi(result[1])
-	if err != nil {
-		return false, err
-	}
-
-	minor, err := strconv.Atoi(result[2])
-	if err != nil {
-		return false, err
-	}
-
-	return (major == ipVlanRequirementMajor && minor >= ipVlanRequirementMinor) ||
-		major > ipVlanRequirementMajor, nil
-}
-
-func newIPVlanDriver() *ipvlanDriver {
-	return &ipvlanDriver{
+func NewIPVlanDriver(ipv4, ipv6 bool) *IPvlanDriver {
+	return &IPvlanDriver{
 		name: "IPVLanL2",
+		ipv4: ipv4,
+		ipv6: ipv6,
 	}
 }
 
-func (driver *ipvlanDriver) Setup(
-	hostIPVlan string,
-	containerIPVlan string,
-	ipv4Addr *net.IPNet,
-	primaryIpv4Addr net.IP,
-	serviceCIDR *net.IPNet,
-	hostStackCIDRs []*net.IPNet,
-	gateway net.IP,
-	extraRoutes []*types.Route,
-	deviceID int,
-	ingress uint64,
-	egress uint64,
-	mtu int,
-	netNS ns.NetNS) error {
+func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 	var err error
 
-	parentLink, err := netlink.LinkByIndex(deviceID)
+	parentLink, err := netlink.LinkByIndex(cfg.ENIIndex)
 	if err != nil {
-		return errors.Wrapf(err, "%s, get device by index %d error.", driver.name, deviceID)
+		return fmt.Errorf("error get eni by index %d, %w", cfg.ENIIndex, err)
 	}
 	_, err = EnsureLinkUp(parentLink)
 	if err != nil {
-		return errors.Wrapf(err, "%s, set device %s up error", driver.name, parentLink.Attrs().Name)
+		return err
 	}
-	_, err = EnsureLinkMTU(parentLink, mtu)
+	_, err = EnsureLinkMTU(parentLink, cfg.MTU)
 	if err != nil {
-		return errors.Wrapf(err, "%s, set device %s mtu to %v error", driver.name, parentLink.Attrs().Name, mtu)
+		return err
 	}
 
-	slaveIPVlan := &netlink.IPVlan{
+	err = LinkAdd(&netlink.IPVlan{
 		LinkAttrs: netlink.LinkAttrs{
-			Name:        hostIPVlan,
-			ParentIndex: deviceID,
-			MTU:         mtu,
+			Name:        cfg.HostVETHName,
+			ParentIndex: cfg.ENIIndex,
+			MTU:         cfg.MTU,
 		},
 		Mode: netlink.IPVLAN_MODE_L2,
-	}
-
-	if err := netlink.LinkAdd(slaveIPVlan); err != nil {
-		return errors.Wrapf(err, "%s, add ipvlan slave device %s error.", driver.name, hostIPVlan)
-	}
-
-	slaveLink, err := netlink.LinkByName(hostIPVlan)
+	})
 	if err != nil {
-		return errors.Wrapf(err, "%s, get link for %s error.", driver.name, hostIPVlan)
+		return err
 	}
 
-	if err = netlink.LinkSetNsFd(slaveLink, int(netNS.Fd())); err != nil {
-		return errors.Wrapf(err, "%s, set %s to constainer error.", driver.name, slaveLink.Attrs().Name)
+	slaveLink, err := netlink.LinkByName(cfg.HostVETHName)
+	if err != nil {
+		return fmt.Errorf("error find ipvlan link %s, %w", cfg.HostVETHName, err)
+	}
+
+	err = LinkSetNsFd(slaveLink, netNS)
+	if err != nil {
+		return err
 	}
 
 	// 2. setup addr and default route
 	err = netNS.Do(func(netNS ns.NetNS) error {
-		name := fmt.Sprintf("%s.%s", driver.name, "container")
-		// remove equal ip net
+		if d.ipv6 {
+			err := EnableIPv6()
+			if err != nil {
+				return err
+			}
+		}
+
 		linkList, err := netlink.LinkList()
 		if err != nil {
-			return errors.Wrapf(err, "%s, list devices error.", name)
+			return fmt.Errorf("error list links, %w", err)
 		}
 
 		for _, link := range linkList {
-			if link.Attrs().Name == hostIPVlan {
-				if err := netlink.LinkSetName(link, containerIPVlan); err != nil {
-					return errors.Wrapf(err, "%s, rename device name from %s to %s error", name, hostIPVlan, containerIPVlan)
-				}
+			if link.Attrs().Name != cfg.HostVETHName {
+				continue
 			}
-
-			addrList, err := netlink.AddrList(link, netlink.FAMILY_ALL)
+			err = SetupLink(link, cfg)
 			if err != nil {
-				return errors.Wrapf(err, "%s, list addr for device %s error", name, link.Attrs().Name)
+				return err
 			}
-			for _, addr := range addrList {
-				if addr.IP.Equal(ipv4Addr.IP) {
-					if err = netlink.AddrDel(link, &netlink.Addr{IPNet: ipv4Addr}); err != nil {
-						return errors.Wrapf(err, "%s, delete old addaress %s error.", name, addr.IP)
-					}
-				}
-			}
-		}
-		defLink, err := netlink.LinkByName(containerIPVlan)
-		if err != nil {
-			return errors.Wrapf(err, "%s, get device %s error", name, defLink.Attrs().Name)
-		}
-
-		if _, err := EnsureLinkUp(defLink); err != nil {
-			return errors.Wrapf(err, "%s, set device %s up error", name, defLink.Attrs().Name)
-		}
-
-		if err := netlink.AddrAdd(slaveLink, &netlink.Addr{IPNet: ipv4Addr}); err != nil {
-			return errors.Wrapf(err, "add address %v to device %s error", ipv4Addr, defLink.Attrs().Name)
-		}
-
-		// 2.2 setup default route
-		err = netlink.RouteReplace(&netlink.Route{
-			LinkIndex: slaveLink.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Flags:     int(netlink.FLAG_ONLINK),
-			Dst:       defaultRoute,
-			Gw:        gateway,
-		})
-		if err != nil {
-			return errors.Wrapf(err, "%s, add default route via %s error", name, gateway)
+			_, err = EnsureDefaultRoute(link, cfg.GatewayIP)
+			return err
 		}
 		return nil
 	})
 
 	if err != nil {
-		return errors.Wrapf(err, "%s, set container link/address/route error", driver.name)
+		return fmt.Errorf("error set container link/address/route, %w", err)
 	}
 
-	if err := driver.setupInitNamespace(parentLink, primaryIpv4Addr, ipv4Addr, serviceCIDR, hostStackCIDRs, mtu); err != nil {
-		return errors.Wrapf(err, "%s, configure init namespace error.", driver.name)
+	if err := d.setupInitNamespace(parentLink, cfg); err != nil {
+		return fmt.Errorf("error set init namespace, %w", err)
 	}
 
 	return nil
 }
 
-func (driver *ipvlanDriver) Teardown(hostIPVlan string,
-	containerIPVlan string,
-	netNS ns.NetNS,
-	containerIP net.IP) error {
+func (d *IPvlanDriver) Teardown(cfg *TeardownCfg, netNS ns.NetNS) error {
 	parents := make(map[int]struct{})
-
-	if link, err := netlink.LinkByName(hostIPVlan); err != nil {
+	link, err := netlink.LinkByName(cfg.HostVETHName)
+	if err != nil {
 		if _, ok := err.(netlink.LinkNotFoundError); !ok {
-			return errors.Wrapf(err, "%s, list device %s error", driver.name, hostIPVlan)
+			return fmt.Errorf("error get link %s, %w", cfg.HostVETHName, err)
 		}
 	} else {
 		parents[link.Attrs().ParentIndex] = struct{}{}
-		err := netlink.LinkSetDown(link)
-		if e := netlink.LinkDel(link); e != nil {
-			return errors.Wrapf(e, "%s, delete device %s error with another down device error %v",
-				driver.name, hostIPVlan, err)
+		_ = LinkSetDown(link)
+		err = LinkDel(link)
+		if err != nil {
+			return fmt.Errorf("error del link, %w", err)
 		}
 	}
-
-	err := netNS.Do(func(netNS ns.NetNS) error {
-		name := fmt.Sprintf("%s.%s", driver.name, "container")
-
-		for _, ifName := range []string{hostIPVlan, containerIPVlan} {
+	err = netNS.Do(func(netNS ns.NetNS) error {
+		for _, ifName := range []string{cfg.HostVETHName, cfg.ContainerIfName} {
 			link, err := netlink.LinkByName(ifName)
 			if err != nil {
 				if _, ok := err.(netlink.LinkNotFoundError); !ok {
-					return errors.Wrapf(err, "%s, list device %s error.", name, ifName)
+					return fmt.Errorf("error get link %s, %w", ifName, err)
 				}
 				continue
 			}
 
 			parents[link.Attrs().ParentIndex] = struct{}{}
-			err = netlink.LinkSetDown(link)
-			if e := netlink.LinkDel(link); e != nil {
-				return errors.Wrapf(e, "%s, delete device %s error with another down device error %v.",
-					name, ifName, err)
+			_ = LinkSetDown(link)
+			err = LinkDel(link)
+			if err != nil {
+				return fmt.Errorf("error del link, %w", err)
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		return errors.Wrapf(err, "%s, clear container network error", driver.name)
+		return fmt.Errorf("error teardown container, %w", err)
 	}
 
 	delete(parents, 0)
-	return driver.teardownInitNamespace(parents, containerIP)
+	return d.teardownInitNamespace(parents, cfg.ContainerIPNet)
 }
 
-func (driver *ipvlanDriver) Check(cfg *CheckConfig) error {
+func (d *IPvlanDriver) Check(cfg *CheckConfig) error {
 	parentLinkIndex := 0
 	// 1. check addr and default route
 	err := cfg.NetNS.Do(func(netNS ns.NetNS) error {
@@ -268,7 +187,7 @@ func (driver *ipvlanDriver) Check(cfg *CheckConfig) error {
 			cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", cfg.ContainerIFName, cfg.MTU))
 		}
 
-		changed, err = EnsureDefaultRoute(link, cfg.Gateway)
+		changed, err = EnsureDefaultRoute(link, cfg.GatewayIP)
 		if err != nil {
 			return err
 		}
@@ -293,14 +212,14 @@ func (driver *ipvlanDriver) Check(cfg *CheckConfig) error {
 	Log.Debugf("parent link is %d", parentLinkIndex)
 	parentLink, err := netlink.LinkByIndex(parentLinkIndex)
 	if err != nil {
-		return errors.Wrapf(err, "%s, get device by index %d error.", driver.name, cfg.DeviceID)
+		return errors.Wrapf(err, "%s, get device by index %d error.", d.name, cfg.ENIIndex)
 	}
 	changed, err := EnsureLinkUp(parentLink)
 	if err != nil {
 		return err
 	}
 	if changed {
-		cfg.RecordPodEvent(fmt.Sprintf("parent link id %d set to up", int(cfg.DeviceID)))
+		cfg.RecordPodEvent(fmt.Sprintf("parent link id %d set to up", int(cfg.ENIIndex)))
 	}
 	changed, err = EnsureLinkMTU(parentLink, cfg.MTU)
 	if err != nil {
@@ -314,20 +233,21 @@ func (driver *ipvlanDriver) Check(cfg *CheckConfig) error {
 	return err
 }
 
-func (driver *ipvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slaveName string, mtu int) (netlink.Link, error) {
+func (d *IPvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slaveName string, mtu int) (netlink.Link, error) {
 	slaveLink, err := netlink.LinkByName(slaveName)
 	if err != nil {
 		if _, ok := err.(netlink.LinkNotFoundError); !ok {
-			return nil, errors.Wrapf(err, "%s, get device %s error", driver.name, slaveName)
+			return nil, errors.Wrapf(err, "%s, get device %s error", d.name, slaveName)
 		}
 	} else {
-		if _, err = EnsureLinkMTU(slaveLink, mtu); err != nil {
-			return nil, errors.Wrapf(err, "%s, set slave link %s mtu to %v error", driver.name, slaveName, mtu)
+		_, err = EnsureLinkMTU(slaveLink, mtu)
+		if err != nil {
+			return nil, err
 		}
 		return slaveLink, nil
 	}
 
-	err = netlink.LinkAdd(&netlink.IPVlan{
+	err = LinkAdd(&netlink.IPVlan{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:        slaveName,
 			ParentIndex: parentLink.Attrs().Index,
@@ -335,78 +255,60 @@ func (driver *ipvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slave
 		},
 		Mode: netlink.IPVLAN_MODE_L2,
 	})
-	link, e := netlink.LinkByName(slaveName)
-	if e != nil {
-		return nil, errors.Wrapf(err, "%s, add device %s error with another list device error %v",
-			driver.name, slaveName, e)
+	if err != nil {
+		return nil, err
+	}
+	link, err := netlink.LinkByName(slaveName)
+	if err != nil {
+		return nil, fmt.Errorf("error get ipvlan link %s", slaveName)
 	}
 
 	return link, nil
 }
 
-func (driver *ipvlanDriver) setAddressIfNotExist(link netlink.Link, ip *net.IPNet, scope netlink.Scope) error {
-	new := &netlink.Addr{
-		IPNet: ip,
-		Scope: int(scope),
-	}
-
-	addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
-	if err != nil {
-		return errors.Wrapf(err, "%s, list address for device %s error", driver.name, link.Attrs().Name)
-	}
-
-	found := false
-	for _, old := range addrs {
-		if ipNetEqual(old.IPNet, new.IPNet) && old.Scope == new.Scope {
-			found = true
-			continue
+func (d *IPvlanDriver) setupRouteIfNotExist(link netlink.Link, dst *terwayTypes.IPNetSet) error {
+	exec := func(ipNet *net.IPNet) error {
+		family := NetlinkFamily(ipNet.IP)
+		route := &netlink.Route{
+			Protocol:  family,
+			LinkIndex: link.Attrs().Index,
+			Scope:     netlink.SCOPE_LINK,
+			Dst:       ipNet,
 		}
-		if err := netlink.AddrDel(link, &old); err != nil {
-			return errors.Wrapf(err, "%s, delete address %s of device %s error",
-				driver.name, old.IPNet, link.Attrs().Name)
+		routes, err := netlink.RouteListFiltered(family, route, netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF)
+		if err != nil {
+			return fmt.Errorf("error list route %s, %w", route.String(), err)
 		}
-	}
+		if len(routes) != 0 {
+			return nil
+		}
 
-	if found {
+		err = RouteReplace(route)
+		if err != nil {
+			return err
+		}
 		return nil
 	}
-
-	if err := netlink.AddrReplace(link, new); err != nil {
-		return errors.Wrapf(err, "%s, replace addr %s for device %s error",
-			driver.name, new.IPNet, link.Attrs().Name)
+	if dst.IPv4 != nil {
+		err := exec(NewIPNetWithMaxMask(dst.IPv4))
+		if err != nil {
+			return err
+		}
 	}
+	if dst.IPv6 != nil {
+		err := exec(NewIPNetWithMaxMask(dst.IPv6))
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func (driver *ipvlanDriver) setupRouteIfNotExist(dst *net.IPNet, link netlink.Link) error {
-	new := &netlink.Route{
-		Protocol:  netlink.FAMILY_V4,
-		LinkIndex: link.Attrs().Index,
-		Scope:     netlink.SCOPE_LINK,
-		Dst:       dst,
-	}
-
-	routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, new, netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF)
-	if err != nil {
-		return errors.Wrapf(err, "%s, filter route dst %s dev %s error",
-			driver.name, dst, link.Attrs().Name)
-	}
-
-	if len(routes) != 0 {
-		return nil
-	}
-
-	if err := netlink.RouteReplace(new); err != nil {
-		return errors.Wrapf(err, "%s, replace route %s dev %s error",
-			driver.name, dst, link.Attrs().Name)
-	}
-	return nil
-}
-
-func (driver *ipvlanDriver) setupClsActQsic(link netlink.Link) error {
+func (d *IPvlanDriver) setupClsActQsic(link netlink.Link) error {
 	qds, err := netlink.QdiscList(link)
 	if err != nil {
-		return errors.Wrapf(err, "%s, list qdisc for dev %s error", driver.name, link.Attrs().Name)
+		return errors.Wrapf(err, "%s, list qdisc for dev %s error", d.name, link.Attrs().Name)
 	}
 	for _, q := range qds {
 		if q.Type() == "clsact" {
@@ -423,9 +325,159 @@ func (driver *ipvlanDriver) setupClsActQsic(link netlink.Link) error {
 		QdiscType: "clsact",
 	}
 	if err := netlink.QdiscReplace(qdisc); err != nil {
-		return errors.Wrapf(err, "%s, replace clsact qdisc for dev %s error", driver.name, link.Attrs().Name)
+		return errors.Wrapf(err, "%s, replace clsact qdisc for dev %s error", d.name, link.Attrs().Name)
 	}
 	return nil
+}
+
+func (d *IPvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIndex int) error {
+	parent := uint32(netlink.HANDLE_CLSACT&0xffff0000 | netlink.HANDLE_MIN_EGRESS&0x0000ffff)
+	filters, err := netlink.FilterList(link, parent)
+	if err != nil {
+		return errors.Wrapf(err, "%s, list egress filter for %s error", d.name, link.Attrs().Name)
+	}
+
+	ruleInFilter := make(map[*redirectRule]bool)
+	for _, v := range cidrs {
+		rule, err := dstIPRule(link.Attrs().Index, v, dstIndex, netlink.TCA_INGRESS_REDIR)
+		if err != nil {
+			return errors.Wrapf(err, "%s, create redirect rule error", d.name)
+		}
+		ruleInFilter[rule] = false
+	}
+
+	for _, filter := range filters {
+		matchAny := false
+		for rule := range ruleInFilter {
+			if rule.isMatch(filter) {
+				ruleInFilter[rule] = true
+				matchAny = true
+				break
+			}
+		}
+		if matchAny {
+			continue
+		}
+		if err := netlink.FilterDel(filter); err != nil {
+			return errors.Wrapf(err, "%s, delete filter of %s error", d.name, link.Attrs().Name)
+		}
+	}
+
+	for rule, in := range ruleInFilter {
+		if !in {
+			u32 := rule.toU32Filter()
+			u32.Parent = parent
+			if err := netlink.FilterAdd(u32); err != nil {
+				return errors.Wrapf(err, "%s, add filter for %s error", d.name, link.Attrs().Name)
+			}
+		}
+	}
+	return nil
+}
+
+func (d *IPvlanDriver) setupInitNamespace(parentLink netlink.Link, cfg *SetupConfig) error {
+	// setup slave nic
+	slaveName := d.initSlaveName(parentLink.Attrs().Index)
+	slaveLink, err := d.createSlaveIfNotExist(parentLink, slaveName, cfg.MTU)
+	if err != nil {
+		return err
+	}
+	_, err = EnsureLinkUp(slaveLink)
+	if err != nil {
+		return err
+	}
+
+	if slaveLink.Attrs().Flags&unix.IFF_NOARP == 0 {
+		if err := netlink.LinkSetARPOff(slaveLink); err != nil {
+			return errors.Wrapf(err, "%s, set device %s noarp error", d.name, slaveLink.Attrs().Name)
+		}
+	}
+
+	nodeIPSet, err := GetHostIP(d.ipv4, d.ipv6)
+	if err != nil {
+		return err
+	}
+	_, err = EnsureAddr(slaveLink, nodeIPSet, func(a netlink.Addr) bool {
+		return a.Scope == int(netlink.SCOPE_HOST)
+	})
+	if err != nil {
+		return err
+	}
+
+	// check tc rule
+	err = d.setupClsActQsic(parentLink)
+	if err != nil {
+		return err
+	}
+
+	redirectCIDRs := append(cfg.HostStackCIDRs, cfg.ServiceCIDR.IPv4)
+	err = d.setupFilters(parentLink, redirectCIDRs, slaveLink.Attrs().Index)
+	if err != nil {
+		return err
+	}
+
+	err = d.setupRouteIfNotExist(slaveLink, cfg.ContainerIPNet)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *IPvlanDriver) teardownInitNamespace(parents map[int]struct{}, containerIP *terwayTypes.IPNetSet) error {
+	if containerIP == nil {
+		return nil
+	}
+
+	exec := func(link netlink.Link, ipNet *net.IPNet) error {
+		rt := &netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Dst:       NewIPNetWithMaxMask(ipNet),
+		}
+
+		routes, err := netlink.RouteListFiltered(NetlinkFamily(ipNet.IP), rt, netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF)
+		if err != nil {
+			return fmt.Errorf("error get route by filter %s, %w", rt.String(), err)
+		}
+		for _, route := range routes {
+			err = RouteDel(&route)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	// get slave link
+	for index := range parents {
+		initLink, err := d.initSlaveLink(index)
+		if err != nil {
+			if _, ok := err.(netlink.LinkNotFoundError); !ok {
+				return fmt.Errorf("error get link by index %d, %w", index, err)
+			}
+			continue
+		}
+		if containerIP.IPv4 != nil {
+			err = exec(initLink, containerIP.IPv4)
+			if err != nil {
+				return err
+			}
+		}
+		if containerIP.IPv6 != nil {
+			err = exec(initLink, containerIP.IPv6)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (d *IPvlanDriver) initSlaveName(parentIndex int) string {
+	return fmt.Sprintf("ipvl_%d", parentIndex)
+}
+
+func (d *IPvlanDriver) initSlaveLink(parentIndex int) (netlink.Link, error) {
+	return netlink.LinkByName(d.initSlaveName(parentIndex))
 }
 
 type redirectRule struct {
@@ -561,142 +613,42 @@ func (rule *redirectRule) toU32Filter() *netlink.U32 {
 	}
 }
 
-func (driver *ipvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIndex int) error {
-	parent := uint32(netlink.HANDLE_CLSACT&0xffff0000 | netlink.HANDLE_MIN_EGRESS&0x0000ffff)
-	filters, err := netlink.FilterList(link, parent)
+func int8ToString(arr []int8) string {
+	var bytes []byte
+	for _, v := range arr {
+		if v == 0 {
+			break
+		}
+
+		bytes = append(bytes, byte(v))
+	}
+
+	return string(bytes)
+}
+
+// CheckIPVLanAvailable checks if current kernel version meet the requirement (>= 4.19)
+func CheckIPVLanAvailable() (bool, error) {
+	var uts syscall.Utsname
+	err := syscall.Uname(&uts)
 	if err != nil {
-		return errors.Wrapf(err, "%s, list egress filter for %s error", driver.name, link.Attrs().Name)
+		return false, err
 	}
 
-	ruleInFilter := make(map[*redirectRule]bool)
-	for _, v := range cidrs {
-		rule, err := dstIPRule(link.Attrs().Index, v, dstIndex, netlink.TCA_INGRESS_REDIR)
-		if err != nil {
-			return errors.Wrapf(err, "%s, create redirect rule error", driver.name)
-		}
-		ruleInFilter[rule] = false
+	result := regexKernelVersion.FindStringSubmatch(int8ToString(uts.Release[:]))
+	if len(result) != 3 {
+		return false, errors.New("can't determine linux kernel version")
 	}
 
-	for _, filter := range filters {
-		matchAny := false
-		for rule := range ruleInFilter {
-			if rule.isMatch(filter) {
-				ruleInFilter[rule] = true
-				matchAny = true
-				break
-			}
-		}
-		if matchAny {
-			continue
-		}
-		if err := netlink.FilterDel(filter); err != nil {
-			return errors.Wrapf(err, "%s, delete filter of %s error", driver.name, link.Attrs().Name)
-		}
-	}
-
-	for rule, in := range ruleInFilter {
-		if !in {
-			u32 := rule.toU32Filter()
-			u32.Parent = parent
-			if err := netlink.FilterAdd(u32); err != nil {
-				return errors.Wrapf(err, "%s, add filter for %s error", driver.name, link.Attrs().Name)
-			}
-		}
-	}
-
-	return nil
-}
-
-func (driver *ipvlanDriver) setupInitNamespace(
-	parentLink netlink.Link,
-	hostIP net.IP,
-	containerIP *net.IPNet,
-	serviceCIDR *net.IPNet,
-	hostStackCIDRs []*net.IPNet,
-	mtu int,
-) error {
-	// setup slave nic
-	slaveName := driver.initSlaveName(parentLink.Attrs().Index)
-	slaveLink, err := driver.createSlaveIfNotExist(parentLink, slaveName, mtu)
+	major, err := strconv.Atoi(result[1])
 	if err != nil {
-		return err
-	}
-	if slaveLink.Attrs().OperState != netlink.OperUp {
-		if err := netlink.LinkSetUp(slaveLink); err != nil {
-			return errors.Wrapf(err, "%s, set device %s up error", driver.name, slaveLink.Attrs().Name)
-		}
-	}
-	if slaveLink.Attrs().Flags&unix.IFF_NOARP == 0 {
-		if err := netlink.LinkSetARPOff(slaveLink); err != nil {
-			return errors.Wrapf(err, "%s, set device %s noarp error", driver.name, slaveLink.Attrs().Name)
-		}
+		return false, err
 	}
 
-	ipNet := &net.IPNet{
-		IP:   hostIP,
-		Mask: net.CIDRMask(32, 32),
-	}
-	if err := driver.setAddressIfNotExist(slaveLink, ipNet, netlink.SCOPE_HOST); err != nil {
-		return err
+	minor, err := strconv.Atoi(result[2])
+	if err != nil {
+		return false, err
 	}
 
-	// check tc rule
-	if err := driver.setupClsActQsic(parentLink); err != nil {
-		return err
-	}
-
-	redirectCIDRs := append(hostStackCIDRs, serviceCIDR)
-
-	if err := driver.setupFilters(parentLink, redirectCIDRs, slaveLink.Attrs().Index); err != nil {
-		return err
-	}
-
-	dst := &net.IPNet{
-		IP:   containerIP.IP,
-		Mask: net.CIDRMask(32, 32),
-	}
-
-	return driver.setupRouteIfNotExist(dst, slaveLink)
-}
-
-func (driver *ipvlanDriver) teardownInitNamespace(parents map[int]struct{}, containerIP net.IP) error {
-	if containerIP == nil {
-		return nil
-	}
-	// get slave link
-	for index := range parents {
-		initLink, err := driver.initSlaveLink(index)
-		if err != nil {
-			if _, ok := err.(netlink.LinkNotFoundError); !ok {
-				return errors.Wrapf(err, "%s, get slave device %s error", driver.name, driver.initSlaveName(index))
-			}
-			continue
-		}
-
-		rt := &netlink.Route{
-			LinkIndex: initLink.Attrs().Index,
-			Dst: &net.IPNet{
-				IP:   containerIP,
-				Mask: net.CIDRMask(32, 32),
-			},
-		}
-		routes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, rt, netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF)
-		if err != nil {
-			return errors.Wrapf(err, "%s, list route %s dev %s error", driver.name, containerIP, initLink.Attrs().Name)
-		}
-		for _, route := range routes {
-			if err := netlink.RouteDel(&route); err != nil {
-				return errors.Wrapf(err, "%s, delete route %s dev %s error", driver.name, containerIP, initLink.Attrs().Name)
-			}
-		}
-	}
-	return nil
-}
-
-func (driver *ipvlanDriver) initSlaveName(parentIndex int) string {
-	return fmt.Sprintf("ipvl_%d", parentIndex)
-}
-
-func (driver *ipvlanDriver) initSlaveLink(parentIndex int) (netlink.Link, error) {
-	return netlink.LinkByName(driver.initSlaveName(parentIndex))
+	return (major == ipVlanRequirementMajor && minor >= ipVlanRequirementMinor) ||
+		major > ipVlanRequirementMajor, nil
 }

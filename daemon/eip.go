@@ -37,7 +37,7 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 		eniIP net.IP
 		err   error
 	)
-	podIP := net.ParseIP(context.pod.PodIP)
+	podIP := context.pod.PodIPs.IPv4
 	if podIP == nil {
 		return nil, errors.Errorf("invalid pod ip: %v", context.pod.PodIP)
 	}

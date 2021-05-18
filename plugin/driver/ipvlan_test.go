@@ -25,13 +25,15 @@ func setUpNetlinkTest(t *testing.T) tearDownNetlinkTest {
 	// lock thread since the namespace is thread local
 	runtime.LockOSThread()
 	var err error
+	current, _ := netns.Get()
 	ns, err := netns.New()
 	if err != nil {
 		t.Fatal("Failed to create netns", ns)
 	}
 
 	return func() {
-		ns.Close()
+		_ = netns.Set(current)
+		_ = ns.Close()
 		runtime.UnlockOSThread()
 	}
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/types"
-
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
@@ -36,13 +35,12 @@ const (
 // ECS the interface of ecs operation set
 type ECS interface {
 	AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int, eniTags map[string]string) (*types.ENI, error)
-	GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error)
+	GetAttachedENIs(containsMainENI bool) ([]*types.ENI, error)
 	GetSecondaryENIMACs() ([]string, error)
 	GetPrivateIPv4ByMAC(mac string) ([]net.IP, error)
-	GetENIByID(instanceID, eniID string) (*types.ENI, error)
-	GetENIByMac(instanceID, mac string) (*types.ENI, error)
+	GetENIByMac(mac string) (*types.ENI, error)
 	FreeENI(eniID string, instanceID string) error
-	GetENIIPs(eniID string) ([]net.IP, error)
+	GetENIIPs(mac string) ([]net.IP, []net.IP, error)
 	AssignIPForENI(eniID string) (net.IP, error)
 	AssignNIPsForENI(eniID string, count int) ([]net.IP, error)
 	UnAssignIPsForENI(eniID string, ips []net.IP) error
@@ -59,14 +57,14 @@ type ECS interface {
 type ecsImpl struct {
 	privateIPMutex sync.RWMutex
 	clientSet      *ClientMgr
-	metadataGetter ENIInfoGetter
-	// avoid conflict on ecs
-	openAPIGetter ENIInfoGetter
-	vpcID         string
+	metadata       ENIInfoGetter
+	vpcID          string
+
+	ipFamily *types.IPFamily
 }
 
 // NewECS return new ECS implement object
-func NewECS(ak, sk, credentialPath string, ignoreLinkNotExist bool, ins *Instance) (ECS, error) {
+func NewECS(ak, sk, credentialPath string, ignoreLinkNotExist bool, ins *Instance, ipFamily *types.IPFamily) (ECS, error) {
 	clientSet, err := NewClientMgr(ak, sk, credentialPath, ins.RegionID)
 	if err != nil {
 		return nil, fmt.Errorf("error get clientset, %w", err)
@@ -75,13 +73,9 @@ func NewECS(ak, sk, credentialPath string, ignoreLinkNotExist bool, ins *Instanc
 	e := &ecsImpl{
 		privateIPMutex: sync.RWMutex{},
 		clientSet:      clientSet,
-		metadataGetter: &eniMetadata{
-			ignoreLinkNotExist: ignoreLinkNotExist,
-		},
-		openAPIGetter: &eniOpenAPI{
-			clientSet: clientSet,
-		},
-		vpcID: ins.VPCID,
+		metadata:       NewENIMetadata(ignoreLinkNotExist, ipFamily),
+		vpcID:          ins.VPCID,
+		ipFamily:       ipFamily,
 	}
 
 	err = UpdateFromAPI(clientSet.ECS(), GetInstanceMeta().InstanceType)
@@ -206,7 +200,7 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 				return true, fmt.Errorf("failed to get instance type")
 			}
 
-			eni, innerErr = e.metadataGetter.GetENIConfigByMac(eniStatus.MacAddress)
+			eni, innerErr = e.metadata.GetENIConfigByMac(eniStatus.MacAddress)
 			if innerErr != nil || eni.ID != resp.NetworkInterfaceId {
 				logrus.Warnf("error get eni config by mac: %v, retrying...", innerErr)
 				return false, nil
@@ -294,24 +288,23 @@ func (e *ecsImpl) WaitForNetworkInterface(eniID, status string, backoff wait.Bac
 
 // GetAttachedENIs of instanceId
 // containsMainENI is contains the main interface(eth0) of instance
-func (e *ecsImpl) GetAttachedENIs(instanceID string, containsMainENI bool) ([]*types.ENI, error) {
-	enis, err := e.metadataGetter.GetAttachedENIs(instanceID, containsMainENI)
+func (e *ecsImpl) GetAttachedENIs(containsMainENI bool) ([]*types.ENI, error) {
+	enis, err := e.metadata.GetAttachedENIs(containsMainENI)
 	if err != nil {
 		return nil, fmt.Errorf("error get eni config by mac, %w", err)
 	}
+	l, ok := GetLimit(GetInstanceMeta().InstanceType)
+	if !ok {
+		return nil, fmt.Errorf("failed to get instance type")
+	}
 	for _, eni := range enis {
-
-		l, ok := GetLimit(GetInstanceMeta().InstanceType)
-		if !ok {
-			return nil, fmt.Errorf("failed to get instance type")
-		}
 		eni.MaxIPs = l.IPv4PerAdapter
 	}
 	return enis, nil
 }
 
 func (e *ecsImpl) GetSecondaryENIMACs() ([]string, error) {
-	return e.metadataGetter.GetSecondaryENIMACs()
+	return e.metadata.GetSecondaryENIMACs()
 }
 
 func (e *ecsImpl) GetPrivateIPv4ByMAC(mac string) ([]net.IP, error) {
@@ -322,10 +315,25 @@ func (e *ecsImpl) FreeENI(eniID, instanceID string) error {
 	return e.destroyInterface(eniID, instanceID)
 }
 
-func (e *ecsImpl) GetENIIPs(eniID string) ([]net.IP, error) {
+func (e *ecsImpl) GetENIIPs(mac string) ([]net.IP, []net.IP, error) {
 	e.privateIPMutex.RLock()
 	defer e.privateIPMutex.RUnlock()
-	return e.metadataGetter.GetENIPrivateAddresses(eniID)
+
+	var ipv4, ipv6 []net.IP
+	var err error
+	if e.ipFamily.IPv4 {
+		ipv4, err = e.metadata.GetENIPrivateAddressesByMAC(mac)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if e.ipFamily.IPv6 {
+		ipv6, err = e.metadata.GetENIPrivateIPv6AddressesByMAC(mac)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return ipv4, ipv6, nil
 }
 
 func (e *ecsImpl) AssignIPForENI(eniID string) (net.IP, error) {
@@ -424,21 +432,8 @@ func (e *ecsImpl) UnAssignIPsForENI(eniID string, ips []net.IP) error {
 	return nil
 }
 
-func (e *ecsImpl) GetENIByID(instanceID, eniID string) (*types.ENI, error) {
-	eni, err := e.metadataGetter.GetENIConfigByID(eniID)
-	if err != nil {
-		return nil, fmt.Errorf("error get eni config by mac, %w", err)
-	}
-	l, ok := GetLimit(GetInstanceMeta().InstanceType)
-	if !ok {
-		return nil, fmt.Errorf("failed to get instance type")
-	}
-	eni.MaxIPs = l.IPv4PerAdapter
-	return eni, nil
-}
-
-func (e *ecsImpl) GetENIByMac(instanceID, mac string) (*types.ENI, error) {
-	eni, err := e.metadataGetter.GetENIConfigByMac(mac)
+func (e *ecsImpl) GetENIByMac(mac string) (*types.ENI, error) {
+	eni, err := e.metadata.GetENIConfigByMac(mac)
 	if err != nil {
 		return nil, fmt.Errorf("error get eni config by mac, %w", err)
 	}
