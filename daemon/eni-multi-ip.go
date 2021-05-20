@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	goerr "errors"
 	"fmt"
 	"net"
 	"sort"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	aliyunErrors "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
-	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
@@ -36,7 +34,6 @@ const (
 	factoryNameENIIP = "eniip"
 
 	tracingKeyENIMaxIP         = "eni_max_ip"
-	tracingKeyPrimaryIP        = "primary_ip"
 	tracingKeyENICount         = "eni_count"
 	tracingKeySecondaryIPCount = "secondary_ip_count"
 
@@ -51,12 +48,13 @@ type eniIPFactory struct {
 	enis         []*ENI
 	maxENI       chan struct{}
 	eniMaxIP     int
-	primaryIP    net.IP
 	eniOperChan  chan struct{}
 	ipResultChan chan *ENIIP
 	sync.RWMutex
 	// metrics
 	metricENICount prometheus.Gauge
+
+	ipFamily *types.IPFamily
 }
 
 // ENIIP the secondary ip of eni
@@ -70,7 +68,6 @@ type ENI struct {
 	lock sync.Mutex
 	*types.ENI
 	ips       []*ENIIP
-	primaryIP net.IP
 	pending   int
 	ipBacklog chan struct{}
 	ecs       aliyun.ECS
@@ -112,7 +109,7 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 			for i := 0; i < toAllocate; i++ {
 				resultChan <- &ENIIP{
 					ENIIP: &types.ENIIP{
-						Eni: e.ENI,
+						ENI: e.ENI,
 					},
 					err: errors.Errorf("error assign ip for ENI: %v", err),
 				}
@@ -122,9 +119,11 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 			for _, ip := range ips {
 				resultChan <- &ENIIP{
 					ENIIP: &types.ENIIP{
-						Eni:        e.ENI,
-						SecAddress: ip,
-						PrimaryIP:  e.primaryIP,
+						ENI: e.ENI,
+						SecondaryIP: types.IPSet{
+							IPv4: ip,
+							IPv6: nil,
+						},
 					},
 					err: nil,
 				}
@@ -220,9 +219,9 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 		// Error Case 2. The IP number allocated has reached ENI quota.
 		f.Lock()
 		defer f.Unlock()
-		if result.ENIIP != nil && result.Eni != nil {
+		if result.ENIIP != nil && result.ENI != nil {
 			for _, eni := range f.enis {
-				if eni.MAC == result.Eni.MAC {
+				if eni.MAC == result.ENI.MAC {
 					eni.pending--
 					// if an error message with InvalidVSwitchIDIPNotEnough returned, then mark the ENI as IP allocation inhibited.
 					if strings.Contains(result.err.Error(), aliyunErrors.InvalidVSwitchIDIPNotEnough) {
@@ -238,7 +237,7 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 	f.Lock()
 	defer f.Unlock()
 	for _, eni := range f.enis {
-		if eni.ENI != nil && eni.MAC == result.Eni.MAC {
+		if eni.ENI != nil && eni.MAC == result.ENI.MAC {
 			eni.pending--
 			eni.lock.Lock()
 			eni.ips = append(eni.ips, result)
@@ -325,11 +324,11 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 	)
 	f.RLock()
 	for _, e := range f.enis {
-		if ip.Eni.ID == e.ID {
+		if ip.ENI.ID == e.ID {
 			eni = e
 			e.lock.Lock()
 			for _, eip := range e.ips {
-				if eip.SecAddress.String() == ip.SecAddress.String() {
+				if eip.SecondaryIP.String() == ip.SecondaryIP.String() {
 					eniip = eip
 				}
 			}
@@ -353,7 +352,7 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 
 		f.Lock()
 		for i, e := range f.enis {
-			if ip.Eni.ID == e.ID {
+			if ip.ENI.ID == e.ID {
 				close(eni.done)
 				f.enis[len(f.enis)-1], f.enis[i] = f.enis[i], f.enis[len(f.enis)-1]
 				f.enis = f.enis[:len(f.enis)-1]
@@ -365,7 +364,7 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 
 		f.eniOperChan <- struct{}{}
 		// only remain ENI main ip address, release the ENI interface
-		err = f.eniFactory.Dispose(ip.Eni)
+		err = f.eniFactory.Dispose(ip.ENI)
 		<-f.eniOperChan
 		if err != nil {
 			return fmt.Errorf("error dispose ENI for eniip, %v", err)
@@ -376,17 +375,17 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 	eni.lock.Unlock()
 
 	// main ip of ENI, raise put_it_back error
-	if ip.Eni.Address.IP.Equal(ip.SecAddress) {
+	if ip.ENI.PrimaryIP.IPv4.Equal(ip.SecondaryIP.IPv4) {
 		return fmt.Errorf("ip to be release is primary ip of ENI")
 	}
 
-	err = f.eniFactory.ecs.UnAssignIPsForENI(ip.Eni.ID, []net.IP{ip.SecAddress})
+	err = f.eniFactory.ecs.UnAssignIPsForENI(ip.ENI.ID, []net.IP{ip.SecondaryIP.IPv4})
 	if err != nil {
 		return fmt.Errorf("error unassign eniip, %v", err)
 	}
 	eni.lock.Lock()
 	for i, e := range eni.ips {
-		if e.SecAddress.Equal(eniip.SecAddress) {
+		if e.SecondaryIP.IPv4.Equal(eniip.SecondaryIP.IPv4) {
 			eni.ips[len(eni.ips)-1], eni.ips[i] = eni.ips[i], eni.ips[len(eni.ips)-1]
 			eni.ips = eni.ips[:len(eni.ips)-1]
 			break
@@ -400,12 +399,12 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 func (f *eniIPFactory) Get(res types.NetworkResource) (types.NetworkResource, error) {
 	eniIP := res.(*types.ENIIP)
 
-	ips, err := f.eniFactory.ecs.GetENIIPs(eniIP.Eni.ID)
+	ips, _, err := f.eniFactory.ecs.GetENIIPs(eniIP.ENI.MAC)
 	if err != nil {
 		return nil, err
 	}
 	for _, ip := range ips {
-		if ip.Equal(eniIP.SecAddress) {
+		if ip.Equal(eniIP.SecondaryIP.IPv4) {
 			return res, nil
 		}
 	}
@@ -414,7 +413,8 @@ func (f *eniIPFactory) Get(res types.NetworkResource) (types.NetworkResource, er
 
 func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 	rawEni, err := f.eniFactory.CreateWithIPCount(ipCount)
-	var ips []net.IP
+	var ipv4s []net.IP
+	var ipv6s []net.IP
 	// eni operate finished
 	<-f.eniOperChan
 	if err != nil || len(rawEni) != 1 {
@@ -425,14 +425,14 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 		eni.ENI, ok = rawEni[0].(*types.ENI)
 		if !ok {
 			err = fmt.Errorf("error get type ENI from factory, got: %+v, rollback it", rawEni)
-			logrus.Errorf("error get type ENI from factory, got: %+v, rollback it", rawEni)
+			logrus.Error(err)
 			errDispose := f.eniFactory.Dispose(rawEni[0])
 			if errDispose != nil {
 				logrus.Errorf("rollback %+v failed", rawEni)
 			}
 			<-f.maxENI
 		} else {
-			ips, err = f.eniFactory.ecs.GetENIIPs(eni.ID)
+			ipv4s, ipv6s, err = f.eniFactory.ecs.GetENIIPs(eni.MAC)
 			if err != nil {
 				logrus.Errorf("error get eni secondary address: %+v, rollback it", err)
 				errDispose := f.eniFactory.Dispose(rawEni[0])
@@ -440,6 +440,16 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 					logrus.Errorf("rollback %+v failed", rawEni)
 				}
 				<-f.maxENI
+			}
+			if f.ipFamily.IPv4 && f.ipFamily.IPv6 {
+				if len(ipv4s) != len(ipv6s) {
+					logrus.Errorf("error get eni secondary address: ipv4 ipv6 length is not equal, rollback it")
+					errDispose := f.eniFactory.Dispose(rawEni[0])
+					if errDispose != nil {
+						logrus.Errorf("rollback %+v failed", rawEni)
+					}
+					<-f.maxENI
+				}
 			}
 		}
 	}
@@ -452,9 +462,9 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 		for i := 0; i < eni.pending; i++ {
 			f.ipResultChan <- &ENIIP{
 				ENIIP: &types.ENIIP{
-					Eni: nil,
+					ENI: nil,
 				},
-				err: errors.Errorf("error initial ENI: %v", err),
+				err: fmt.Errorf("error initial ENI: %w", err),
 			}
 		}
 		// disable eni for submit
@@ -478,13 +488,20 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 
 	eni.lock.Lock()
 	logrus.Infof("allocate status on async eni: %+v, pending: %v, ips: %v, backlog: %v",
-		eni, eni.pending, ips, len(eni.ipBacklog))
-	for _, ip := range ips {
+		eni, eni.pending, ipv4s, len(eni.ipBacklog))
+	for i, ip := range ipv4s {
 		eniip := &types.ENIIP{
-			Eni:        eni.ENI,
-			SecAddress: ip,
-			PrimaryIP:  eni.primaryIP,
+			ENI: eni.ENI,
+			SecondaryIP: types.IPSet{
+				IPv4: ip,
+				IPv6: nil,
+			},
 		}
+
+		if f.ipFamily.IPv6 {
+			eniip.SecondaryIP.IPv6 = ipv6s[i]
+		}
+
 		f.ipResultChan <- &ENIIP{
 			ENIIP: eniip,
 			err:   nil,
@@ -500,7 +517,6 @@ func (f *eniIPFactory) createENIAsync(initIPs int) (*ENI, error) {
 		lock:      sync.Mutex{},
 		ENI:       nil,
 		ips:       make([]*ENIIP, 0),
-		primaryIP: f.primaryIP,
 		pending:   initIPs,
 		ipBacklog: make(chan struct{}, maxIPBacklog),
 		ecs:       f.eniFactory.ecs,
@@ -530,7 +546,6 @@ func (f *eniIPFactory) Config() []tracing.MapKeyValueEntry {
 	config := []tracing.MapKeyValueEntry{
 		{Key: tracingKeyName, Value: f.name},
 		{Key: tracingKeyENIMaxIP, Value: fmt.Sprint(f.eniMaxIP)},
-		{Key: tracingKeyPrimaryIP, Value: f.primaryIP.String()},
 	}
 
 	return config
@@ -553,7 +568,7 @@ func (f *eniIPFactory) Trace() []tracing.MapKeyValueEntry {
 
 		var secIPs []string
 		for _, v := range v.ips {
-			secIPs = append(secIPs, v.SecAddress.String())
+			secIPs = append(secIPs, v.SecondaryIP.String())
 		}
 
 		trace = append(trace, tracing.MapKeyValueEntry{
@@ -589,7 +604,7 @@ func (f *eniIPFactory) Execute(cmd string, _ []string, message chan<- string) {
 func (f *eniIPFactory) checkAccount(message chan<- string) {
 	// get ENIs via Aliyun API
 	message <- "fetching attached ENIs from aliyun\n"
-	enis, err := f.eniFactory.ecs.GetAttachedENIs(f.eniFactory.instanceID, false)
+	enis, err := f.eniFactory.ecs.GetAttachedENIs(false)
 	if err != nil {
 		message <- fmt.Sprintf("error while fetching from remote: %s\n", err.Error())
 		return
@@ -622,17 +637,16 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 		}
 
 		// diff secondary ips
-		remoteIPs, err := f.eniFactory.ecs.GetENIIPs(v.ID)
+		remoteIPs, _, err := f.eniFactory.ecs.GetENIIPs(v.MAC)
 		if err != nil {
 			message <- fmt.Sprintf("error while fetching ips: %s", err.Error())
 			return
 		}
 
 		diffIPMap := make(map[string]struct{})
-		diffIPMap[eni.primaryIP.String()] = struct{}{}
 
 		for _, ip := range eni.ips {
-			diffIPMap[ip.SecAddress.String()] = struct{}{}
+			diffIPMap[ip.SecondaryIP.IPv4.String()] = struct{}{}
 		}
 
 		// range for remote ips
@@ -655,20 +669,23 @@ func (f *eniIPFactory) GetResource() (map[string]types.FactoryResIf, error) {
 	mapping := make(map[string]types.FactoryResIf, len(macs))
 	for _, mac := range macs {
 		// get secondary ips from one mac
-		ips, err := f.eniFactory.ecs.GetPrivateIPv4ByMAC(mac)
+		ipv4s, _, err := f.eniFactory.ecs.GetENIIPs(mac)
 		if err != nil {
-			if goerr.Is(err, aliyunErrors.ErrNotFound) {
+			if errors.Is(err, aliyunErrors.ErrNotFound) {
 				continue
 			}
 			return nil, err
 		}
 
-		for _, ip := range ips {
+		for _, ip := range ipv4s {
 			eniIP := types.ENIIP{
-				Eni: &types.ENI{
+				ENI: &types.ENI{
 					MAC: mac,
 				},
-				SecAddress: ip,
+				SecondaryIP: types.IPSet{
+					IPv4: ip,
+					IPv6: nil,
+				},
 			}
 
 			mapping[eniIP.GetResourceID()] = &types.FactoryRes{
@@ -693,29 +710,23 @@ type eniIPResourceManager struct {
 	pool pool.ObjectPool
 }
 
-func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []resourceManagerInitItem) (ResourceManager, error) {
-	primaryIP, err := metadata.GetPrivateIPV4()
-	if err != nil {
-		return nil, errors.Wrapf(err, "get primary ip error")
-	}
-	logrus.Infof("node's primary ip is %v", primaryIP)
-
+func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []resourceManagerInitItem, ipFamily *types.IPFamily) (ResourceManager, error) {
 	eniFactory, err := newENIFactory(poolConfig, ecs)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get ENI factory for eniip factory")
+		return nil, fmt.Errorf("error get ENI factory for eniip factory, %w", err)
 	}
 
 	factory := &eniIPFactory{
 		name:         factoryNameENIIP,
 		eniFactory:   eniFactory,
 		enis:         []*ENI{},
-		primaryIP:    primaryIP,
 		eniOperChan:  make(chan struct{}, maxEniOperating),
 		ipResultChan: make(chan *ENIIP, maxIPBacklog),
+		ipFamily:     ipFamily,
 	}
 	limit, ok := aliyun.GetLimit(aliyun.GetInstanceMeta().InstanceType)
 	if !ok {
-		return nil, errors.Wrapf(err, "error get max eni for eniip factory")
+		return nil, fmt.Errorf("error get max eni for eniip factory, %w", err)
 	}
 	maxEni := limit.Adapters - 1
 
@@ -763,9 +774,9 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 		Capacity: capacity,
 		Initializer: func(holder pool.ResourceHolder) error {
 			// not use main ENI for ENI multiple ip allocate
-			enis, err := ecs.GetAttachedENIs(poolConfig.InstanceID, false)
+			enis, err := ecs.GetAttachedENIs(false)
 			if err != nil {
-				return errors.Wrapf(err, "error get attach ENI on pool init")
+				return fmt.Errorf("error get attach ENI on pool init, %w", err)
 			}
 			stubMap := make(map[string]*podInfo)
 			for _, allocated := range allocatedResources {
@@ -773,26 +784,24 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 			}
 
 			for _, eni := range enis {
-				ips, err := ecs.GetENIIPs(eni.ID)
+				ipv4s, _, err := ecs.GetENIIPs(eni.MAC)
 				if err != nil {
-					return errors.Wrapf(err, "error get ENI's ip on pool init")
+					return fmt.Errorf("error get ENI's ip on pool init, %w", err)
 				}
 				poolENI := &ENI{
 					lock:      sync.Mutex{},
 					ENI:       eni,
 					ips:       []*ENIIP{},
 					ecs:       ecs,
-					primaryIP: primaryIP,
 					ipBacklog: make(chan struct{}, maxIPBacklog),
 					done:      make(chan struct{}, 1),
 				}
 				factory.enis = append(factory.enis, poolENI)
 				factory.metricENICount.Inc()
-				for _, ip := range ips {
+				for _, ip := range ipv4s {
 					eniIP := &types.ENIIP{
-						Eni:        eni,
-						SecAddress: ip,
-						PrimaryIP:  primaryIP,
+						ENI:         eni,
+						SecondaryIP: types.IPSet{IPv4: ip},
 					}
 					podInfo, ok := stubMap[eniIP.GetResourceID()]
 
@@ -807,6 +816,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 						holder.AddInuse(eniIP, podInfoKey(podInfo.Namespace, podInfo.Name))
 					}
 				}
+
 				logrus.Debugf("init factory's exist ENI: %+v", poolENI)
 				select {
 				case factory.maxENI <- struct{}{}:

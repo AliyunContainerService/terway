@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/pool"
@@ -271,7 +272,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		}
 		networkContext.resources = append(networkContext.resources, newRes.Resources...)
 		if networkService.eipResMgr != nil && podinfo.EipInfo.PodEip {
-			podinfo.PodIP = eniMultiIP.SecAddress.String()
+			podinfo.PodIPs = eniMultiIP.SecondaryIP
 			var eipRes *types.EIP
 			eipRes, err = networkService.allocateEIP(networkContext, &oldRes)
 			if err != nil {
@@ -297,24 +298,22 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		allocIPReply.Success = true
 		allocIPReply.NetworkInfo = &rpc.AllocIPReply_ENIMultiIP{
 			ENIMultiIP: &rpc.ENIMultiIP{
-				EniConfig: &rpc.ENI{
-					IPv4Addr:        eniMultiIP.SecAddress.String(),
-					IPv4Subnet:      eniMultiIP.Eni.Address.String(),
-					MacAddr:         eniMultiIP.Eni.MAC,
-					Gateway:         eniMultiIP.Eni.Gateway.String(),
-					DeviceNumber:    eniMultiIP.Eni.DeviceNumber,
-					PrimaryIPv4Addr: eniMultiIP.PrimaryIP.String(),
+				ENIConfig: &rpc.ENI{
+					PodIP:     eniMultiIP.SecondaryIP.ToRPC(),
+					Subnet:    eniMultiIP.ENI.VSwitchCIDR.ToRPC(),
+					MAC:       eniMultiIP.ENI.MAC,
+					GatewayIP: eniMultiIP.ENI.GatewayIP.ToRPC(),
 				},
 				PodConfig: &rpc.Pod{
 					Ingress: podinfo.TcIngress,
 					Egress:  podinfo.TcEgress,
 				},
-				ServiceCidr: networkService.k8s.GetServiceCidr().String(),
+				ServiceCIDR: networkService.k8s.GetServiceCIDR().ToRPC(),
 			},
 		}
 	case podNetworkTypeVPCENI:
-		var vpcEni *types.ENI
-		vpcEni, err = networkService.allocateENI(networkContext, &oldRes)
+		var eni *types.ENI
+		eni, err = networkService.allocateENI(networkContext, &oldRes)
 		if err != nil {
 			return nil, fmt.Errorf("error get allocated vpc ENI ip for: %+v, result: %+v", podinfo, err)
 		}
@@ -322,8 +321,8 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 			PodInfo: podinfo,
 			Resources: []ResourceItem{
 				{
-					ID:   vpcEni.GetResourceID(),
-					Type: vpcEni.GetType(),
+					ID:   eni.GetResourceID(),
+					Type: eni.GetType(),
 				},
 			},
 			NetNs: func(s string) *string {
@@ -332,7 +331,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		}
 		networkContext.resources = append(networkContext.resources, newRes.Resources...)
 		if networkService.eipResMgr != nil && podinfo.EipInfo.PodEip {
-			podinfo.PodIP = vpcEni.Address.IP.String()
+			podinfo.PodIPs = eni.PrimaryIP
 			var eipRes *types.EIP
 			eipRes, err = networkService.allocateEIP(networkContext, &oldRes)
 			if err != nil {
@@ -360,21 +359,19 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		}
 		allocIPReply.IPType = rpc.IPType_TypeVPCENI
 		allocIPReply.Success = true
-		allocIPReply.NetworkInfo = &rpc.AllocIPReply_VpcEni{
-			VpcEni: &rpc.VPCENI{
-				EniConfig: &rpc.ENI{
-					IPv4Addr:        vpcEni.Address.IP.String(),
-					IPv4Subnet:      vpcEni.Address.String(),
-					MacAddr:         vpcEni.MAC,
-					Gateway:         vpcEni.Gateway.String(),
-					DeviceNumber:    vpcEni.DeviceNumber,
-					PrimaryIPv4Addr: vpcEni.Address.IP.String(),
+		allocIPReply.NetworkInfo = &rpc.AllocIPReply_VPCENI{
+			VPCENI: &rpc.VPCENI{
+				ENIConfig: &rpc.ENI{
+					PodIP:     eni.PrimaryIP.ToRPC(),
+					Subnet:    eni.VSwitchCIDR.ToRPC(),
+					MAC:       eni.MAC,
+					GatewayIP: eni.GatewayIP.ToRPC(),
 				},
 				PodConfig: &rpc.Pod{
 					Ingress: podinfo.TcIngress,
 					Egress:  podinfo.TcEgress,
 				},
-				ServiceCidr: networkService.k8s.GetServiceCidr().String(),
+				ServiceCIDR: networkService.k8s.GetServiceCIDR().ToRPC(),
 			},
 		}
 	case podNetworkTypeVPCIP:
@@ -402,8 +399,8 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		}
 		allocIPReply.IPType = rpc.IPType_TypeVPCIP
 		allocIPReply.Success = true
-		allocIPReply.NetworkInfo = &rpc.AllocIPReply_VpcIp{
-			VpcIp: &rpc.VPCIP{
+		allocIPReply.NetworkInfo = &rpc.AllocIPReply_VPCIP{
+			VPCIP: &rpc.VPCIP{
 				PodConfig: &rpc.Pod{
 					Ingress: podinfo.TcIngress,
 					Egress:  podinfo.TcEgress,
@@ -544,19 +541,17 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 				eniMultiIP := res.(*types.ENIIP)
 				reply = &rpc.GetInfoReply_ENIMultiIP{
 					ENIMultiIP: &rpc.ENIMultiIP{
-						EniConfig: &rpc.ENI{
-							IPv4Addr:        eniMultiIP.SecAddress.String(),
-							IPv4Subnet:      eniMultiIP.Eni.Address.String(),
-							MacAddr:         eniMultiIP.Eni.MAC,
-							Gateway:         eniMultiIP.Eni.Gateway.String(),
-							DeviceNumber:    eniMultiIP.Eni.DeviceNumber,
-							PrimaryIPv4Addr: eniMultiIP.PrimaryIP.String(),
+						ENIConfig: &rpc.ENI{
+							PodIP:     eniMultiIP.SecondaryIP.ToRPC(),
+							Subnet:    eniMultiIP.ENI.VSwitchCIDR.ToRPC(),
+							MAC:       eniMultiIP.ENI.MAC,
+							GatewayIP: eniMultiIP.ENI.GatewayIP.ToRPC(),
 						},
 						PodConfig: &rpc.Pod{
 							Ingress: podinfo.TcIngress,
 							Egress:  podinfo.TcEgress,
 						},
-						ServiceCidr: networkService.k8s.GetServiceCidr().String(),
+						ServiceCIDR: networkService.k8s.GetServiceCIDR().ToRPC(),
 					},
 				}
 			} else {
@@ -569,7 +564,7 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 				Ingress: podinfo.TcIngress,
 				Egress:  podinfo.TcEgress,
 			},
-			PodIP:       podinfo.PodIP,
+			PodIP:       podinfo.PodIPs.ToRPC(),
 			NetworkInfo: reply,
 		}
 		return getIPInfoResult, nil
@@ -584,28 +579,26 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 		}
 		return getIPInfoResult, nil
 	case podNetworkTypeVPCENI:
-		var reply *rpc.GetInfoReply_VpcEni
+		var reply *rpc.GetInfoReply_VPCENI
 		resItems := podRes.GetResourceItemByType(types.ResourceTypeENI)
 		if len(resItems) > 0 {
 			// only have one
 			res, err := networkService.eniResMgr.Stat(networkContext, resItems[0].ID)
 			if err == nil {
-				vpcEni := res.(*types.ENI)
-				reply = &rpc.GetInfoReply_VpcEni{
-					VpcEni: &rpc.VPCENI{
-						EniConfig: &rpc.ENI{
-							IPv4Addr:        vpcEni.Address.IP.String(),
-							IPv4Subnet:      vpcEni.Address.String(),
-							MacAddr:         vpcEni.MAC,
-							Gateway:         vpcEni.Gateway.String(),
-							DeviceNumber:    vpcEni.DeviceNumber,
-							PrimaryIPv4Addr: vpcEni.Address.IP.String(),
+				eni := res.(*types.ENI)
+				reply = &rpc.GetInfoReply_VPCENI{
+					VPCENI: &rpc.VPCENI{
+						ENIConfig: &rpc.ENI{
+							PodIP:     eni.PrimaryIP.ToRPC(),
+							Subnet:    eni.VSwitchCIDR.ToRPC(),
+							MAC:       eni.MAC,
+							GatewayIP: eni.GatewayIP.ToRPC(),
 						},
 						PodConfig: &rpc.Pod{
 							Ingress: podinfo.TcIngress,
 							Egress:  podinfo.TcEgress,
 						},
-						ServiceCidr: networkService.k8s.GetServiceCidr().String(),
+						ServiceCIDR: networkService.k8s.GetServiceCIDR().ToRPC(),
 					},
 				}
 			} else {
@@ -1088,20 +1081,30 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	if daemonMode == daemonModeENIOnly {
 		ignoreLinkNotExist = true
 	}
-	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, ignoreLinkNotExist, ins)
+	ipFamily := types.NewIPFamilyFromIPStack(types.IPStack(config.IPStack))
+	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, ignoreLinkNotExist, ins, ipFamily)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get aliyun client")
 	}
 
-	var ipnet *net.IPNet
+	ipNetSet := &types.IPNetSet{}
 	if config.ServiceCIDR != "" {
-		_, ipnet, err = net.ParseCIDR(config.ServiceCIDR)
-		if err != nil {
-			return nil, errors.Wrapf(err, "error parse service cidr: %s", config.ServiceCIDR)
+		cidrs := strings.Split(config.ServiceCIDR, ",")
+
+		for _, cidr := range cidrs {
+			_, ipNet, err := net.ParseCIDR(cidr)
+			if err != nil {
+				return nil, fmt.Errorf("error parse service CIDR, %w", err)
+			}
+			if terwayIP.IPv6(ipNet.IP) {
+				ipNetSet.IPv6 = ipNet
+			} else {
+				ipNetSet.IPv4 = ipNet
+			}
 		}
 	}
 
-	err = netSrv.k8s.SetSvcCidr(ipnet)
+	err = netSrv.k8s.SetSvcCidr(ipNetSet)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error set k8s svcCidr")
 	}
@@ -1145,7 +1148,11 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 			localResource[res.Type] = append(localResource[res.Type], resourceManagerInitItem{resourceID: res.ID, podInfo: podRes.PodInfo})
 		}
 	}
-	log.Debugf("local resources to restore: %+v", localResource)
+	resStr, err := json.Marshal(localResource)
+	if err != nil {
+		return nil, err
+	}
+	log.Debugf("local resources to restore: %s", resStr)
 
 	switch daemonMode {
 	case daemonModeVPC:
@@ -1167,7 +1174,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 
 	case daemonModeENIMultiIP:
 		//init ENI multi ip
-		netSrv.eniIPResMgr, err = newENIIPResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENIIP])
+		netSrv.eniIPResMgr, err = newENIIPResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENIIP], ipFamily)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init ENI ip resource manager")
 		}
@@ -1224,13 +1231,14 @@ func restoreLocalENIRes(ecs aliyun.ECS, pc *types.PoolConfig, k8s Kubernetes, re
 		log.Debugf("skip restore for upgraded")
 		return nil
 	}
-	eniList, err := ecs.GetAttachedENIs(pc.InstanceID, false)
+
+	eniList, err := ecs.GetAttachedENIs(false)
 	if err != nil {
 		return errors.Wrapf(err, "error get attached eni for restore")
 	}
 	ipEniMap := map[string]*types.ENI{}
 	for _, eni := range eniList {
-		ipEniMap[eni.Address.IP.String()] = eni
+		ipEniMap[eni.PrimaryIP.IPv4.String()] = eni
 	}
 
 	podList, err := k8s.GetLocalPods()
@@ -1238,25 +1246,26 @@ func restoreLocalENIRes(ecs aliyun.ECS, pc *types.PoolConfig, k8s Kubernetes, re
 		return errors.Wrapf(err, "error get local pod for restore")
 	}
 	for _, pod := range podList {
-		if pod.PodNetworkType == podNetworkTypeVPCENI {
-			log.Debugf("restore for local pod: %+v, enis: %+v", pod, ipEniMap)
-			eni, ok := ipEniMap[pod.PodIP]
-			if ok {
-				err = resourceDB.Put(podInfoKey(pod.Namespace, pod.Name), PodResources{
-					PodInfo: pod,
-					Resources: []ResourceItem{
-						{
-							ID:   eni.GetResourceID(),
-							Type: eni.GetType(),
-						},
+		if pod.PodNetworkType != podNetworkTypeVPCENI {
+			continue
+		}
+		log.Debugf("restore for local pod: %+v, enis: %+v", pod, ipEniMap)
+		eni, ok := ipEniMap[pod.PodIPs.IPv4.String()]
+		if ok {
+			err = resourceDB.Put(podInfoKey(pod.Namespace, pod.Name), PodResources{
+				PodInfo: pod,
+				Resources: []ResourceItem{
+					{
+						ID:   eni.GetResourceID(),
+						Type: eni.GetType(),
 					},
-				})
-				if err != nil {
-					return errors.Wrapf(err, "error put resource into store")
-				}
-			} else {
-				log.Warnf("error found pod relate eni, pod: %+v", pod)
+				},
+			})
+			if err != nil {
+				return errors.Wrapf(err, "error put resource into store")
 			}
+		} else {
+			log.Warnf("error found pod relate eni, pod: %+v", pod)
 		}
 	}
 	return nil
@@ -1280,10 +1289,20 @@ func setDefault(cfg *types.Configure) error {
 	if cfg.VSwitchSelectionPolicy == "" {
 		cfg.VSwitchSelectionPolicy = types.VSwitchSelectionPolicyRandom
 	}
+
+	if cfg.IPStack == "" {
+		cfg.IPStack = string(types.IPStackIPv4)
+	}
 	return nil
 }
 
 func validateConfig(cfg *types.Configure) error {
+	switch cfg.IPStack {
+	case "", string(types.IPStackIPv4), string(types.IPStackDual):
+	default:
+		return fmt.Errorf("unsupported ipStack %s in configMap", cfg.IPStack)
+	}
+
 	return nil
 }
 

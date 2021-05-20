@@ -24,3 +24,19 @@ func ToIPs(addrs []string) ([]net.IP, error) {
 	}
 	return result, nil
 }
+
+func IPv6(ip net.IP) bool {
+	return ip.To4() == nil
+}
+
+// NetEqual returns true if both IPNet are equal
+func NetEqual(ipn1 *net.IPNet, ipn2 *net.IPNet) bool {
+	if ipn1 == ipn2 {
+		return true
+	}
+	if ipn1 == nil || ipn2 == nil {
+		return false
+	}
+
+	return ipn1.String() == ipn2.String()
+}

@@ -3,144 +3,148 @@ package rpc;
 option go_package = ".;rpc";
 
 service TerwayBackend {
-    rpc AllocIP (AllocIPRequest) returns (AllocIPReply) {
-    }
-    rpc ReleaseIP (ReleaseIPRequest) returns (ReleaseIPReply) {
-    }
-    rpc GetIPInfo(GetInfoRequest) returns (GetInfoReply) {
-    }
-    rpc RecordEvent(EventRequest) returns (EventReply) {
-    }
+  rpc AllocIP (AllocIPRequest) returns (AllocIPReply) {
+  }
+  rpc ReleaseIP (ReleaseIPRequest) returns (ReleaseIPReply) {
+  }
+  rpc GetIPInfo(GetInfoRequest) returns (GetInfoReply) {
+  }
+  rpc RecordEvent(EventRequest) returns (EventReply) {
+  }
+}
+
+// IPSet declare a string set contain v4 v6 info
+message IPSet {
+  string IPv4 = 1;
+  string IPv6 = 2;
 }
 
 message AllocIPRequest {
-    string K8sPodName = 1;
-    string K8sPodNamespace = 2;
-    string K8sPodInfraContainerId = 3;
-    string Netns = 4;
-    string IfName = 5;
+  string K8sPodName = 1;
+  string K8sPodNamespace = 2;
+  string K8sPodInfraContainerId = 3;
+  string Netns = 4;
+  string IfName = 5;
 }
 
 
 enum IPType {
-    TypeVPCIP = 0;
-    TypeVPCENI = 1;
-    TypeManagedK8S = 2;
-    TypeENIMultiIP = 3;
+  TypeVPCIP = 0;
+  TypeVPCENI = 1;
+  TypeManagedK8S = 2;
+  TypeENIMultiIP = 3;
 }
 
 // VETH Basic
 message Pod {
-    uint64 Ingress = 1;
-    uint64 Egress = 2;
+  uint64 Ingress = 1;
+  uint64 Egress = 2;
 }
 
 // VPC route veth
 message VPCIP {
-    Pod PodConfig = 1;
-    string NodeCidr = 2;
+  Pod PodConfig = 1;
+  string NodeCidr = 2;
 }
 
 // ENI Basic
 message ENI {
-    string IPv4Addr = 1;
-    string IPv4Subnet = 2;
-    string MacAddr = 3;
-    string Gateway = 4;
-    int32 DeviceNumber = 5;
-    string PrimaryIPv4Addr = 6;
+  IPSet PodIP = 1; // ip for pod
+  IPSet Subnet = 2;
+  string MAC = 3; // mac for eni
+  IPSet GatewayIP = 4; // gw for eni
 }
 
 // Dedicated ENI
 message VPCENI {
-    ENI EniConfig = 1;
-    Pod PodConfig = 2;
-    string ServiceCidr = 3;
+  ENI ENIConfig = 1;
+  Pod PodConfig = 2;
+  IPSet ServiceCIDR = 3;
 }
 
 // Managed k8s ENI
 message ManagedK8SENI {
-    ENI EniConfig = 1;
-    Pod PodConfig = 2;
-    string PodCidr = 3;
-    string VpcCidr = 4;
-    string NodeCidr = 5;
-    string ServiceCidr = 6;
+  ENI EniConfig = 1;
+  Pod PodConfig = 2;
+  string PodCidr = 3;
+  string VpcCidr = 4;
+  string NodeCidr = 5;
+  IPSet ServiceCIDR = 6;
 }
 
 // ENI Multiple IP
 message ENIMultiIP {
-    ENI EniConfig = 1;
-    Pod PodConfig = 2;
-    string ServiceCidr = 3;
+  ENI ENIConfig = 1;
+  Pod PodConfig = 2;
+  IPSet ServiceCIDR = 3;
 }
 
 message AllocIPReply {
-    bool Success = 1;
-    IPType IPType = 2;
-    oneof NetworkInfo {
-        VPCIP VpcIp = 3;
-        VPCENI VpcEni = 4;
-        ManagedK8SENI ManagedK8S = 5;
-        ENIMultiIP ENIMultiIP = 6;
-    }
+  bool Success = 1;
+  IPType IPType = 2;
+  oneof NetworkInfo {
+    VPCIP VPCIP = 3;
+    VPCENI VPCENI = 4;
+    ManagedK8SENI ManagedK8S = 5;
+    ENIMultiIP ENIMultiIP = 6;
+  }
 }
 
 message ReleaseIPRequest {
-    string K8sPodName = 1;
-    string K8sPodNamespace = 2;
-    string K8sPodInfraContainerId = 3;
-    IPType IPType = 4;
-    string IPv4Addr = 5;
-    string MacAddr = 6;
-    string Reason = 7;
+  string K8sPodName = 1;
+  string K8sPodNamespace = 2;
+  string K8sPodInfraContainerId = 3;
+  IPType IPType = 4;
+  IPSet IPv4Addr = 5;
+  string MacAddr = 6;
+  string Reason = 7;
 }
 
 message ReleaseIPReply {
-    bool Success = 1;
-    string IPv4Addr = 2;
-    int32 DeviceNumber = 3;
+  bool Success = 1;
+  IPSet IPv4Addr = 2;
+  int32 DeviceNumber = 3;
 }
 
 message GetInfoRequest {
-    string K8sPodName = 1;
-    string K8sPodNamespace = 2;
-    string K8sPodInfraContainerId = 3;
+  string K8sPodName = 1;
+  string K8sPodNamespace = 2;
+  string K8sPodInfraContainerId = 3;
 }
 
 message GetInfoReply {
-    IPType IPType = 1;
-    Pod PodConfig = 2;
-    string NodeCidr = 3;
-    string PodIP = 4;
-    oneof NetworkInfo {
-        VPCIP VpcIp = 5;
-        VPCENI VpcEni = 6;
-        ManagedK8SENI ManagedK8S = 7;
-        ENIMultiIP ENIMultiIP = 8;
-    }
+  IPType IPType = 1;
+  Pod PodConfig = 2;
+  string NodeCidr = 3;
+  IPSet PodIP = 4;
+  oneof NetworkInfo {
+    VPCIP VPCIP = 5;
+    VPCENI VPCENI = 6;
+    ManagedK8SENI ManagedK8S = 7;
+    ENIMultiIP ENIMultiIP = 8;
+  }
 }
 
 enum EventTarget {
-    EventTargetNode = 0;
-    EventTargetPod = 1;
+  EventTargetNode = 0;
+  EventTargetPod = 1;
 }
 
 enum EventType {
-    EventTypeNormal = 0;
-    EventTypeWarning = 1;
+  EventTypeNormal = 0;
+  EventTypeWarning = 1;
 }
 
 message EventRequest {
-    EventTarget EventTarget = 1;
-    string K8sPodName = 2;
-    string K8sPodNamespace = 3;
-    EventType EventType = 4;
-    string Reason = 5;
-    string Message = 6;
+  EventTarget EventTarget = 1;
+  string K8sPodName = 2;
+  string K8sPodNamespace = 3;
+  EventType EventType = 4;
+  string Reason = 5;
+  string Message = 6;
 }
 
 message EventReply {
-    bool Succeed = 1;
-    string Error = 2;
+  bool Succeed = 1;
+  string Error = 2;
 }

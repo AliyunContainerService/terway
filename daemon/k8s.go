@@ -48,6 +48,8 @@ const (
 	labelDynamicConfig = "terway-config"
 )
 
+// podEipInfo store pod eip info
+// NOTE: this is the type store in db
 type podEipInfo struct {
 	PodEip           bool
 	PodEipID         string
@@ -56,6 +58,8 @@ type podEipInfo struct {
 	PodEipChargeType types.InternetChargeType
 }
 
+// podInfo store the pod info
+// NOTE: this is the type store in db
 type podInfo struct {
 	//K8sPod *v1.Pod
 	Name           string
@@ -63,7 +67,8 @@ type podInfo struct {
 	TcIngress      uint64
 	TcEgress       uint64
 	PodNetworkType string
-	PodIP          string
+	PodIP          string      // used for eip and mip
+	PodIPs         types.IPSet // used for eip and mip
 	SandboxExited  bool
 	EipInfo        podEipInfo
 	IPStickTime    time.Duration
@@ -73,7 +78,7 @@ type podInfo struct {
 type Kubernetes interface {
 	GetLocalPods() ([]*podInfo, error)
 	GetPod(namespace, name string) (*podInfo, error)
-	GetServiceCidr() *net.IPNet
+	GetServiceCIDR() *types.IPNetSet
 	GetNodeCidr() *net.IPNet
 	SetNodeAllocatablePod(count int) error
 	PatchEipInfo(info *podInfo) error
@@ -81,7 +86,7 @@ type Kubernetes interface {
 	RecordPodEvent(podName, podNamespace, eventType, reason, message string) error
 	GetNodeDynamicConfigLabel() string
 	GetDynamicConfigWithName(name string) (string, error)
-	SetSvcCidr(svcCidr *net.IPNet) error
+	SetSvcCidr(svcCidr *types.IPNetSet) error
 }
 
 type k8s struct {
@@ -94,20 +99,19 @@ type k8s struct {
 	daemonNamespace string
 	nodeCidr        *net.IPNet
 	node            *corev1.Node
-	svcCidr         *net.IPNet
+	svcCidr         *types.IPNetSet
 	apiConn         *connTracker
 	apiConnTime     time.Time
 	sync.Locker
 }
 
-func (k *k8s) SetSvcCidr(svcCidr *net.IPNet) error {
+func (k *k8s) SetSvcCidr(svcCidr *types.IPNetSet) error {
 	var err error
-	if svcCidr == nil {
-		svcCidr, err = serviceCidrFromAPIServer(k.client)
+	if svcCidr.IPv4 == nil {
+		svcCidr.IPv4, err = serviceCidrFromAPIServer(k.client)
 		if err != nil {
 			return errors.Wrap(err, "failed getting service cidr")
 		}
-
 	}
 
 	k.svcCidr = svcCidr
@@ -354,15 +358,18 @@ func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 }
 
 func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
-
 	pi := &podInfo{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
+		PodIPs:    types.IPSet{},
 	}
 
 	pi.PodNetworkType = podNetworkType(daemonMode, pod)
 
-	pi.PodIP = pod.Status.PodIP
+	for _, str := range pod.Status.PodIPs {
+		pi.PodIPs.SetIP(str.IP)
+	}
+	pi.PodIPs.SetIP(pod.Status.PodIP)
 
 	podAnnotation := pod.GetAnnotations()
 	if ingressBandwidth, ok := podAnnotation[podIngressBandwidth]; ok {
@@ -541,7 +548,7 @@ func (k *k8s) GetLocalPods() ([]*podInfo, error) {
 	return ret, nil
 }
 
-func (k *k8s) GetServiceCidr() *net.IPNet {
+func (k *k8s) GetServiceCIDR() *types.IPNetSet {
 	return k.svcCidr
 }
 

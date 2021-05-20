@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 
+	"github.com/AliyunContainerService/terway/types"
 	"github.com/sirupsen/logrus"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
@@ -31,7 +32,7 @@ func main() {
 	flag.Parse()
 	log.SetOutput(ioutil.Discard)
 	logrus.SetOutput(ioutil.Discard)
-	_, err := aliyun.NewECS(accessKeyID, accessKeySecret, credentialPath, false, aliyun.GetInstanceMeta())
+	_, err := aliyun.NewECS(accessKeyID, accessKeySecret, credentialPath, false, aliyun.GetInstanceMeta(), &types.IPFamily{IPv4: true})
 	if err != nil {
 		panic(err)
 	}

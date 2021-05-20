@@ -2,7 +2,6 @@ package aliyun
 
 import (
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
@@ -18,11 +17,11 @@ var defaultIns *Instance
 var once sync.Once
 
 type Instance struct {
-	RegionID    string
-	ZoneID      string
-	VPCID       string
-	VSwitchID   string
-	PrivateIPv4 net.IP
+	RegionID   string
+	ZoneID     string
+	VPCID      string
+	VSwitchID  string
+	PrimaryMAC string
 
 	InstanceID   string
 	InstanceType string
@@ -54,9 +53,9 @@ func GetInstanceMeta() *Instance {
 		if err != nil || vSwitchID == "" {
 			panic(fmt.Errorf("error get vSwitchID %w", err))
 		}
-		privateIPv4, err := metadata.GetPrivateIPV4()
+		mac, err := metadata.GetPrimaryENIMAC()
 		if err != nil {
-			panic(fmt.Errorf("error get privateIPv4 %w", err))
+			panic(fmt.Errorf("error get eth0's mac %w", err))
 		}
 
 		defaultIns = &Instance{
@@ -66,7 +65,7 @@ func GetInstanceMeta() *Instance {
 			VSwitchID:    vSwitchID,
 			InstanceID:   instanceID,
 			InstanceType: instanceType,
-			PrivateIPv4:  privateIPv4,
+			PrimaryMAC:   mac,
 		}
 		logrus.WithFields(map[string]interface{}{
 			"region-id":     regionID,
@@ -75,7 +74,7 @@ func GetInstanceMeta() *Instance {
 			"instance-id":   instanceID,
 			"instance-type": instanceType,
 			"vswitch-id":    vSwitchID,
-			"private-ipv4":  privateIPv4,
+			"primary-mac":   mac,
 		}).Infof("instance metadata")
 	})
 

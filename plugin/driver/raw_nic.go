@@ -4,62 +4,55 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
-	"net"
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/sysctl"
-	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 )
 
-// rawNicDriver put nic in net ns
-type rawNicDriver struct {
+// RawNicDriver put nic in net ns
+type RawNicDriver struct {
+	name string
+	ipv4 bool
+	ipv6 bool
 }
 
-func (r *rawNicDriver) Setup(
-	hostVeth string,
-	containerVeth string,
-	ipv4Addr *net.IPNet,
-	primaryIpv4Addr net.IP,
-	serviceCIDR *net.IPNet,
-	hostStackCIDRs []*net.IPNet,
-	gateway net.IP,
-	extraRoutes []*types.Route,
-	deviceID int,
-	ingress uint64,
-	egress uint64,
-	mtu int,
-	netNS ns.NetNS) error {
-	// 1. move link in
-	nicLink, err := netlink.LinkByIndex(deviceID)
-	if err != nil {
-		return errors.Wrapf(err, "NicDriver, cannot found spec nic link")
+func NewRawNICDriver(ipv4, ipv6 bool) *RawNicDriver {
+	return &RawNicDriver{
+		name: "rawNIC",
+		ipv4: ipv4,
+		ipv6: ipv6,
 	}
-	hostCurrentNs, err := ns.GetCurrentNS()
-	defer func() {
-		err = hostCurrentNs.Close()
-	}()
-	if err != nil {
-		return errors.Wrapf(err, "NicDriver, cannot get host netns")
-	}
+}
 
-	err = netlink.LinkSetNsFd(nicLink, int(netNS.Fd()))
+func (r *RawNicDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
+	// 1. move link in
+	nicLink, err := netlink.LinkByIndex(cfg.ENIIndex)
 	if err != nil {
-		return errors.Wrapf(err, "NicDriver, cannot set nic link to container netns")
+		return fmt.Errorf("error get eni by index %d, %w", cfg.ENIIndex, err)
+	}
+	hostNetNS, err := ns.GetCurrentNS()
+	if err != nil {
+		return fmt.Errorf("err get host net ns, %w", err)
+	}
+	defer hostNetNS.Close()
+
+	err = LinkSetNsFd(nicLink, netNS)
+	if err != nil {
+		return fmt.Errorf("error set nic %s to container, %w", nicLink.Attrs().Name, err)
 	}
 
 	defer func() {
 		if err != nil {
 			err = netNS.Do(func(netNS ns.NetNS) error {
-				nicLink, err = netlink.LinkByName(containerVeth)
+				nicLink, err = netlink.LinkByName(cfg.ContainerIfName)
 				if err == nil {
 					nicName, err1 := r.randomNicName()
 					if err1 != nil {
 						return err1
 					}
-					err = netlink.LinkSetName(nicLink, nicName)
+					err = LinkSetName(nicLink, nicName)
 					if err != nil {
 						return err
 					}
@@ -70,8 +63,8 @@ func (r *rawNicDriver) Setup(
 					nicLink, err = netlink.LinkByName(nicLink.Attrs().Name)
 				}
 				if err == nil {
-					err = netlink.LinkSetDown(nicLink)
-					return netlink.LinkSetNsFd(nicLink, int(hostCurrentNs.Fd()))
+					err = LinkSetDown(nicLink)
+					return LinkSetNsFd(nicLink, hostNetNS)
 				}
 				return err
 			})
@@ -79,132 +72,69 @@ func (r *rawNicDriver) Setup(
 	}()
 	// 2. setup addr and default route
 	err = netNS.Do(func(netNS ns.NetNS) error {
-		// remove equal ip net
-		var linkList []netlink.Link
-		linkList, err = netlink.LinkList()
-		if err != nil {
-			return errors.Wrapf(err, "error list netns links")
-		}
-
-		for _, link := range linkList {
-			var addrList []netlink.Addr
-			addrList, err = netlink.AddrList(link, netlink.FAMILY_ALL)
+		if r.ipv6 {
+			err := EnableIPv6()
 			if err != nil {
-				return errors.Wrapf(err, "error list addrs in netns")
-			}
-			for _, addr := range addrList {
-				if ipNetEqual(addr.IPNet, ipv4Addr) {
-					err = netlink.AddrDel(link, &netlink.Addr{IPNet: ipv4Addr})
-					if err != nil {
-						return errors.Wrapf(err, "error delete conflict addr in netns")
-					}
-				}
+				return err
 			}
 		}
-
 		// 2.1 setup addr
 		nicLink, err = netlink.LinkByName(nicLink.Attrs().Name)
 		if err != nil {
-			return errors.Wrapf(err, "error get link by name: %s", nicLink.Attrs().Name)
+			return fmt.Errorf("error find link %s, %w", nicLink.Attrs().Name, err)
 		}
 
-		err = netlink.LinkSetName(nicLink, containerVeth)
+		_, err = EnsureLinkMTU(nicLink, cfg.MTU)
 		if err != nil {
-			return errors.Wrapf(err, "setup nic link name failed")
+			return fmt.Errorf("error set link %s MTU %d, %w", nicLink.Attrs().Name, cfg.MTU, err)
 		}
-
-		err = netlink.LinkSetUp(nicLink)
+		err = SetupLink(nicLink, cfg)
 		if err != nil {
-			return errors.Wrapf(err, "setup set nic link up")
+			return err
 		}
-
-		_, err = EnsureLinkMTU(nicLink, mtu)
-		if err != nil {
-			return errors.Wrapf(err, "setup set nic link mtu to %v", mtu)
-		}
-
-		err = netlink.AddrAdd(nicLink, &netlink.Addr{
-			IPNet: ipv4Addr,
-		})
-		if err != nil {
-			return errors.Wrapf(err, "setup add addr to link")
-		}
-
-		var defaultRoutes []netlink.Route
-		defaultRoutes, err = netlink.RouteListFiltered(netlink.FAMILY_ALL,
-			&netlink.Route{
-				Dst:   nil,
-				Scope: netlink.SCOPE_UNIVERSE,
-			}, netlink.RT_FILTER_DST|netlink.RT_FILTER_SCOPE)
-		if err != nil {
-			return errors.Wrapf(err, "error found conflict route for nic")
-		}
-		for _, route := range defaultRoutes {
-			err = netlink.RouteDel(&route)
-			if err != nil {
-				return errors.Wrapf(err, "error delete conflict route for nic")
-			}
-		}
-
-		// 2.2 setup default route
-		err = netlink.RouteAdd(&netlink.Route{
-			LinkIndex: nicLink.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Flags:     int(netlink.FLAG_ONLINK),
-			Dst:       defaultRoute,
-			Gw:        gateway,
-		})
-		if err != nil {
-			return errors.Wrap(err, "error add route for nic")
-		}
-		return nil
+		_, err = EnsureDefaultRoute(nicLink, cfg.GatewayIP)
+		return err
 	})
 
-	if err != nil {
-		return errors.Wrapf(err, "NicDriver, cannot set nic addr and default route")
-	}
-	return nil
+	return err
 }
 
-func (r *rawNicDriver) Teardown(hostVeth string,
-	containerVeth string,
-	netNS ns.NetNS,
-	containerIP net.IP) error {
+func (r *RawNicDriver) Teardown(cfg *TeardownCfg, netNS ns.NetNS) error {
 	// 1. move link out
 	hostCurrentNs, err := ns.GetCurrentNS()
 	defer func() {
 		err = hostCurrentNs.Close()
 	}()
 	if err != nil {
-		return errors.Wrapf(err, "NicDriver, cannot get host netns")
+		return fmt.Errorf("error get host net ns, %w", err)
 	}
 	err = netNS.Do(func(netNS ns.NetNS) error {
 		var nicLink netlink.Link
-		nicLink, err = netlink.LinkByName(containerVeth)
+		nicLink, err = netlink.LinkByName(cfg.ContainerIfName)
 		if err == nil {
 			nicName, err1 := r.randomNicName()
 			if err1 != nil {
-				return errors.Wrapf(err1, "error get random nic name")
+				return fmt.Errorf("error generate random nic name, %w", err)
 			}
 			err = netlink.LinkSetDown(nicLink)
 			if err != nil {
-				return errors.Wrapf(err, "error set link down")
+				return fmt.Errorf("error set link %s down, %w", nicLink.Attrs().Name, err)
 			}
 			err = netlink.LinkSetName(nicLink, nicName)
 			if err != nil {
-				return errors.Wrapf(err, "error set link name: %v", nicName)
+				return fmt.Errorf("error set link %s name %s, %w", nicLink.Attrs().Name, nicName, err)
 			}
 			return netlink.LinkSetNsFd(nicLink, int(hostCurrentNs.Fd()))
 		}
-		return errors.Wrapf(err, "error get link from namespace")
+		return fmt.Errorf("error get link %s, %w", cfg.ContainerIfName, err)
 	})
 	if err != nil {
-		return errors.Wrapf(err, "NicDriver, error move nic out")
+		return fmt.Errorf("error move eni to host net ns, %w", err)
 	}
 	return nil
 }
 
-func (r *rawNicDriver) Check(cfg *CheckConfig) error {
+func (r *RawNicDriver) Check(cfg *CheckConfig) error {
 	_ = cfg.NetNS.Do(func(netNS ns.NetNS) error {
 		link, err := netlink.LinkByName(cfg.ContainerIFName)
 		if err != nil {
@@ -225,7 +155,7 @@ func (r *rawNicDriver) Check(cfg *CheckConfig) error {
 		if changed {
 			cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", cfg.ContainerIFName, cfg.MTU))
 		}
-		changed, err = EnsureDefaultRoute(link, cfg.Gateway)
+		changed, err = EnsureDefaultRoute(link, cfg.GatewayIP)
 		if err != nil {
 			return err
 		}
@@ -248,7 +178,7 @@ func (r *rawNicDriver) Check(cfg *CheckConfig) error {
 
 const nicPrefix = "eth"
 
-func (*rawNicDriver) randomNicName() (string, error) {
+func (*RawNicDriver) randomNicName() (string, error) {
 	ethNameSuffix := make([]byte, 3)
 	rand.Seed(time.Now().UnixNano())
 	_, err := rand.Read(ethNameSuffix)

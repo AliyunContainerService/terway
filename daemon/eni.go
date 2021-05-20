@@ -73,7 +73,7 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 		Capacity: capacity,
 		Factory:  factory,
 		Initializer: func(holder pool.ResourceHolder) error {
-			enis, err := ecs.GetAttachedENIs(poolConfig.InstanceID, false)
+			enis, err := ecs.GetAttachedENIs(false)
 			if err != nil {
 				return errors.Wrapf(err, "error get attach ENI on pool init")
 			}
@@ -323,12 +323,12 @@ func (f *eniFactory) Execute(cmd string, _ []string, message chan<- string) {
 
 func (f *eniFactory) Get(res types.NetworkResource) (types.NetworkResource, error) {
 	eni := res.(*types.ENI)
-	return f.ecs.GetENIByID(f.instanceID, eni.ID)
+	return f.ecs.GetENIByMac(eni.MAC)
 }
 
 func (f *eniFactory) GetResource() (map[string]types.FactoryResIf, error) {
 	// Get ENIs from Aliyun API
-	enis, err := f.ecs.GetAttachedENIs(f.instanceID, false)
+	enis, err := f.ecs.GetAttachedENIs(false)
 	if err != nil {
 		return nil, err
 	}

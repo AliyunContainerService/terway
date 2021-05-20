@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -9,29 +10,31 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	terwayErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 )
 
 // Reference https://help.aliyun.com/knowledge_detail/49122.html
 const (
-	metadataBase     = "http://100.100.100.200/latest/meta-data/"
-	mainEniPath      = "mac"
-	enisPath         = "network/interfaces/macs/"
-	eniIDPath        = "network/interfaces/macs/%s/network-interface-id"
-	eniAddrPath      = "network/interfaces/macs/%s/primary-ip-address"
-	eniNetmaskPath   = "network/interfaces/macs/%s/netmask"
-	eniGatewayPath   = "network/interfaces/macs/%s/gateway"
-	eniPrivateIPs    = "network/interfaces/macs/%s/private-ipv4s"
-	eniVSwitchPath   = "network/interfaces/macs/%s/vswitch-id"
-	instanceIDPath   = "instance-id"
-	instanceTypePath = "instance/instance-type"
-	regionIDPath     = "region-id"
-	zoneIDPath       = "zone-id"
-	vswitchIDPath    = "vswitch-id"
-	vpcIDPath        = "vpc-id"
-	privateIPV4Path  = "private-ipv4"
+	metadataBase           = "http://100.100.100.200/latest/meta-data/"
+	mainEniPath            = "mac"
+	enisPath               = "network/interfaces/macs/"
+	eniIDPath              = "network/interfaces/macs/%s/network-interface-id"
+	eniAddrPath            = "network/interfaces/macs/%s/primary-ip-address"
+	eniGatewayPath         = "network/interfaces/macs/%s/gateway"
+	eniV6GatewayPath       = "network/interfaces/macs/%s/ipv6-gateway"
+	eniPrivateIPs          = "network/interfaces/macs/%s/private-ipv4s"
+	eniPrivateV6IPs        = "network/interfaces/macs/%s/ipv6s"
+	eniVSwitchPath         = "network/interfaces/macs/%s/vswitch-id"
+	eniVSwitchCIDRPath     = "network/interfaces/macs/%s/vswitch-cidr-block"
+	eniVSwitchIPv6CIDRPath = "network/interfaces/macs/%s/vswitch-ipv6-cidr-block"
+	instanceIDPath         = "instance-id"
+	instanceTypePath       = "instance/instance-type"
+	regionIDPath           = "region-id"
+	zoneIDPath             = "zone-id"
+	vswitchIDPath          = "vswitch-id"
+	vpcIDPath              = "vpc-id"
 )
 
 func getValue(url string) (string, error) {
@@ -51,6 +54,9 @@ func getValue(url string) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return "", terwayErr.ErrNotFound
+	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return "", fmt.Errorf("error get url: %s from metaserver, code: %v", url, resp.StatusCode)
 	}
@@ -83,7 +89,7 @@ func getArray(url string) ([]string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, errors.ErrNotFound
+		return nil, terwayErr.ErrNotFound
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return []string{}, fmt.Errorf("error get url: %s from metaserver, code: %v", url, resp.StatusCode)
@@ -131,19 +137,6 @@ func GetLocalVPC() (string, error) {
 	return getValue(vpcIDPath)
 }
 
-// GetPrivateIPV4 get private ip for master nic
-func GetPrivateIPV4() (net.IP, error) {
-	value, err := getValue(privateIPV4Path)
-	if err != nil {
-		return nil, err
-	}
-	ip := net.ParseIP(value)
-	if ip == nil {
-		return nil, fmt.Errorf("invalid ip format: %s", value)
-	}
-	return ip, nil
-}
-
 // GetENIID by mac
 func GetENIID(mac string) (string, error) {
 	return getValue(fmt.Sprintf(metadataBase+eniIDPath, mac))
@@ -180,9 +173,29 @@ func GetENIPrivateIPs(mac string) ([]net.IP, error) {
 	return ips, nil
 }
 
-// GetENINetMask by mac
-func GetENINetMask(mac string) (string, error) {
-	return getValue(fmt.Sprintf(metadataBase+eniNetmaskPath, mac))
+// GetENIPrivateIPv6IPs by mac return [2408::28eb]
+func GetENIPrivateIPv6IPs(mac string) ([]net.IP, error) {
+	ipsStr, err := getValue(fmt.Sprintf(metadataBase+eniPrivateV6IPs, mac))
+	if err != nil {
+		// metadata return 404 when no ipv6 is allocated
+		if errors.Is(err, terwayErr.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	ipsStr = strings.ReplaceAll(ipsStr, "[", "")
+	ipsStr = strings.ReplaceAll(ipsStr, "]", "")
+	addressStrList := strings.Split(ipsStr, ",")
+
+	var ips []net.IP
+	for _, ipStr := range addressStrList {
+		i, err := ip.ToIP(ipStr)
+		if err != nil {
+			return nil, err
+		}
+		ips = append(ips, i)
+	}
+	return ips, nil
 }
 
 // GetENIGateway return gateway ip by mac
@@ -194,8 +207,43 @@ func GetENIGateway(mac string) (net.IP, error) {
 	return ip.ToIP(addr)
 }
 
-// GetENIVSwitch by mac
-func GetENIVSwitch(mac string) (string, error) {
+// GetVSwitchCIDR return vSwitch cidr by mac
+func GetVSwitchCIDR(mac string) (*net.IPNet, error) {
+	addr, err := getValue(fmt.Sprintf(metadataBase+eniVSwitchCIDRPath, mac))
+	if err != nil {
+		return nil, err
+	}
+	_, ipNet, err := net.ParseCIDR(addr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse cidr %s", addr)
+	}
+	return ipNet, nil
+}
+
+// GetVSwitchIPv6CIDR return vSwitch cidr by mac
+func GetVSwitchIPv6CIDR(mac string) (*net.IPNet, error) {
+	addr, err := getValue(fmt.Sprintf(metadataBase+eniVSwitchIPv6CIDRPath, mac))
+	if err != nil {
+		return nil, err
+	}
+	_, ipNet, err := net.ParseCIDR(addr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse cidr %s", addr)
+	}
+	return ipNet, nil
+}
+
+// GetENIV6Gateway return gateway ip by mac
+func GetENIV6Gateway(mac string) (net.IP, error) {
+	addr, err := getValue(fmt.Sprintf(metadataBase+eniV6GatewayPath, mac))
+	if err != nil {
+		return nil, err
+	}
+	return ip.ToIP(addr)
+}
+
+// GetENIVSwitchID by mac
+func GetENIVSwitchID(mac string) (string, error) {
 	return getValue(fmt.Sprintf(metadataBase+eniVSwitchPath, mac))
 }
 
