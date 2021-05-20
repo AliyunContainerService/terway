@@ -30,6 +30,15 @@ jobs:
         run: |
           go test -v ./...
           go test -race -v ./...
+          go test -coverpkg=./... -race -coverprofile=coverage.txt -covermode=atomic ./...
+      - uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.txt
+          flags: unittests
+          name: codecov-terway
+          fail_ci_if_error: true
+          verbose: true
 
   docker-build:
     runs-on: ubuntu-latest

@@ -4,7 +4,8 @@ CNI plugin for Alibaba Cloud VPC/ENI
 
 [![CircleCI](https://circleci.com/gh/AliyunContainerService/terway.svg?style=svg)](https://circleci.com/gh/AliyunContainerService/terway)
 [![Go Report Card](https://goreportcard.com/badge/github.com/AliyunContainerService/terway)](https://goreportcard.com/report/github.com/AliyunContainerService/terway)
-[![codecov](https://codecov.io/gh/AliyunContainerService/terway/branch/master/graph/badge.svg)](https://codecov.io/gh/AliyunContainerService/terway)
+[![codecov](https://codecov.io/gh/AliyunContainerService/terway/branch/main/graph/badge.svg)](https://codecov.io/gh/AliyunContainerService/terway)
+[![Linter](https://github.com/AliyunContainerService/terway/workflows/check/badge.svg)](https://github.com/marketplace/actions/super-linter)
 
 English | [简体中文](./README-zh_CN.md)
 
@@ -13,7 +14,8 @@ English | [简体中文](./README-zh_CN.md)
 ### Install Kubernetes
 
 * Prepare Aliyun ECS instance. The ECS OS we tested is `Centos 7.4/7.6`.
-* Install Kubernetes via kubeadm: [create-cluster-kubeadm](https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/)
+* Install Kubernetes via
+  kubeadm: [create-cluster-kubeadm](https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/)
 
 After setup kubernetes cluster.
 
@@ -29,20 +31,25 @@ Terway plugin have two installation modes
 
 * VPC Mode
 
-	VPC Mode, Using `Aliyun VPC` route table to connect the pods. Can assign dedicated ENI to Pod. Install method: <br />
-	Replace `Network` and `access_key/access_secret` in [terway.yml](./terway.yml) with your cluster pod subnet and aliyun openapi credentials. Then use `kubectl apply -f terway.yml` to install Terway into kubernetes cluster.
+    ```shell
+    VPC Mode, Using `Aliyun VPC` route table to connect the pods. Can assign dedicated ENI to Pod. Install method: <br />
+    Replace `Network` and `access_key/access_secret` in [terway.yml](./terway.yml) with your cluster pod subnet and aliyun openapi credentials. Then use `kubectl apply -f terway.yml` to install Terway into kubernetes cluster.
+    ```
 
 * ENI Secondary IP Mode
 
-	ENI Secondary IP Mode, Using `Aliyun ENI's secondary ip` to connect the pods. This mode not limited by VPC route tables quotation. Install method: <br />
-	Replace `access_key/access_secret` and `security_group/vswitches` in [terway-multiip.yml](./terway-multiip.yml) with your aliyun openapi credentials and resources id. Then use `kubectl apply -f terway-multiip.yml` to install Terway into kubernetes cluster.
+    ```shell
+    ENI Secondary IP Mode, Using `Aliyun ENI's secondary ip` to connect the pods. This mode not limited by VPC route tables quotation. Install method: <br />
+    Replace `access_key/access_secret` and `security_group/vswitches` in [terway-multiip.yml](./terway-multiip.yml) with your aliyun openapi credentials and resources id. Then use `kubectl apply -f terway-multiip.yml` to install Terway into kubernetes cluster.
+    ```
 
 Terway requires the `access_key` have following [RAM Permissions](https://ram.console.aliyun.com/)
 
 ```json
 {
   "Version": "1",
-  "Statement": [{
+  "Statement": [
+    {
       "Action": [
         "ecs:CreateNetworkInterface",
         "ecs:DescribeNetworkInterfaces",
@@ -74,15 +81,17 @@ Terway requires the `access_key` have following [RAM Permissions](https://ram.co
 }
 ```
 
-Using `kubectl get ds terway -n kube-system` to watch plugin launching. Plugin install completed while terway daemonset available pods equal to nodes.
+Using `kubectl get ds terway -n kube-system` to watch plugin launching. Plugin install completed while terway daemonset
+available pods equal to nodes.
 
 ### Terway network plugin usage
 
 #### Vpc network container
 
-On VPC installation mode, Terway will config pod's address using node's `podCidr` when pod not have any special config. eg:
+On VPC installation mode, Terway will config pod's address using node's `podCidr` when pod not have any special config.
+eg:
 
-```
+```sh
 [root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl run -it --rm --image busybox busybox
 If you don't see a command prompt, try pressing enter.
 / # ip link
@@ -107,23 +116,24 @@ If you don't see a command prompt, try pressing enter.
 
 #### Using ENI network interface to get the performance equivalent to the underlying network
 
-On VPC installation mode, Config `eni` request `aliyun/eni: 1` in one container of pod. The following example will create an Nginx Pod and assign an ENI:
+On VPC installation mode, Config `eni` request `aliyun/eni: 1` in one container of pod. The following example will
+create an Nginx Pod and assign an ENI:
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
   name: nginx
 spec:
   containers:
-  - name: nginx
-    image: nginx
-    resources:
-      limits:
-        aliyun/eni: 1
+    - name: nginx
+      image: nginx
+      resources:
+        limits:
+          aliyun/eni: 1
 ```
 
-```
+```sh
 [root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl exec -it nginx sh
 # ip addr show
 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1
@@ -144,11 +154,12 @@ spec:
        valid_lft forever preferred_lft forever
 ```
 
-#### ENI Secondary IP Pod：
+#### ENI Secondary IP Pod
 
-On ENI secondary IP installation mode, Terway will create & allocate ENI secondary IP for pod. The IP of pod will in same IP Range:
+On ENI secondary IP installation mode, Terway will create & allocate ENI secondary IP for pod. The IP of pod will in
+same IP Range:
 
-```
+```sh
 [root@iZj6c86lmr8k9rk78ju0ncZ ~]# kubectl get pod -o wide
 NAME                     READY   STATUS    RESTARTS   AGE   IP              NODE                                 NOMINATED NODE
 nginx-64f497f8fd-ckpdm   1/1     Running   0          4d    192.168.0.191   cn-hangzhou.i-j6c86lmr8k9rk78ju0nc   <none>
@@ -169,67 +180,68 @@ root@nginx-64f497f8fd-ckpdm:/# ip addr show
 
 #### Using network policy to limit accessible between containers
 
-The Terway plugin is compatible with NetworkPolicy in the standard K8S to control access between containers, for example:
+The Terway plugin is compatible with NetworkPolicy in the standard K8S to control access between containers, for
+example:
 
 1. Create and expose an deployment for test
 
-	```
-	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run nginx --image=nginx --replicas=2
-	deployment "nginx" created
-	[root@iZbp126bomo449eksjknkeZ ~]# kubectl expose deployment nginx --port=80
-	service "nginx" exposed
-	```
+    ```sh
+    [root@iZbp126bomo449eksjknkeZ ~]# kubectl run nginx --image=nginx --replicas=2
+    deployment "nginx" created
+    [root@iZbp126bomo449eksjknkeZ ~]# kubectl expose deployment nginx --port=80
+    service "nginx" exposed
+    ```
 
 2. Run busybox to test connection to deployment:
 
-	```
-	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --image=busybox /bin/sh
-	If you don't see a command prompt, try pressing enter.
-	/ # wget --spider --timeout=1 nginx
-	Connecting to nginx (172.21.0.225:80)
-	/ #
-	```
+    ```sh
+    [root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --image=busybox /bin/sh
+    If you don't see a command prompt, try pressing enter.
+    / # wget --spider --timeout=1 nginx
+    Connecting to nginx (172.21.0.225:80)
+    / #
+    ```
 
 3. Config network policy，only allow pod access which have `run: nginx` label:
 
-	```
-	kind: NetworkPolicy
-	apiVersion: networking.k8s.io/v1
-	metadata:
-	  name: access-nginx
-	spec:
-	  podSelector:
-	    matchLabels:
-	      run: nginx
-	  ingress:
-	  - from:
-	    - podSelector:
-	        matchLabels:
-	          access: "true"
-	  ```
+    ```sh
+    kind: NetworkPolicy
+    apiVersion: networking.k8s.io/v1
+    metadata:
+      name: access-nginx
+    spec:
+      podSelector:
+      matchLabels:
+        run: nginx
+      ingress:
+      - from:
+      - podSelector:
+        matchLabels:
+          access: "true"
+    ```
 
 4. The Pod access service without the specified label is rejected, and the container of the specified label can be accessed normally.
 
-	```
-	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --image=busybox /bin/sh
-	If you don't see a command prompt, try pressing enter.
-	/ # wget --spider --timeout=1 nginx
-	Connecting to nginx (172.21.0.225:80)
-	wget: download timed out
-	/ #
-
-	[root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --labels="access=true" --image=busybox /bin/sh
-	If you don't see a command prompt, try pressing enter.
-	/ # wget --spider --timeout=1 nginx
-	Connecting to nginx (172.21.0.225:80)
-	/ #
-	```
+    ```sh
+    [root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --image=busybox /bin/sh
+    If you don't see a command prompt, try pressing enter.
+    / # wget --spider --timeout=1 nginx
+    Connecting to nginx (172.21.0.225:80)
+    wget: download timed out
+    / #
+  
+    [root@iZbp126bomo449eksjknkeZ ~]# kubectl run busybox --rm -ti --labels="access=true" --image=busybox /bin/sh
+    If you don't see a command prompt, try pressing enter.
+    / # wget --spider --timeout=1 nginx
+    Connecting to nginx (172.21.0.225:80)
+    / #
+    ```
 
 #### Limit container in/out bandwidth
 
 The Terway network plugin can limit the container's traffic via limit policy in pod's annotations. For example:
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -241,10 +253,10 @@ spec:
   nodeSelector:
     kubernetes.io/hostname: cn-shanghai.i-uf63p6s96kf4jfh8wpwn
   containers:
-  - name: nginx
-    image: nginx:1.7.9
-    ports:
-    - containerPort: 80
+    - name: nginx
+      image: nginx:1.7.9
+      ports:
+        - containerPort: 80
 ```
 
 ## Build Terway
@@ -253,7 +265,7 @@ Prerequisites:
 
 * Docker >= 17.05 with multi-stage build
 
-```
+```sh
 docker build -t acs/terway:latest .
 ```
 
@@ -261,7 +273,7 @@ docker build -t acs/terway:latest .
 
 unit test:
 
-```
+```sh
 git clone https://github.com/AliyunContainerService/terway.git
 docker run -i --rm \
   -v $(pwd)/terway:/go/src/github.com/AliyunContainerService/terway \
@@ -271,7 +283,7 @@ docker run -i --rm \
 
 function test:
 
-```
+```sh
 cd terway/tests
 ./test.sh --cluster-id ${clusterid} \
     --access-key ${ACCESS_KEY_ID} --access-secret ${ACCESS_KEY_SECRET} \
@@ -281,7 +293,7 @@ cd terway/tests
 
 example:
 
-```
+```sh
 ./test.sh --cluster-id c05ef31ec40754f6c99c995963e2e01ed \
     --access-key ******** --access-secret ******** \
     --region cn-huhehaote --category vpc \
@@ -294,9 +306,14 @@ You are welcome to make new issues and pull requests.
 
 ## Built With
 
-[Felix](https://github.com/projectcalico/felix): Terway's NetworkPolicy is implemented by integrating [`ProjectCalico`](https://projectcalico.org)'s `Felix` components. `Felix` watch `NetworkPolicy` configuration and config ACL rules on container `veth`.
+[Felix](https://github.com/projectcalico/felix): Terway's NetworkPolicy is implemented by
+integrating [`ProjectCalico`](https://projectcalico.org)'s `Felix` components. `Felix` watch `NetworkPolicy`
+configuration and config ACL rules on container `veth`.
 
-[Cilium](https://github.com/cilium/cilium): In the `IPvlan` mode, `Terway` integrate [`Cilium`](https://github.com/cilium/cilium) components to support `NetworkPolicy` and optimize the `Service` performance. `Cilium` watch `NetworkPolicy` and `Service` configuration and inject `ebpf` program into pod's `IPvlan` slave device.
+[Cilium](https://github.com/cilium/cilium): In the `IPvlan` mode, `Terway`
+integrate [`Cilium`](https://github.com/cilium/cilium) components to support `NetworkPolicy` and optimize the `Service`
+performance. `Cilium` watch `NetworkPolicy` and `Service` configuration and inject `ebpf` program into pod's `IPvlan`
+slave device.
 
 ## Community
 
