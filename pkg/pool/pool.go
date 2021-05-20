@@ -47,7 +47,7 @@ type UsageIf interface {
 	GetStatus() types.ResStatus
 }
 
-// ResUsage
+// ResUsage ResUsage
 type ResUsage struct {
 	ID     string
 	Type   string

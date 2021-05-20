@@ -11,13 +11,6 @@ jobs:
     - checkout
     - setup_remote_docker
     - run:
-        name: run tests
-        command: |
-          test -z $(go fmt ./...)
-          go vet ./...
-          go test -race -v ./...
-    - run: docker build -t acs/terway:$CIRCLE_BUILD_NUM .
-    - run:
         name: codecov
         command: |
           go test -coverpkg=./... -race -coverprofile=coverage.txt -covermode=atomic ./...
@@ -29,14 +22,6 @@ jobs:
     working_directory: /go/src/github.com/AliyunContainerService/terway
     steps:
       - checkout
-      - run:
-          name: validate go code
-          command: |
-            golangci-lint run --timeout 300s --disable-all --skip-dirs-use-default -E goconst -E gofmt -E ineffassign -E goimports -E golint -E misspell -E vet -E deadcode
-      - run:
-          name: use ShellCheck (https://github.com/koalaman/shellcheck) to check the validateness of shell scripts
-          command: |
-            find ./ -name "*.sh" | grep -v vendor | grep -v tests | xargs shellcheck -e SC2236,SC2162
       - run:
           name: use markdown-link-check(https://github.com/tcort/markdown-link-check) to check links in markdown files
           command: |
@@ -62,21 +47,9 @@ jobs:
           command: |
             find . -name \*.md | grep -v '^./vendor' | grep  -v ./README-zh_C | xargs mdspell --ignore-numbers --ignore-acronyms --en-us -r -x
 
-  golangci-lint:
-    docker:
-        - image: golangci/golangci-lint:v1.33.0
-    working_directory: /go/src/github.com/AliyunContainerService/terway
-    steps:
-      - checkout
-      - run:
-          name: golangci-lint
-          command: |
-            golangci-lint run --timeout 300s --skip-dirs-use-default -v
-
 workflows:
   ci:
     jobs:
-      - golangci-lint
       - build
       - code-check
       - markdown-spellcheck

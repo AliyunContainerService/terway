@@ -89,7 +89,7 @@ func EnsureLinkMTU(link netlink.Link, mtu int) (bool, error) {
 	return true, netlink.LinkSetMTU(link, mtu)
 }
 
-// EnsureDefaultRoute
+// EnsureDefaultRoute set default route
 func EnsureDefaultRoute(link netlink.Link, gw net.IP) (bool, error) {
 	err := ip.ValidateExpectedRoute([]*types.Route{
 		{
@@ -171,6 +171,7 @@ func EnsureHostToContainerRoute(addr *net.IPNet, linkIndex int) error {
 	return nil
 }
 
+// Log Log
 var Log = MyLog{
 	l: log.New(ioutil.Discard, "", log.LstdFlags),
 }
@@ -180,7 +181,7 @@ type MyLog struct {
 	debug bool
 }
 
-// Debugf
+// Debugf Debugf
 func (m *MyLog) Debugf(format string, v ...interface{}) {
 	if !m.debug {
 		return
@@ -188,7 +189,7 @@ func (m *MyLog) Debugf(format string, v ...interface{}) {
 	m.l.Printf(format, v...)
 }
 
-// Debug
+// Debug Debug
 func (m *MyLog) Debug(v ...interface{}) {
 	if !m.debug {
 		return
@@ -196,7 +197,7 @@ func (m *MyLog) Debug(v ...interface{}) {
 	m.l.Print(v...)
 }
 
-// SetDebug
+// SetDebug SetDebug
 func (m *MyLog) SetDebug(d bool, fd *os.File) {
 	if !d {
 		m.l.SetOutput(ioutil.Discard)
@@ -206,7 +207,7 @@ func (m *MyLog) SetDebug(d bool, fd *os.File) {
 	m.l.SetOutput(fd)
 }
 
-// JSONStr
+// JSONStr json to string
 func JSONStr(v interface{}) string {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -219,7 +220,7 @@ type Locker struct {
 	FD *os.File
 }
 
-// Close
+// Close close
 func (l *Locker) Close() error {
 	if l.FD != nil {
 		return l.FD.Close()

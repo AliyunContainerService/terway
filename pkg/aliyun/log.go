@@ -1,5 +1,6 @@
 package aliyun
 
+// log fields
 const (
 	LogFieldAPI              = "api"
 	LogFieldRequestID        = "requestID"
