@@ -2,7 +2,8 @@ name: release
 
 on:
   push:
-    branches: [ main ]
+    tags:
+      - 'v*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.after }}
@@ -33,7 +34,7 @@ jobs:
         with:
           images: l1b0k/terway
           tags: |
-            type=sha,prefix={{branch}}-
+            type=ref,event=tag
 
       - name: Login to DockerHub
         uses: docker/login-action@v1
