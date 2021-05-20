@@ -413,13 +413,13 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		return nil, fmt.Errorf("not support pod network type")
 	}
 
-	// 3. grpc connection
+	// 4. grpc connection
 	if ctx.Err() != nil {
 		err = ctx.Err()
 		return nil, errors.Wrapf(err, "error on grpc connection")
 	}
 
-	// 4. return allocate result
+	// 5. return allocate result
 	return allocIPReply, err
 }
 
