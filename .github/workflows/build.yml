@@ -33,8 +33,6 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
-    env:
-      SHA8: ${GITHUB_SHA::8}
     steps:
       - uses: actions/checkout@v2
       - name: Set up QEMU
