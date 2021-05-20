@@ -8,7 +8,7 @@ import (
 type MetadataProvider struct {
 }
 
-// NewMetadataProvider
+// NewMetadataProvider get ramRole from metadata
 func NewMetadataProvider() *MetadataProvider {
 	return &MetadataProvider{}
 }

@@ -655,11 +655,8 @@ func (driver *ipvlanDriver) setupInitNamespace(
 		IP:   containerIP.IP,
 		Mask: net.CIDRMask(32, 32),
 	}
-	if err := driver.setupRouteIfNotExist(dst, slaveLink); err != nil {
-		return err
-	}
 
-	return nil
+	return driver.setupRouteIfNotExist(dst, slaveLink)
 }
 
 func (driver *ipvlanDriver) teardownInitNamespace(parents map[int]struct{}, containerIP net.IP) error {

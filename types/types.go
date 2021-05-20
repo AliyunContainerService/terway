@@ -7,6 +7,7 @@ import (
 
 type InternetChargeType string
 
+// EIP pay type
 const (
 	PayByBandwidth = InternetChargeType("PayByBandwidth")
 	PayByTraffic   = InternetChargeType("PayByTraffic")

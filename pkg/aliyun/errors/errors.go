@@ -15,22 +15,22 @@ const (
 	// for API UnassignPrivateIpAddresses
 	ErrInvalidIPIPUnassigned = "InvalidIp.IpUnassigned"
 
-	// ErrInvalidENINotFound
+	// ErrInvalidENINotFound ..
 	// for API UnassignPrivateIpAddresses DetachNetworkInterface
 	ErrInvalidENINotFound = "InvalidEniId.NotFound"
 
-	// ErrInvalidENIState
+	// ErrInvalidENIState ..
 	// for API DeleteNetworkInterface
 	ErrInvalidENIState = "InvalidOperation.InvalidEniState"
 
 	// ErrInvalidAllocationIDNotFound InvalidAllocationId.NotFound EIP not found
 	ErrInvalidAllocationIDNotFound = "InvalidAllocationId.NotFound"
 
-	// ErrIncorrectEIPStatus
+	// ErrIncorrectEIPStatus ..
 	// for API UnassociateEipAddress ReleaseEipAddress
 	ErrIncorrectEIPStatus = "IncorrectEipStatus"
 
-	// ErrAssociationDuplicated
+	// ErrAssociationDuplicated ..
 	// for API AssociateEipAddress
 	ErrAssociationDuplicated = "InvalidAssociation.Duplicated"
 )
