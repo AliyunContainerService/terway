@@ -1,4 +1,4 @@
-name: build
+name: release
 
 on:
   push:
@@ -11,8 +11,6 @@ concurrency:
 jobs:
   docker-build:
     runs-on: ubuntu-latest
-    env:
-      SHA8: ${GITHUB_SHA::8}
     steps:
       - uses: actions/checkout@v2
       - name: Set up QEMU
@@ -29,6 +27,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
 
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          images: l1b0k/terway
+          tags: |
+            type=sha,prefix={{branch}}-
+
       - name: Login to DockerHub
         uses: docker/login-action@v1
         with:
@@ -41,8 +47,8 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          push: true
-          tags: |
-            l1b0k/terway:$SHA8
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
