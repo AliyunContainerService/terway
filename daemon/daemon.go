@@ -69,9 +69,8 @@ type networkService struct {
 	eniIPResMgr    ResourceManager
 	eipResMgr      ResourceManager
 	//networkResourceMgr ResourceManager
-	mgrForResource  map[string]ResourceManager
-	pendingPods     map[string]interface{}
-	pendingPodsLock sync.RWMutex
+	mgrForResource map[string]ResourceManager
+	pendingPods    sync.Map
 	sync.RWMutex
 
 	cniBinPath string
@@ -185,20 +184,13 @@ func (networkService *networkService) allocateEIP(ctx *networkContext, old *PodR
 
 func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*rpc.AllocIPReply, error) {
 	log.Infof("alloc ip request: %+v", r)
-	networkService.pendingPodsLock.Lock()
-	_, ok := networkService.pendingPods[podInfoKey(r.K8SPodNamespace, r.K8SPodName)]
-	if !ok {
-		networkService.pendingPods[podInfoKey(r.K8SPodNamespace, r.K8SPodName)] = struct{}{}
-		networkService.pendingPodsLock.Unlock()
-		defer func() {
-			networkService.pendingPodsLock.Lock()
-			delete(networkService.pendingPods, podInfoKey(r.K8SPodNamespace, r.K8SPodName))
-			networkService.pendingPodsLock.Unlock()
-		}()
-	} else {
-		networkService.pendingPodsLock.Unlock()
-		return nil, fmt.Errorf("pod %s/%s resource processing", r.K8SPodNamespace, r.K8SPodName)
+	_, exist := networkService.pendingPods.LoadOrStore(podInfoKey(r.K8SPodNamespace, r.K8SPodName), struct{}{})
+	if exist {
+		return nil, fmt.Errorf("pod %s resource processing", podInfoKey(r.K8SPodNamespace, r.K8SPodName))
 	}
+	defer func() {
+		networkService.pendingPods.Delete(podInfoKey(r.K8SPodNamespace, r.K8SPodName))
+	}()
 
 	networkService.RLock()
 	defer networkService.RUnlock()
@@ -885,10 +877,15 @@ func (networkService *networkService) Config() []tracing.MapKeyValueEntry {
 }
 
 func (networkService *networkService) Trace() []tracing.MapKeyValueEntry {
-	trace := []tracing.MapKeyValueEntry{
-		{Key: tracingKeyPendingPodsCount, Value: fmt.Sprint(len(networkService.pendingPods))},
-	}
+	count := 0
+	networkService.pendingPods.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
 
+	trace := []tracing.MapKeyValueEntry{
+		{Key: tracingKeyPendingPodsCount, Value: fmt.Sprint(count)},
+	}
 	resList, err := networkService.resourceDB.List()
 	if err != nil {
 		trace = append(trace, tracing.MapKeyValueEntry{Key: "error", Value: err.Error()})
@@ -1029,12 +1026,11 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		cniBinPath = cniDefaultPath
 	}
 	netSrv := &networkService{
-		configFilePath:  configFilePath,
-		kubeConfig:      kubeconfig,
-		master:          master,
-		pendingPods:     map[string]interface{}{},
-		pendingPodsLock: sync.RWMutex{},
-		cniBinPath:      cniBinPath,
+		configFilePath: configFilePath,
+		kubeConfig:     kubeconfig,
+		master:         master,
+		pendingPods:    sync.Map{},
+		cniBinPath:     cniBinPath,
 	}
 	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC || daemonMode == daemonModeENIOnly {
 		netSrv.daemonMode = daemonMode
