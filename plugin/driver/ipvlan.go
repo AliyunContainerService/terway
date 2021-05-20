@@ -79,6 +79,11 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		return err
 	}
 
+	hostIPSet, err := GetHostIP(d.ipv4, d.ipv6)
+	if err != nil {
+		return err
+	}
+
 	// 2. setup addr and default route
 	err = netNS.Do(func(netNS ns.NetNS) error {
 		if d.ipv6 {
@@ -102,9 +107,24 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 				return err
 			}
 			_, err = EnsureDefaultRoute(link, cfg.GatewayIP)
+			if err != nil {
+				return err
+			}
+
+			// setup route to host ipvlan interface
+			_, err = EnsureRoute(link, hostIPSet)
+			if err != nil {
+				return fmt.Errorf("add route to host %s %s error, %w", hostIPSet.IPv4, hostIPSet.IPv6, err)
+			}
+
+			// set host ipvlan interface mac in ARP table
+			_, err = EnsureNeighbor(link, hostIPSet)
+			if err != nil {
+				return err
+			}
 			return err
 		}
-		return nil
+		return err
 	})
 
 	if err != nil {

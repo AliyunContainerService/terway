@@ -208,9 +208,54 @@ func EnsureAddr(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, equal func(a 
 
 func EnsureDefaultRoute(link netlink.Link, gw *terwayTypes.IPSet) (bool, error) {
 	var changed bool
+	if gw.IPv4 != nil {
+		ok, err := ensureRoute(link, defaultRoute, netlink.SCOPE_UNIVERSE, int(netlink.FLAG_ONLINK), gw.IPv4)
+		if err != nil {
+			return changed, err
+		}
+		if ok {
+			changed = true
+		}
+	}
+	if gw.IPv6 != nil {
+		ok, err := ensureRoute(link, defaultRouteIPv6, netlink.SCOPE_UNIVERSE, int(netlink.FLAG_ONLINK), gw.IPv6)
+		if err != nil {
+			return changed, err
+		}
+		if ok {
+			changed = true
+		}
+	}
+	return changed, nil
+}
 
-	exec := func(dst *net.IPNet, gw net.IP) (bool, error) {
-		err := ip.ValidateExpectedRoute([]*types.Route{
+func EnsureRoute(link netlink.Link, hostIPSet *terwayTypes.IPNetSet) (bool, error) {
+	var changed bool
+	if hostIPSet.IPv4 != nil {
+		ok, err := ensureRoute(link, hostIPSet.IPv4, netlink.SCOPE_LINK, 0, nil)
+		if err != nil {
+			return changed, err
+		}
+		if ok {
+			changed = true
+		}
+	}
+	if hostIPSet.IPv6 != nil {
+		ok, err := ensureRoute(link, hostIPSet.IPv6, netlink.SCOPE_LINK, 0, nil)
+		if err != nil {
+			return changed, err
+		}
+		if ok {
+			changed = true
+		}
+	}
+	return changed, nil
+}
+
+func ensureRoute(link netlink.Link, dst *net.IPNet, scope netlink.Scope, flags int, gw net.IP) (bool, error) {
+	var err error
+	if gw != nil {
+		err = ip.ValidateExpectedRoute([]*types.Route{
 			{
 				Dst: *dst,
 				GW:  gw,
@@ -222,39 +267,19 @@ func EnsureDefaultRoute(link netlink.Link, gw *terwayTypes.IPSet) (bool, error) 
 		if !strings.Contains(err.Error(), "not found") {
 			return false, err
 		}
-		r := &netlink.Route{
-			LinkIndex: link.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Flags:     int(netlink.FLAG_ONLINK),
-			Dst:       dst,
-			Gw:        gw,
-		}
-
-		err = RouteReplace(r)
-		if err != nil {
-			return false, err
-		}
-		return true, nil
 	}
-	if gw.IPv4 != nil {
-		ok, err := exec(defaultRoute, gw.IPv4)
-		if err != nil {
-			return changed, err
-		}
-		if ok {
-			changed = true
-		}
+	r := &netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Scope:     scope,
+		Flags:     flags,
+		Dst:       dst,
+		Gw:        gw,
 	}
-	if gw.IPv6 != nil {
-		ok, err := exec(defaultRouteIPv6, gw.IPv6)
-		if err != nil {
-			return changed, err
-		}
-		if ok {
-			changed = true
-		}
+	err = RouteReplace(r)
+	if err != nil {
+		return false, err
 	}
-	return changed, nil
+	return true, nil
 }
 
 // EnsureHostToContainerRoute create host to container route
@@ -570,4 +595,39 @@ func GetHostIP(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
 		IPv4: nodeIPv4,
 		IPv6: nodeIPv6,
 	}, nil
+}
+
+func EnsureNeighbor(link netlink.Link, hostIPSet *terwayTypes.IPNetSet) (bool, error) {
+	var changed bool
+	var err error
+
+	if hostIPSet.IPv4 != nil {
+		err = netlink.NeighSet(&netlink.Neigh{
+			IP:           hostIPSet.IPv4.IP,
+			Family:       netlink.FAMILY_V4,
+			LinkIndex:    link.Attrs().Index,
+			HardwareAddr: link.Attrs().HardwareAddr,
+			Type:         netlink.NDA_DST,
+			State:        netlink.NUD_PERMANENT,
+		})
+		if err != nil {
+			return false, fmt.Errorf("add host ipvlan interface %s mac %s to ARP table error, %w", hostIPSet.IPv4, link.Attrs().HardwareAddr, err)
+		}
+		changed = true
+	}
+	if hostIPSet.IPv6 != nil {
+		err = netlink.NeighSet(&netlink.Neigh{
+			IP:           hostIPSet.IPv6.IP,
+			Family:       netlink.FAMILY_V6,
+			LinkIndex:    link.Attrs().Index,
+			HardwareAddr: link.Attrs().HardwareAddr,
+			Type:         netlink.NDA_DST,
+			State:        netlink.NUD_PERMANENT,
+		})
+		if err != nil {
+			return false, fmt.Errorf("add host ipvlan interface %s mac %s to ARP table error, %w", hostIPSet.IPv4, link.Attrs().HardwareAddr, err)
+		}
+		changed = true
+	}
+	return changed, nil
 }
