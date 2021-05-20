@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 
-	errors2 "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 	"github.com/AliyunContainerService/terway/types"
 
@@ -55,12 +54,12 @@ func (e *ENIMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
 	}
 	gw, err := metadata.GetENIGateway(mac)
 	if err != nil {
-		return nil, fmt.Errorf("error get eni gateway by mac %s, %w", mac, err)
+		return nil, fmt.Errorf("error get eni ipv4 gateway by mac: %s, %w", mac, err)
 	}
 
 	vSwitchCIDR, err := metadata.GetVSwitchCIDR(mac)
 	if err != nil {
-		return nil, fmt.Errorf("error get eni vSwitchCIDR from metaserver, mac: %s, %w", mac, err)
+		return nil, fmt.Errorf("error get eni ipv4 vSwitchCIDR by mac: %s, %w", mac, err)
 	}
 
 	var v6gw net.IP
@@ -68,12 +67,12 @@ func (e *ENIMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
 	if e.ipFamily.IPv6 {
 		v6gw, err = metadata.GetENIV6Gateway(mac)
 		if err != nil {
-			return nil, fmt.Errorf("error get eni ipv6 gateway from metaserver, mac: %s, %w", mac, err)
+			return nil, fmt.Errorf("error get eni ipv6 gateway by mac: %s, %w", mac, err)
 		}
 
 		vSwitchIPv6CIDR, err = metadata.GetVSwitchIPv6CIDR(mac)
 		if err != nil {
-			return nil, fmt.Errorf("error get eni vSwitchIPv6CIDR from metaserver, mac: %s, %w", mac, err)
+			return nil, fmt.Errorf("error get eni ipv6 vSwitchCIDR by mac: %s, %w", mac, err)
 		}
 	}
 
@@ -94,23 +93,6 @@ func (e *ENIMetadata) GetENIConfigByMac(mac string) (*types.ENI, error) {
 	eni.VSwitch = vswitch
 
 	return &eni, nil
-}
-
-func (e *ENIMetadata) GetENIConfigByID(eniID string) (*types.ENI, error) {
-	macs, err := metadata.GetENIsMAC()
-	if err != nil {
-		return nil, err
-	}
-	for _, mac := range macs {
-		id, err := metadata.GetENIID(mac)
-		if err != nil {
-			return nil, errors.Wrapf(err, "error get eni id for mac: %s from metadata", mac)
-		}
-		if eniID == id {
-			return e.GetENIConfigByMac(mac)
-		}
-	}
-	return nil, errors.Wrapf(errors2.ErrNotFound, fmt.Sprintf("eni id: %s", eniID))
 }
 
 func (e *ENIMetadata) GetENIPrivateAddressesByMAC(mac string) ([]net.IP, error) {
