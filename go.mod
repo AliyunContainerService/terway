@@ -10,7 +10,7 @@ require (
 	github.com/containernetworking/plugins v0.8.7
 	github.com/denverdino/aliyungo v0.0.0-20201215054313-f635de23c5e0
 	github.com/docker/distribution v2.7.1+incompatible // indirect
-	github.com/docker/docker v20.10.1+incompatible
+	github.com/docker/docker v20.10.6+incompatible
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/evanphx/json-patch v4.9.0+incompatible
