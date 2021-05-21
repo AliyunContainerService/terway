@@ -15,67 +15,15 @@
 package sysctl
 
 import (
-	"fmt"
-	"io"
+	"bytes"
 	"io/ioutil"
-	"os"
-	"path/filepath"
-	"strings"
 )
 
-const (
-	prefixDir = "/proc/sys"
-)
-
-// Setting represents a sysctl setting. Its purpose it to be able to iterate
-// over a slice of settings.
-type Setting struct {
-	Name      string
-	Val       string
-	IgnoreErr bool
-}
-
-func fullPath(name string) string {
-	return filepath.Join(prefixDir, strings.Replace(name, ".", "/", -1))
-}
-
-func writeSysctl(name string, value string) error {
-	fPath := fullPath(name)
-	f, err := os.OpenFile(fPath, os.O_RDWR, 0644)
-	if err != nil {
-		return fmt.Errorf("could not open the sysctl file %s: %s",
-			fPath, err)
+func EnsureConf(fPath string, cfg string) error {
+	if content, err := ioutil.ReadFile(fPath); err == nil {
+		if bytes.Equal(bytes.TrimSpace(content), []byte(cfg)) {
+			return nil
+		}
 	}
-	defer f.Close()
-	if _, err := io.WriteString(f, value); err != nil {
-		return fmt.Errorf("could not write to the systctl file %s: %s",
-			fPath, err)
-	}
-	return nil
-}
-
-// Disable disables the given sysctl parameter.
-func Disable(name string) error {
-	return writeSysctl(name, "0")
-}
-
-// Enable enables the given sysctl parameter.
-func Enable(name string) error {
-	return writeSysctl(name, "1")
-}
-
-// Write writes the given sysctl parameter.
-func Write(name string, val string) error {
-	return writeSysctl(name, val)
-}
-
-// Read reads the given sysctl parameter.
-func Read(name string) (string, error) {
-	fPath := fullPath(name)
-	val, err := ioutil.ReadFile(fPath)
-	if err != nil {
-		return "", fmt.Errorf("Failed to read %s: %s", fPath, val)
-	}
-
-	return strings.TrimRight(string(val), "\n"), nil
+	return ioutil.WriteFile(fPath, []byte(cfg), 0644)
 }

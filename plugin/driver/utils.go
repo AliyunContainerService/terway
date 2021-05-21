@@ -11,15 +11,15 @@ import (
 	"time"
 
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
+	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
-	k8snet "k8s.io/apimachinery/pkg/util/net"
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ip"
-	"github.com/containernetworking/plugins/pkg/utils/sysctl"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
+	k8snet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -101,37 +101,18 @@ func getRouteTableID(linkIndex int) int {
 	return 1000 + linkIndex
 }
 
-const rpFilterSysctl = "net.ipv4.conf.%s.rp_filter"
-
 // EnsureHostNsConfig setup host namespace configs
 func EnsureHostNsConfig() error {
-	existInterfaces, err := net.Interfaces()
-	if err != nil {
-		return fmt.Errorf("error get network interfaces, %w", err)
-	}
-
 	for _, key := range []string{"default", "all"} {
-		sysctlName := fmt.Sprintf(rpFilterSysctl, key)
-		if _, err = sysctl.Sysctl(sysctlName, "0"); err != nil {
-			return fmt.Errorf("error set: %s sysctl value to 0, %w", sysctlName, err)
-		}
-
-	}
-
-	for _, existIf := range existInterfaces {
-		sysctlName := fmt.Sprintf(rpFilterSysctl, existIf.Name)
-		sysctlValue, err := sysctl.Sysctl(sysctlName)
-		if err != nil {
-			continue
-		}
-		if sysctlValue != "0" {
-			if _, err = sysctl.Sysctl(sysctlName, "0"); err != nil {
-				return fmt.Errorf("error set: %s sysctl value to 0, %w", sysctlName, err)
+		for _, cfg := range ipv4NetConfig {
+			err := terwaySysctl.EnsureConf(fmt.Sprintf(cfg[0], key), cfg[1])
+			if err != nil {
+				return err
 			}
 		}
-
 	}
-	return nil
+
+	return EnsureNetConfSet(true, false)
 }
 
 // EnsureLinkUp set link up,return changed and err
@@ -550,11 +531,11 @@ func EnsurePolicyRule(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, tableID
 }
 
 func EnableIPv6() error {
-	_, err := sysctl.Sysctl("net.ipv6.conf.all.disable_ipv6", "0")
+	err := terwaySysctl.EnsureConf("/proc/sys/net/ipv6/conf/all/disable_ipv6", "0")
 	if err != nil {
 		return err
 	}
-	_, err = sysctl.Sysctl("net.ipv6.conf.default.disable_ipv6", "0")
+	err = terwaySysctl.EnsureConf("/proc/sys/net/ipv6/conf/default/disable_ipv6", "0")
 	if err != nil {
 		return err
 	}
@@ -595,6 +576,44 @@ func GetHostIP(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
 		IPv4: nodeIPv4,
 		IPv6: nodeIPv6,
 	}, nil
+}
+
+var ipv4NetConfig = [][]string{
+	{"/proc/sys/net/ipv4/conf/%s/forwarding", "1"},
+	{"/proc/sys/net/ipv4/conf/%s/rp_filter", "0"},
+}
+
+var ipv6NetConfig = [][]string{
+	{"/proc/sys/net/ipv6/conf/%s/forwarding", "1"},
+	{"/proc/sys/net/ipv6/conf/%s/disable_ipv6", "0"},
+}
+
+// EnsureNetConfSet will set net config to all link
+func EnsureNetConfSet(ipv4, ipv6 bool) error {
+	links, err := netlink.LinkList()
+	if err != nil {
+		return err
+	}
+
+	for _, link := range links {
+		if ipv4 {
+			for _, cfg := range ipv4NetConfig {
+				innerErr := terwaySysctl.EnsureConf(fmt.Sprintf(cfg[0], link.Attrs().Name), cfg[1])
+				if innerErr != nil {
+					err = fmt.Errorf("%v, %w", err, innerErr)
+				}
+			}
+		}
+		if ipv6 {
+			for _, cfg := range ipv6NetConfig {
+				innerErr := terwaySysctl.EnsureConf(fmt.Sprintf(cfg[0], link.Attrs().Name), cfg[1])
+				if innerErr != nil {
+					err = fmt.Errorf("%v, %w", err, innerErr)
+				}
+			}
+		}
+	}
+	return err
 }
 
 func EnsureNeighbor(link netlink.Link, hostIPSet *terwayTypes.IPNetSet) (bool, error) {

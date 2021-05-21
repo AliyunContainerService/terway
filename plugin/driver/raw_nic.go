@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/sysctl"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
 )
@@ -163,15 +162,8 @@ func (r *RawNicDriver) Check(cfg *CheckConfig) error {
 			Log.Debugf("route is changed")
 			cfg.RecordPodEvent("default route is updated")
 		}
-		err = sysctl.Enable(fmt.Sprintf("net.ipv4.conf.%s.forwarding", cfg.ContainerIFName))
-		if err != nil {
-			return err
-		}
-		err = sysctl.Disable(fmt.Sprintf("net.ipv4.conf.%s.rp_filter", cfg.ContainerIFName))
-		if err != nil {
-			return err
-		}
-		return nil
+
+		return EnsureNetConfSet(true, false)
 	})
 	return nil
 }

@@ -687,6 +687,8 @@ func cmdCheck(args *skel.CmdArgs) error {
 	logger.Debugf("args: %s", driver.JSONStr(args))
 	logger.Debugf("ns %s , k8s %s, cni std %s", cniNetns.Path(), driver.JSONStr(k8sConfig), driver.JSONStr(conf))
 
+	_ = driver.EnsureHostNsConfig()
+
 	terwayBackendClient, closeConn, err := getNetworkClient()
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("add cmd: create grpc client, pod: %s-%s",

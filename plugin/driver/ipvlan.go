@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/AliyunContainerService/terway/pkg/sysctl"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -215,15 +214,8 @@ func (d *IPvlanDriver) Check(cfg *CheckConfig) error {
 			Log.Debugf("route is changed")
 			cfg.RecordPodEvent("default route is updated")
 		}
-		err = sysctl.Enable(fmt.Sprintf("net.ipv4.conf.%s.forwarding", cfg.ContainerIFName))
-		if err != nil {
-			return err
-		}
-		err = sysctl.Disable(fmt.Sprintf("net.ipv4.conf.%s.rp_filter", cfg.ContainerIFName))
-		if err != nil {
-			return err
-		}
-		return nil
+
+		return EnsureNetConfSet(true, false)
 	})
 	if err != nil {
 		return err
