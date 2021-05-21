@@ -17,7 +17,6 @@ import (
 	"github.com/AliyunContainerService/terway/rpc"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/version"
-	"github.com/sirupsen/logrus"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
@@ -158,7 +157,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	defer cniNetns.Close()
 
 	if conf.Debug {
-		driver.DefaultLogger.SetLevel(logrus.DebugLevel)
+		driver.SetLogDebug()
 	}
 	logger = logger.WithFields(map[string]interface{}{
 		"netns":        args.Netns,
@@ -231,9 +230,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}()
 
 	hostVETHName, _ := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
-	var (
-		allocatedIPAddr net.IPNet
-	)
 
 	var containerIPNet *terwayTypes.IPNetSet
 	var gatewayIPSet *terwayTypes.IPSet
@@ -244,13 +240,14 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return fmt.Errorf("eni multi ip return result is empty: %v", allocResult)
 		}
 		podIP := allocResult.GetENIMultiIP().GetENIConfig().GetPodIP()
+		subNet := allocResult.GetENIMultiIP().GetENIConfig().GetSubnet()
 		gatewayIP := allocResult.GetENIMultiIP().GetENIConfig().GetGatewayIP()
 		eniMAC := allocResult.GetENIMultiIP().GetENIConfig().GetMAC()
 		ingress := allocResult.GetENIMultiIP().GetPodConfig().GetIngress()
 		egress := allocResult.GetENIMultiIP().GetPodConfig().GetEgress()
 		serviceCIDR := allocResult.GetENIMultiIP().GetServiceCIDR()
 
-		containerIPNet, err = terwayTypes.BuildIPNet(podIP, &rpc.IPSet{IPv4: "0.0.0.0/32", IPv6: "::/128"})
+		containerIPNet, err = terwayTypes.BuildIPNet(podIP, subNet)
 		if err != nil {
 			return err
 		}
@@ -356,6 +353,13 @@ func cmdAdd(args *skel.CmdArgs) error {
 		podIPAddr := ipamResult.IPs[0].Address
 		gateway := ipamResult.IPs[0].Gateway
 
+		containerIPNet = &terwayTypes.IPNetSet{
+			IPv4: &podIPAddr,
+		}
+		gatewayIPSet = &terwayTypes.IPSet{
+			IPv4: gateway,
+		}
+
 		ingress := allocResult.GetVPCIP().GetPodConfig().GetIngress()
 		egress := allocResult.GetVPCIP().GetPodConfig().GetEgress()
 		l, err := driver.GrabFileLock(terwayCNILock)
@@ -368,15 +372,11 @@ func cmdAdd(args *skel.CmdArgs) error {
 		setupCfg := &driver.SetupConfig{
 			HostVETHName:    hostVETHName,
 			ContainerIfName: args.IfName,
-			ContainerIPNet: &terwayTypes.IPNetSet{
-				IPv4: &podIPAddr,
-			},
-			GatewayIP: &terwayTypes.IPSet{
-				IPv4: gateway,
-			},
-			MTU:     conf.MTU,
-			Ingress: ingress,
-			Egress:  egress,
+			ContainerIPNet:  containerIPNet,
+			GatewayIP:       gatewayIPSet,
+			MTU:             conf.MTU,
+			Ingress:         ingress,
+			Egress:          egress,
 		}
 
 		err = veth.Setup(setupCfg, cniNetns)
@@ -508,7 +508,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			K8SPodNamespace: string(k8sConfig.K8S_POD_NAMESPACE),
 			EventType:       rpc.EventType_EventTypeNormal,
 			Reason:          "AllocIPSucceed",
-			Message:         fmt.Sprintf("Alloc IP %s for Pod", allocatedIPAddr.String()),
+			Message:         fmt.Sprintf("Alloc IP %s for Pod", containerIPNet.String()),
 		})
 
 	return types.PrintResult(result, confVersion)
@@ -523,7 +523,7 @@ func cmdDel(args *skel.CmdArgs) error {
 	defer cniNetns.Close()
 
 	if conf.Debug {
-		driver.DefaultLogger.SetLevel(logrus.DebugLevel)
+		driver.SetLogDebug()
 	}
 	logger = logger.WithFields(map[string]interface{}{
 		"netns":        args.Netns,
@@ -676,7 +676,7 @@ func cmdCheck(args *skel.CmdArgs) error {
 	defer cniNetns.Close()
 
 	if conf.Debug {
-		driver.DefaultLogger.SetLevel(logrus.DebugLevel)
+		driver.SetLogDebug()
 	}
 	logger = logger.WithFields(map[string]interface{}{
 		"netns":        args.Netns,
@@ -722,8 +722,9 @@ func cmdCheck(args *skel.CmdArgs) error {
 		}
 
 		podIP := getResult.GetENIMultiIP().GetENIConfig().GetPodIP()
+		subNet := getResult.GetENIMultiIP().GetENIConfig().GetSubnet()
 
-		containerIPNet, err = terwayTypes.BuildIPNet(podIP, &rpc.IPSet{IPv4: "0.0.0.0/32", IPv6: "::/128"})
+		containerIPNet, err = terwayTypes.BuildIPNet(podIP, subNet)
 		if err != nil {
 			return err
 		}

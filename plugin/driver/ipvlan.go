@@ -469,13 +469,13 @@ func (d *IPvlanDriver) teardownInitNamespace(parents map[int]struct{}, container
 			continue
 		}
 		if containerIP.IPv4 != nil {
-			err = exec(initLink, containerIP.IPv4)
+			err = exec(initLink, NewIPNetWithMaxMask(containerIP.IPv4))
 			if err != nil {
 				return err
 			}
 		}
 		if containerIP.IPv6 != nil {
-			err = exec(initLink, containerIP.IPv6)
+			err = exec(initLink, NewIPNetWithMaxMask(containerIP.IPv6))
 			if err != nil {
 				return err
 			}

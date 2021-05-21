@@ -87,6 +87,7 @@ func (r *RawNicDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		if err != nil {
 			return fmt.Errorf("error set link %s MTU %d, %w", nicLink.Attrs().Name, cfg.MTU, err)
 		}
+		IPNetToMaxMask(cfg.ContainerIPNet)
 		err = SetupLink(nicLink, cfg)
 		if err != nil {
 			return err

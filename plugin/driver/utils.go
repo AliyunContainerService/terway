@@ -44,6 +44,11 @@ func NewDefaultLogger() *logrus.Logger {
 	return logger
 }
 
+func SetLogDebug() {
+	DefaultLogger.SetLevel(logrus.DebugLevel)
+	logrus.SetOutput(os.Stderr)
+}
+
 // JSONStr json to str
 func JSONStr(v interface{}) string {
 	b, err := json.Marshal(v)
@@ -309,7 +314,7 @@ func EnsureHostToContainerRoute(link netlink.Link, ipNetSet *terwayTypes.IPNetSe
 		err := exec(&netlink.Route{
 			LinkIndex: linkIndex,
 			Scope:     netlink.SCOPE_LINK,
-			Dst:       ipNetSet.IPv4,
+			Dst:       NewIPNetWithMaxMask(ipNetSet.IPv4),
 		})
 		if err != nil {
 			return changed, err
@@ -319,7 +324,7 @@ func EnsureHostToContainerRoute(link netlink.Link, ipNetSet *terwayTypes.IPNetSe
 		err := exec(&netlink.Route{
 			LinkIndex: linkIndex,
 			Scope:     netlink.SCOPE_LINK,
-			Dst:       ipNetSet.IPv6,
+			Dst:       NewIPNetWithMaxMask(ipNetSet.IPv6),
 		})
 		if err != nil {
 			return changed, err
@@ -396,6 +401,15 @@ func NewIPNetWithMaxMask(ipNet *net.IPNet) *net.IPNet {
 	return &net.IPNet{
 		IP:   ipNet.IP,
 		Mask: net.CIDRMask(32, 32),
+	}
+}
+
+func IPNetToMaxMask(ipNet *terwayTypes.IPNetSet) {
+	if ipNet.IPv4 != nil {
+		ipNet.IPv4 = NewIPNetWithMaxMask(ipNet.IPv4)
+	}
+	if ipNet.IPv6 != nil {
+		ipNet.IPv6 = NewIPNetWithMaxMask(ipNet.IPv6)
 	}
 }
 
@@ -480,13 +494,14 @@ func EnsurePolicyRule(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, tableID
 	}
 
 	if ipNetSet.IPv4 != nil {
+		v4 := NewIPNetWithMaxMask(ipNetSet.IPv4)
 		// 2. add host to container rule
 		toContainerRule := netlink.NewRule()
-		toContainerRule.Dst = ipNetSet.IPv4
+		toContainerRule.Dst = v4
 		toContainerRule.Table = mainRouteTable
 		toContainerRule.Priority = toContainerPriority
 
-		err := exec(ipNetSet.IPv4, toContainerRule)
+		err := exec(v4, toContainerRule)
 		if err != nil {
 			return changed, err
 		}
@@ -494,23 +509,25 @@ func EnsurePolicyRule(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, tableID
 		// 3. add from container rule
 		fromContainerRule := netlink.NewRule()
 		fromContainerRule.IifName = link.Attrs().Name
-		fromContainerRule.Src = ipNetSet.IPv4
+		fromContainerRule.Src = v4
 		fromContainerRule.Table = tableID
 		fromContainerRule.Priority = fromContainerPriority
 
-		err = exec(ipNetSet.IPv4, fromContainerRule)
+		err = exec(v4, fromContainerRule)
 		if err != nil {
 			return changed, err
 		}
 	}
 	if ipNetSet.IPv6 != nil {
+		v6 := NewIPNetWithMaxMask(ipNetSet.IPv6)
+
 		// 2. add host to container rule
 		toContainerRule := netlink.NewRule()
-		toContainerRule.Dst = ipNetSet.IPv6
+		toContainerRule.Dst = v6
 		toContainerRule.Table = mainRouteTable
 		toContainerRule.Priority = toContainerPriority
 
-		err := exec(ipNetSet.IPv6, toContainerRule)
+		err := exec(v6, toContainerRule)
 		if err != nil {
 			return changed, err
 		}
@@ -518,11 +535,11 @@ func EnsurePolicyRule(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, tableID
 		// 3. add from container rule
 		fromContainerRule := netlink.NewRule()
 		fromContainerRule.IifName = link.Attrs().Name
-		fromContainerRule.Src = ipNetSet.IPv6
+		fromContainerRule.Src = v6
 		fromContainerRule.Table = tableID
 		fromContainerRule.Priority = fromContainerPriority
 
-		err = exec(ipNetSet.IPv6, fromContainerRule)
+		err = exec(v6, fromContainerRule)
 		if err != nil {
 			return changed, err
 		}

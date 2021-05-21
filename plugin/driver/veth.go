@@ -84,7 +84,7 @@ func (d *VETHDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		if err != nil {
 			return fmt.Errorf("error find link %s in container, %w", contVETH.Attrs().Name, err)
 		}
-
+		IPNetToMaxMask(cfg.ContainerIPNet)
 		err = SetupLink(contLink, cfg)
 		if err != nil {
 			return err
