@@ -123,6 +123,16 @@ func (i *IPNetSet) ToRPC() *rpc.IPSet {
 		IPv6: ipv6,
 	}
 }
+func (i *IPNetSet) String() string {
+	var result []string
+	if i.IPv4 != nil {
+		result = append(result, i.IPv4.String())
+	}
+	if i.IPv6 != nil {
+		result = append(result, i.IPv6.String())
+	}
+	return strings.Join(result, "-")
+}
 
 // ENI aliyun ENI resource
 type ENI struct {

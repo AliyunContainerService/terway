@@ -14,7 +14,7 @@ type SetupConfig struct {
 	HostVETHName string
 
 	ContainerIfName string
-	ContainerIPNet  *terwayTypes.IPNetSet // ipNet type with mask /32 or /128
+	ContainerIPNet  *terwayTypes.IPNetSet
 	GatewayIP       *terwayTypes.IPSet
 	MTU             int
 	ENIIndex        int
