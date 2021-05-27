@@ -10,7 +10,7 @@ require (
 	github.com/containernetworking/plugins v0.8.7
 	github.com/denverdino/aliyungo v0.0.0-20201215054313-f635de23c5e0
 	github.com/docker/distribution v2.7.1+incompatible // indirect
-	github.com/docker/docker v20.10.1+incompatible
+	github.com/docker/docker v20.10.6+incompatible
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/evanphx/json-patch v4.9.0+incompatible
@@ -28,7 +28,7 @@ require (
 	golang.org/x/net v0.0.0-20201209123823-ac852fbbde11
 	golang.org/x/sys v0.0.0-20201221093633-bc327ba9c2f0
 	google.golang.org/grpc v1.34.0
-	google.golang.org/protobuf v1.25.0
+	google.golang.org/protobuf v1.26.0
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 	gotest.tools/v3 v3.0.3 // indirect
