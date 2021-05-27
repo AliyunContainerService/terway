@@ -3,14 +3,14 @@ module github.com/AliyunContainerService/terway
 go 1.15
 
 require (
-	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1004
+	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1110
 	github.com/boltdb/bolt v1.3.1
 	github.com/containerd/containerd v1.4.3 // indirect
 	github.com/containernetworking/cni v0.8.0
 	github.com/containernetworking/plugins v0.8.7
 	github.com/denverdino/aliyungo v0.0.0-20201215054313-f635de23c5e0
 	github.com/docker/distribution v2.7.1+incompatible // indirect
-	github.com/docker/docker v20.10.1+incompatible
+	github.com/docker/docker v20.10.6+incompatible
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/evanphx/json-patch v4.9.0+incompatible
