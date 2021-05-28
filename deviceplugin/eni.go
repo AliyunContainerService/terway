@@ -18,29 +18,56 @@ import (
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
+// define resource name
 const (
-	// DefaultResourceName aliyun eni resource name in kubernetes container resource
-	DefaultResourceName = "aliyun/eni"
-	serverSock          = pluginapi.DevicePluginPath + "%d-" + "eni.sock"
+	ENITypeENI    = "eni"
+	ENITypeMember = "member"
+
+	// ENIResName aliyun eni resource name in kubernetes container resource
+	ENIResName       = "aliyun/eni"
+	MemberENIResName = "aliyun/member-eni"
 )
 
-var eniServerSockRegex = regexp.MustCompile("^.*" + "-eni.sock")
+type eniRes struct {
+	resName string
+	re      *regexp.Regexp
+	sock    string
+}
 
-// EniDevicePlugin implements the Kubernetes device plugin API
-type EniDevicePlugin struct {
+var eniMap = map[string]eniRes{
+	ENITypeENI: {
+		resName: ENIResName,
+		re:      regexp.MustCompile("^.*" + "-eni.sock"),
+		sock:    pluginapi.DevicePluginPath + "%d-" + "eni.sock",
+	},
+	ENITypeMember: {
+		resName: MemberENIResName,
+		re:      regexp.MustCompile("^.*" + "-member-eni.sock"),
+		sock:    pluginapi.DevicePluginPath + "%d-" + "member-eni.sock",
+	},
+}
+
+// ENIDevicePlugin implements the Kubernetes device plugin API
+type ENIDevicePlugin struct {
 	socket string
 	server *grpc.Server
 	count  int
 	stop   chan struct{}
+	eniRes eniRes
 	sync.Locker
 }
 
-// NewEniDevicePlugin returns an initialized EniDevicePlugin
-func NewEniDevicePlugin(count int) *EniDevicePlugin {
-	pluginEndpoint := fmt.Sprintf(serverSock, time.Now().Unix())
-	return &EniDevicePlugin{
+// NewENIDevicePlugin returns an initialized ENIDevicePlugin
+func NewENIDevicePlugin(count int, eniType string) *ENIDevicePlugin {
+	res, ok := eniMap[eniType]
+	if !ok {
+		panic("unsupported eni type " + eniType)
+	}
+	pluginEndpoint := fmt.Sprintf(res.sock, time.Now().Unix())
+	return &ENIDevicePlugin{
 		socket: pluginEndpoint,
 		count:  count,
+		eniRes: res,
 	}
 }
 
@@ -65,7 +92,7 @@ func dial(unixSocketPath string, timeout time.Duration) (*grpc.ClientConn, func(
 }
 
 // Start starts the gRPC server of the device plugin
-func (m *EniDevicePlugin) Start() error {
+func (m *ENIDevicePlugin) Start() error {
 	if m.server != nil {
 		close(m.stop)
 		m.server.Stop()
@@ -101,17 +128,17 @@ func (m *EniDevicePlugin) Start() error {
 }
 
 // GetDevicePluginOptions return device plugin options
-func (m *EniDevicePlugin) GetDevicePluginOptions(context.Context, *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
+func (m *ENIDevicePlugin) GetDevicePluginOptions(context.Context, *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
 	return &pluginapi.DevicePluginOptions{}, nil
 }
 
 // PreStartContainer return container prestart hook
-func (m *EniDevicePlugin) PreStartContainer(context.Context, *pluginapi.PreStartContainerRequest) (*pluginapi.PreStartContainerResponse, error) {
+func (m *ENIDevicePlugin) PreStartContainer(context.Context, *pluginapi.PreStartContainerRequest) (*pluginapi.PreStartContainerResponse, error) {
 	return &pluginapi.PreStartContainerResponse{}, nil
 }
 
 // Stop stops the gRPC server
-func (m *EniDevicePlugin) Stop() error {
+func (m *ENIDevicePlugin) Stop() error {
 	if m.server == nil {
 		return nil
 	}
@@ -124,7 +151,7 @@ func (m *EniDevicePlugin) Stop() error {
 }
 
 // Register registers the device plugin for the given resourceName with Kubelet.
-func (m *EniDevicePlugin) Register(request pluginapi.RegisterRequest) error {
+func (m *ENIDevicePlugin) Register(request pluginapi.RegisterRequest) error {
 	conn, closeConn, err := dial(pluginapi.KubeletSocket, 5*time.Second)
 	if err != nil {
 		return err
@@ -141,7 +168,7 @@ func (m *EniDevicePlugin) Register(request pluginapi.RegisterRequest) error {
 }
 
 // ListAndWatch lists devices and update that list according to the health status
-func (m *EniDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
+func (m *ENIDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
 	var devs []*pluginapi.Device
 	for i := 0; i < m.count; i++ {
 		devs = append(devs, &pluginapi.Device{ID: fmt.Sprintf("eni-%d", i), Health: pluginapi.Healthy})
@@ -166,7 +193,7 @@ func (m *EniDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlu
 }
 
 // Allocate which return list of devices.
-func (m *EniDevicePlugin) Allocate(ctx context.Context, r *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
+func (m *ENIDevicePlugin) Allocate(ctx context.Context, r *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
 	response := pluginapi.AllocateResponse{
 		ContainerResponses: []*pluginapi.ContainerAllocateResponse{},
 	}
@@ -181,7 +208,7 @@ func (m *EniDevicePlugin) Allocate(ctx context.Context, r *pluginapi.AllocateReq
 	return &response, nil
 }
 
-func (m *EniDevicePlugin) cleanup() error {
+func (m *ENIDevicePlugin) cleanup() error {
 	preSocks, err := ioutil.ReadDir(pluginapi.DevicePluginPath)
 	if err != nil {
 		return err
@@ -189,7 +216,7 @@ func (m *EniDevicePlugin) cleanup() error {
 
 	for _, preSock := range preSocks {
 		log.Infof("device plugin file info: %+v", preSock)
-		if eniServerSockRegex.Match([]byte(preSock.Name())) && preSock.Mode()&os.ModeSocket != 0 {
+		if m.eniRes.re.Match([]byte(preSock.Name())) && preSock.Mode()&os.ModeSocket != 0 {
 			if err = syscall.Unlink(path.Join(pluginapi.DevicePluginPath, preSock.Name())); err != nil {
 				log.Errorf("error on clean up previous device plugin listens, %+v", err)
 			}
@@ -198,7 +225,7 @@ func (m *EniDevicePlugin) cleanup() error {
 	return nil
 }
 
-func (m *EniDevicePlugin) watchKubeletRestart() {
+func (m *ENIDevicePlugin) watchKubeletRestart() {
 	//fsWatcher, err := fsnotify.NewWatcher()
 	//if err != nil {
 	//	log.Fatalf("error create fs watcher, %+v", err)
@@ -244,7 +271,7 @@ func (m *EniDevicePlugin) watchKubeletRestart() {
 				pluginapi.RegisterRequest{
 					Version:      pluginapi.Version,
 					Endpoint:     path.Base(m.socket),
-					ResourceName: DefaultResourceName,
+					ResourceName: ENIResName,
 				},
 			)
 			if err != nil {
@@ -257,7 +284,7 @@ func (m *EniDevicePlugin) watchKubeletRestart() {
 }
 
 // Serve starts the gRPC server and register the device plugin to Kubelet
-func (m *EniDevicePlugin) Serve(resourceName string) error {
+func (m *ENIDevicePlugin) Serve() error {
 	err := m.Start()
 	if err != nil {
 		log.Errorf("Could not start device plugin: %v", err)
@@ -270,7 +297,7 @@ func (m *EniDevicePlugin) Serve(resourceName string) error {
 		pluginapi.RegisterRequest{
 			Version:      pluginapi.Version,
 			Endpoint:     path.Base(m.socket),
-			ResourceName: resourceName,
+			ResourceName: m.eniRes.resName,
 		},
 	)
 	if err != nil {

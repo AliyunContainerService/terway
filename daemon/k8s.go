@@ -340,7 +340,7 @@ func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 		}
 
 		for _, c := range pod.Spec.Containers {
-			if _, ok := c.Resources.Requests[deviceplugin.DefaultResourceName]; ok {
+			if _, ok := c.Resources.Requests[deviceplugin.ENIResName]; ok {
 				useENI = true
 				break
 			}

@@ -92,6 +92,9 @@ type Limits struct {
 
 	// IPv6PerAdapter is the maximum number of ipv6 addresses per adapter/interface
 	IPv6PerAdapter int
+
+	// MemberAdapterLimit is the number interfaces that type is member
+	MemberAdapterLimit int
 }
 
 var limits = struct {
@@ -133,17 +136,20 @@ func UpdateFromAPI(client *ecs.Client, instanceType string) error {
 		adapterLimit := instanceTypeInfo.EniQuantity
 		ipv4PerAdapter := instanceTypeInfo.EniPrivateIpAddressQuantity
 		ipv6PerAdapter := instanceTypeInfo.EniIpv6AddressQuantity
+		memberAdapterLimit := instanceTypeInfo.EniTotalQuantity - instanceTypeInfo.EniQuantity
 
 		limits.m[instanceType] = Limits{
-			Adapters:       adapterLimit,
-			IPv4PerAdapter: ipv4PerAdapter,
-			IPv6PerAdapter: ipv6PerAdapter,
+			Adapters:           adapterLimit,
+			IPv4PerAdapter:     ipv4PerAdapter,
+			IPv6PerAdapter:     ipv6PerAdapter,
+			MemberAdapterLimit: memberAdapterLimit,
 		}
 		logrus.WithFields(map[string]interface{}{
-			"instance-type": instanceType,
-			"adapters":      adapterLimit,
-			"ipv4":          ipv4PerAdapter,
-			"ipv6":          ipv6PerAdapter,
+			"instance-type":   instanceType,
+			"adapters":        adapterLimit,
+			"ipv4":            ipv4PerAdapter,
+			"ipv6":            ipv6PerAdapter,
+			"member-adapters": memberAdapterLimit,
 		}).Infof("instance limit")
 	}
 
