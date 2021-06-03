@@ -447,7 +447,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 		setupCfg := &driver.SetupConfig{
 			HostVETHName:    hostVETHName,
-			ContainerIfName: args.IfName,
+			ContainerIfName: defaultVethForENI,
 			ContainerIPNet:  containerIPNet,
 			GatewayIP:       gatewayIPSet,
 			MTU:             conf.MTU,
@@ -472,7 +472,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 				}
 			}
 		}()
-
+		setupCfg.ContainerIfName = args.IfName
 		err = rawNIC.Setup(setupCfg, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network for vpc eni failed: %v", err)
