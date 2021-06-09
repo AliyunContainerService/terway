@@ -1,17 +1,12 @@
-From f02e30ee9c3eb24625f27c4a815f512c3136e241 Mon Sep 17 00:00:00 2001
-From: Lyt99 <lyt1999131@163.com>
-Date: Thu, 30 Jul 2020 14:26:07 +0800
-Subject: [PATCH] overwrite endpoint when conflicting
-
----
- daemon/cmd/endpoint.go | 4 +++-
- 1 file changed, 3 insertions(+), 1 deletion(-)
-
+Index: daemon/cmd/endpoint.go
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
 diff --git a/daemon/cmd/endpoint.go b/daemon/cmd/endpoint.go
-index ee81aeede..671cab315 100644
---- a/daemon/cmd/endpoint.go
-+++ b/daemon/cmd/endpoint.go
-@@ -343,7 +343,9 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
+--- a/daemon/cmd/endpoint.go	(revision 952d9d33740fc77e1a94d5a52b38d2a313e5c570)
++++ b/daemon/cmd/endpoint.go	(revision d25122164324795e85c9dc59a175b903779cbd82)
+@@ -361,7 +361,9 @@
  		if err != nil {
  			return invalidDataError(ep, err)
  		} else if oldEp != nil {
@@ -22,6 +17,3 @@ index ee81aeede..671cab315 100644
  		}
  	}
  
--- 
-2.28.0
-

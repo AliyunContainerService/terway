@@ -19,53 +19,24 @@ RUN mkdir -p /go/src/github.com/projectcalico/ && cd /go/src/github.com/projectc
 COPY policy/felix /terway_patch
 RUN cd /go/src/github.com/projectcalico/felix && git apply /terway_patch/*.patch && glide up --strip-vendor || glide install --strip-vendor
 RUN cd /go/src/github.com/projectcalico/felix && \
-    go build -v -i -o bin/calico-felix-amd64 -v -ldflags \
+    go build -v -i -o bin/calico-felix-arm64 -v -ldflags \
     "-X github.com/projectcalico/felix/buildinfo.GitVersion=${GIT_BRANCH} \
     -X github.com/projectcalico/felix/buildinfo.BuildDate=$(date -u +'%FT%T%z') \
     -X github.com/projectcalico/felix/buildinfo.GitRevision=${GIT_COMMIT} \
     -B 0x${GIT_COMMIT}" "github.com/projectcalico/felix/cmd/calico-felix" && \
-    ( ldd bin/calico-felix-amd64 2>&1 | grep -q -e "Not a valid dynamic program" \
+    ( ldd bin/calico-felix-arm64 2>&1 | grep -q -e "Not a valid dynamic program" \
     -e "not a dynamic executable" || \
-    ( echo "Error: bin/calico-felix-amd64 was not statically linked"; false ) ) \
-    && chmod +x /go/src/github.com/projectcalico/felix/bin/calico-felix-amd64
-
-FROM quay.io/cilium/cilium-builder:2021-05-10-v1.9@sha256:7bd7b86a4580d1b2f11a45a6734f85718a39fc9946c4870f3a26edfe12f10ffb as cilium-builder
-ARG CILIUM_SHA=""
-LABEL cilium-sha=${CILIUM_SHA}
-LABEL maintainer="maintainer@cilium.io"
-WORKDIR /go/src/github.com/cilium
-ENV GIT_BRANCH=master
-ENV GIT_TAG=v1.10.0
-ENV GIT_COMMIT=952d9d33740fc77e1a94d5a52b38d2a313e5c570
-RUN git clone https://github.com/cilium/cilium.git && \
-    cd cilium && git checkout ${GIT_TAG} && \
-    [ "`git rev-parse HEAD`" = "${GIT_COMMIT}" ]
-COPY policy/cilium /cilium_patch
-RUN cd cilium && git apply /cilium_patch/*.patch
-ARG NOSTRIP
-ARG LOCKDEBUG
-ARG V
-ARG LIBNETWORK_PLUGIN
-#
-# Please do not add any dependency updates before the 'make install' here,
-# as that will mess with caching for incremental builds!
-#
-RUN cd cilium && make NOSTRIP=$NOSTRIP LOCKDEBUG=$LOCKDEBUG PKG_BUILD=1 V=$V LIBNETWORK_PLUGIN=$LIBNETWORK_PLUGIN \
-    SKIP_DOCS=true DESTDIR=/tmp/install clean-container build-container install-container
-RUN cp /tmp/install/opt/cni/bin/cilium-cni /tmp/install/usr/bin/
+    ( echo "Error: bin/calico-felix-arm64 was not statically linked"; false ) ) \
+    && chmod +x /go/src/github.com/projectcalico/felix/bin/calico-felix-arm64
 
 
 FROM ubuntu:20.04
 RUN apt-get update && apt-get install -y kmod libelf1 libmnl0 iptables kmod curl ipset bash ethtool bridge-utils socat grep findutils jq && \
     apt-get purge --auto-remove && apt-get clean && rm -rf /var/lib/apt/lists/*
-COPY --from=docker.io/cilium/cilium-llvm:33c302266cecc264febfca95129ce8dad9397c81 /bin/clang /bin/llc /bin/
-COPY --from=docker.io/cilium/cilium-bpftool:b5ba881d2a7ec68d88ecd72efd60ac551c720701 /bin/bpftool /bin/
-COPY --from=docker.io/cilium/cilium-iproute2:4db2c4bdf00ce461406e1c82aada461356fac935 /bin/tc /bin/ip /bin/ss /bin/
-COPY --from=felix-builder /go/src/github.com/projectcalico/felix/bin/calico-felix-amd64 /bin/calico-felix
+COPY --from=felix-builder /go/src/github.com/projectcalico/felix/bin/calico-felix-arm64 /bin/calico-felix
 COPY policy/policyinit.sh /bin/
 COPY policy/uninstall_policy.sh /bin/
 COPY init.sh /bin/
-COPY --from=cilium-builder /tmp/install/ /
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terwayd /usr/bin/terwayd
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/plugin/terway/terway /usr/bin/terway
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cli/terway-cli /usr/bin/terway-cli
