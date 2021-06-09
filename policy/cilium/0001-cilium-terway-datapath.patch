@@ -1,73 +1,78 @@
+From 68af670f7140a32d90e60dcc8a3867f886519e0e Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Wed, 9 Jun 2021 16:55:20 +0800
+Subject: [PATCH 1/5] cilium terway datapath
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ pkg/datapath/connector/ipvlan.go             |  98 +++++++---
+ pkg/datapath/linux/config/config.go          |   8 +-
+ pkg/datapath/loader/loader.go                |  16 +-
+ pkg/datapath/loader/netlink.go               |   6 +-
+ plugins/cilium-cni/chaining/terway/terway.go | 180 +++++++++++++++++++
+ plugins/cilium-cni/cilium-cni.go             |   1 +
+ 6 files changed, 273 insertions(+), 36 deletions(-)
+ create mode 100644 plugins/cilium-cni/chaining/terway/terway.go
+
 diff --git a/pkg/datapath/connector/ipvlan.go b/pkg/datapath/connector/ipvlan.go
-index a82a35786..b9d7b87b6 100644
+index de33de8f10..372e10202e 100644
 --- a/pkg/datapath/connector/ipvlan.go
 +++ b/pkg/datapath/connector/ipvlan.go
-@@ -46,14 +46,19 @@ type bpfAttrProg struct {
- 	Name        [16]byte
- }
- 
--func loadEntryProg(mapFd int) (int, error) {
-+func loadEntryProg(mapFd int, key uint8) (int, error) {
- 	tmp := (*[4]byte)(unsafe.Pointer(&mapFd))
- 	insns := []byte{
-+		// BPF_LD | BPF_IMM | BPF_DW
- 		0x18, 0x12, 0x00, 0x00, tmp[0], tmp[1], tmp[2], tmp[3],
- 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
--		0xb7, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-+		// BPF_ALU64 | BPF_K | BPF_MOVE
-+		0xb7, 0x03, 0x00, 0x00, byte(key), 0x00, 0x00, 0x00,
-+		// BPF_JMP | BPF_K | BPF_CALL
- 		0x85, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00,
-+		// BPF_ALU64 | BPF_MOVE
- 		0xb7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-+		// BPF_JMP | BPF_K | BPF_CALL
- 		0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+@@ -40,13 +40,23 @@ func getEntryProgInstructions(fd int) asm.Instructions {
  	}
- 	license := []byte{'A', 'S', 'L', '2', '\x00'}
-@@ -103,7 +108,7 @@ func createTailCallMap() (int, int, error) {
- 		MapType:    3,
- 		SizeKey:    4,
- 		SizeValue:  4,
--		MaxEntries: 1,
-+		MaxEntries: 2,
- 		Flags:      0,
- 	}
- 	fd, _, errno := unix.Syscall(unix.SYS_BPF, 0, /* BPF_MAP_CREATE */
-@@ -138,13 +143,18 @@ func createTailCallMap() (int, int, error) {
- 	return int(fd), int(info.MapID), nil
  }
  
 -// setupIpvlanInRemoteNs creates a tail call map, renames the netdevice inside
--// the target netns and attaches a BPF program to it on egress path which
--// then jumps into the tail call map index 0.
-+// setupIpvlanInRemoteNs renames device name and setups tc-bpf filter and tail call map.
-+func setupIpvlanInRemoteNs(netNs ns.NetNS, srcIfName, dstIfName string) (int, int, error) {
-+	return SetupIpvlanInRemoteNsWithBPF(netNs, srcIfName, dstIfName, false, true)
++func getIngressEntryProgInstructions(fd int) asm.Instructions {
++	return asm.Instructions{
++		asm.LoadMapPtr(asm.R2, fd),
++		asm.Mov.Imm(asm.R3, 1),
++		asm.FnTailCall.Call(),
++		asm.Mov.Imm(asm.R0, 0),
++		asm.Return(),
++	}
 +}
 +
-+// SetupIpvlanInRemoteNsWithBPF creates a tail call map, renames the netdevice inside
-+// the target netns and attaches BPF programs to it. egress path jumps into the tail
-+// call map index 0, ingress path jumps into  index 1.
++// SetupIpvlanInRemoteNs creates a tail call map, renames the netdevice inside
+ // the target netns and attaches a BPF program to it on egress path which
+ // then jumps into the tail call map index 0.
  //
- // NB: Do not close the returned mapFd before it has been pinned. Otherwise,
+ // NB: Do not close the returned map before it has been pinned. Otherwise,
  // the map will be destroyed.
--func setupIpvlanInRemoteNs(netNs ns.NetNS, srcIfName, dstIfName string) (int, int, error) {
-+func SetupIpvlanInRemoteNsWithBPF(netNs ns.NetNS, srcIfName, dstIfName string, ingress bool, egress bool) (int, int, error) {
+-func setupIpvlanInRemoteNs(netNs ns.NetNS, srcIfName, dstIfName string) (*ebpf.Map, error) {
++func SetupIpvlanInRemoteNs(netNs ns.NetNS, srcIfName, dstIfName string, ingress, egress bool) (*ebpf.Map, error) {
  	rl := unix.Rlimit{
  		Cur: unix.RLIM_INFINITY,
  		Max: unix.RLIM_INFINITY,
-@@ -188,27 +198,54 @@ func setupIpvlanInRemoteNs(netNs ns.NetNS, srcIfName, dstIfName string) (int, in
+@@ -61,7 +71,7 @@ func setupIpvlanInRemoteNs(netNs ns.NetNS, srcIfName, dstIfName string) (*ebpf.M
+ 		Type:       ebpf.ProgramArray,
+ 		KeySize:    4,
+ 		ValueSize:  4,
+-		MaxEntries: 1,
++		MaxEntries: 2,
+ 	})
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to create root BPF map for %q: %s", dstIfName, err)
+@@ -95,33 +105,63 @@ func setupIpvlanInRemoteNs(netNs ns.NetNS, srcIfName, dstIfName string) (*ebpf.M
  			return fmt.Errorf("failed to create clsact qdisc on %q: %s", dstIfName, err)
  		}
  
--		progFd, err := loadEntryProg(mapFd)
+-		prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
+-			Type:         ebpf.SchedCLS,
+-			Instructions: getEntryProgInstructions(m.FD()),
+-			License:      "ASL2",
+-		})
 -		if err != nil {
 -			return fmt.Errorf("failed to load root BPF prog for %q: %s", dstIfName, err)
 -		}
 +		if egress {
-+			progFd, err := loadEntryProg(mapFd, 0)
++			prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
++				Type:         ebpf.SchedCLS,
++				Instructions: getEntryProgInstructions(m.FD()),
++				License:      "ASL2",
++			})
 +			if err != nil {
-+				return fmt.Errorf("failed to load egress root BPF prog for %q: %s", dstIfName, err)
++				return fmt.Errorf("failed to load root BPF prog for %q: %s", dstIfName, err)
 +			}
  
 -		filterAttrs := netlink.FilterAttrs{
@@ -79,9 +84,13 @@ index a82a35786..b9d7b87b6 100644
 -		}
 -		filter := &netlink.BpfFilter{
 -			FilterAttrs:  filterAttrs,
--			Fd:           progFd,
+-			Fd:           prog.FD(),
 -			Name:         "polEntry",
 -			DirectAction: true,
+-		}
+-		if err = netlink.FilterAdd(filter); err != nil {
+-			prog.Close()
+-			return fmt.Errorf("failed to create cls_bpf filter on %q: %s", dstIfName, err)
 +			filterAttrs := netlink.FilterAttrs{
 +				LinkIndex: ipvlan.Attrs().Index,
 +				Parent:    netlink.HANDLE_MIN_EGRESS,
@@ -91,52 +100,72 @@ index a82a35786..b9d7b87b6 100644
 +			}
 +			filter := &netlink.BpfFilter{
 +				FilterAttrs:  filterAttrs,
-+				Fd:           progFd,
++				Fd:           prog.FD(),
 +				Name:         "polEntry",
 +				DirectAction: true,
 +			}
 +			if err = netlink.FilterAdd(filter); err != nil {
-+				unix.Close(progFd)
-+				return fmt.Errorf("failed to create egress cls_bpf filter on %q: %s", dstIfName, err)
++				prog.Close()
++				return fmt.Errorf("failed to create cls_bpf filter on %q: %s", dstIfName, err)
 +			}
  		}
--		if err = netlink.FilterAdd(filter); err != nil {
--			unix.Close(progFd)
--			return fmt.Errorf("failed to create cls_bpf filter on %q: %s", dstIfName, err)
-+
+ 
 +		if ingress {
-+			progFd, err := loadEntryProg(mapFd, 1)
++			prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
++				Type:         ebpf.SchedCLS,
++				Instructions: getIngressEntryProgInstructions(m.FD()),
++				License:      "ASL2",
++			})
 +			if err != nil {
-+				return fmt.Errorf("failed to load ingress root eBPF prog for %q: %s", dstIfName, err)
++				return fmt.Errorf("failed to load root BPF prog for %q: %s", dstIfName, err)
 +			}
 +
 +			filterAttrs := netlink.FilterAttrs{
 +				LinkIndex: ipvlan.Attrs().Index,
 +				Parent:    netlink.HANDLE_MIN_INGRESS,
 +				Handle:    netlink.MakeHandle(0, 1),
-+				Protocol:  unix.ETH_P_ALL,
++				Protocol:  3,
 +				Priority:  1,
 +			}
 +			filter := &netlink.BpfFilter{
 +				FilterAttrs:  filterAttrs,
-+				Fd:           progFd,
++				Fd:           prog.FD(),
 +				Name:         "ingressPolEntry",
 +				DirectAction: true,
 +			}
 +			if err = netlink.FilterAdd(filter); err != nil {
-+				unix.Close(progFd)
-+				return fmt.Errorf("failed to create ingress cls_bpf ingress filter on %q: %s", dstIfName, err)
++				prog.Close()
++				return fmt.Errorf("failed to create cls_bpf filter on %q: %s", dstIfName, err)
 +			}
- 		}
- 
++		}
  		return nil
+ 	})
+ 	if err != nil {
+@@ -217,7 +257,7 @@ func createIpvlanSlave(lxcIfName string, mtu, masterDev int, mode string, ep *mo
+ 
+ // CreateAndSetupIpvlanSlave creates an ipvlan slave device for the given
+ // master device, moves it to the given network namespace, and finally
+-// initializes it (see setupIpvlanInRemoteNs).
++// initializes it (see SetupIpvlanInRemoteNs).
+ func CreateAndSetupIpvlanSlave(id string, slaveIfName string, netNs ns.NetNS, mtu int, masterDev int, mode string, ep *models.EndpointChangeRequest) (*ebpf.Map, error) {
+ 	var tmpIfName string
+ 
+@@ -236,7 +276,7 @@ func CreateAndSetupIpvlanSlave(id string, slaveIfName string, netNs ns.NetNS, mt
+ 		return nil, fmt.Errorf("unable to move ipvlan slave '%v' to netns: %s", link, err)
+ 	}
+ 
+-	m, err := setupIpvlanInRemoteNs(netNs, tmpIfName, slaveIfName)
++	m, err := SetupIpvlanInRemoteNs(netNs, tmpIfName, slaveIfName, false, true)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("unable to setup ipvlan slave in remote netns: %w", err)
+ 	}
 diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
-index 215eb39d8..fb88e783e 100644
+index 52b366e30b..0b4ae87c51 100644
 --- a/pkg/datapath/linux/config/config.go
 +++ b/pkg/datapath/linux/config/config.go
-@@ -529,10 +529,12 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, e datapath.Endp
- 		}
- 	}
+@@ -754,10 +754,12 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, e datapath.Endp
+ 
+ 	fmt.Fprintf(fw, "#define HOST_EP_ID %d\n", uint32(node.GetEndpointID()))
  
 +	if e.RequireARPPassthrough() {
 +		fmt.Fprint(fw, "#define ENABLE_ARP_PASSTHROUGH 1\n")
@@ -151,10 +180,10 @@ index 215eb39d8..fb88e783e 100644
  		}
  
 diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
-index abce41005..fec8ddee6 100644
+index 9dee5e82ef..9cab73273c 100644
 --- a/pkg/datapath/loader/loader.go
 +++ b/pkg/datapath/loader/loader.go
-@@ -286,7 +286,7 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs
+@@ -301,7 +301,7 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs
  			return err
  		}
  	} else if ep.HasIpvlanDataPath() {
@@ -163,7 +192,7 @@ index abce41005..fec8ddee6 100644
  			scopedLog := ep.Logger(Subsystem).WithFields(logrus.Fields{
  				logfields.Path: objPath,
  			})
-@@ -298,6 +298,20 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs
+@@ -313,6 +313,20 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs
  			}
  			return err
  		}
@@ -182,21 +211,21 @@ index abce41005..fec8ddee6 100644
 +			}
 +		}
  	} else {
- 		if err := l.replaceDatapath(ctx, ep.InterfaceName(), objPath, symbolFromEndpoint, dirIngress); err != nil {
+ 		if err := replaceDatapath(ctx, ep.InterfaceName(), objPath, symbolFromEndpoint, dirIngress, false, ""); err != nil {
  			scopedLog := ep.Logger(Subsystem).WithFields(logrus.Fields{
 diff --git a/pkg/datapath/loader/netlink.go b/pkg/datapath/loader/netlink.go
-index 72f3e337e..83eae337a 100644
+index 381e1fbc8b..67bbe72335 100644
 --- a/pkg/datapath/loader/netlink.go
 +++ b/pkg/datapath/loader/netlink.go
-@@ -17,6 +17,7 @@ package loader
- import (
+@@ -18,6 +18,7 @@ import (
  	"context"
  	"fmt"
+ 	"net"
 +	"strconv"
  
  	"github.com/cilium/cilium/pkg/bpf"
  	"github.com/cilium/cilium/pkg/command/exec"
-@@ -94,7 +95,7 @@ func (l *Loader) replaceDatapath(ctx context.Context, ifName, objPath, progSec,
+@@ -119,7 +120,7 @@ func replaceDatapath(ctx context.Context, ifName, objPath, progSec, progDirectio
  }
  
  // graftDatapath replaces obj in tail call map
@@ -205,7 +234,7 @@ index 72f3e337e..83eae337a 100644
  	var err error
  
  	// FIXME: Replace cilium-map-migrate with Golang map migration
-@@ -117,8 +118,7 @@ func graftDatapath(ctx context.Context, mapPath, objPath, progSec string) error
+@@ -142,8 +143,7 @@ func graftDatapath(ctx context.Context, mapPath, objPath, progSec string) error
  	}()
  
  	// FIXME: replace exec with native call
@@ -217,10 +246,10 @@ index 72f3e337e..83eae337a 100644
  	cmd = exec.CommandContext(ctx, "tc", args...).WithFilters(libbpfFixupMsg)
 diff --git a/plugins/cilium-cni/chaining/terway/terway.go b/plugins/cilium-cni/chaining/terway/terway.go
 new file mode 100644
-index 000000000..55e91fe7c
+index 0000000000..7c5752bc15
 --- /dev/null
 +++ b/plugins/cilium-cni/chaining/terway/terway.go
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,180 @@
 +// Copyright 2019 Authors of Cilium
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -240,8 +269,6 @@ index 000000000..55e91fe7c
 +import (
 +	"context"
 +	"fmt"
-+
-+	"golang.org/x/sys/unix"
 +
 +	"github.com/cilium/cilium/api/v1/models"
 +	"github.com/cilium/cilium/pkg/datapath/connector"
@@ -287,7 +314,7 @@ index 000000000..55e91fe7c
 +	defer func() {
 +		if err != nil {
 +			pluginCtx.Logger.WithError(err).
-+				WithFields(logrus.Fields{"cni-pre-result": pluginCtx.NetConf.PrevResult.String()}).
++				WithFields(logrus.Fields{"cni-pre-result": pluginCtx.NetConf.PrevResult}).
 +				Errorf("Unable to create endpoint")
 +		}
 +	}()
@@ -337,18 +364,17 @@ index 000000000..55e91fe7c
 +		return
 +	}
 +
-+	var (
-+		mapFD, mapID int
-+	)
-+
 +	// set bpf
-+	mapFD, mapID, err = connector.SetupIpvlanInRemoteNsWithBPF(netNs, ifName, ifName, true, true)
++	m, err := connector.SetupIpvlanInRemoteNs(netNs, ifName, ifName, true, true)
 +	if err != nil {
 +		pluginCtx.Logger.WithError(err).Warn("Unable to set ipvlan ebpf")
 +		return
 +	}
-+	defer unix.Close(mapFD)
-+
++	defer m.Close()
++	mapID, err := m.ID()
++	if err != nil {
++		return nil, fmt.Errorf("failed to get map ID: %w", err)
++	}
 +	// create endpoint
 +	ep := &models.EndpointChangeRequest{
 +		Addressing: &models.AddressPair{
@@ -405,14 +431,17 @@ index 000000000..55e91fe7c
 +	chainingapi.Register(name, &TerwayChainer{})
 +}
 diff --git a/plugins/cilium-cni/cilium-cni.go b/plugins/cilium-cni/cilium-cni.go
-index 0e63ccc81..a19b71b9c 100644
+index ca5b2bd03b..61da6b1097 100644
 --- a/plugins/cilium-cni/cilium-cni.go
 +++ b/plugins/cilium-cni/cilium-cni.go
-@@ -44,6 +44,7 @@ import (
+@@ -43,6 +43,7 @@ import (
  	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/flannel"
  	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/generic-veth"
  	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/portmap"
 +	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/terway"
  	"github.com/cilium/cilium/plugins/cilium-cni/types"
+ 	"github.com/cilium/ebpf"
  
- 	"github.com/containernetworking/cni/pkg/skel"
+-- 
+2.32.0
+
