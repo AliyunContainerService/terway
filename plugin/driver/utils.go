@@ -145,7 +145,7 @@ func EnsureLinkName(link netlink.Link, name string) (bool, error) {
 
 // EnsureAddr take the ipNet set and ensure only one IP for each family is present on link
 // it will remove other unmatched IPs
-func EnsureAddr(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, equal func(a netlink.Addr) bool) (bool, error) {
+func EnsureAddr(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, scope int) (bool, error) {
 	var changed bool
 
 	exec := func(expect *net.IPNet) error {
@@ -160,7 +160,7 @@ func EnsureAddr(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, equal func(a 
 				continue
 			}
 
-			if addr.IPNet.String() == expect.String() && equal(addr) {
+			if addr.IPNet.String() == expect.String() && (scope == -1 || addr.Scope == scope) {
 				found = true
 				continue
 			}
@@ -174,7 +174,12 @@ func EnsureAddr(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, equal func(a 
 			return nil
 		}
 		changed = true
-		return AddrReplace(link, &netlink.Addr{IPNet: expect})
+
+		newAddr := &netlink.Addr{IPNet: expect}
+		if scope > 0 {
+			newAddr.Scope = scope
+		}
+		return AddrReplace(link, newAddr)
 	}
 
 	if ipNetSet.IPv4 != nil {
@@ -351,9 +356,7 @@ func SetupLink(link netlink.Link, cfg *SetupConfig) error {
 		return fmt.Errorf("error set link %s up , %w", link.Attrs().Name, err)
 	}
 
-	_, err = EnsureAddr(link, cfg.ContainerIPNet, func(a netlink.Addr) bool {
-		return true
-	})
+	_, err = EnsureAddr(link, cfg.ContainerIPNet, -1)
 	return err
 }
 
