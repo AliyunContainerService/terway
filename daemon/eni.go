@@ -93,8 +93,8 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 	}
 
 	//init deviceplugin for ENI
-	dp := deviceplugin.NewEniDevicePlugin(capacity)
-	err = dp.Serve(deviceplugin.DefaultResourceName)
+	dp := deviceplugin.NewENIDevicePlugin(capacity, deviceplugin.ENITypeENI)
+	err = dp.Serve()
 	if err != nil {
 		return nil, errors.Wrapf(err, "error set deviceplugin on node")
 	}

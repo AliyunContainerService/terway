@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	aliyunErrors "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -835,6 +836,14 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 	mgr := &eniIPResourceManager{
 		pool: p,
 	}
+
+	//init deviceplugin for ENI
+	dp := deviceplugin.NewENIDevicePlugin(capacity, deviceplugin.ENITypeMember)
+	err = dp.Serve()
+	if err != nil {
+		return nil, fmt.Errorf("error start device plugin on node, %w", err)
+	}
+
 	_ = tracing.Register(tracing.ResourceTypeFactory, factory.name, factory)
 	return mgr, nil
 }
