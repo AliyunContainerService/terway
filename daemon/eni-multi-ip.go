@@ -741,6 +741,11 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 	if capacity < 0 {
 		capacity = 0
 	}
+	memberENIPod := limit.MemberAdapterLimit * limit.IPv4PerAdapter
+	if memberENIPod < 0 {
+		memberENIPod = 0
+	}
+
 	factory.maxENI = make(chan struct{}, maxEni)
 
 	if poolConfig.MinENI != 0 {
@@ -838,10 +843,12 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 	}
 
 	//init deviceplugin for ENI
-	dp := deviceplugin.NewENIDevicePlugin(capacity, deviceplugin.ENITypeMember)
-	err = dp.Serve()
-	if err != nil {
-		return nil, fmt.Errorf("error start device plugin on node, %w", err)
+	if poolConfig.EnableENITrunking {
+		dp := deviceplugin.NewENIDevicePlugin(memberENIPod, deviceplugin.ENITypeMember)
+		err = dp.Serve()
+		if err != nil {
+			return nil, fmt.Errorf("error start device plugin on node, %w", err)
+		}
 	}
 
 	_ = tracing.Register(tracing.ResourceTypeFactory, factory.name, factory)
