@@ -1319,6 +1319,7 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 		EniCapShift:            cfg.EniCapShift,
 		SecurityGroup:          cfg.SecurityGroup,
 		VSwitchSelectionPolicy: cfg.VSwitchSelectionPolicy,
+		EnableENITrunking:      cfg.EnableENITrunking,
 	}
 	ins := aliyun.GetInstanceMeta()
 	zone := ins.ZoneID
