@@ -55,7 +55,7 @@ jobs:
         env:
           SHELLCHECK_OPTS: -e SC2236,SC2162,SC2268
         with:
-          ignore: tests
+          ignore: tests hack
 
   super-linter:
     runs-on: ubuntu-latest
