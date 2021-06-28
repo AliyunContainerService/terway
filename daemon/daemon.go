@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -839,7 +840,7 @@ func (networkService *networkService) startPeriodCheck() {
 					Bytes: ff,
 				}, &libcni.RuntimeConf{
 					ContainerID: "fake", // must provide
-					NetNS:       *res.NetNs,
+					NetNS:       filepath.Join("/proc/1/root/", *res.NetNs),
 					IfName:      "eth0",
 					Args: [][2]string{
 						{"K8S_POD_NAME", res.PodInfo.Name},
