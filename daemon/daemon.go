@@ -1079,7 +1079,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	ins := aliyun.GetInstanceMeta()
 
 	ignoreLinkNotExist := false
-	if daemonMode == daemonModeENIOnly {
+	if daemonMode == daemonModeENIOnly || daemonMode == daemonModeVPC {
 		ignoreLinkNotExist = true
 	}
 	ipFamily := types.NewIPFamilyFromIPStack(types.IPStack(config.IPStack))
