@@ -19,7 +19,7 @@
    ```json
    10-terway.conf: |
    {
-     "cniVersion": "0.3.0",
+     "cniVersion": "0.3.1",
      "name": "terway",
      "eniip_virtual_type": "IPVlan",
      // 新增以下配置，以打开 Hubble 网络流量分析

@@ -14,9 +14,9 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/plugin/backend"
 	"github.com/AliyunContainerService/terway/plugin/driver"
+	"github.com/AliyunContainerService/terway/plugin/version"
 	"github.com/AliyunContainerService/terway/rpc"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
-	"github.com/AliyunContainerService/terway/version"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
