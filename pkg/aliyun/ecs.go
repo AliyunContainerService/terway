@@ -321,12 +321,12 @@ func (e *ecsImpl) GetENIIPs(mac string) ([]net.IP, []net.IP, error) {
 
 	var ipv4, ipv6 []net.IP
 	var err error
-	if e.ipFamily.IPv4 {
-		ipv4, err = e.metadata.GetENIPrivateAddressesByMAC(mac)
-		if err != nil {
-			return nil, nil, err
-		}
+
+	ipv4, err = e.metadata.GetENIPrivateAddressesByMAC(mac)
+	if err != nil {
+		return nil, nil, err
 	}
+
 	if e.ipFamily.IPv6 {
 		ipv6, err = e.metadata.GetENIPrivateIPv6AddressesByMAC(mac)
 		if err != nil {
