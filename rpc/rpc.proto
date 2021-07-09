@@ -1,6 +1,6 @@
 syntax = "proto3";
 package rpc;
-option go_package = ".;rpc";
+option go_package = "./;rpc";
 
 service TerwayBackend {
   rpc AllocIP (AllocIPRequest) returns (AllocIPReply) {
@@ -53,6 +53,7 @@ message ENI {
   IPSet Subnet = 2;
   string MAC = 3; // mac for eni
   IPSet GatewayIP = 4; // gw for eni
+  bool Trunk = 5; // eni is trunk
 }
 
 // Dedicated ENI

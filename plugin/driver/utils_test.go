@@ -1,0 +1,19 @@
+package driver
+
+import (
+	"github.com/vishvananda/netlink"
+	"testing"
+)
+
+func TestEnsureVlanUntagger(t *testing.T) {
+	link, err := netlink.LinkByName("eth0")
+	if err != nil {
+		t.Errorf("error found eth0 interface, %v", err)
+		t.Fail()
+	}
+	err = EnsureVlanUntagger(link)
+	if err != nil {
+		t.Errorf("error ensure vlan untagger, %v", err)
+		t.Fail()
+	}
+}

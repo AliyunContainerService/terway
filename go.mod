@@ -45,6 +45,7 @@ require (
 )
 
 replace (
+	github.com/vishvananda/netlink => github.com/BSWANG/netlink v1.0.1-0.20210709055804-4cc3be0c24fe
 	k8s.io/api => k8s.io/api v0.19.10
 	k8s.io/apimachinery => k8s.io/apimachinery v0.19.10
 	k8s.io/client-go => k8s.io/client-go v0.19.10
