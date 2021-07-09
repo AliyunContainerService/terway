@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/pkg/errors"
 	"net"
 	"os"
 	"strings"
@@ -669,4 +670,80 @@ func EnsureNeighbor(link netlink.Link, hostIPSet *terwayTypes.IPNetSet) (bool, e
 		changed = true
 	}
 	return changed, nil
+}
+
+func EnsureVlanUntagger(link netlink.Link) error {
+	if err := EnsureClsActQdsic(link); err != nil {
+		return errors.Wrapf(err, "error ensure cls act qdisc for %s vlan untag", link.Attrs().Name)
+	}
+	filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_INGRESS)
+	if err != nil {
+		return errors.Wrapf(err, "list ingress filter for %s error", link.Attrs().Name)
+	}
+	for _, filter := range filters {
+		if u32, ok := filter.(*netlink.U32); ok {
+			if u32.Attrs().LinkIndex == link.Attrs().Index &&
+				u32.Attrs().Protocol == uint16(netlink.VLAN_PROTOCOL_8021Q) &&
+				len(u32.Sel.Keys) == 1 && u32.Sel.Keys[0].Mask == 0x0 && u32.Sel.Keys[0].Off == 0x0 && u32.Sel.Keys[0].Val == 0x0 &&
+				len(u32.Actions) == 1 {
+				if action, ok := u32.Actions[0].(*netlink.VlanAction); ok {
+					if action.Action == netlink.TCA_VLAN_KEY_POP {
+						return nil
+					}
+				}
+			}
+		}
+	}
+	vlanAct := netlink.NewVlanKeyAction()
+	vlanAct.Action = netlink.TCA_VLAN_KEY_POP
+	u32 := &netlink.U32{
+		FilterAttrs: netlink.FilterAttrs{
+			LinkIndex: link.Attrs().Index,
+			Parent:    netlink.HANDLE_MIN_INGRESS,
+			Priority:  40000,
+			Protocol:  uint16(netlink.VLAN_PROTOCOL_8021Q),
+		},
+		Sel: &netlink.TcU32Sel{
+			Nkeys: 1,
+			Flags: netlink.TC_U32_TERMINAL,
+			Keys: []netlink.TcU32Key{
+				{
+					Mask: 0x0,
+					Val:  0x0,
+					Off:  0x0,
+				},
+			},
+		},
+		Actions: []netlink.Action{vlanAct},
+	}
+	err = netlink.FilterAdd(u32)
+	if err != nil {
+		return errors.Wrapf(err, "error add filter for vlan untag")
+	}
+	return nil
+}
+
+func EnsureClsActQdsic(link netlink.Link) error {
+	qds, err := netlink.QdiscList(link)
+	if err != nil {
+		return errors.Wrapf(err, "list qdisc for dev %s error", link.Attrs().Name)
+	}
+	for _, q := range qds {
+		if q.Type() == "clsact" {
+			return nil
+		}
+	}
+
+	qdisc := &netlink.GenericQdisc{
+		QdiscAttrs: netlink.QdiscAttrs{
+			LinkIndex: link.Attrs().Index,
+			Parent:    netlink.HANDLE_CLSACT,
+			Handle:    netlink.HANDLE_CLSACT & 0xffff0000,
+		},
+		QdiscType: "clsact",
+	}
+	if err := netlink.QdiscReplace(qdisc); err != nil {
+		return errors.Wrapf(err, "replace clsact qdisc for dev %s error", link.Attrs().Name)
+	}
+	return nil
 }
