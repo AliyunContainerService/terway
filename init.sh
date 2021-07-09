@@ -107,7 +107,7 @@ if [ "$ENIIP_VIRTUAL_TYPE" = "ipvlan" ]; then
     echo "Creating 10-terway.conflist"
     jq '
 {
-  "cniVersion": "0.3.0",
+  "cniVersion": "0.3.1",
   "name": "terway-chainer",
   "plugins": [
       del(.name,.cniVersion),

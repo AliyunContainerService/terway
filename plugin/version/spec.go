@@ -10,7 +10,7 @@ import "github.com/containernetworking/cni/pkg/version"
 // * VERSION
 // Refer to https://github.com/containernetworking/cni/blob/master/SPEC.md
 // for details
-var specVersionSupported = version.PluginSupports("0.3.0", "0.4.0")
+var specVersionSupported = version.PluginSupports("0.3.0", "0.3.1", "0.4.0")
 
 // GetSpecVersionSupported gets the version of the CNI spec that's supported
 // by the ENI plugin
