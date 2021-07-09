@@ -9,4 +9,5 @@ const (
 	LogFieldENIID            = "eni"
 	LogFieldEIPID            = "eip"
 	LogFieldPrivateIP        = "privateIP"
+	LogFieldVSwitchID        = "vSwitchID"
 )

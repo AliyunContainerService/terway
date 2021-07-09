@@ -1039,17 +1039,6 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, errors.Wrapf(err, "error init k8s service")
 	}
 
-	// load default config
-	f, err := os.Open(configFilePath)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed open config file")
-	}
-
-	data, err := ioutil.ReadAll(f)
-	if err != nil {
-		return nil, fmt.Errorf("failed read file %s: %v", configFilePath, err)
-	}
-
 	// load dynamic config
 	dynamicCfg, nodeLabel, err := getDynamicConfig(netSrv.k8s)
 	if err != nil {
@@ -1057,7 +1046,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		dynamicCfg = ""
 	}
 
-	config, err := mergeConfigAndUnmarshal([]byte(dynamicCfg), data)
+	config, err := types.GetConfigFromFileWithMerge(configFilePath, []byte(dynamicCfg))
 	if err != nil {
 		return nil, fmt.Errorf("failed parse config: %v", err)
 	}
@@ -1083,7 +1072,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		ignoreLinkNotExist = true
 	}
 	ipFamily := types.NewIPFamilyFromIPStack(types.IPStack(config.IPStack))
-	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, ignoreLinkNotExist, ins, ipFamily)
+	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, ignoreLinkNotExist, ins.VPCID, ins.RegionID, ipFamily)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get aliyun client")
 	}

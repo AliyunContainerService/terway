@@ -192,6 +192,10 @@ func (m *ENIDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlu
 	}
 }
 
+func (m *ENIDevicePlugin) GetPreferredAllocation(context.Context, *pluginapi.PreferredAllocationRequest) (*pluginapi.PreferredAllocationResponse, error) {
+	return nil, fmt.Errorf("unsupported")
+}
+
 // Allocate which return list of devices.
 func (m *ENIDevicePlugin) Allocate(ctx context.Context, r *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
 	response := pluginapi.AllocateResponse{

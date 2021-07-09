@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 
-	errors2 "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 	"github.com/AliyunContainerService/terway/types"
 
@@ -110,7 +110,7 @@ func (e *ENIMetadata) GetENIConfigByID(eniID string) (*types.ENI, error) {
 			return e.GetENIConfigByMac(mac)
 		}
 	}
-	return nil, errors.Wrapf(errors2.ErrNotFound, fmt.Sprintf("eni id: %s", eniID))
+	return nil, errors.Wrapf(apiErr.ErrNotFound, fmt.Sprintf("eni id: %s", eniID))
 }
 
 func (e *ENIMetadata) GetENIPrivateAddressesByMAC(mac string) ([]net.IP, error) {

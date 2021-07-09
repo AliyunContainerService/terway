@@ -119,7 +119,7 @@ func (k *k8s) SetSvcCidr(svcCidr *types.IPNetSet) error {
 }
 
 func (k *k8s) PatchEipInfo(info *podInfo) error {
-	pod, err := k.client.CoreV1().Pods(info.Namespace).Get(info.Name, metav1.GetOptions{
+	pod, err := k.client.CoreV1().Pods(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
 		ResourceVersion: "0",
 	})
 	if err != nil || pod == nil {
@@ -139,7 +139,7 @@ func (k *k8s) PatchEipInfo(info *podInfo) error {
 
 	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, podEipAddress, info.EipInfo.PodEipIP)
 
-	_, err = k.client.CoreV1().Pods(info.Namespace).Patch(info.Name, apiTypes.MergePatchType, []byte(annotationPatchStr))
+	_, err = k.client.CoreV1().Pods(info.Namespace).Patch(context.TODO(), info.Name, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
 	if err != nil {
 		k.reconnectOnTimeoutError(err)
 		return err
@@ -177,7 +177,7 @@ func newK8S(master, kubeconfig string, daemonMode string) (Kubernetes, error) {
 		log.Warnf("POD_NAMESPACE is not set in environment variables, use kube-system as default namespace")
 	}
 
-	node, err := client.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{
+	node, err := client.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{
 		ResourceVersion: "0",
 	})
 	if err != nil {
@@ -242,7 +242,7 @@ func getNodeName(client kubernetes.Interface) (string, error) {
 			return "", fmt.Errorf("env variables POD_NAME and POD_NAMESPACE must be set")
 		}
 
-		pod, err := client.CoreV1().Pods(podNamespace).Get(podName, metav1.GetOptions{})
+		pod, err := client.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
 		if err != nil {
 			return "", fmt.Errorf("error retrieving pod spec for '%s/%s': %v", podNamespace, podName, err)
 		}
@@ -255,7 +255,7 @@ func getNodeName(client kubernetes.Interface) (string, error) {
 }
 
 func nodeCidrFromAPIServer(client kubernetes.Interface, nodeName string) (*net.IPNet, error) {
-	node, err := client.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+	node, err := client.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving node spec for '%s': %v", nodeName, err)
 	}
@@ -272,7 +272,7 @@ func parseCidr(cidrString string) (*net.IPNet, error) {
 }
 
 func serviceCidrFromAPIServer(client kubernetes.Interface) (*net.IPNet, error) {
-	kubeadmConfigMap, err := client.CoreV1().ConfigMaps(k8sSystemNamespace).Get(k8sKubeadmConfigmap, metav1.GetOptions{})
+	kubeadmConfigMap, err := client.CoreV1().ConfigMaps(k8sSystemNamespace).Get(context.TODO(), k8sKubeadmConfigmap, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -495,7 +495,7 @@ func deserialize(data []byte) (interface{}, error) {
 }
 
 func (k *k8s) GetPod(namespace, name string) (*podInfo, error) {
-	pod, err := k.client.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{
+	pod, err := k.client.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{
 		ResourceVersion: "0",
 	})
 	if err != nil {
@@ -534,7 +534,7 @@ func (k *k8s) GetLocalPods() ([]*podInfo, error) {
 		FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", k.nodeName).String(),
 		ResourceVersion: "0",
 	}
-	list, err := k.client.CoreV1().Pods(corev1.NamespaceAll).List(options)
+	list, err := k.client.CoreV1().Pods(corev1.NamespaceAll).List(context.TODO(), options)
 	if err != nil {
 		k.reconnectOnTimeoutError(err)
 		return nil, errors.Wrapf(err, "failed listting pods on %s from apiserver", k.nodeName)
@@ -634,7 +634,7 @@ func (k *k8s) RecordNodeEvent(eventType, reason, message string) {
 }
 
 func (k *k8s) RecordPodEvent(podName, podNamespace, eventType, reason, message string) error {
-	pod, err := k.client.CoreV1().Pods(podNamespace).Get(podName, metav1.GetOptions{
+	pod, err := k.client.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{
 		ResourceVersion: "0",
 	})
 
@@ -667,7 +667,7 @@ func (k *k8s) GetNodeDynamicConfigLabel() string {
 
 // GetDynamicConfigWithName gets the Dynamic Config's content with its ConfigMap name
 func (k *k8s) GetDynamicConfigWithName(name string) (string, error) {
-	cfgMap, err := k.client.CoreV1().ConfigMaps(k.daemonNamespace).Get(name, metav1.GetOptions{
+	cfgMap, err := k.client.CoreV1().ConfigMaps(k.daemonNamespace).Get(context.TODO(), name, metav1.GetOptions{
 		TypeMeta:        metav1.TypeMeta{},
 		ResourceVersion: "0",
 	})

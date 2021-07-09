@@ -6,16 +6,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
+	"github.com/AliyunContainerService/terway/pkg/logger"
+
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
-	"github.com/sirupsen/logrus"
-
-	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 )
 
 var (
-	mgrLog                     = logrus.WithField("subSys", "clientMgr")
+	mgrLog                     = logger.DefaultLogger.WithField("subSys", "clientMgr")
 	kubernetesAlicloudIdentity = "Kubernetes.Alicloud"
 
 	tokenReSyncPeriod = 5 * time.Minute

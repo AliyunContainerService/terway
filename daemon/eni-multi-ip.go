@@ -10,7 +10,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
-	aliyunErrors "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
@@ -225,7 +225,7 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 				if eni.MAC == result.ENI.MAC {
 					eni.pending--
 					// if an error message with InvalidVSwitchIDIPNotEnough returned, then mark the ENI as IP allocation inhibited.
-					if strings.Contains(result.err.Error(), aliyunErrors.InvalidVSwitchIDIPNotEnough) {
+					if strings.Contains(result.err.Error(), apiErr.InvalidVSwitchIDIPNotEnough) {
 						eni.ipAllocInhibitExpireAt = time.Now().Add(eniIPAllocInhibitTimeout)
 						logrus.Infof("eni's associated vswitch %s has no available IP, set eni ipAllocInhibitExpireAt = %s",
 							eni.VSwitch, eni.ipAllocInhibitExpireAt.Format(timeFormat))
@@ -409,7 +409,7 @@ func (f *eniIPFactory) Get(res types.NetworkResource) (types.NetworkResource, er
 			return res, nil
 		}
 	}
-	return nil, aliyunErrors.ErrNotFound
+	return nil, apiErr.ErrNotFound
 }
 
 func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
@@ -672,7 +672,7 @@ func (f *eniIPFactory) GetResource() (map[string]types.FactoryResIf, error) {
 		// get secondary ips from one mac
 		ipv4s, _, err := f.eniFactory.ecs.GetENIIPs(mac)
 		if err != nil {
-			if errors.Is(err, aliyunErrors.ErrNotFound) {
+			if errors.Is(err, apiErr.ErrNotFound) {
 				continue
 			}
 			return nil, err
@@ -741,7 +741,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 	if capacity < 0 {
 		capacity = 0
 	}
-	memberENIPod := limit.MemberAdapterLimit * limit.IPv4PerAdapter
+	memberENIPod := limit.MemberAdapterLimit
 	if memberENIPod < 0 {
 		memberENIPod = 0
 	}

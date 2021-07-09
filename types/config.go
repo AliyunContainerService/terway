@@ -1,5 +1,49 @@
 package types
 
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+
+	"github.com/AliyunContainerService/terway/pkg/utils"
+	jsonpatch "github.com/evanphx/json-patch"
+	"github.com/spf13/viper"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/json"
+)
+
+var (
+	terwayConfigmapNamespace string
+	terwayConfigmapName      string
+)
+
+func init() {
+	flag.StringVar(&terwayConfigmapName, "terway-configmap-name", "eni-config", "read terway config from configmap")
+	flag.StringVar(&terwayConfigmapNamespace, "terway-configmap-namespace", "kube-system", "read terway config from configmap")
+}
+
+func ParseClusterConfig() error {
+	clusterID := viper.GetString("cluster-id")
+	vpcID := viper.GetString("vpc-id")
+	if clusterID == "" || vpcID == "" {
+		clusterCM, err := utils.K8sClient.CoreV1().ConfigMaps("kube-system").Get(context.TODO(), "ack-cluster-profile", metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("neither clusterID or vpcID is set,%w", err)
+		}
+		if clusterID == "" {
+			clusterID = clusterCM.Data["clusterid"]
+		}
+		if vpcID == "" {
+			vpcID = clusterCM.Data["vpcid"]
+		}
+	}
+
+	viper.Set("cluster-id", clusterID)
+	viper.Set("vpc-id", vpcID)
+	return nil
+}
+
 // Configure configuration of terway daemon
 type Configure struct {
 	Version                string              `yaml:"version" json:"version"`
@@ -45,4 +89,33 @@ type PoolConfig struct {
 	EniCapShift            int
 	VSwitchSelectionPolicy string
 	EnableENITrunking      bool
+}
+
+// GetConfigFromFileWithMerge parse Configure from file
+func GetConfigFromFileWithMerge(filePath string, cfg []byte) (*Configure, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	return MergeConfigAndUnmarshal(cfg, data)
+}
+
+func MergeConfigAndUnmarshal(topCfg, baseCfg []byte) (*Configure, error) {
+	if len(topCfg) == 0 { // no topCfg, unmarshal baseCfg and return
+		config := &Configure{}
+		err := json.Unmarshal(baseCfg, config)
+		return config, err
+	}
+
+	// MergePatch in RFC7396
+	jsonBytes, err := jsonpatch.MergePatch(baseCfg, topCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	config := &Configure{}
+	err = json.Unmarshal(jsonBytes, config)
+
+	return config, err
 }
