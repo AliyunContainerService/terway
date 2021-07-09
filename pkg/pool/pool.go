@@ -8,15 +8,17 @@ import (
 	"sync"
 	"time"
 
-	errors2 "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/types"
 
 	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
+
+var log = logger.DefaultLogger.WithField("subSys", "pool")
 
 // Errors of pool
 var (
@@ -501,7 +503,7 @@ func (p *simpleObjectPool) ReleaseWithReservation(resID string, reservation time
 
 	// check metadata
 	_, err := p.factory.Get(res.res)
-	if errors.Is(err, errors2.ErrNotFound) {
+	if errors.Is(err, apiErr.ErrNotFound) {
 		log.Warnf("release %s, resource not exist in metadata, ignored", resID)
 		if err = p.factory.Dispose(res.res); err == nil {
 			p.tokenCh <- struct{}{}

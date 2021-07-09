@@ -178,6 +178,7 @@ type VSwitch struct {
 	Zone string `json:"zone,omitempty"`
 }
 
+// NetworkingStatus the status for the resource
 type NetworkingStatus string
 
 // NetworkingStatus

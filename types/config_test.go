@@ -1,4 +1,4 @@
-package daemon
+package types
 
 import (
 	"testing"
@@ -38,7 +38,7 @@ func Test_MergeConfigAndUnmarshal(t *testing.T) {
 
 	dynCfg3 := ``
 
-	cfg, err := mergeConfigAndUnmarshal([]byte(dynCfg1), []byte(baseCfg))
+	cfg, err := MergeConfigAndUnmarshal([]byte(dynCfg1), []byte(baseCfg))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func Test_MergeConfigAndUnmarshal(t *testing.T) {
 	assert.Equal(t, "ordered", cfg.VSwitchSelectionPolicy)
 	t.Logf("%+v", cfg)
 
-	cfg, err = mergeConfigAndUnmarshal([]byte(dynCfg2), []byte(baseCfg))
+	cfg, err = MergeConfigAndUnmarshal([]byte(dynCfg2), []byte(baseCfg))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func Test_MergeConfigAndUnmarshal(t *testing.T) {
 	assert.Equal(t, "ordered", cfg.VSwitchSelectionPolicy)
 	t.Logf("%+v", cfg)
 
-	cfg, err = mergeConfigAndUnmarshal([]byte(dynCfg3), []byte(baseCfg))
+	cfg, err = MergeConfigAndUnmarshal([]byte(dynCfg3), []byte(baseCfg))
 	if err != nil {
 		t.Fatal(err)
 	}

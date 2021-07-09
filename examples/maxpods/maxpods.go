@@ -32,7 +32,8 @@ func main() {
 	flag.Parse()
 	log.SetOutput(ioutil.Discard)
 	logrus.SetOutput(ioutil.Discard)
-	_, err := aliyun.NewECS(accessKeyID, accessKeySecret, credentialPath, false, aliyun.GetInstanceMeta(), &types.IPFamily{IPv4: true})
+	ins := aliyun.GetInstanceMeta()
+	_, err := aliyun.NewECS(accessKeyID, accessKeySecret, credentialPath, false, false, ins.VPCID, ins.RegionID, &types.IPFamily{IPv4: true})
 	if err != nil {
 		panic(err)
 	}

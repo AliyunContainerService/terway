@@ -113,7 +113,7 @@ func UpdateFromAPI(client *ecs.Client, instanceType string) error {
 	}
 	var innerErr error
 	var resp *ecs.DescribeInstanceTypesResponse
-	err := wait.ExponentialBackoff(eniOpBackoff,
+	err := wait.ExponentialBackoff(ENIOpBackoff,
 		func() (done bool, err error) {
 			start := time.Now()
 			resp, innerErr = client.DescribeInstanceTypes(req)
@@ -137,6 +137,10 @@ func UpdateFromAPI(client *ecs.Client, instanceType string) error {
 		ipv4PerAdapter := instanceTypeInfo.EniPrivateIpAddressQuantity
 		ipv6PerAdapter := instanceTypeInfo.EniIpv6AddressQuantity
 		memberAdapterLimit := instanceTypeInfo.EniTotalQuantity - instanceTypeInfo.EniQuantity
+
+		if !instanceTypeInfo.EniTrunkSupported {
+			memberAdapterLimit = 0
+		}
 
 		limits.m[instanceType] = Limits{
 			Adapters:           adapterLimit,

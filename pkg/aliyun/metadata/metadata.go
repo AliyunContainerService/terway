@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	terwayErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 )
@@ -55,7 +55,7 @@ func getValue(url string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return "", terwayErr.ErrNotFound
+		return "", apiErr.ErrNotFound
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return "", fmt.Errorf("error get url: %s from metaserver, code: %v", url, resp.StatusCode)
@@ -89,7 +89,7 @@ func getArray(url string) ([]string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, terwayErr.ErrNotFound
+		return nil, apiErr.ErrNotFound
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return []string{}, fmt.Errorf("error get url: %s from metaserver, code: %v", url, resp.StatusCode)
@@ -178,7 +178,7 @@ func GetENIPrivateIPv6IPs(mac string) ([]net.IP, error) {
 	ipsStr, err := getValue(fmt.Sprintf(metadataBase+eniPrivateV6IPs, mac))
 	if err != nil {
 		// metadata return 404 when no ipv6 is allocated
-		if errors.Is(err, terwayErr.ErrNotFound) {
+		if errors.Is(err, apiErr.ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err

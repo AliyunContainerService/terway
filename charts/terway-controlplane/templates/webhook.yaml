@@ -1,0 +1,52 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ .Chart.Name }}
+  labels:
+    {{- include "terway-controlplane.labels" . | nindent 4 }}
+webhooks:
+  - name: {{ .Chart.Name }}.mutating.k8s.io
+    rules:
+      - apiGroups:   [""]
+        apiVersions: ["v1"]
+        operations:  ["CREATE"]
+        resources:   ["pods"]
+        scope:       "Namespaced"
+      - apiGroups:   ["network.alibabacloud.com"]
+        apiVersions: ["*"]
+        operations:  ["CREATE"]
+        resources:   ["podnetworkings"]
+        scope:       "Cluster"
+    clientConfig:
+      service:
+        namespace: {{ .Release.Namespace }}
+        name: {{ .Chart.Name }}
+        path: /mutating
+    admissionReviewVersions: ["v1", "v1beta1"]
+    sideEffects: None
+    timeoutSeconds: 10
+    failurePolicy: Ignore
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ .Chart.Name }}
+  labels:
+  {{- include "terway-controlplane.labels" . | nindent 4 }}
+webhooks:
+  - name: {{ .Chart.Name }}.validate.k8s.io
+    rules:
+      - apiGroups:   ["network.alibabacloud.com"]
+        apiVersions: ["*"]
+        operations:  ["CREATE"]
+        resources:   ["podnetworkings"]
+        scope:       "Cluster"
+    clientConfig:
+      service:
+        namespace: {{ .Release.Namespace }}
+        name: {{ .Chart.Name }}
+        path: /validate
+    admissionReviewVersions: ["v1", "v1beta1"]
+    sideEffects: None
+    timeoutSeconds: 10
+    failurePolicy: Fail
