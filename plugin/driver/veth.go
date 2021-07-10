@@ -319,7 +319,7 @@ func (d *VETHDriver) ensureENIConfig(link netlink.Link, trunk bool, mtu, tableID
 	if err != nil {
 		return err
 	}
-	_, err = EnsureAddr(link, nodeIPSet, -1)
+	_, err = EnsureAddr(link, nodeIPSet, true, -1)
 	if err != nil {
 		return err
 	}

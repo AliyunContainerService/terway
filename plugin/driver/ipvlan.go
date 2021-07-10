@@ -384,7 +384,8 @@ func (d *IPvlanDriver) setupInitNamespace(parentLink netlink.Link, cfg *SetupCon
 	if err != nil {
 		return err
 	}
-	_, err = EnsureAddr(slaveLink, nodeIPSet, int(netlink.SCOPE_HOST))
+	_, err = EnsureAddr(slaveLink, nodeIPSet, true, int(netlink.SCOPE_HOST))
+
 	if err != nil {
 		return err
 	}

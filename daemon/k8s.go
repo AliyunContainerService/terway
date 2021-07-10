@@ -13,6 +13,8 @@ import (
 	"unicode"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
+	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned/typed/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/types"
@@ -25,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	apiTypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -72,6 +75,7 @@ type podInfo struct {
 	SandboxExited  bool
 	EipInfo        podEipInfo
 	IPStickTime    time.Duration
+	PodENI         bool
 }
 
 // Kubernetes operation set
@@ -82,6 +86,8 @@ type Kubernetes interface {
 	GetNodeCidr() *net.IPNet
 	SetNodeAllocatablePod(count int) error
 	PatchEipInfo(info *podInfo) error
+	PatchTrunkInfo(trunkEni string) error
+	WaitPodENIInfo(info *podInfo) (podEni *podENITypes.PodENI, err error)
 	RecordNodeEvent(eventType, reason, message string)
 	RecordPodEvent(podName, podNamespace, eventType, reason, message string) error
 	GetNodeDynamicConfigLabel() string
@@ -91,6 +97,7 @@ type Kubernetes interface {
 
 type k8s struct {
 	client          kubernetes.Interface
+	podEniClient    v1beta1.NetworkV1beta1Interface
 	storage         storage.Storage
 	broadcaster     record.EventBroadcaster
 	recorder        record.EventRecorder
@@ -103,6 +110,33 @@ type k8s struct {
 	apiConn         *connTracker
 	apiConnTime     time.Time
 	sync.Locker
+}
+
+func (k *k8s) PatchTrunkInfo(trunkEni string) error {
+	node, err := k.client.CoreV1().Nodes().Get(context.TODO(), k.nodeName, metav1.GetOptions{
+		ResourceVersion: "0",
+	})
+	if err != nil || node == nil {
+		k.reconnectOnTimeoutError(err)
+		return err
+	}
+
+	if node.GetAnnotations() != nil {
+		if eni, ok := node.GetAnnotations()[types.TrunkOn]; ok {
+			if eni == trunkEni {
+				return nil
+			}
+		}
+	}
+	node.Annotations[types.TrunkOn] = trunkEni
+
+	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, types.TrunkOn, trunkEni)
+	_, err = k.client.CoreV1().Nodes().Patch(context.TODO(), k.nodeName, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
+	if err != nil {
+		k.reconnectOnTimeoutError(err)
+		return err
+	}
+	return nil
 }
 
 func (k *k8s) SetSvcCidr(svcCidr *types.IPNetSet) error {
@@ -145,6 +179,32 @@ func (k *k8s) PatchEipInfo(info *podInfo) error {
 		return err
 	}
 	return nil
+}
+
+func (k *k8s) WaitPodENIInfo(info *podInfo) (podEni *podENITypes.PodENI, err error) {
+	err = wait.ExponentialBackoff(wait.Backoff{
+		Duration: time.Second * 5,
+		Factor:   2,
+		Jitter:   0.3,
+		Steps:    6,
+	}, func() (bool, error) {
+		podEni, err = k.podEniClient.PodENIs(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				// wait pod eni exist
+				return false, nil
+			}
+			return false, errors.Wrapf(err, "error get pod eni info")
+		}
+		if podEni.Status.Status != podENITypes.ENIStatusBind {
+			// wait pod eni bind
+			return false, nil
+		}
+		return true, nil
+	})
+	return podEni, err
 }
 
 // newK8S return Kubernetes service by pod spec and daemon mode
@@ -220,6 +280,11 @@ func newK8S(master, kubeconfig string, daemonMode string) (Kubernetes, error) {
 		apiConnTime:     time.Now(),
 		Locker:          &sync.RWMutex{},
 	}
+	podENICli, err := v1beta1.NewForConfig(k8sRestConfig)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error init pod ENI client")
+	}
+	k8sObj.podEniClient = podENICli
 	go func() {
 		for range time.Tick(storageCleanPeriod) {
 			err := k8sObj.clean()
@@ -424,6 +489,15 @@ func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
 	}
 
 	pi.SandboxExited = pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
+
+	if podENI, ok := podAnnotation[types.PodENI]; ok {
+		var err error
+		pi.PodENI, err = strconv.ParseBool(podENI)
+		if err != nil {
+			_ = tracing.RecordPodEvent(pod.Name, pod.Namespace, eventTypeWarning,
+				"ParseFailed", fmt.Sprintf("Parse pod eni %s failed.", podENI))
+		}
+	}
 
 	if len(pod.OwnerReferences) != 0 {
 		switch strings.ToLower(pod.OwnerReferences[0].Kind) {

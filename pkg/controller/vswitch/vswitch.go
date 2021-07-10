@@ -140,7 +140,7 @@ func (s *SwitchPool) GetOne(zone string, ids sets.String) (string, error) {
 		return false
 	})
 	if id == "" {
-		return "", fmt.Errorf("no avaliable vswitch")
+		return "", fmt.Errorf("no available vswitch")
 	}
 	return id, nil
 }

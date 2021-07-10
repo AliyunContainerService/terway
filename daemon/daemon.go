@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -76,6 +77,8 @@ type networkService struct {
 	sync.RWMutex
 
 	cniBinPath string
+
+	enableTrunk bool
 
 	rpc.UnimplementedTerwayBackendServer
 }
@@ -255,45 +258,65 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 	switch podinfo.PodNetworkType {
 	case podNetworkTypeENIMultiIP:
 		var eniMultiIP *types.ENIIP
-		eniMultiIP, err = networkService.allocateENIMultiIP(networkContext, &oldRes)
-		if err != nil {
-			return nil, fmt.Errorf("error get allocated eniip ip for: %+v, result: %+v", podinfo, err)
-		}
-		newRes := PodResources{
-			PodInfo: podinfo,
-			Resources: []ResourceItem{
-				{
-					ID:   eniMultiIP.GetResourceID(),
-					Type: eniMultiIP.GetType(),
-				},
-			},
-			NetNs: func(s string) *string {
-				return &s
-			}(r.Netns),
-		}
-		networkContext.resources = append(networkContext.resources, newRes.Resources...)
-		if networkService.eipResMgr != nil && podinfo.EipInfo.PodEip {
-			podinfo.PodIPs = eniMultiIP.SecondaryIP
-			var eipRes *types.EIP
-			eipRes, err = networkService.allocateEIP(networkContext, &oldRes)
+		if podinfo.PodENI && networkService.enableTrunk {
+			var podEni *podENITypes.PodENI
+			podEni, err = networkService.k8s.WaitPodENIInfo(podinfo)
 			if err != nil {
-				return nil, fmt.Errorf("error get allocated eip for: %+v, result: %+v", podinfo, err)
+				return nil, errors.Wrapf(err, "error wait pod eni info")
 			}
-			eipResItem := ResourceItem{
-				Type: eipRes.GetType(),
-				ID:   eipRes.GetResourceID(),
-				ExtraEipInfo: &ExtraEipInfo{
-					Delete:         eipRes.Delete,
-					AssociateENI:   eipRes.AssociateENI,
-					AssociateENIIP: eipRes.AssociateENIIP,
+			nodeTrunkENI := networkService.eniIPResMgr.(*eniIPResourceManager).trunkENI
+			if nodeTrunkENI == nil || nodeTrunkENI.ID != podEni.Status.TrunkENIID {
+				return nil, fmt.Errorf("pod status eni parent not match instance trunk eni")
+			}
+			eniMultiIP = &types.ENIIP{
+				ENI: nodeTrunkENI,
+				SecondaryIP: types.IPSet{
+					IPv4: net.ParseIP(podEni.Spec.Allocation.IPv4),
+					IPv6: net.ParseIP(podEni.Spec.Allocation.IPv6),
 				},
 			}
-			newRes.Resources = append(newRes.Resources, eipResItem)
-			networkContext.resources = append(networkContext.resources, eipResItem)
-		}
-		err = networkService.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
-		if err != nil {
-			return nil, errors.Wrapf(err, "error put resource into store")
+
+		} else {
+			eniMultiIP, err = networkService.allocateENIMultiIP(networkContext, &oldRes)
+			if err != nil {
+				return nil, fmt.Errorf("error get allocated eniip ip for: %+v, result: %+v", podinfo, err)
+			}
+			newRes := PodResources{
+				PodInfo: podinfo,
+				Resources: []ResourceItem{
+					{
+						ID:   eniMultiIP.GetResourceID(),
+						Type: eniMultiIP.GetType(),
+					},
+				},
+				NetNs: func(s string) *string {
+					return &s
+				}(r.Netns),
+			}
+			networkContext.resources = append(networkContext.resources, newRes.Resources...)
+			if networkService.eipResMgr != nil && podinfo.EipInfo.PodEip {
+				podinfo.PodIPs = eniMultiIP.SecondaryIP
+				var eipRes *types.EIP
+				eipRes, err = networkService.allocateEIP(networkContext, &oldRes)
+				if err != nil {
+					return nil, fmt.Errorf("error get allocated eip for: %+v, result: %+v", podinfo, err)
+				}
+				eipResItem := ResourceItem{
+					Type: eipRes.GetType(),
+					ID:   eipRes.GetResourceID(),
+					ExtraEipInfo: &ExtraEipInfo{
+						Delete:         eipRes.Delete,
+						AssociateENI:   eipRes.AssociateENI,
+						AssociateENIIP: eipRes.AssociateENIIP,
+					},
+				}
+				newRes.Resources = append(newRes.Resources, eipResItem)
+				networkContext.resources = append(networkContext.resources, eipResItem)
+			}
+			err = networkService.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
+			if err != nil {
+				return nil, errors.Wrapf(err, "error put resource into store")
+			}
 		}
 		allocIPReply.IPType = rpc.IPType_TypeENIMultiIP
 		allocIPReply.Success = true
@@ -304,6 +327,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 					Subnet:    eniMultiIP.ENI.VSwitchCIDR.ToRPC(),
 					MAC:       eniMultiIP.ENI.MAC,
 					GatewayIP: eniMultiIP.ENI.GatewayIP.ToRPC(),
+					Trunk:     podinfo.PodENI && networkService.enableTrunk && eniMultiIP.ENI.Trunk,
 				},
 				PodConfig: &rpc.Pod{
 					Ingress: podinfo.TcIngress,
@@ -451,6 +475,9 @@ func (networkService *networkService) ReleaseIP(ctx context.Context, r *rpc.Rele
 	}
 	releaseReply := &rpc.ReleaseIPReply{
 		Success: true,
+	}
+	if podinfo.PodENI {
+		return releaseReply, nil
 	}
 	defer func() {
 		if err != nil {
@@ -1072,10 +1099,12 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		ignoreLinkNotExist = true
 	}
 	ipFamily := types.NewIPFamilyFromIPStack(types.IPStack(config.IPStack))
-	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, ignoreLinkNotExist, ins.VPCID, ins.RegionID, ipFamily)
+	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, config.EnableENITrunking, ignoreLinkNotExist, ins.VPCID, ins.RegionID, ipFamily)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get aliyun client")
 	}
+
+	netSrv.enableTrunk = config.EnableENITrunking
 
 	ipNetSet := &types.IPNetSet{}
 	if config.ServiceCIDR != "" {
@@ -1164,7 +1193,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 
 	case daemonModeENIMultiIP:
 		//init ENI multi ip
-		netSrv.eniIPResMgr, err = newENIIPResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENIIP], ipFamily)
+		netSrv.eniIPResMgr, err = newENIIPResourceManager(poolConfig, ecs, netSrv.k8s, localResource[types.ResourceTypeENIIP], ipFamily)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init ENI ip resource manager")
 		}

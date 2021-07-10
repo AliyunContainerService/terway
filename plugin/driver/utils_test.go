@@ -1,8 +1,9 @@
 package driver
 
 import (
-	"github.com/vishvananda/netlink"
 	"testing"
+
+	"github.com/vishvananda/netlink"
 )
 
 func TestEnsureVlanUntagger(t *testing.T) {

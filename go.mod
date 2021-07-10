@@ -14,7 +14,6 @@ require (
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/evanphx/json-patch v4.9.0+incompatible
-	github.com/google/uuid v1.1.2
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect

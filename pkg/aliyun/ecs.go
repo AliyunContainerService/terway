@@ -29,7 +29,7 @@ var log = logger.DefaultLogger.WithField("subSys", "openAPI")
 
 // ECS the interface of ecs operation set
 type ECS interface {
-	AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int, eniTags map[string]string) (*types.ENI, error)
+	AllocateENI(vSwitch, securityGroup, instanceID string, trunk bool, ipCount int, eniTags map[string]string) (*types.ENI, error)
 	GetAttachedENIs(containsMainENI bool) ([]*types.ENI, error)
 	GetSecondaryENIMACs() ([]string, error)
 	GetPrivateIPv4ByMAC(mac string) ([]net.IP, error)
@@ -51,9 +51,11 @@ type ECS interface {
 
 type ecsImpl struct {
 	privateIPMutex sync.RWMutex
-	clientSet      *ClientMgr
 	metadata       ENIInfoGetter
 	vpcID          string
+
+	// fixme remove when metadata support eni type field
+	eniTypeAttr bool
 
 	ipFamily *types.IPFamily
 
@@ -61,35 +63,35 @@ type ecsImpl struct {
 }
 
 // NewECS return new ECS implement object
-func NewECS(ak, sk, credentialPath string, ignoreLinkNotExist bool, vpcID, regionID string, ipFamily *types.IPFamily) (ECS, error) {
-	clientSet, err := NewClientMgr(ak, sk, credentialPath, regionID)
-	if err != nil {
-		return nil, fmt.Errorf("error get clientset, %w", err)
-	}
+func NewECS(ak, sk, credentialPath string, needENITypeAttr, ignoreLinkNotExist bool, vpcID, regionID string, ipFamily *types.IPFamily) (ECS, error) {
 	openAPI, err := NewAliyun(ak, sk, regionID, credentialPath)
 	if err != nil {
 		return nil, fmt.Errorf("error get clientset, %w", err)
 	}
 	e := &ecsImpl{
 		privateIPMutex: sync.RWMutex{},
-		clientSet:      clientSet,
 		metadata:       NewENIMetadata(ignoreLinkNotExist, ipFamily),
 		vpcID:          vpcID,
 		ipFamily:       ipFamily,
+		eniTypeAttr:    needENITypeAttr,
 		OpenAPI:        openAPI,
 	}
 
-	err = UpdateFromAPI(clientSet.ECS(), GetInstanceMeta().InstanceType)
+	err = UpdateFromAPI(openAPI.clientSet.ECS(), GetInstanceMeta().InstanceType)
 	return e, err
 }
 
 // AllocateENI for instance
-func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID string, ipCount int, eniTags map[string]string) (*types.ENI, error) {
+func (e *ecsImpl) AllocateENI(vSwitch, securityGroup, instanceID string, trunk bool, ipCount int, eniTags map[string]string) (*types.ENI, error) {
 	if vSwitch == "" || len(securityGroup) == 0 || instanceID == "" {
 		return nil, fmt.Errorf("invalid eni args for allocate")
 	}
 
-	resp, err := e.CreateNetworkInterface("", vSwitch, []string{securityGroup}, ipCount, eniTags)
+	var instanceType ENIType
+	if trunk {
+		instanceType = ENITypeTrunk
+	}
+	resp, err := e.CreateNetworkInterface(instanceType, vSwitch, []string{securityGroup}, ipCount, eniTags)
 	if err != nil {
 		return nil, err
 	}
@@ -151,6 +153,7 @@ func (e *ecsImpl) AllocateENI(vSwitch string, securityGroup string, instanceID s
 			}
 
 			eni.MaxIPs = l.IPv4PerAdapter
+			eni.Trunk = ENIType(eniStatus.Type) == ENITypeTrunk
 			return true, nil
 		},
 	)
@@ -211,8 +214,21 @@ func (e *ecsImpl) GetAttachedENIs(containsMainENI bool) ([]*types.ENI, error) {
 	if !ok {
 		return nil, fmt.Errorf("failed to get instance type")
 	}
+	var eniIDs []string
+	enisMap := map[string]*types.ENI{}
 	for _, eni := range enis {
 		eni.MaxIPs = l.IPv4PerAdapter
+		eniIDs = append(eniIDs, eni.ID)
+		enisMap[eni.ID] = eni
+	}
+	if e.eniTypeAttr && len(eniIDs) > 0 {
+		eniSet, err := e.DescribeNetworkInterface("", eniIDs, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		for _, eni := range eniSet {
+			enisMap[eni.NetworkInterfaceId].Trunk = ENIType(eni.Type) == ENITypeTrunk
+		}
 	}
 	return enis, nil
 }
@@ -318,7 +334,7 @@ func (e *ecsImpl) UnAssignIPsForENI(eniID string, ips []net.IP) error {
 		eniStateBackoff,
 		func() (done bool, err error) {
 			var enis []ecs.NetworkInterfaceSet
-			enis, innerErr = e.DescribeNetworkInterface("", eniID, "", "", "")
+			enis, innerErr = e.DescribeNetworkInterface("", []string{eniID}, "", "", "")
 			if innerErr != nil {
 				return false, nil
 			}
@@ -418,7 +434,7 @@ func (e *ecsImpl) CheckEniSecurityGroup(sg []string) error {
 	instanceID := GetInstanceMeta().InstanceID
 
 	// get all attached eni
-	eniList, err := e.DescribeNetworkInterface("", "", instanceID, "", "")
+	eniList, err := e.DescribeNetworkInterface("", nil, instanceID, "", "")
 	if err != nil {
 		logrus.WithField(LogFieldInstanceID, instanceID).Warn(err)
 		return nil

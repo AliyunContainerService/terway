@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
 	"net"
 	"os"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/pkg/errors"
 
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
@@ -146,7 +147,7 @@ func EnsureLinkName(link netlink.Link, name string) (bool, error) {
 
 // EnsureAddr take the ipNet set and ensure only one IP for each family is present on link
 // it will remove other unmatched IPs
-func EnsureAddr(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, scope int) (bool, error) {
+func EnsureAddr(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, prefixRoute bool, scope int) (bool, error) {
 	var changed bool
 
 	exec := func(expect *net.IPNet) error {
@@ -179,6 +180,9 @@ func EnsureAddr(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, scope int) (b
 		newAddr := &netlink.Addr{IPNet: expect}
 		if scope > 0 {
 			newAddr.Scope = scope
+		}
+		if !prefixRoute {
+			newAddr.Flags = unix.IFA_F_NOPREFIXROUTE
 		}
 		return AddrReplace(link, newAddr)
 	}
@@ -357,7 +361,7 @@ func SetupLink(link netlink.Link, cfg *SetupConfig) error {
 		return fmt.Errorf("error set link %s up , %w", link.Attrs().Name, err)
 	}
 
-	_, err = EnsureAddr(link, cfg.ContainerIPNet, -1)
+	_, err = EnsureAddr(link, cfg.ContainerIPNet, !cfg.TrunkENI, -1)
 	return err
 }
 
@@ -700,7 +704,7 @@ func EnsureVlanUntagger(link netlink.Link) error {
 		FilterAttrs: netlink.FilterAttrs{
 			LinkIndex: link.Attrs().Index,
 			Parent:    netlink.HANDLE_MIN_INGRESS,
-			Priority:  40000,
+			Priority:  20000,
 			Protocol:  uint16(netlink.VLAN_PROTOCOL_8021Q),
 		},
 		Sel: &netlink.TcU32Sel{
