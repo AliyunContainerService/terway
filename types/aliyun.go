@@ -2,7 +2,7 @@ package types
 
 // this keys is used in alibabacloud resource
 const (
-	TagKeyClusterID        = "ack.aliyun.com"
+	TagKeyClusterID = "ack.aliyun.com"
 
 	// NetworkInterfaceTagCreatorKey denotes the creator tag's key of network interface
 	NetworkInterfaceTagCreatorKey = "creator"

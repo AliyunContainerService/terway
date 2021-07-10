@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
 	"net"
 	"os"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/pkg/errors"
 
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"

@@ -77,15 +77,14 @@ func (a *OpenAPI) CreateNetworkInterface(instanceType ENIType, vSwitch string, s
 }
 
 // DescribeNetworkInterface list eni
-func (a *OpenAPI) DescribeNetworkInterface(vpcID, eniID, instanceID string, instanceType ENIType, status ENIStatus) ([]ecs.NetworkInterfaceSet, error) {
+func (a *OpenAPI) DescribeNetworkInterface(vpcID string, eniID []string, instanceID string, instanceType ENIType, status ENIStatus) ([]ecs.NetworkInterfaceSet, error) {
 	var result []ecs.NetworkInterfaceSet
 	for i := 1; ; {
 		req := ecs.CreateDescribeNetworkInterfacesRequest()
 		req.VpcId = vpcID
 
-		if eniID != "" {
-			req.NetworkInterfaceId = &[]string{eniID}
-		}
+		req.NetworkInterfaceId = &eniID
+
 		req.InstanceId = instanceID
 		req.Type = string(instanceType)
 		req.Status = string(status)
@@ -194,7 +193,7 @@ func (a *OpenAPI) WaitForNetworkInterface(eniID string, status ENIStatus, backof
 
 	err := wait.ExponentialBackoff(backoff,
 		func() (done bool, err error) {
-			eni, err := a.DescribeNetworkInterface("", eniID, "", "", status)
+			eni, err := a.DescribeNetworkInterface("", []string{eniID}, "", "", status)
 			if err != nil {
 				return false, nil
 			}

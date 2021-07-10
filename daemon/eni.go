@@ -266,10 +266,10 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 }
 
 func (f *eniFactory) Create(int) ([]types.NetworkResource, error) {
-	return f.CreateWithIPCount(1)
+	return f.CreateWithIPCount(1, false)
 }
 
-func (f *eniFactory) CreateWithIPCount(count int) ([]types.NetworkResource, error) {
+func (f *eniFactory) CreateWithIPCount(count int, trunk bool) ([]types.NetworkResource, error) {
 	vSwitches, _ := f.GetVSwitches()
 	logrus.Infof("adjusted vswitch slice: %+v", vSwitches)
 
@@ -279,7 +279,7 @@ func (f *eniFactory) CreateWithIPCount(count int) ([]types.NetworkResource, erro
 	for k, v := range f.eniTags {
 		tags[k] = v
 	}
-	eni, err := f.ecs.AllocateENI(vSwitches[0], f.securityGroup, f.instanceID, count, tags)
+	eni, err := f.ecs.AllocateENI(vSwitches[0], f.securityGroup, f.instanceID, trunk, count, tags)
 	if err != nil {
 		return nil, err
 	}

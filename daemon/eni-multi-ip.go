@@ -45,6 +45,8 @@ const timeFormat = "2006-01-02 15:04:05"
 
 type eniIPFactory struct {
 	name         string
+	enableTrunk  bool
+	trunkOnEni   string
 	eniFactory   *eniFactory
 	enis         []*ENI
 	maxENI       chan struct{}
@@ -343,6 +345,11 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 
 	eni.lock.Lock()
 	if len(eni.ips) == 1 {
+		if f.enableTrunk && eni.Trunk {
+			eni.lock.Unlock()
+			return fmt.Errorf("trunk ENI %+v will not dispose", eni.ID)
+		}
+
 		if eni.pending > 0 {
 			eni.lock.Unlock()
 			return fmt.Errorf("ENI have pending ips to be allocate")
@@ -413,7 +420,7 @@ func (f *eniIPFactory) Get(res types.NetworkResource) (types.NetworkResource, er
 }
 
 func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
-	rawEni, err := f.eniFactory.CreateWithIPCount(ipCount)
+	rawEni, err := f.eniFactory.CreateWithIPCount(ipCount, false)
 	var ipv4s []net.IP
 	var ipv6s []net.IP
 	// eni operate finished
@@ -708,10 +715,11 @@ func (f *eniIPFactory) Reconcile() {
 }
 
 type eniIPResourceManager struct {
-	pool pool.ObjectPool
+	trunkENI *types.ENI
+	pool     pool.ObjectPool
 }
 
-func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []resourceManagerInitItem, ipFamily *types.IPFamily) (ResourceManager, error) {
+func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, k8s Kubernetes, allocatedResources []resourceManagerInitItem, ipFamily *types.IPFamily) (ResourceManager, error) {
 	eniFactory, err := newENIFactory(poolConfig, ecs)
 	if err != nil {
 		return nil, fmt.Errorf("error get ENI factory for eniip factory, %w", err)
@@ -720,6 +728,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 	factory := &eniIPFactory{
 		name:         factoryNameENIIP,
 		eniFactory:   eniFactory,
+		enableTrunk:  poolConfig.EnableENITrunking,
 		enis:         []*ENI{},
 		eniOperChan:  make(chan struct{}, maxEniOperating),
 		ipResultChan: make(chan *ENIIP, maxIPBacklog),
@@ -770,7 +779,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 
 	// eniip factory metrics
 	factory.metricENICount = metric.ENIIPFactoryENICount.WithLabelValues(factory.name, fmt.Sprint(maxEni))
-
+	var trunkENI *types.ENI
 	poolCfg := pool.Config{
 		Name:     poolNameENIIP,
 		Type:     typeNameENIIP,
@@ -787,6 +796,23 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 			stubMap := make(map[string]*podInfo)
 			for _, allocated := range allocatedResources {
 				stubMap[allocated.resourceID] = allocated.podInfo
+			}
+			if factory.enableTrunk {
+				for _, eni := range enis {
+					if eni.Trunk {
+						trunkENI = eni
+						factory.trunkOnEni = eni.ID
+					}
+				}
+				if factory.trunkOnEni == "" && len(enis) < limit.MemberAdapterLimit {
+					trunkENIRes, err := factory.eniFactory.CreateWithIPCount(1, true)
+					if err != nil {
+						return errors.Wrapf(err, "error init trunk eni")
+					}
+					trunkENI, _ = trunkENIRes[0].(*types.ENI)
+					factory.trunkOnEni = trunkENI.ID
+					enis = append(enis, trunkENI)
+				}
 			}
 
 			for _, eni := range enis {
@@ -839,15 +865,20 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, alloc
 		return nil, err
 	}
 	mgr := &eniIPResourceManager{
-		pool: p,
+		trunkENI: trunkENI,
+		pool:     p,
 	}
 
 	//init deviceplugin for ENI
-	if poolConfig.EnableENITrunking {
+	if poolConfig.EnableENITrunking && factory.trunkOnEni != "" {
 		dp := deviceplugin.NewENIDevicePlugin(memberENIPod, deviceplugin.ENITypeMember)
 		err = dp.Serve()
 		if err != nil {
 			return nil, fmt.Errorf("error start device plugin on node, %w", err)
+		}
+		err = k8s.PatchTrunkInfo(factory.trunkOnEni)
+		if err != nil {
+			return nil, errors.Wrapf(err, "error patch trunk info on node")
 		}
 	}
 
