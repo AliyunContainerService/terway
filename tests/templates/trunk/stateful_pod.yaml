@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sts-pod
+spec:
+  serviceName: sts-pod
+  selector:
+    matchLabels:
+      app: nginx
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: nginx
+        pod-ip: elastic
+    spec:
+      containers:
+        - name: nginx
+          image: nginx
