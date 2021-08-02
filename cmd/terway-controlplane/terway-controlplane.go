@@ -68,6 +68,7 @@ func init() {
 	flag.String("controller-name", "terway-controlplane", "specific controller name")
 	flag.String("cert-dir", "/var/run/webhook-cert", "webhook cert dir")
 	flag.Int("webhook-port", 443, "port for webhook")
+	flag.Int("v", 4, "log level")
 
 	_ = viper.BindPFlag("cluster-id", flag.CommandLine.Lookup("cluster-id"))
 	_ = viper.BindPFlag("vpc-id", flag.CommandLine.Lookup("vpc-id"))
@@ -78,13 +79,16 @@ func init() {
 	_ = viper.BindPFlag("cert-dir", flag.CommandLine.Lookup("cert-dir"))
 	_ = viper.BindPFlag("webhook-port", flag.CommandLine.Lookup("webhook-port"))
 
+	_ = viper.BindPFlag("podeni-max-concurrent-reconciles", flag.CommandLine.Lookup("podeni-max-concurrent-reconciles"))
+
 	_ = viper.BindPFlag("v", flag.CommandLine.Lookup("v"))
 
 	_ = viper.BindEnv("ALIBABA_CLOUD_REGION_ID")
 	_ = viper.BindEnv("ALIBABA_CLOUD_ACCESS_KEY_ID")
 	_ = viper.BindEnv("ALIBABA_CLOUD_ACCESS_KEY_SECRET")
 
-	viper.SetDefault("v", 5)
+	viper.SetDefault("v", 4)
+	viper.SetDefault("podeni-max-concurrent-reconciles", 1)
 
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(networkv1beta1.AddToScheme(scheme))
@@ -105,7 +109,7 @@ func main() {
 
 	flag.Parse()
 
-	utils.RegisterClients()
+	utils.RegisterClients(ctrl.GetConfigOrDie())
 
 	err := crds.RegisterCRDs()
 	if err != nil {

@@ -9,7 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	ctrl "sigs.k8s.io/controller-runtime"
+	"k8s.io/client-go/rest"
 )
 
 // K8sClient k8s client set
@@ -22,8 +22,7 @@ var APIExtensionsClient apiextensionsclient.Interface
 var NetworkClient networkingclientset.Interface
 
 // RegisterClients create all k8s clients
-func RegisterClients() {
-	restConfig := ctrl.GetConfigOrDie()
+func RegisterClients(restConfig *rest.Config) {
 	K8sClient = kubernetes.NewForConfigOrDie(restConfig)
 	APIExtensionsClient = apiextensionsclient.NewForConfigOrDie(restConfig)
 	NetworkClient = networkingclientset.NewForConfigOrDie(restConfig)

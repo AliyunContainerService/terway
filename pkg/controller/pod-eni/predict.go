@@ -17,11 +17,14 @@ limitations under the License.
 package podeni
 
 import (
+	"reflect"
 	"strconv"
 
+	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/types"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
@@ -64,4 +67,26 @@ func OKToProcess(obj interface{}) bool {
 		return false
 	}
 	return v
+}
+
+type predicateForPodENIEvent struct {
+	predicate.Funcs
+}
+
+func (p *predicateForPodENIEvent) Update(e event.UpdateEvent) bool {
+	oldPodENI, ok := e.ObjectOld.(*v1beta1.PodENI)
+	if !ok {
+		return false
+	}
+	newPodENI, ok := e.ObjectNew.(*v1beta1.PodENI)
+	if !ok {
+		return false
+	}
+
+	oldPodENICopy := oldPodENI.DeepCopy()
+	newPodENICopy := newPodENI.DeepCopy()
+	oldPodENICopy.Status.PodLastSeen = metav1.Unix(0, 0)
+	newPodENICopy.Status.PodLastSeen = metav1.Unix(0, 0)
+
+	return !reflect.DeepEqual(&oldPodENICopy, &newPodENICopy)
 }

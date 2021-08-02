@@ -24,7 +24,7 @@ func (e *ecsImpl) AllocateEipAddress(bandwidth int, chargeType types.InternetCha
 		err     error
 	)
 	var eni *ecs.NetworkInterfaceSet
-	eni, err = e.WaitForNetworkInterface(eniID, "", ENIOpBackoff)
+	eni, err = e.WaitForNetworkInterface(eniID, "", ENIOpBackoff, false)
 	if err != nil {
 		return nil, err
 	}

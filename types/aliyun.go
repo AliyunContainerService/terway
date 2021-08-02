@@ -11,4 +11,7 @@ const (
 
 	// TagTerwayController terway controller
 	TagTerwayController = "terway-controller"
+
+	TagKubernetesPodName      = "k8s_pod_name"
+	TagKubernetesPodNamespace = "k8s_pod_namespace"
 )

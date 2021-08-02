@@ -92,7 +92,7 @@ func (p *PodConf) SetPodENIConf(podENI *v1beta1.PodENI) error {
 	return nil
 }
 
-// SetPodNetworkingConf SetPodNetworkingConf set config from podNetworking
+// SetPodNetworkingConf set config from podNetworking
 func (p *PodConf) SetPodNetworkingConf(podNetworking *v1beta1.PodNetworking) error {
 	switch podNetworking.Spec.IPType.Type {
 	case v1beta1.IPAllocTypeElastic:

@@ -106,6 +106,7 @@ func (a *OpenAPI) DescribeNetworkInterface(vpcID string, eniID []string, instanc
 			return nil, err
 		}
 		result = append(result, resp.NetworkInterfaceSets.NetworkInterfaceSet...)
+		l.WithField(LogFieldRequestID, resp.RequestId).Infof("result count %d", len(resp.NetworkInterfaceSets.NetworkInterfaceSet))
 
 		if resp.TotalCount < resp.PageNumber*resp.PageSize {
 			break
@@ -188,7 +189,7 @@ func (a *OpenAPI) DeleteNetworkInterface(eniID string) error {
 }
 
 // WaitForNetworkInterface wait status of eni
-func (a *OpenAPI) WaitForNetworkInterface(eniID string, status ENIStatus, backoff wait.Backoff) (*ecs.NetworkInterfaceSet, error) {
+func (a *OpenAPI) WaitForNetworkInterface(eniID string, status ENIStatus, backoff wait.Backoff, ignoreNotExist bool) (*ecs.NetworkInterfaceSet, error) {
 	var eniInfo *ecs.NetworkInterfaceSet
 
 	err := wait.ExponentialBackoff(backoff,
@@ -200,6 +201,9 @@ func (a *OpenAPI) WaitForNetworkInterface(eniID string, status ENIStatus, backof
 			if len(eni) == 1 {
 				eniInfo = &eni[0]
 				return true, nil
+			}
+			if len(eni) == 0 && ignoreNotExist {
+				return true, apiErr.ErrNotFound
 			}
 			return false, nil
 		},

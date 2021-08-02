@@ -9,5 +9,6 @@ const (
 	TrunkOn = AnnotationPrefix + "trunk-on"
 
 	// PodENI whether pod is using eni (trunking mode)
-	PodENI = AnnotationPrefix + "pod-eni"
+	PodENI        = AnnotationPrefix + "pod-eni"
+	PodNetworking = AnnotationPrefix + "pod-networking"
 )

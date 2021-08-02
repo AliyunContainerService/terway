@@ -29,8 +29,9 @@ import (
 
 // MatchOnePodNetworking will range all podNetworking and try to found a matched podNetworking for this pod
 // for stateless pod Fixed ip config is never matched
-func MatchOnePodNetworking(pod *corev1.Pod, networkings []v1beta1.PodNetworking) (*v1beta1.PodNetworking, error) {
-	l := labels.Set(pod.Labels)
+func MatchOnePodNetworking(pod *corev1.Pod, ns *corev1.Namespace, networkings []v1beta1.PodNetworking) (*v1beta1.PodNetworking, error) {
+	podLabels := labels.Set(pod.Labels)
+	nsLabels := labels.Set(ns.Labels)
 	for _, podNetworking := range networkings {
 		if podNetworking.Status.Status != v1beta1.NetworkingStatusReady {
 			continue
@@ -44,7 +45,7 @@ func MatchOnePodNetworking(pod *corev1.Pod, networkings []v1beta1.PodNetworking)
 
 		matchOne := false
 		if podNetworking.Spec.Selector.PodSelector != nil {
-			ok, err := PodMatchSelector(podNetworking.Spec.Selector.PodSelector, l)
+			ok, err := PodMatchSelector(podNetworking.Spec.Selector.PodSelector, podLabels)
 			if err != nil {
 				return nil, fmt.Errorf("error match pod selector, %w", err)
 			}
@@ -54,7 +55,7 @@ func MatchOnePodNetworking(pod *corev1.Pod, networkings []v1beta1.PodNetworking)
 			matchOne = true
 		}
 		if podNetworking.Spec.Selector.NamespaceSelector != nil {
-			ok, err := PodMatchSelector(podNetworking.Spec.Selector.NamespaceSelector, l)
+			ok, err := PodMatchSelector(podNetworking.Spec.Selector.NamespaceSelector, nsLabels)
 			if err != nil {
 				return nil, fmt.Errorf("error match namespace selector, %w", err)
 			}

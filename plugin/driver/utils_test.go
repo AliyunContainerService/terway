@@ -7,6 +7,7 @@ import (
 )
 
 func TestEnsureVlanUntagger(t *testing.T) {
+	skipUnlessRoot(t)
 	link, err := netlink.LinkByName("eth0")
 	if err != nil {
 		t.Errorf("error found eth0 interface, %v", err)

@@ -18,13 +18,14 @@ package podeni
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
-	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
@@ -32,7 +33,7 @@ import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/spf13/viper"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -59,7 +60,7 @@ func init() {
 		r := NewReconcilePod(mgr, aliyunClient, swPool)
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
 			Reconciler:              r,
-			MaxConcurrentReconciles: 1,
+			MaxConcurrentReconciles: viper.GetInt("podeni-max-concurrent-reconciles"),
 		})
 		if err != nil {
 			return err
@@ -91,6 +92,7 @@ func init() {
 			},
 			&handler.EnqueueRequestForObject{},
 			&predicate.ResourceVersionChangedPredicate{},
+			&predicateForPodENIEvent{},
 		)
 	})
 }
@@ -162,7 +164,7 @@ func (m *ReconcilePod) Reconcile(ctx context.Context, request reconcile.Request)
 	pod := &corev1.Pod{}
 	err := m.client.Get(context.Background(), request.NamespacedName, pod)
 	if err != nil {
-		if errors.IsNotFound(err) {
+		if k8sErr.IsNotFound(err) {
 			return reconcile.Result{}, m.podDelete(ctx, request.NamespacedName)
 		}
 		return reconcile.Result{}, err
@@ -256,7 +258,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) error {
 		}
 	}
 	if err != nil {
-		if !errors.IsNotFound(err) {
+		if !k8sErr.IsNotFound(err) {
 			return err
 		}
 	}
@@ -275,17 +277,14 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) error {
 		return fmt.Errorf("error parse node, %w", err)
 	}
 
-	podNetworkingList := &v1beta1.PodNetworkingList{}
-	err = m.client.List(ctx, podNetworkingList)
+	podNetwokingName := pod.Annotations[types.PodNetworking]
+
+	podNetworking := &v1beta1.PodNetworking{}
+	err = m.client.Get(ctx, k8stypes.NamespacedName{
+		Name: podNetwokingName,
+	}, podNetworking)
 	if err != nil {
-		return fmt.Errorf("error list podNetworking")
-	}
-	if len(podNetworkingList.Items) == 0 {
-		return fmt.Errorf("can not found podNetwrking")
-	}
-	podNetworking, err := common.MatchOnePodNetworking(pod, podNetworkingList.Items)
-	if err != nil {
-		return fmt.Errorf("can match podNetwrking for pod")
+		return fmt.Errorf("error get podNetworking %s", podNetwokingName)
 	}
 
 	err = podConf.SetPodNetworkingConf(podNetworking)
@@ -310,6 +309,8 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) error {
 	eni, err := m.aliyun.CreateNetworkInterface(aliyun.ENITypeSecondary, podConf.VSwitchID, podConf.SecurityGroups, 1, map[string]string{
 		types.TagKeyClusterID:               viper.GetString("cluster-id"),
 		types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
+		types.TagKubernetesPodName:          utils.TrimStr(pod.Name, 120),
+		types.TagKubernetesPodNamespace:     utils.TrimStr(pod.Namespace, 120),
 	})
 	if err != nil {
 		return err
@@ -356,8 +357,9 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) error {
 	}()
 
 	// 2.4 wait attached
-	_, err = m.aliyun.WaitForNetworkInterface(eni.NetworkInterfaceId, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff)
+	_, err = m.aliyun.WaitForNetworkInterface(eni.NetworkInterfaceId, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff, false)
 	if err != nil {
+		l.Error(err, "error wait eni status")
 		return err
 	}
 
@@ -372,7 +374,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) error {
 		if err != nil {
 			innerErr := m.client.Delete(ctx, podENI)
 			if innerErr != nil {
-				if errors.IsNotFound(innerErr) {
+				if k8sErr.IsNotFound(innerErr) {
 					return
 				}
 				l.Error(innerErr, fmt.Sprintf("error delete cr %s/%s", pod.Namespace, pod.Name))
@@ -388,45 +390,46 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) error {
 		PodLastSeen: metav1.Now(),
 	}
 	_, err = m.setPodENIStatus(ctx, podENI, old)
-	return err
+	if err != nil {
+		l.Error(err, "error update podENI status")
+		return nil
+	}
+	l.WithValues("eni", eni.NetworkInterfaceId).Info("success associate eni")
+	return nil
 }
 
 func (m *ReconcilePod) podDelete(ctx context.Context, namespacedName client.ObjectKey) error {
 	l := log.FromContext(ctx)
 	l.Info("pod delete")
-	podENI := &v1beta1.PodENI{}
-	err := m.client.Get(context.Background(), namespacedName, podENI)
+	oldPodENI := &v1beta1.PodENI{}
+	err := m.client.Get(context.Background(), namespacedName, oldPodENI)
 	if err != nil {
-		if errors.IsNotFound(err) {
+		if k8sErr.IsNotFound(err) {
 			l.Info("cr resource not found")
 			return nil
 		}
 		return err
 	}
-	p := podENI.DeepCopy()
+	podENICopy := oldPodENI.DeepCopy()
 
 	podConf := &PodConf{}
-	err = podConf.SetPodENIConf(p)
+	err = podConf.SetPodENIConf(podENICopy)
 	if err != nil {
 		return fmt.Errorf("error parse podENI, %w", err)
 	}
 	// for fixed ip ,we will not delete eni
 	if podConf.UseFixedIP {
-		err := m.detachMemberENI(p)
+		err := m.detachMemberENI(podENICopy)
 		if err != nil {
 			return err
 		}
-		old := p.DeepCopy()
-		p.Status.Status = v1beta1.ENIStatusUnbind
-		_, err = m.setPodENIStatus(ctx, p, old)
-		if err != nil {
-			return err
-		}
-		return nil
+		podENICopy.Status.Status = v1beta1.ENIStatusUnbind
+		_, err = m.setPodENIStatus(ctx, podENICopy, oldPodENI)
+		return err
 	}
 
 	// for non-fixed ip, we will detach then delete eni
-	return m.pruneENI(ctx, p)
+	return m.pruneENI(ctx, podENICopy)
 }
 
 // pruneENI is the func release eni resource and cr
@@ -449,7 +452,7 @@ func (m *ReconcilePod) pruneENI(ctx context.Context, podENI *v1beta1.PodENI) err
 		return fmt.Errorf("error delete eni, %w", err)
 	}
 	err = m.client.Delete(ctx, podENI)
-	if errors.IsNotFound(err) {
+	if k8sErr.IsNotFound(err) {
 		return nil
 	}
 	return err
@@ -533,35 +536,12 @@ func (m *ReconcilePod) gcENIs(enis []ecs.NetworkInterfaceSet, force bool) error 
 		return err
 	}
 
-	// 3. range podENI and gc usless eni
+	// 3. range podENI and gc useless eni
 	for _, podENI := range podENIs.Items {
 		_, ok := eniMap[podENI.Spec.Allocation.ENI.ID]
 		if !ok {
 			continue
 		}
-		// if with fixed ip we will try gc the eni
-		if podENI.Spec.Allocation.IPType.Type == v1beta1.IPAllocTypeFixed &&
-			podENI.Spec.Allocation.IPType.ReleaseStrategy == v1beta1.ReleaseStrategyTTL {
-			duration, err := time.ParseDuration(podENI.Spec.Allocation.IPType.ReleaseAfter)
-			if err != nil {
-				l.Error(err, "error parse podENI ReleaseAfter")
-				delete(eniMap, podENI.Spec.Allocation.ENI.ID)
-				continue
-			}
-			// need gc
-			if podENI.Status.PodLastSeen.Add(duration).Before(now) {
-				l.Info("fixed ip recycle", "lastSeen", podENI.Status.PodLastSeen.String(), "now", now.String())
-
-				patched := podENI.DeepCopy()
-				patched.Status.Status = v1beta1.ENIStatusDeleting
-				_, err = m.setPodENIStatus(context.Background(), patched, &podENI)
-				if err != nil {
-					delete(eniMap, podENI.Spec.Allocation.ENI.ID)
-				}
-				continue
-			}
-		}
-		// del eni that need to keep
 		delete(eniMap, podENI.Spec.Allocation.ENI.ID)
 	}
 
@@ -611,48 +591,58 @@ func (m *ReconcilePod) gcCRPodENIs() {
 			Namespace: podENI.Namespace,
 			Name:      podENI.Name,
 		}, p)
+		if err != nil && !k8sErr.IsNotFound(err) {
+			l.Error(err, "error get pod, %s")
+			continue
+		}
+		ll := l.WithValues("pod", k8stypes.NamespacedName{
+			Namespace: podENI.Namespace,
+			Name:      podENI.Name,
+		}.String())
+
+		// pod exist just update timestamp
 		if err == nil {
+			ll.V(5).Info("update pod lastSeen to now")
 			update := podENI.DeepCopy()
-			// pod exist just update timestamp
 			update.Status.PodLastSeen = metav1.Now()
 			_, err = m.setPodENIStatus(context.Background(), update, &podENI)
 			if err != nil {
-				l.Error(err, "error update timestamp, %s", msg)
+				ll.Error(err, "error update timestamp, %s", msg)
 			}
 			continue
 		}
-		if errors.IsNotFound(err) {
-			if podENI.Spec.Allocation.IPType.Type == v1beta1.IPAllocTypeFixed {
-				switch podENI.Spec.Allocation.IPType.ReleaseStrategy {
-				case v1beta1.ReleaseStrategyNever:
-					continue
-				case v1beta1.ReleaseStrategyTTL:
-					duration, err := time.ParseDuration(podENI.Spec.Allocation.IPType.ReleaseAfter)
-					if err != nil {
-						l.Error(err, "error parse ReleaseAfter, %s", msg)
-						continue
-					}
-					if duration < 0 {
-						l.Error(err, "error parse ReleaseAfter %s, %s", duration.String(), msg)
-						continue
-					}
-					if podENI.Status.PodLastSeen.Add(duration).After(time.Now()) {
-						continue
-					}
-				default:
-					l.Error(err, "unsupported ReleaseStrategy %s", podENI.Spec.Allocation.IPType.ReleaseStrategy)
+
+		// pod not exist
+		if podENI.Spec.Allocation.IPType.Type == v1beta1.IPAllocTypeFixed {
+			switch podENI.Spec.Allocation.IPType.ReleaseStrategy {
+			case v1beta1.ReleaseStrategyNever:
+				continue
+			case v1beta1.ReleaseStrategyTTL:
+				duration, err := time.ParseDuration(podENI.Spec.Allocation.IPType.ReleaseAfter)
+				if err != nil {
+					ll.Error(err, "error parse ReleaseAfter, %s", msg)
 					continue
 				}
+				if duration < 0 {
+					ll.Error(err, "error parse ReleaseAfter %s, %s", duration.String(), msg)
+					continue
+				}
+				now := time.Now()
+				if podENI.Status.PodLastSeen.Add(duration).After(now) {
+					continue
+				}
+				l.Info("fixed ip recycle", "lastSeen", podENI.Status.PodLastSeen.String(), "now", now.String())
+			default:
+				ll.Error(err, "unsupported ReleaseStrategy %s", podENI.Spec.Allocation.IPType.ReleaseStrategy)
+				continue
 			}
-
-			l.Info("prune eni")
-			err := m.pruneENI(context.Background(), &podENI)
-			if err != nil {
-				l.Error(err, "error prune eni, %s")
-			}
-			continue
 		}
-		l.Error(err, "error get pod, %s")
+
+		ll.WithValues("eni", podENI.Spec.Allocation.ENI.ID).Info("prune eni")
+		err := m.pruneENI(context.Background(), &podENI)
+		if err != nil {
+			ll.Error(err, "error prune eni, %s")
+		}
 	}
 }
 
@@ -665,7 +655,7 @@ func (m *ReconcilePod) attachMemberENI(podENI *v1beta1.PodENI) error {
 		return err
 	}
 	time.Sleep(aliyun.ENIOpBackoff.Duration)
-	_, err = m.aliyun.WaitForNetworkInterface(podENI.Spec.Allocation.ENI.ID, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff)
+	_, err = m.aliyun.WaitForNetworkInterface(podENI.Spec.Allocation.ENI.ID, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff, false)
 	return err
 }
 
@@ -678,7 +668,10 @@ func (m *ReconcilePod) detachMemberENI(podENI *v1beta1.PodENI) error {
 		return err
 	}
 	time.Sleep(aliyun.ENIOpBackoff.Duration)
-	_, err = m.aliyun.WaitForNetworkInterface(podENI.Spec.Allocation.ENI.ID, aliyun.ENIStatusAvailable, aliyun.ENIOpBackoff)
+	_, err = m.aliyun.WaitForNetworkInterface(podENI.Spec.Allocation.ENI.ID, aliyun.ENIStatusAvailable, aliyun.ENIOpBackoff, true)
+	if errors.Is(err, apiErr.ErrNotFound) {
+		return nil
+	}
 	return err
 }
 

@@ -78,7 +78,7 @@ COPY policy/policyinit.sh /bin/
 COPY policy/uninstall_policy.sh /bin/
 COPY init.sh /bin/
 COPY --from=cilium-builder /tmp/install/ /
-COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terwayd /usr/bin/terwayd
+COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cmd/terway/terwayd /usr/bin/terwayd
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/plugin/terway/terway /usr/bin/terway
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cli/terway-cli /usr/bin/terway-cli
 COPY hack/iptables-wrapper-installer.sh /iptables-wrapper-installer.sh

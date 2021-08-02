@@ -50,7 +50,7 @@ func MutatingHook(client client.Client) *webhook.Admission {
 				if req.Namespace == "kube-system" {
 					return webhook.Allowed("namespace is kube-system")
 				}
-				return podWebhook(ctx, req, client)
+				return podWebhook(ctx, &req, client)
 			case "PodNetworking":
 				return podNetworkingWebhook(ctx, req, client)
 			}
@@ -59,15 +59,17 @@ func MutatingHook(client client.Client) *webhook.Admission {
 	}
 }
 
-func podWebhook(ctx context.Context, req webhook.AdmissionRequest, client client.Client) webhook.AdmissionResponse {
+func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client client.Client) webhook.AdmissionResponse {
 	original := req.Object.Raw
-
 	pod := &corev1.Pod{}
 	err := json.Unmarshal(original, pod)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, fmt.Errorf("failed decoding pod: %s, %w", string(original), err))
 	}
-	l := log.WithName(fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
+	l := log.WithName(k8stypes.NamespacedName{
+		Namespace: req.Namespace,
+		Name:      req.Name, // for non sts pod the name is empty
+	}.String())
 	l.Info("checking pod")
 
 	if pod.Spec.HostNetwork {
@@ -81,7 +83,15 @@ func podWebhook(ctx context.Context, req webhook.AdmissionRequest, client client
 		return webhook.Errored(1, fmt.Errorf("error list podNetworking, %w", err))
 	}
 
-	podNetworking, err := common.MatchOnePodNetworking(pod, podNetworkings.Items)
+	ns := &corev1.Namespace{}
+	err = client.Get(ctx, k8stypes.NamespacedName{
+		Name: req.Namespace,
+	}, ns)
+	if err != nil {
+		return webhook.Errored(1, fmt.Errorf("error get namespace, %w", err))
+	}
+
+	podNetworking, err := common.MatchOnePodNetworking(pod, ns, podNetworkings.Items)
 	if err != nil {
 		l.Error(err, "error match podNetworking")
 		return webhook.Errored(1, err)
@@ -95,7 +105,11 @@ func podWebhook(ctx context.Context, req webhook.AdmissionRequest, client client
 		return webhook.Allowed("pod do not have containers")
 	}
 
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
+	}
 	pod.Annotations[types.PodENI] = "true"
+	pod.Annotations[types.PodNetworking] = podNetworking.Name
 
 	// we only patch one container for res request
 	if pod.Spec.Containers[0].Resources.Requests == nil {
@@ -108,7 +122,6 @@ func podWebhook(ctx context.Context, req webhook.AdmissionRequest, client client
 	pod.Spec.Containers[0].Resources.Limits[deviceplugin.MemberENIResName] = resource.MustParse("1")
 
 	// 2. get pod previous zone
-
 	previousZone, err := getPreviousZone(client, pod)
 	if err != nil {
 		msg := fmt.Sprintf("error get previous podENI conf, %s", err)
@@ -162,7 +175,6 @@ func podWebhook(ctx context.Context, req webhook.AdmissionRequest, client client
 
 func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, client client.Client) webhook.AdmissionResponse {
 	original := req.Object.Raw
-
 	podNetworking := &v1beta1.PodNetworking{}
 	err := json.Unmarshal(original, podNetworking)
 	if err != nil {

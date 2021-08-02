@@ -129,7 +129,7 @@ func (e *ecsImpl) AllocateENI(vSwitch, securityGroup, instanceID string, trunk b
 	start := time.Now()
 	// bind status is async api, sleep for first bind status inspect
 	time.Sleep(eniStateBackoff.Duration)
-	eniStatus, err := e.WaitForNetworkInterface(resp.NetworkInterfaceId, ENIStatusInUse, eniStateBackoff)
+	eniStatus, err := e.WaitForNetworkInterface(resp.NetworkInterfaceId, ENIStatusInUse, eniStateBackoff, false)
 	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceBind/"+string(ENIStatusInUse), fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 	if err != nil {
