@@ -10,9 +10,14 @@ FROM golang:1.16.5 as builder
 ARG GOPROXY
 ENV GOPROXY $GOPROXY
 WORKDIR /go/src/github.com/AliyunContainerService/terway/
+COPY go.sum go.sum
+COPY go.mod go.mod
+RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags "-X \"main.gitVer=`git rev-parse --short HEAD 2>/dev/null`\" \
+RUN cd cmd/terway && CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags \
+    "-X \"k8s.io/client-go/pkg/version.gitCommit=`git rev-parse HEAD`\" \
+    -X \"k8s.io/client-go/pkg/version.buildDate=`date -u +'%Y-%m-%dT%H:%M:%SZ'`\" \
     -X \"github.com/AliyunContainerService/terway/pkg/aliyun.kubernetesAlicloudIdentity=Kubernetes.Alicloud/`git rev-parse --short HEAD 2>/dev/null`\"" -o terwayd .
 RUN cd plugin/terway && CGO_ENABLED=0 GOOS=linux go build -o terway .
 RUN cd cmd/terway-cli && CGO_ENABLED=0 GOOS=linux go build -o terway-cli .
@@ -80,7 +85,7 @@ COPY init.sh /bin/
 COPY --from=cilium-builder /tmp/install/ /
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cmd/terway/terwayd /usr/bin/terwayd
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/plugin/terway/terway /usr/bin/terway
-COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cli/terway-cli /usr/bin/terway-cli
+COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cmd/terway-cli/terway-cli /usr/bin/terway-cli
 COPY hack/iptables-wrapper-installer.sh /iptables-wrapper-installer.sh
 RUN /iptables-wrapper-installer.sh
 ENTRYPOINT ["/usr/bin/terwayd"]
