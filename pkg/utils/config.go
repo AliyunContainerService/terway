@@ -17,11 +17,19 @@ func ParseClusterConfig() error {
 			return fmt.Errorf("neither clusterID or vpcID is set,%w", err)
 		}
 		if clusterID == "" {
+			// managed k8s
 			clusterID = clusterCM.Data["clusterid"]
+		}
+		if clusterID == "" {
+			// dedicated k8s
+			clusterID = clusterCM.Data["cluster-id"]
 		}
 		if vpcID == "" {
 			vpcID = clusterCM.Data["vpcid"]
 		}
+	}
+	if clusterID == "" || vpcID == "" {
+		return fmt.Errorf("clutter-id or vpc-id is empty")
 	}
 
 	viper.Set("cluster-id", clusterID)
