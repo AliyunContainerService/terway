@@ -242,7 +242,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) error {
 
 				p.Status.InstanceID = podConf.InstanceID
 				p.Status.TrunkENIID = podConf.TrunkENIID
-				err = m.attachMemberENI(p)
+				err = m.attachMemberENI(ctx, p)
 				if err != nil {
 					l.Error(err, "error attach eni")
 					return err
@@ -306,7 +306,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) error {
 	}
 
 	// 2.2 create eni
-	eni, err := m.aliyun.CreateNetworkInterface(aliyun.ENITypeSecondary, podConf.VSwitchID, podConf.SecurityGroups, 1, map[string]string{
+	eni, err := m.aliyun.CreateNetworkInterface(ctx, aliyun.ENITypeSecondary, podConf.VSwitchID, podConf.SecurityGroups, 1, 0, map[string]string{
 		types.TagKeyClusterID:               viper.GetString("cluster-id"),
 		types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
 		types.TagKubernetesPodName:          utils.TrimStr(pod.Name, 120),
@@ -334,7 +334,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) error {
 	defer func() {
 		if err != nil {
 			podENI.Status.Status = v1beta1.ENIStatusUnbind
-			innerErr := m.deleteMemberENI(podENI)
+			innerErr := m.deleteMemberENI(ctx, podENI)
 			if innerErr != nil {
 				l.Error(innerErr, "error delete eni %w")
 			}
@@ -343,13 +343,13 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) error {
 	l.Info("attaching eni")
 
 	// 2.3 attach eni
-	err = m.aliyun.AttachNetworkInterface(eni.NetworkInterfaceId, podConf.InstanceID, podConf.TrunkENIID)
+	err = m.aliyun.AttachNetworkInterface(ctx, eni.NetworkInterfaceId, podConf.InstanceID, podConf.TrunkENIID)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if err != nil {
-			innerErr := m.detachMemberENI(podENI)
+			innerErr := m.detachMemberENI(ctx, podENI)
 			if innerErr != nil {
 				l.Error(innerErr, "error detach eni %w")
 			}
@@ -357,7 +357,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) error {
 	}()
 
 	// 2.4 wait attached
-	_, err = m.aliyun.WaitForNetworkInterface(eni.NetworkInterfaceId, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff, false)
+	_, err = m.aliyun.WaitForNetworkInterface(ctx, eni.NetworkInterfaceId, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff, false)
 	if err != nil {
 		l.Error(err, "error wait eni status")
 		return err
@@ -419,7 +419,7 @@ func (m *ReconcilePod) podDelete(ctx context.Context, namespacedName client.Obje
 	}
 	// for fixed ip ,we will not delete eni
 	if podConf.UseFixedIP {
-		err := m.detachMemberENI(podENICopy)
+		err := m.detachMemberENI(ctx, podENICopy)
 		if err != nil {
 			return err
 		}
@@ -442,12 +442,12 @@ func (m *ReconcilePod) pruneENI(ctx context.Context, podENI *v1beta1.PodENI) err
 		return err
 	}
 	// detach eni
-	err = m.detachMemberENI(podENI)
+	err = m.detachMemberENI(ctx, podENI)
 	if err != nil {
 		return fmt.Errorf("error detachMemberENI podENI status to %s", v1beta1.ENIStatusUnbind)
 	}
 	// delete eni
-	err = m.deleteMemberENI(podENI)
+	err = m.deleteMemberENI(ctx, podENI)
 	if err != nil {
 		return fmt.Errorf("error delete eni, %w", err)
 	}
@@ -460,7 +460,7 @@ func (m *ReconcilePod) pruneENI(ctx context.Context, podENI *v1beta1.PodENI) err
 
 func (m *ReconcilePod) gcSecondaryENI(force bool) {
 	// 1. list all available enis ( which type is secondary)
-	enis, err := m.aliyun.DescribeNetworkInterface(viper.GetString("vpc-id"), nil, "", aliyun.ENITypeSecondary, aliyun.ENIStatusAvailable)
+	enis, err := m.aliyun.DescribeNetworkInterface(context.Background(), viper.GetString("vpc-id"), nil, "", aliyun.ENITypeSecondary, aliyun.ENIStatusAvailable)
 	if err != nil {
 		ctrlLog.Error(err, "error list all member enis")
 		return
@@ -478,7 +478,7 @@ func (m *ReconcilePod) gcSecondaryENI(force bool) {
 
 func (m *ReconcilePod) gcMemberENI(force bool) {
 	// 1. list all attached member eni
-	enis, err := m.aliyun.DescribeNetworkInterface(viper.GetString("vpc-id"), nil, "", aliyun.ENITypeMember, aliyun.ENIStatusInUse)
+	enis, err := m.aliyun.DescribeNetworkInterface(context.Background(), viper.GetString("vpc-id"), nil, "", aliyun.ENITypeMember, aliyun.ENIStatusInUse)
 	if err != nil {
 		ctrlLog.Error(err, "error list all member enis")
 		return
@@ -549,7 +549,7 @@ func (m *ReconcilePod) gcENIs(enis []ecs.NetworkInterfaceSet, force bool) error 
 	for id, eni := range eniMap {
 		if eni.Type == string(aliyun.ENITypeMember) && eni.Status == string(aliyun.ENIStatusInUse) {
 			l.Info("detach eni", "eni", id, "trunk-eni", eni.Attachment.TrunkNetworkInterfaceId)
-			err = m.aliyun.DetachNetworkInterface(id, eni.Attachment.InstanceId, eni.Attachment.TrunkNetworkInterfaceId)
+			err = m.aliyun.DetachNetworkInterface(context.Background(), id, eni.Attachment.InstanceId, eni.Attachment.TrunkNetworkInterfaceId)
 			if err != nil {
 				l.Error(err, fmt.Sprintf("errot detach eni %s", id))
 			}
@@ -558,7 +558,7 @@ func (m *ReconcilePod) gcENIs(enis []ecs.NetworkInterfaceSet, force bool) error 
 		}
 		if eni.Status == string(aliyun.ENIStatusAvailable) {
 			l.Info("delete eni", "eni", id)
-			err = m.aliyun.DeleteNetworkInterface(id)
+			err = m.aliyun.DeleteNetworkInterface(context.Background(), id)
 			if err != nil {
 				l.Info(fmt.Sprintf("delete leaked eni %s, %s", id, err))
 			}
@@ -646,40 +646,40 @@ func (m *ReconcilePod) gcCRPodENIs() {
 	}
 }
 
-func (m *ReconcilePod) attachMemberENI(podENI *v1beta1.PodENI) error {
+func (m *ReconcilePod) attachMemberENI(ctx context.Context, podENI *v1beta1.PodENI) error {
 	if podENI.Status.InstanceID == "" || podENI.Status.Status == v1beta1.ENIStatusBind {
 		return nil
 	}
-	err := m.aliyun.AttachNetworkInterface(podENI.Spec.Allocation.ENI.ID, podENI.Status.InstanceID, podENI.Status.TrunkENIID)
+	err := m.aliyun.AttachNetworkInterface(ctx, podENI.Spec.Allocation.ENI.ID, podENI.Status.InstanceID, podENI.Status.TrunkENIID)
 	if err != nil {
 		return err
 	}
 	time.Sleep(aliyun.ENIOpBackoff.Duration)
-	_, err = m.aliyun.WaitForNetworkInterface(podENI.Spec.Allocation.ENI.ID, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff, false)
+	_, err = m.aliyun.WaitForNetworkInterface(ctx, podENI.Spec.Allocation.ENI.ID, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff, false)
 	return err
 }
 
-func (m *ReconcilePod) detachMemberENI(podENI *v1beta1.PodENI) error {
+func (m *ReconcilePod) detachMemberENI(ctx context.Context, podENI *v1beta1.PodENI) error {
 	if podENI.Status.InstanceID == "" || podENI.Status.Status == v1beta1.ENIStatusUnbind {
 		return nil
 	}
-	err := m.aliyun.DetachNetworkInterface(podENI.Spec.Allocation.ENI.ID, podENI.Status.InstanceID, podENI.Status.TrunkENIID)
+	err := m.aliyun.DetachNetworkInterface(ctx, podENI.Spec.Allocation.ENI.ID, podENI.Status.InstanceID, podENI.Status.TrunkENIID)
 	if err != nil {
 		return err
 	}
 	time.Sleep(aliyun.ENIOpBackoff.Duration)
-	_, err = m.aliyun.WaitForNetworkInterface(podENI.Spec.Allocation.ENI.ID, aliyun.ENIStatusAvailable, aliyun.ENIOpBackoff, true)
+	_, err = m.aliyun.WaitForNetworkInterface(ctx, podENI.Spec.Allocation.ENI.ID, aliyun.ENIStatusAvailable, aliyun.ENIOpBackoff, true)
 	if errors.Is(err, apiErr.ErrNotFound) {
 		return nil
 	}
 	return err
 }
 
-func (m *ReconcilePod) deleteMemberENI(podENI *v1beta1.PodENI) error {
+func (m *ReconcilePod) deleteMemberENI(ctx context.Context, podENI *v1beta1.PodENI) error {
 	if podENI.Spec.Allocation.ENI.ID == "" {
 		return nil
 	}
-	return m.aliyun.DeleteNetworkInterface(podENI.Spec.Allocation.ENI.ID)
+	return m.aliyun.DeleteNetworkInterface(ctx, podENI.Spec.Allocation.ENI.ID)
 }
 
 // setPodENIStatus set ccr status

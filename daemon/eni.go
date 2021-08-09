@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/AliyunContainerService/terway/pkg/ipam"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/types"
@@ -35,10 +37,10 @@ const (
 
 type eniResourceManager struct {
 	pool pool.ObjectPool
-	ecs  aliyun.ECS
+	ecs  ipam.API
 }
 
-func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocatedResources []resourceManagerInitItem) (ResourceManager, error) {
+func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocatedResources []resourceManagerInitItem) (ResourceManager, error) {
 	logrus.Debugf("new ENI Resource Manager, pool config: %+v, allocated resources: %+v", poolConfig, allocatedResources)
 	factory, err := newENIFactory(poolConfig, ecs)
 	if err != nil {
@@ -74,7 +76,7 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, allocat
 		Capacity: capacity,
 		Factory:  factory,
 		Initializer: func(holder pool.ResourceHolder) error {
-			enis, err := ecs.GetAttachedENIs(false)
+			enis, err := ecs.GetAttachedENIs(context.Background(), false)
 			if err != nil {
 				return errors.Wrapf(err, "error get attach ENI on pool init")
 			}
@@ -176,16 +178,16 @@ type eniFactory struct {
 	eniTags                map[string]string
 	securityGroup          string
 	instanceID             string
-	ecs                    aliyun.ECS
+	ecs                    ipam.API
 	vswitchIPCntMap        map[string]int
 	tsExpireAt             time.Time
 	vswitchSelectionPolicy string
 	sync.RWMutex
 }
 
-func newENIFactory(poolConfig *types.PoolConfig, ecs aliyun.ECS) (*eniFactory, error) {
+func newENIFactory(poolConfig *types.PoolConfig, ecs ipam.API) (*eniFactory, error) {
 	if poolConfig.SecurityGroup == "" {
-		securityGroups, err := ecs.GetAttachedSecurityGroups(poolConfig.InstanceID)
+		securityGroups, err := ecs.GetAttachedSecurityGroups(context.Background(), poolConfig.InstanceID)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error get security group on factory init")
 		}
@@ -236,7 +238,7 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 			// Loop vswitch slice to get each vswitch's available IP count.
 			for _, vswitch := range f.switches {
 				var vsw *vpc.VSwitch
-				vsw, err = f.ecs.DescribeVSwitchByID(vswitch)
+				vsw, err = f.ecs.DescribeVSwitchByID(context.Background(), vswitch)
 				if err != nil {
 					f.vswitchIPCntMap[vswitch] = 0
 				} else {
@@ -279,7 +281,7 @@ func (f *eniFactory) CreateWithIPCount(count int, trunk bool) ([]types.NetworkRe
 	for k, v := range f.eniTags {
 		tags[k] = v
 	}
-	eni, err := f.ecs.AllocateENI(vSwitches[0], f.securityGroup, f.instanceID, trunk, count, tags)
+	eni, err := f.ecs.AllocateENI(context.Background(), vSwitches[0], f.securityGroup, f.instanceID, trunk, count, tags)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +290,7 @@ func (f *eniFactory) CreateWithIPCount(count int, trunk bool) ([]types.NetworkRe
 
 func (f *eniFactory) Dispose(resource types.NetworkResource) error {
 	eni := resource.(*types.ENI)
-	return f.ecs.FreeENI(eni.ID, f.instanceID)
+	return f.ecs.FreeENI(context.Background(), eni.ID, f.instanceID)
 }
 
 func (f *eniFactory) Config() []tracing.MapKeyValueEntry {
@@ -331,12 +333,12 @@ func (f *eniFactory) Execute(cmd string, _ []string, message chan<- string) {
 
 func (f *eniFactory) Get(res types.NetworkResource) (types.NetworkResource, error) {
 	eni := res.(*types.ENI)
-	return f.ecs.GetENIByMac(eni.MAC)
+	return f.ecs.GetENIByMac(context.Background(), eni.MAC)
 }
 
 func (f *eniFactory) GetResource() (map[string]types.FactoryResIf, error) {
 	// Get ENIs from Aliyun API
-	enis, err := f.ecs.GetAttachedENIs(false)
+	enis, err := f.ecs.GetAttachedENIs(context.Background(), false)
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +356,7 @@ func (f *eniFactory) GetResource() (map[string]types.FactoryResIf, error) {
 
 func (f *eniFactory) Reconcile() {
 	// check security group
-	err := f.ecs.CheckEniSecurityGroup([]string{f.securityGroup})
+	err := f.ecs.CheckEniSecurityGroup(context.Background(), []string{f.securityGroup})
 	if err != nil {
 		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, "ResourceInvalid", fmt.Sprintf("eni has misconfiged security group. %s", err.Error()))
 	}

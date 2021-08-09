@@ -189,7 +189,7 @@ func GetENIPrivateIPv6IPs(mac string) ([]net.IP, error) {
 
 	var ips []net.IP
 	for _, ipStr := range addressStrList {
-		i, err := ip.ToIP(ipStr)
+		i, err := ip.ToIP(strings.TrimSpace(ipStr))
 		if err != nil {
 			return nil, err
 		}

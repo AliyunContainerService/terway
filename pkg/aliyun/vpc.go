@@ -1,6 +1,7 @@
 package aliyun
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 )
 
 // DescribeVSwitchByID get vsw by id
-func (a *OpenAPI) DescribeVSwitchByID(vSwitch string) (*vpc.VSwitch, error) {
+func (a *OpenAPI) DescribeVSwitchByID(ctx context.Context, vSwitch string) (*vpc.VSwitch, error) {
 	req := vpc.CreateDescribeVSwitchesRequest()
 	req.VSwitchId = vSwitch
 
@@ -21,13 +22,13 @@ func (a *OpenAPI) DescribeVSwitchByID(vSwitch string) (*vpc.VSwitch, error) {
 	})
 
 	start := time.Now()
-	resp, err := a.clientSet.VPC().DescribeVSwitches(req)
+	resp, err := a.ClientSet.VPC().DescribeVSwitches(req)
 	metric.OpenAPILatency.WithLabelValues("DescribeVSwitches", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		l.WithField(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err)
 		return nil, err
 	}
-	l.WithField(LogFieldRequestID, resp.RequestId).Debugf("result for DescribeVSwitches: vsw slice = %+v, err = %v", resp.VSwitches.VSwitch, err)
+	l.WithField(LogFieldRequestID, resp.RequestId).Debugf("DescribeVSwitches: vsw slice = %+v, err = %v", resp.VSwitches.VSwitch, err)
 	if len(resp.VSwitches.VSwitch) == 0 {
 		return nil, apiErr.ErrNotFound
 	}

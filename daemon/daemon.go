@@ -17,6 +17,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
+	"github.com/AliyunContainerService/terway/pkg/ipam"
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/pool"
@@ -270,7 +271,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 			}
 			eniMultiIP = &types.ENIIP{
 				ENI: nodeTrunkENI,
-				SecondaryIP: types.IPSet{
+				IPSet: types.IPSet{
 					IPv4: net.ParseIP(podEni.Spec.Allocation.IPv4),
 					IPv6: net.ParseIP(podEni.Spec.Allocation.IPv6),
 				},
@@ -295,7 +296,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 			}
 			networkContext.resources = append(networkContext.resources, newRes.Resources...)
 			if networkService.eipResMgr != nil && podinfo.EipInfo.PodEip {
-				podinfo.PodIPs = eniMultiIP.SecondaryIP
+				podinfo.PodIPs = eniMultiIP.IPSet
 				var eipRes *types.EIP
 				eipRes, err = networkService.allocateEIP(networkContext, &oldRes)
 				if err != nil {
@@ -323,7 +324,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		allocIPReply.NetworkInfo = &rpc.AllocIPReply_ENIMultiIP{
 			ENIMultiIP: &rpc.ENIMultiIP{
 				ENIConfig: &rpc.ENI{
-					PodIP:     eniMultiIP.SecondaryIP.ToRPC(),
+					PodIP:     eniMultiIP.IPSet.ToRPC(),
 					Subnet:    eniMultiIP.ENI.VSwitchCIDR.ToRPC(),
 					MAC:       eniMultiIP.ENI.MAC,
 					GatewayIP: eniMultiIP.ENI.GatewayIP.ToRPC(),
@@ -570,7 +571,7 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 				reply = &rpc.GetInfoReply_ENIMultiIP{
 					ENIMultiIP: &rpc.ENIMultiIP{
 						ENIConfig: &rpc.ENI{
-							PodIP:     eniMultiIP.SecondaryIP.ToRPC(),
+							PodIP:     eniMultiIP.IPSet.ToRPC(),
 							Subnet:    eniMultiIP.ENI.VSwitchCIDR.ToRPC(),
 							MAC:       eniMultiIP.ENI.MAC,
 							GatewayIP: eniMultiIP.ENI.GatewayIP.ToRPC(),
@@ -1093,16 +1094,13 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	}
 
 	ins := aliyun.GetInstanceMeta()
-
-	ignoreLinkNotExist := false
-	if daemonMode == daemonModeENIOnly || daemonMode == daemonModeVPC {
-		ignoreLinkNotExist = true
-	}
 	ipFamily := types.NewIPFamilyFromIPStack(types.IPStack(config.IPStack))
-	ecs, err := aliyun.NewECS(config.AccessID, config.AccessSecret, config.CredentialPath, config.EnableENITrunking, ignoreLinkNotExist, ins.VPCID, ins.RegionID, ipFamily)
+
+	aliyunClient, err := aliyun.NewAliyun(config.AccessID, config.AccessSecret, ins.RegionID, config.CredentialPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error get aliyun client")
+		return nil, errors.Wrapf(err, "error create aliyun client")
 	}
+	ecs := aliyun.NewAliyunImpl(aliyunClient, config.EnableENITrunking, ipFamily)
 
 	netSrv.enableTrunk = config.EnableENITrunking
 
@@ -1241,7 +1239,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 }
 
 // restore local eni resources for old terway migration
-func restoreLocalENIRes(ecs aliyun.ECS, pc *types.PoolConfig, k8s Kubernetes, resourceDB storage.Storage) error {
+func restoreLocalENIRes(ecs ipam.API, pc *types.PoolConfig, k8s Kubernetes, resourceDB storage.Storage) error {
 	resList, err := resourceDB.List()
 	if err != nil {
 		return errors.Wrapf(err, "error list resourceDB storage")
@@ -1251,7 +1249,7 @@ func restoreLocalENIRes(ecs aliyun.ECS, pc *types.PoolConfig, k8s Kubernetes, re
 		return nil
 	}
 
-	eniList, err := ecs.GetAttachedENIs(false)
+	eniList, err := ecs.GetAttachedENIs(context.Background(), false)
 	if err != nil {
 		return errors.Wrapf(err, "error get attached eni for restore")
 	}
@@ -1296,14 +1294,6 @@ func setDefault(cfg *types.Configure) error {
 		cfg.EniCapRatio = 1
 	}
 
-	if cfg.HotPlug == "" {
-		cfg.HotPlug = conditionTrue
-	}
-
-	if cfg.HotPlug == conditionFalse || cfg.HotPlug == "0" {
-		cfg.HotPlug = conditionFalse
-	}
-
 	// Default policy for vswitch selection is random.
 	if cfg.VSwitchSelectionPolicy == "" {
 		cfg.VSwitchSelectionPolicy = types.VSwitchSelectionPolicyRandom
@@ -1325,7 +1315,7 @@ func validateConfig(cfg *types.Configure) error {
 	return nil
 }
 
-func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, error) {
+func getPoolConfig(cfg *types.Configure, ecs ipam.API) (*types.PoolConfig, error) {
 	poolConfig := &types.PoolConfig{
 		MaxPoolSize:            cfg.MaxPoolSize,
 		MinPoolSize:            cfg.MinPoolSize,
@@ -1333,7 +1323,6 @@ func getPoolConfig(cfg *types.Configure, ecs aliyun.ECS) (*types.PoolConfig, err
 		MinENI:                 cfg.MinENI,
 		AccessID:               cfg.AccessID,
 		AccessSecret:           cfg.AccessSecret,
-		HotPlug:                cfg.HotPlug == conditionTrue,
 		EniCapRatio:            cfg.EniCapRatio,
 		EniCapShift:            cfg.EniCapShift,
 		SecurityGroup:          cfg.SecurityGroup,

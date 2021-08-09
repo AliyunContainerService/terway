@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	"github.com/AliyunContainerService/terway/pkg/ipam"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
@@ -73,7 +75,7 @@ type ENI struct {
 	ips       []*ENIIP
 	pending   int
 	ipBacklog chan struct{}
-	ecs       aliyun.ECS
+	ecs       ipam.API
 	done      chan struct{}
 	// Unix timestamp to mark when this ENI can allocate Pod IP.
 	ipAllocInhibitExpireAt time.Time
@@ -104,7 +106,7 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 			}
 		}
 		logrus.Debugf("allocate %v ips for eni", toAllocate)
-		ips, err := e.ecs.AssignNIPsForENI(e.ENI.ID, toAllocate)
+		ips, err := e.ecs.AssignNIPsForENI(context.Background(), e.ENI.ID, e.ENI.MAC, toAllocate)
 		logrus.Debugf("allocated ips for eni: eni = %+v, ips = %+v, err = %v", e.ENI, ips, err)
 		if err != nil {
 			logrus.Errorf("error allocate ips for eni: %v", err)
@@ -122,11 +124,8 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 			for _, ip := range ips {
 				resultChan <- &ENIIP{
 					ENIIP: &types.ENIIP{
-						ENI: e.ENI,
-						SecondaryIP: types.IPSet{
-							IPv4: ip,
-							IPv6: nil,
-						},
+						ENI:   e.ENI,
+						IPSet: ip,
 					},
 					err: nil,
 				}
@@ -164,7 +163,7 @@ func (f *eniIPFactory) getEnis() ([]*ENI, error) {
 				pendingEnis = append(pendingEnis, eni)
 				continue
 			}
-			if vswitch == eni.VSwitch {
+			if vswitch == eni.VSwitchID {
 				enis = append(enis, eni)
 			}
 		}
@@ -185,12 +184,12 @@ func (f *eniIPFactory) submit() error {
 		now := time.Now()
 		if eni.ENI != nil {
 			logrus.Infof("check if the current eni is in the time window for IP allocation inhibition: "+
-				"eni = %+v, vsw= %s, now = %s, expireAt = %s", eni, eni.VSwitch, now.Format(timeFormat), eni.ipAllocInhibitExpireAt.Format(timeFormat))
+				"eni = %+v, vsw= %s, now = %s, expireAt = %s", eni, eni.VSwitchID, now.Format(timeFormat), eni.ipAllocInhibitExpireAt.Format(timeFormat))
 		}
 		// if the current eni has been inhibited for Pod IP allocation, then skip current eni.
 		if now.Before(eni.ipAllocInhibitExpireAt) && eni.ENI != nil {
 			eni.lock.Unlock()
-			logrus.Debugf("skip IP allocation: eni = %+v, vsw = %s", eni, eni.VSwitch)
+			logrus.Debugf("skip IP allocation: eni = %+v, vsw = %s", eni, eni.VSwitchID)
 			continue
 		}
 
@@ -230,7 +229,7 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 					if strings.Contains(result.err.Error(), apiErr.InvalidVSwitchIDIPNotEnough) {
 						eni.ipAllocInhibitExpireAt = time.Now().Add(eniIPAllocInhibitTimeout)
 						logrus.Infof("eni's associated vswitch %s has no available IP, set eni ipAllocInhibitExpireAt = %s",
-							eni.VSwitch, eni.ipAllocInhibitExpireAt.Format(timeFormat))
+							eni.VSwitchID, eni.ipAllocInhibitExpireAt.Format(timeFormat))
 					}
 				}
 			}
@@ -331,7 +330,7 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 			eni = e
 			e.lock.Lock()
 			for _, eip := range e.ips {
-				if eip.SecondaryIP.String() == ip.SecondaryIP.String() {
+				if eip.IPSet.String() == ip.IPSet.String() {
 					eniip = eip
 				}
 			}
@@ -383,17 +382,17 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 	eni.lock.Unlock()
 
 	// main ip of ENI, raise put_it_back error
-	if ip.ENI.PrimaryIP.IPv4.Equal(ip.SecondaryIP.IPv4) {
+	if ip.ENI.PrimaryIP.IPv4.Equal(ip.IPSet.IPv4) {
 		return fmt.Errorf("ip to be release is primary ip of ENI")
 	}
 
-	err = f.eniFactory.ecs.UnAssignIPsForENI(ip.ENI.ID, []net.IP{ip.SecondaryIP.IPv4})
+	err = f.eniFactory.ecs.UnAssignIPsForENI(context.Background(), ip.ENI.ID, ip.ENI.MAC, []net.IP{ip.IPSet.IPv4}, nil)
 	if err != nil {
 		return fmt.Errorf("error unassign eniip, %v", err)
 	}
 	eni.lock.Lock()
 	for i, e := range eni.ips {
-		if e.SecondaryIP.IPv4.Equal(eniip.SecondaryIP.IPv4) {
+		if e.IPSet.IPv4.Equal(eniip.IPSet.IPv4) {
 			eni.ips[len(eni.ips)-1], eni.ips[i] = eni.ips[i], eni.ips[len(eni.ips)-1]
 			eni.ips = eni.ips[:len(eni.ips)-1]
 			break
@@ -407,12 +406,12 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 func (f *eniIPFactory) Get(res types.NetworkResource) (types.NetworkResource, error) {
 	eniIP := res.(*types.ENIIP)
 
-	ips, _, err := f.eniFactory.ecs.GetENIIPs(eniIP.ENI.MAC)
+	ips, _, err := f.eniFactory.ecs.GetENIIPs(context.Background(), eniIP.ENI.MAC)
 	if err != nil {
 		return nil, err
 	}
 	for _, ip := range ips {
-		if ip.Equal(eniIP.SecondaryIP.IPv4) {
+		if ip.Equal(eniIP.IPSet.IPv4) {
 			return res, nil
 		}
 	}
@@ -440,7 +439,7 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 			}
 			<-f.maxENI
 		} else {
-			ipv4s, ipv6s, err = f.eniFactory.ecs.GetENIIPs(eni.MAC)
+			ipv4s, ipv6s, err = f.eniFactory.ecs.GetENIIPs(context.Background(), eni.MAC)
 			if err != nil {
 				logrus.Errorf("error get eni secondary address: %+v, rollback it", err)
 				errDispose := f.eniFactory.Dispose(rawEni[0])
@@ -500,14 +499,14 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 	for i, ip := range ipv4s {
 		eniip := &types.ENIIP{
 			ENI: eni.ENI,
-			SecondaryIP: types.IPSet{
+			IPSet: types.IPSet{
 				IPv4: ip,
 				IPv6: nil,
 			},
 		}
 
 		if f.ipFamily.IPv6 {
-			eniip.SecondaryIP.IPv6 = ipv6s[i]
+			eniip.IPSet.IPv6 = ipv6s[i]
 		}
 
 		f.ipResultChan <- &ENIIP{
@@ -576,7 +575,7 @@ func (f *eniIPFactory) Trace() []tracing.MapKeyValueEntry {
 
 		var secIPs []string
 		for _, v := range v.ips {
-			secIPs = append(secIPs, v.SecondaryIP.String())
+			secIPs = append(secIPs, v.IPSet.String())
 		}
 
 		trace = append(trace, tracing.MapKeyValueEntry{
@@ -612,7 +611,8 @@ func (f *eniIPFactory) Execute(cmd string, _ []string, message chan<- string) {
 func (f *eniIPFactory) checkAccount(message chan<- string) {
 	// get ENIs via Aliyun API
 	message <- "fetching attached ENIs from aliyun\n"
-	enis, err := f.eniFactory.ecs.GetAttachedENIs(false)
+	ctx := context.Background()
+	enis, err := f.eniFactory.ecs.GetAttachedENIs(ctx, false)
 	if err != nil {
 		message <- fmt.Sprintf("error while fetching from remote: %s\n", err.Error())
 		return
@@ -645,7 +645,7 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 		}
 
 		// diff secondary ips
-		remoteIPs, _, err := f.eniFactory.ecs.GetENIIPs(v.MAC)
+		remoteIPs, _, err := f.eniFactory.ecs.GetENIIPs(ctx, v.MAC)
 		if err != nil {
 			message <- fmt.Sprintf("error while fetching ips: %s", err.Error())
 			return
@@ -654,7 +654,7 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 		diffIPMap := make(map[string]struct{})
 
 		for _, ip := range eni.ips {
-			diffIPMap[ip.SecondaryIP.IPv4.String()] = struct{}{}
+			diffIPMap[ip.IPSet.IPv4.String()] = struct{}{}
 		}
 
 		// range for remote ips
@@ -670,14 +670,15 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 }
 
 func (f *eniIPFactory) GetResource() (map[string]types.FactoryResIf, error) {
-	macs, err := f.eniFactory.ecs.GetSecondaryENIMACs()
+	ctx := context.Background()
+	macs, err := f.eniFactory.ecs.GetSecondaryENIMACs(ctx)
 	if err != nil {
 		return nil, err
 	}
 	mapping := make(map[string]types.FactoryResIf, len(macs))
 	for _, mac := range macs {
 		// get secondary ips from one mac
-		ipv4s, _, err := f.eniFactory.ecs.GetENIIPs(mac)
+		ipv4s, _, err := f.eniFactory.ecs.GetENIIPs(ctx, mac)
 		if err != nil {
 			if errors.Is(err, apiErr.ErrNotFound) {
 				continue
@@ -690,7 +691,7 @@ func (f *eniIPFactory) GetResource() (map[string]types.FactoryResIf, error) {
 				ENI: &types.ENI{
 					MAC: mac,
 				},
-				SecondaryIP: types.IPSet{
+				IPSet: types.IPSet{
 					IPv4: ip,
 					IPv6: nil,
 				},
@@ -708,7 +709,7 @@ func (f *eniIPFactory) GetResource() (map[string]types.FactoryResIf, error) {
 
 func (f *eniIPFactory) Reconcile() {
 	// check security group
-	err := f.eniFactory.ecs.CheckEniSecurityGroup([]string{f.eniFactory.securityGroup})
+	err := f.eniFactory.ecs.CheckEniSecurityGroup(context.Background(), []string{f.eniFactory.securityGroup})
 	if err != nil {
 		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, "ResourceInvalid", fmt.Sprintf("eni has misconfiged security group. %s", err.Error()))
 	}
@@ -719,7 +720,7 @@ type eniIPResourceManager struct {
 	pool     pool.ObjectPool
 }
 
-func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, k8s Kubernetes, allocatedResources []resourceManagerInitItem, ipFamily *types.IPFamily) (ResourceManager, error) {
+func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kubernetes, allocatedResources []resourceManagerInitItem, ipFamily *types.IPFamily) (ResourceManager, error) {
 	eniFactory, err := newENIFactory(poolConfig, ecs)
 	if err != nil {
 		return nil, fmt.Errorf("error get ENI factory for eniip factory, %w", err)
@@ -788,8 +789,9 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, k8s K
 		Factory:  factory,
 		Capacity: capacity,
 		Initializer: func(holder pool.ResourceHolder) error {
+			ctx := context.Background()
 			// not use main ENI for ENI multiple ip allocate
-			enis, err := ecs.GetAttachedENIs(false)
+			enis, err := ecs.GetAttachedENIs(ctx, false)
 			if err != nil {
 				return fmt.Errorf("error get attach ENI on pool init, %w", err)
 			}
@@ -816,7 +818,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, k8s K
 			}
 
 			for _, eni := range enis {
-				ipv4s, _, err := ecs.GetENIIPs(eni.MAC)
+				ipv4s, _, err := ecs.GetENIIPs(ctx, eni.MAC)
 				if err != nil {
 					return fmt.Errorf("error get ENI's ip on pool init, %w", err)
 				}
@@ -832,8 +834,8 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs aliyun.ECS, k8s K
 				factory.metricENICount.Inc()
 				for _, ip := range ipv4s {
 					eniIP := &types.ENIIP{
-						ENI:         eni,
-						SecondaryIP: types.IPSet{IPv4: ip},
+						ENI:   eni,
+						IPSet: types.IPSet{IPv4: ip},
 					}
 					podInfo, ok := stubMap[eniIP.GetResourceID()]
 

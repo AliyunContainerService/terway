@@ -1,6 +1,7 @@
 package aliyun
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
@@ -18,13 +19,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-func (e *ecsImpl) AllocateEipAddress(bandwidth int, chargeType types.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error) {
+func (e *AliyunImpl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType types.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error) {
 	var (
 		eipInfo *types.EIP
 		err     error
 	)
 	var eni *ecs.NetworkInterfaceSet
-	eni, err = e.WaitForNetworkInterface(eniID, "", ENIOpBackoff, false)
+	eni, err = e.WaitForNetworkInterface(ctx, eniID, "", ENIOpBackoff, false)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +84,7 @@ func (e *ecsImpl) AllocateEipAddress(bandwidth int, chargeType types.InternetCha
 
 		defer func() {
 			if err != nil {
-				err = e.ReleaseEipAddress(eipInfo.ID, eniID, eniIP)
+				err = e.ReleaseEipAddress(ctx, eipInfo.ID, eniID, eniIP)
 				if err != nil {
 					log.Errorf("error rollback eip: %+v, %+v, may cause eip leak...", resp.AllocationId, resp.EipAddress)
 				}
@@ -120,7 +121,7 @@ func (e *ecsImpl) AllocateEipAddress(bandwidth int, chargeType types.InternetCha
 		}
 
 		if allowRob && eip.Status == eipStatusInUse {
-			err = e.unassociateEIPAddress(eipID, "", "")
+			err = e.unAssociateEIPAddress(eipID, "", "")
 			if err != nil {
 				return nil, fmt.Errorf("error unassocicate previous eip address, %v", err)
 			}
@@ -160,7 +161,7 @@ func (e *ecsImpl) AllocateEipAddress(bandwidth int, chargeType types.InternetCha
 // 1. if eni is deleted eip auto unassociated
 // 2. if eip is deleted , return code is InvalidAllocationId.NotFound
 // 3. if eip is not bind ,return code is IncorrectEipStatus
-func (e *ecsImpl) UnassociateEipAddress(eipID, eniID, eniIP string) error {
+func (e *AliyunImpl) UnassociateEipAddress(ctx context.Context, eipID, eniID, eniIP string) error {
 	var innerErr error
 	err := wait.ExponentialBackoff(ENIOpBackoff,
 		func() (done bool, err error) {
@@ -185,7 +186,7 @@ func (e *ecsImpl) UnassociateEipAddress(eipID, eniID, eniIP string) error {
 				}
 			}
 
-			innerErr = e.unassociateEIPAddress(eipID, eniID, eniIP)
+			innerErr = e.unAssociateEIPAddress(eipID, eniID, eniIP)
 			if innerErr != nil {
 				return false, nil
 			}
@@ -198,7 +199,7 @@ func (e *ecsImpl) UnassociateEipAddress(eipID, eniID, eniIP string) error {
 	return nil
 }
 
-func (e *ecsImpl) ReleaseEipAddress(eipID, eniID string, eniIP net.IP) error {
+func (e *AliyunImpl) ReleaseEipAddress(ctx context.Context, eipID, eniID string, eniIP net.IP) error {
 	eip, err := e.WaitForEIP(eipID, "", eniStateBackoff)
 	if err != nil {
 		return fmt.Errorf("error release eip: %w", err)
@@ -210,7 +211,7 @@ func (e *ecsImpl) ReleaseEipAddress(eipID, eniID string, eniIP net.IP) error {
 	logrus.Infof("got eip info to release: %+v", eip)
 	if eip.Status != eipStatusAvailable {
 		// detach eip from specify eni
-		err = e.UnassociateEipAddress(eipID, eniID, eniIP.String())
+		err = e.UnassociateEipAddress(ctx, eipID, eniID, eniIP.String())
 		if err == nil {
 			time.Sleep(3 * time.Second)
 			start := time.Now()
@@ -240,7 +241,7 @@ func (e *ecsImpl) ReleaseEipAddress(eipID, eniID string, eniIP net.IP) error {
 }
 
 // WaitForEIP wait status of eni, ignore status if is empty
-func (e *ecsImpl) WaitForEIP(eipID string, status string, backoff wait.Backoff) (*vpc.EipAddress, error) {
+func (e *AliyunImpl) WaitForEIP(eipID string, status string, backoff wait.Backoff) (*vpc.EipAddress, error) {
 	var eip *vpc.EipAddress
 	var innerErr error
 	err := wait.ExponentialBackoff(backoff,
@@ -269,7 +270,7 @@ func (e *ecsImpl) WaitForEIP(eipID string, status string, backoff wait.Backoff) 
 	return eip, err
 }
 
-func (e *ecsImpl) describeEipAddresses(eipID, eniID string) ([]vpc.EipAddress, error) {
+func (e *AliyunImpl) describeEipAddresses(eipID, eniID string) ([]vpc.EipAddress, error) {
 	req := vpc.CreateDescribeEipAddressesRequest()
 	req.AllocationId = eipID
 	if eniID != "" {
@@ -280,7 +281,7 @@ func (e *ecsImpl) describeEipAddresses(eipID, eniID string) ([]vpc.EipAddress, e
 
 	l := log.WithFields(map[string]interface{}{LogFieldAPI: "DescribeEipAddresses", LogFieldEIPID: eipID, LogFieldENIID: eniID})
 	start := time.Now()
-	resp, err := e.clientSet.VPC().DescribeEipAddresses(req)
+	resp, err := e.ClientSet.VPC().DescribeEipAddresses(req)
 	metric.OpenAPILatency.WithLabelValues("DescribeEipAddresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		l.WithFields(map[string]interface{}{LogFieldRequestID: apiErr.ErrRequestID(err)}).Warn(err)
@@ -290,7 +291,7 @@ func (e *ecsImpl) describeEipAddresses(eipID, eniID string) ([]vpc.EipAddress, e
 	return resp.EipAddresses.EipAddress, nil
 }
 
-func (e *ecsImpl) allocateEIPAddress(bandwidth, chargeType string) (*vpc.AllocateEipAddressResponse, error) {
+func (e *AliyunImpl) allocateEIPAddress(bandwidth, chargeType string) (*vpc.AllocateEipAddressResponse, error) {
 	req := vpc.CreateAllocateEipAddressRequest()
 	req.Bandwidth = bandwidth
 	req.InternetChargeType = chargeType
@@ -299,7 +300,7 @@ func (e *ecsImpl) allocateEIPAddress(bandwidth, chargeType string) (*vpc.Allocat
 		LogFieldAPI: "AllocateEipAddress",
 	})
 	start := time.Now()
-	resp, err := e.clientSet.VPC().AllocateEipAddress(req)
+	resp, err := e.ClientSet.VPC().AllocateEipAddress(req)
 	metric.OpenAPILatency.WithLabelValues("AllocateEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		l.WithFields(map[string]interface{}{
@@ -312,7 +313,7 @@ func (e *ecsImpl) allocateEIPAddress(bandwidth, chargeType string) (*vpc.Allocat
 	return resp, nil
 }
 
-func (e *ecsImpl) unassociateEIPAddress(eipID, eniID, eniIP string) error {
+func (e *AliyunImpl) unAssociateEIPAddress(eipID, eniID, eniIP string) error {
 	req := vpc.CreateUnassociateEipAddressRequest()
 	req.AllocationId = eipID
 	req.InstanceId = eniID
@@ -324,7 +325,7 @@ func (e *ecsImpl) unassociateEIPAddress(eipID, eniID, eniIP string) error {
 		LogFieldEIPID: eipID,
 	})
 	start := time.Now()
-	resp, err := e.clientSet.VPC().UnassociateEipAddress(req)
+	resp, err := e.ClientSet.VPC().UnassociateEipAddress(req)
 	metric.OpenAPILatency.WithLabelValues("UnassociateEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		l.WithFields(map[string]interface{}{
@@ -340,7 +341,7 @@ func (e *ecsImpl) unassociateEIPAddress(eipID, eniID, eniIP string) error {
 	return nil
 }
 
-func (e *ecsImpl) associateEIPAddress(eipID, eniID, privateIP string) error {
+func (e *AliyunImpl) associateEIPAddress(eipID, eniID, privateIP string) error {
 	req := vpc.CreateAssociateEipAddressRequest()
 	req.AllocationId = eipID
 	req.InstanceId = eniID
@@ -353,7 +354,7 @@ func (e *ecsImpl) associateEIPAddress(eipID, eniID, privateIP string) error {
 		LogFieldENIID: eniID,
 	})
 	start := time.Now()
-	resp, err := e.clientSet.VPC().AssociateEipAddress(req)
+	resp, err := e.ClientSet.VPC().AssociateEipAddress(req)
 	metric.OpenAPILatency.WithLabelValues("AssociateEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		l.WithFields(map[string]interface{}{
@@ -366,7 +367,7 @@ func (e *ecsImpl) associateEIPAddress(eipID, eniID, privateIP string) error {
 	return nil
 }
 
-func (e *ecsImpl) releaseEIPAddress(eipID string) error {
+func (e *AliyunImpl) releaseEIPAddress(eipID string) error {
 	req := vpc.CreateReleaseEipAddressRequest()
 	req.AllocationId = eipID
 
@@ -376,7 +377,7 @@ func (e *ecsImpl) releaseEIPAddress(eipID string) error {
 	})
 
 	start := time.Now()
-	resp, err := e.clientSet.VPC().ReleaseEipAddress(req)
+	resp, err := e.ClientSet.VPC().ReleaseEipAddress(req)
 	metric.OpenAPILatency.WithLabelValues("ReleaseEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		l.WithFields(map[string]interface{}{

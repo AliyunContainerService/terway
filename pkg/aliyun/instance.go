@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -97,6 +98,22 @@ type Limits struct {
 	MemberAdapterLimit int
 }
 
+func (l *Limits) SupportIPv6() bool {
+	return l.IPv4PerAdapter <= l.IPv6PerAdapter
+}
+
+func (l *Limits) TrunkPod() int {
+	return l.MemberAdapterLimit
+}
+
+func (l *Limits) MIPPod() int {
+	return (l.Adapters - 1) * l.IPv4PerAdapter
+}
+
+func (l *Limits) ENIOnlyPod() int {
+	return l.Adapters - 1
+}
+
 var limits = struct {
 	sync.RWMutex
 	m map[string]Limits
@@ -144,9 +161,9 @@ func UpdateFromAPI(client *ecs.Client, instanceType string) error {
 
 		limits.m[instanceType] = Limits{
 			Adapters:           adapterLimit,
-			IPv4PerAdapter:     ipv4PerAdapter,
-			IPv6PerAdapter:     ipv6PerAdapter,
-			MemberAdapterLimit: memberAdapterLimit,
+			IPv4PerAdapter:     utils.Minimal(ipv4PerAdapter),
+			IPv6PerAdapter:     utils.Minimal(ipv6PerAdapter),
+			MemberAdapterLimit: utils.Minimal(memberAdapterLimit),
 		}
 		logrus.WithFields(map[string]interface{}{
 			"instance-type":   instanceType,
