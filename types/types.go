@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/rpc"
 )
 
@@ -105,6 +106,17 @@ func (i *IPSet) SetIP(str string) *IPSet {
 	return i
 }
 
+func MergeIPs(a, b []net.IP) []IPSet {
+	result := make([]IPSet, utils.Max(len(a), len(b)))
+	for i, ip := range a {
+		result[i].IPv4 = ip
+	}
+	for i, ip := range b {
+		result[i].IPv6 = ip
+	}
+	return result
+}
+
 type IPNetSet struct {
 	IPv4 *net.IPNet
 	IPv6 *net.IPNet
@@ -148,7 +160,7 @@ type ENI struct {
 
 	VSwitchCIDR IPNetSet
 
-	VSwitch string
+	VSwitchID string
 }
 
 // GetResourceID return mac address of eni
@@ -163,13 +175,13 @@ func (eni *ENI) GetType() string {
 
 // ENIIP aliyun secondary IP resource
 type ENIIP struct {
-	ENI         *ENI
-	SecondaryIP IPSet
+	ENI   *ENI
+	IPSet IPSet
 }
 
 // GetResourceID return mac address of eni and secondary ip address
 func (eniIP *ENIIP) GetResourceID() string {
-	return fmt.Sprintf("%s.%s", eniIP.ENI.GetResourceID(), eniIP.SecondaryIP.String())
+	return fmt.Sprintf("%s.%s", eniIP.ENI.GetResourceID(), eniIP.IPSet.String())
 }
 
 // GetType return type name

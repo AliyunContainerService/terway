@@ -1,4 +1,4 @@
-package aliyun
+package ip
 
 import (
 	"net"
@@ -32,23 +32,23 @@ func Test_ipIntersect(t *testing.T) {
 		}, {
 			name: "nil val 1",
 			args: args{
-				a: []net.IP{nil, net.ParseIP("127.0.0.3")},
-				b: []net.IP{nil, net.ParseIP("127.0.0.1"), net.ParseIP("127.0.0.2")},
+				a: []net.IP{net.ParseIP("127.0.0.3")},
+				b: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("127.0.0.2")},
 			},
 			want: false,
 		}, {
 			name: "nil val 2",
 			args: args{
-				a: []net.IP{nil, net.ParseIP("127.0.0.1")},
-				b: []net.IP{nil, net.ParseIP("127.0.0.1"), net.ParseIP("127.0.0.2")},
+				a: []net.IP{net.ParseIP("127.0.0.1")},
+				b: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("127.0.0.2")},
 			},
 			want: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ipIntersect(tt.args.a, tt.args.b); got != tt.want {
-				t.Errorf("ipIntersect() = %v, want %v", got, tt.want)
+			if got := IPsIntersect(tt.args.a, tt.args.b); got != tt.want {
+				t.Errorf("IPsIntersect() = %v, want %v", got, tt.want)
 			}
 		})
 	}

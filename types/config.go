@@ -58,7 +58,6 @@ type PoolConfig struct {
 	InstanceID             string
 	AccessID               string
 	AccessSecret           string
-	HotPlug                bool
 	EniCapRatio            float64
 	EniCapShift            int
 	VSwitchSelectionPolicy string
