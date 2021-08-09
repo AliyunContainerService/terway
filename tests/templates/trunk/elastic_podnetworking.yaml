@@ -1,0 +1,11 @@
+apiVersion: network.alibabacloud.com/v1beta1
+kind: PodNetworking
+metadata:
+  name: stateless
+spec:
+  ipType:
+    type: Elastic
+  selector:
+    podSelector:
+      matchLabels:
+        pod-ip: elastic

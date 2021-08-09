@@ -6,13 +6,13 @@ import (
 	"strconv"
 	"time"
 
-	terwayErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/types"
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -24,7 +24,7 @@ func (e *ecsImpl) AllocateEipAddress(bandwidth int, chargeType types.InternetCha
 		err     error
 	)
 	var eni *ecs.NetworkInterfaceSet
-	eni, err = e.WaitForNetworkInterface(eniID, "", eniOpBackoff)
+	eni, err = e.WaitForNetworkInterface(eniID, "", ENIOpBackoff, false)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (e *ecsImpl) AllocateEipAddress(bandwidth int, chargeType types.InternetCha
 // 3. if eip is not bind ,return code is IncorrectEipStatus
 func (e *ecsImpl) UnassociateEipAddress(eipID, eniID, eniIP string) error {
 	var innerErr error
-	err := wait.ExponentialBackoff(eniOpBackoff,
+	err := wait.ExponentialBackoff(ENIOpBackoff,
 		func() (done bool, err error) {
 			// we check eip binding is not changed
 			var eips []vpc.EipAddress
@@ -251,7 +251,7 @@ func (e *ecsImpl) WaitForEIP(eipID string, status string, backoff wait.Backoff) 
 				return false, nil
 			}
 			if len(eips) == 0 {
-				return false, terwayErr.ErrNotFound
+				return false, apiErr.ErrNotFound
 			}
 			eip = &eips[0]
 			if status != "" {
@@ -283,7 +283,7 @@ func (e *ecsImpl) describeEipAddresses(eipID, eniID string) ([]vpc.EipAddress, e
 	resp, err := e.clientSet.VPC().DescribeEipAddresses(req)
 	metric.OpenAPILatency.WithLabelValues("DescribeEipAddresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
-		l.WithFields(map[string]interface{}{LogFieldRequestID: terwayErr.ErrRequestID(err)}).Warn(err)
+		l.WithFields(map[string]interface{}{LogFieldRequestID: apiErr.ErrRequestID(err)}).Warn(err)
 		return nil, err
 	}
 	l.WithFields(map[string]interface{}{LogFieldRequestID: resp.RequestId}).Debugf("get eip len %d", len(resp.EipAddresses.EipAddress))
@@ -303,7 +303,7 @@ func (e *ecsImpl) allocateEIPAddress(bandwidth, chargeType string) (*vpc.Allocat
 	metric.OpenAPILatency.WithLabelValues("AllocateEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		l.WithFields(map[string]interface{}{
-			LogFieldRequestID: terwayErr.ErrRequestID(err)}).Errorf("alloc EIP faild, %s", err.Error())
+			LogFieldRequestID: apiErr.ErrRequestID(err)}).Errorf("alloc EIP faild, %s", err.Error())
 		return nil, fmt.Errorf("error create EIP, bandwidth %s, %w", bandwidth, err)
 	}
 	l.WithFields(map[string]interface{}{
@@ -328,9 +328,9 @@ func (e *ecsImpl) unassociateEIPAddress(eipID, eniID, eniIP string) error {
 	metric.OpenAPILatency.WithLabelValues("UnassociateEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		l.WithFields(map[string]interface{}{
-			LogFieldRequestID: terwayErr.ErrRequestID(err)}).Warnf("unassociate EIP failed, %s", err.Error())
-		if terwayErr.ErrAssert(terwayErr.ErrInvalidAllocationIDNotFound, err) ||
-			terwayErr.ErrAssert(terwayErr.ErrIncorrectEIPStatus, err) {
+			LogFieldRequestID: apiErr.ErrRequestID(err)}).Warnf("unassociate EIP failed, %s", err.Error())
+		if apiErr.ErrAssert(apiErr.ErrInvalidAllocationIDNotFound, err) ||
+			apiErr.ErrAssert(apiErr.ErrIncorrectEIPStatus, err) {
 			return nil
 		}
 		return fmt.Errorf("error unassociate EIP %s, %w", eipID, err)
@@ -357,7 +357,7 @@ func (e *ecsImpl) associateEIPAddress(eipID, eniID, privateIP string) error {
 	metric.OpenAPILatency.WithLabelValues("AssociateEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		l.WithFields(map[string]interface{}{
-			LogFieldRequestID: terwayErr.ErrRequestID(err)}).Warnf("associate EIP to %s failed, %s", privateIP, err.Error())
+			LogFieldRequestID: apiErr.ErrRequestID(err)}).Warnf("associate EIP to %s failed, %s", privateIP, err.Error())
 
 		return fmt.Errorf("error associate EIP %s, %w", eipID, err)
 	}
@@ -380,7 +380,7 @@ func (e *ecsImpl) releaseEIPAddress(eipID string) error {
 	metric.OpenAPILatency.WithLabelValues("ReleaseEipAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		l.WithFields(map[string]interface{}{
-			LogFieldRequestID: terwayErr.ErrRequestID(err)}).Warnf("release EIP failed, %s", err.Error())
+			LogFieldRequestID: apiErr.ErrRequestID(err)}).Warnf("release EIP failed, %s", err.Error())
 		return fmt.Errorf("error release EIP %s, %w", eipID, err)
 	}
 	l.WithFields(map[string]interface{}{

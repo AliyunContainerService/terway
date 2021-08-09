@@ -282,7 +282,7 @@ func (d *IPvlanDriver) setupRouteIfNotExist(link netlink.Link, dst *terwayTypes.
 	exec := func(ipNet *net.IPNet) error {
 		family := NetlinkFamily(ipNet.IP)
 		route := &netlink.Route{
-			Protocol:  family,
+			Protocol:  netlink.RouteProtocol(family),
 			LinkIndex: link.Attrs().Index,
 			Scope:     netlink.SCOPE_LINK,
 			Dst:       ipNet,
@@ -314,31 +314,6 @@ func (d *IPvlanDriver) setupRouteIfNotExist(link netlink.Link, dst *terwayTypes.
 		}
 	}
 
-	return nil
-}
-
-func (d *IPvlanDriver) setupClsActQsic(link netlink.Link) error {
-	qds, err := netlink.QdiscList(link)
-	if err != nil {
-		return errors.Wrapf(err, "%s, list qdisc for dev %s error", d.name, link.Attrs().Name)
-	}
-	for _, q := range qds {
-		if q.Type() == "clsact" {
-			return nil
-		}
-	}
-
-	qdisc := &netlink.GenericQdisc{
-		QdiscAttrs: netlink.QdiscAttrs{
-			LinkIndex: link.Attrs().Index,
-			Parent:    netlink.HANDLE_CLSACT,
-			Handle:    netlink.HANDLE_CLSACT & 0xffff0000,
-		},
-		QdiscType: "clsact",
-	}
-	if err := netlink.QdiscReplace(qdisc); err != nil {
-		return errors.Wrapf(err, "%s, replace clsact qdisc for dev %s error", d.name, link.Attrs().Name)
-	}
 	return nil
 }
 
@@ -409,15 +384,23 @@ func (d *IPvlanDriver) setupInitNamespace(parentLink netlink.Link, cfg *SetupCon
 	if err != nil {
 		return err
 	}
-	_, err = EnsureAddr(slaveLink, nodeIPSet, int(netlink.SCOPE_HOST))
+	_, err = EnsureAddr(slaveLink, nodeIPSet, true, int(netlink.SCOPE_HOST))
+
 	if err != nil {
 		return err
 	}
 
 	// check tc rule
-	err = d.setupClsActQsic(parentLink)
+	err = EnsureClsActQdsic(parentLink)
 	if err != nil {
 		return err
+	}
+
+	if cfg.TrunkENI {
+		err = EnsureVlanUntagger(parentLink)
+		if err != nil {
+			return err
+		}
 	}
 
 	redirectCIDRs := append(cfg.HostStackCIDRs, cfg.ServiceCIDR.IPv4)

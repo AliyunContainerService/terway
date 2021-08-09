@@ -14,6 +14,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/types"
 
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -226,20 +227,20 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 		// PS: this is only feasible for systems with RAM policy for VPC API permission.
 		// Use f.vswitchIPCntMap to track IP count + vswitch ID
 		var (
-			start        = time.Now()
-			err          error
-			availIPCount int
+			start = time.Now()
+			err   error
 		)
 		// If f.vswitchIPCntMap is empty, then fill in the map with switch + switch's available IP count.
 		f.Lock()
 		if (len(f.vswitchIPCntMap) == 0 && f.tsExpireAt.IsZero()) || start.After(f.tsExpireAt) {
 			// Loop vswitch slice to get each vswitch's available IP count.
 			for _, vswitch := range f.switches {
-				availIPCount, err = f.ecs.DescribeVSwitch(vswitch)
+				var vsw *vpc.VSwitch
+				vsw, err = f.ecs.DescribeVSwitchByID(vswitch)
 				if err != nil {
 					f.vswitchIPCntMap[vswitch] = 0
 				} else {
-					f.vswitchIPCntMap[vswitch] = availIPCount
+					f.vswitchIPCntMap[vswitch] = int(vsw.AvailableIpAddressCount)
 				}
 			}
 			if err == nil {
@@ -265,13 +266,20 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 }
 
 func (f *eniFactory) Create(int) ([]types.NetworkResource, error) {
-	return f.CreateWithIPCount(1)
+	return f.CreateWithIPCount(1, false)
 }
 
-func (f *eniFactory) CreateWithIPCount(count int) ([]types.NetworkResource, error) {
+func (f *eniFactory) CreateWithIPCount(count int, trunk bool) ([]types.NetworkResource, error) {
 	vSwitches, _ := f.GetVSwitches()
 	logrus.Infof("adjusted vswitch slice: %+v", vSwitches)
-	eni, err := f.ecs.AllocateENI(vSwitches[0], f.securityGroup, f.instanceID, count, f.eniTags)
+
+	tags := map[string]string{
+		types.NetworkInterfaceTagCreatorKey: types.NetworkInterfaceTagCreatorValue,
+	}
+	for k, v := range f.eniTags {
+		tags[k] = v
+	}
+	eni, err := f.ecs.AllocateENI(vSwitches[0], f.securityGroup, f.instanceID, trunk, count, tags)
 	if err != nil {
 		return nil, err
 	}

@@ -19,6 +19,7 @@ type SetupConfig struct {
 	GatewayIP       *terwayTypes.IPSet
 	MTU             int
 	ENIIndex        int
+	TrunkENI        bool
 
 	// add extra route in container
 	ExtraRoutes []types.Route
@@ -50,6 +51,7 @@ type CheckConfig struct {
 	GatewayIP      *terwayTypes.IPSet
 
 	ENIIndex int32 // phy device
+	TrunkENI bool
 	MTU      int
 }
 

@@ -1,0 +1,42 @@
+# Default values for terway-controlplane.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 2
+
+image:
+  repository: l1b0k/terway-controlplane
+  pullPolicy: Always
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+#   capabilities:
+#     drop:
+#     - ALL
+#   readOnlyRootFilesystem: true
+#   runAsNonRoot: true
+#   runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 443
+
+resources:
+   requests:
+     cpu: 100m
+     memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

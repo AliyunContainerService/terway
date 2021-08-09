@@ -1,0 +1,13 @@
+apiVersion: network.alibabacloud.com/v1beta1
+kind: PodNetworking
+metadata:
+  name: fixed-ip
+spec:
+  ipType:
+    type: Fixed
+    releaseStrategy: TTL
+    releaseAfter: "5m0s"
+  selector:
+    podSelector:
+      matchLabels:
+        pod-ip: fixed-ip

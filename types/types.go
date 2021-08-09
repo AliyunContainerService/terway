@@ -141,6 +141,8 @@ type ENI struct {
 	MaxIPs           int
 	SecurityGroupIDs []string
 
+	Trunk bool
+
 	PrimaryIP IPSet
 	GatewayIP IPSet
 

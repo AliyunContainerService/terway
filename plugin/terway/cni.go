@@ -246,6 +246,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		ingress := allocResult.GetENIMultiIP().GetPodConfig().GetIngress()
 		egress := allocResult.GetENIMultiIP().GetPodConfig().GetEgress()
 		serviceCIDR := allocResult.GetENIMultiIP().GetServiceCIDR()
+		trunkENI := allocResult.GetENIMultiIP().GetENIConfig().Trunk
 
 		containerIPNet, err = terwayTypes.BuildIPNet(podIP, subNet)
 		if err != nil {
@@ -289,6 +290,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			HostStackCIDRs:  hostStackCIDRs,
 			Ingress:         ingress,
 			Egress:          egress,
+			TrunkENI:        trunkENI,
 		}
 		eniMultiIPDriver := veth
 		if strings.ToLower(conf.ENIIPVirtualType) == eniIPVirtualTypeIPVlan {

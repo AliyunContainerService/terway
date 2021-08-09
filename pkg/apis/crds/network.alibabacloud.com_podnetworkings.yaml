@@ -1,0 +1,162 @@
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: (devel)
+  creationTimestamp: null
+  name: podnetworkings.network.alibabacloud.com
+spec:
+  group: network.alibabacloud.com
+  names:
+    kind: PodNetworking
+    listKind: PodNetworkingList
+    plural: podnetworkings
+    singular: podnetworking
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: PodNetworking is the Schema for the PodNetworking API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PodNetworkingSpec defines the desired state of PodNetworking
+            properties:
+              ipType:
+                description: IPType ip type and release strategy
+                properties:
+                  releaseAfter:
+                    type: string
+                  releaseStrategy:
+                    description: ReleaseStrategy is the type for ip release strategy
+                    enum:
+                    - TTL
+                    - Never
+                    type: string
+                  type:
+                    default: Elastic
+                    description: IPAllocType is the type for ip alloc strategy
+                    enum:
+                    - Elastic
+                    - Fixed
+                    type: string
+                type: object
+              securityGroupIDs:
+                items:
+                  type: string
+                type: array
+              selector:
+                description: Selector is for pod or namespace
+                properties:
+                  namespaceSelector:
+                    description: A label selector is a label query over a set of resources. The result of matchLabels and matchExpressions are ANDed. An empty label selector matches all objects. A null label selector matches no objects.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
+                        items:
+                          description: A label selector requirement is a selector that contains values, a key, and an operator that relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector applies to.
+                              type: string
+                            operator:
+                              description: operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is "key", the operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                  podSelector:
+                    description: A label selector is a label query over a set of resources. The result of matchLabels and matchExpressions are ANDed. An empty label selector matches all objects. A null label selector matches no objects.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
+                        items:
+                          description: A label selector requirement is a selector that contains values, a key, and an operator that relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector applies to.
+                              type: string
+                            operator:
+                              description: operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is "key", the operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                type: object
+              vSwitchIDs:
+                items:
+                  type: string
+                type: array
+            type: object
+          status:
+            description: PodNetworkingStatus defines the observed state of PodNetworking
+            properties:
+              message:
+                description: Message for the status
+                type: string
+              status:
+                description: Status is the status for crd
+                type: string
+              updateAt:
+                description: UpdateAt the time status updated
+                format: date-time
+                type: string
+              vSwitches:
+                description: vSwitches list for vSwitches
+                items:
+                  description: VSwitch VSwitch info
+                  properties:
+                    id:
+                      type: string
+                    zone:
+                      type: string
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

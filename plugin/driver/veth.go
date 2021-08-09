@@ -178,7 +178,7 @@ func (d *VETHDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		tableID := getRouteTableID(parentLink.Attrs().Index)
 
 		// ensure eni config
-		err = d.ensureENIConfig(parentLink, cfg.MTU, tableID, cfg.GatewayIP)
+		err = d.ensureENIConfig(parentLink, cfg.TrunkENI, cfg.MTU, tableID, cfg.GatewayIP)
 		if err != nil {
 			return fmt.Errorf("error setup eni config, %w", err)
 		}
@@ -280,7 +280,7 @@ func (d *VETHDriver) Check(cfg *CheckConfig) error {
 	}
 	tableID := getRouteTableID(parentLink.Attrs().Index)
 	// ensure eni config
-	err = d.ensureENIConfig(parentLink, cfg.MTU, tableID, cfg.GatewayIP)
+	err = d.ensureENIConfig(parentLink, cfg.TrunkENI, cfg.MTU, tableID, cfg.GatewayIP)
 	if err != nil {
 		Log.Debug(errors.Wrapf(err, "vethDriver, fail ensure eni config"))
 		return nil
@@ -302,7 +302,7 @@ func (d *VETHDriver) setupTC(link netlink.Link, bandwidthInBytes uint64) error {
 	return tc.SetRule(link, rule)
 }
 
-func (d *VETHDriver) ensureENIConfig(link netlink.Link, mtu, tableID int, gw *terwayTypes.IPSet) error {
+func (d *VETHDriver) ensureENIConfig(link netlink.Link, trunk bool, mtu, tableID int, gw *terwayTypes.IPSet) error {
 	// set link up
 	_, err := EnsureLinkUp(link)
 	if err != nil {
@@ -319,9 +319,15 @@ func (d *VETHDriver) ensureENIConfig(link netlink.Link, mtu, tableID int, gw *te
 	if err != nil {
 		return err
 	}
-	_, err = EnsureAddr(link, nodeIPSet, -1)
+	_, err = EnsureAddr(link, nodeIPSet, true, -1)
 	if err != nil {
 		return err
+	}
+	if trunk {
+		err = EnsureVlanUntagger(link)
+		if err != nil {
+			return err
+		}
 	}
 
 	// ensure default route

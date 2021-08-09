@@ -1,6 +1,6 @@
 module github.com/AliyunContainerService/terway
 
-go 1.15
+go 1.16
 
 require (
 	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1185
@@ -15,32 +15,39 @@ require (
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/evanphx/json-patch v4.9.0+incompatible
 	github.com/gorilla/mux v1.8.0 // indirect
-	github.com/moby/term v0.0.0-20201216013528-df9cb8a40635 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.0.1 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.7.1
 	github.com/sirupsen/logrus v1.7.0
+	github.com/spf13/pflag v1.0.5
+	github.com/spf13/viper v1.8.1
 	github.com/stretchr/testify v1.7.0
 	github.com/vishvananda/netlink v1.1.1-0.20201206203632-88079d98e65d
 	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae
-	golang.org/x/net v0.0.0-20201209123823-ac852fbbde11
-	golang.org/x/sys v0.0.0-20201221093633-bc327ba9c2f0
-	google.golang.org/grpc v1.34.0
-	google.golang.org/protobuf v1.25.0
+	golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4
+	golang.org/x/sys v0.0.0-20210510120138-977fb7262007
+	gomodules.xyz/jsonpatch/v2 v2.1.0
+	google.golang.org/grpc v1.38.0
+	google.golang.org/protobuf v1.26.0
 	gopkg.in/yaml.v2 v2.4.0
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
-	gotest.tools/v3 v3.0.3 // indirect
-	k8s.io/api v0.20.0
-	k8s.io/apimachinery v0.20.0
-	k8s.io/client-go v0.20.0
+	k8s.io/api v0.21.1
+	k8s.io/apiextensions-apiserver v0.21.1
+	k8s.io/apimachinery v0.21.1
+	k8s.io/client-go v0.21.1
+	k8s.io/code-generator v0.21.1
+	k8s.io/klog/v2 v2.8.0
 	k8s.io/kubelet v0.20.0
+	sigs.k8s.io/controller-runtime v0.8.3
+	sigs.k8s.io/yaml v1.2.0
 )
 
 replace (
-	k8s.io/api => k8s.io/api v0.16.9
-	k8s.io/apimachinery => k8s.io/apimachinery v0.17.15
-	k8s.io/client-go => k8s.io/client-go v0.16.9
-	k8s.io/kubelet => k8s.io/kubelet v0.17.15
+	github.com/vishvananda/netlink => github.com/BSWANG/netlink v1.0.1-0.20210709055804-4cc3be0c24fe
+	k8s.io/api => k8s.io/api v0.19.10
+	k8s.io/apimachinery => k8s.io/apimachinery v0.19.10
+	k8s.io/client-go => k8s.io/client-go v0.19.10
+	k8s.io/code-generator => k8s.io/code-generator v0.19.10
+	k8s.io/kubelet => k8s.io/kubelet v0.19.10
 )
