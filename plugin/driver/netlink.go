@@ -151,6 +151,16 @@ func NeighAdd(neigh *netlink.Neigh) error {
 	return nil
 }
 
+func NeighSet(neigh *netlink.Neigh) error {
+	cmd := fmt.Sprintf("ip neigh replace %s", neigh.String())
+	Log.Infof(cmd)
+	err := netlink.NeighSet(neigh)
+	if err != nil {
+		return fmt.Errorf("error %s, %w", cmd, err)
+	}
+	return nil
+}
+
 func RuleAdd(rule *netlink.Rule) error {
 	cmd := fmt.Sprintf("ip rule add %s", rule.String())
 	Log.Infof(cmd)
