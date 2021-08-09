@@ -118,9 +118,6 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 
 			// set host ipvlan interface mac in ARP table
 			_, err = EnsureNeighbor(link, hostIPSet)
-			if err != nil {
-				return err
-			}
 			return err
 		}
 		return err
@@ -384,10 +381,24 @@ func (d *IPvlanDriver) setupInitNamespace(parentLink netlink.Link, cfg *SetupCon
 	if err != nil {
 		return err
 	}
-	_, err = EnsureAddr(slaveLink, nodeIPSet, true, int(netlink.SCOPE_HOST))
-
-	if err != nil {
-		return err
+	if nodeIPSet.IPv4 != nil {
+		_, err = EnsureAddr(slaveLink, &netlink.Addr{
+			IPNet: nodeIPSet.IPv4,
+			Scope: int(netlink.SCOPE_HOST),
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if nodeIPSet.IPv6 != nil {
+		_, err = EnsureAddr(slaveLink, &netlink.Addr{
+			IPNet: nodeIPSet.IPv6,
+			Flags: unix.IFA_F_NODAD,
+			Scope: int(netlink.SCOPE_LINK),
+		})
+		if err != nil {
+			return err
+		}
 	}
 
 	// check tc rule

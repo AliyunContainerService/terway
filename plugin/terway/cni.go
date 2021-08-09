@@ -484,20 +484,25 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("not support this network type")
 	}
 
+	index0 := 0
 	result := &current.Result{}
-
+	result.Interfaces = append(result.Interfaces, &current.Interface{
+		Name: args.IfName,
+	})
 	if containerIPNet.IPv4 != nil && gatewayIPSet.IPv4 != nil {
 		result.IPs = append(result.IPs, &current.IPConfig{
-			Version: "4",
-			Address: *containerIPNet.IPv4,
-			Gateway: gatewayIPSet.IPv4,
+			Version:   "4",
+			Address:   *containerIPNet.IPv4,
+			Gateway:   gatewayIPSet.IPv4,
+			Interface: &index0,
 		})
 	}
 	if containerIPNet.IPv6 != nil && gatewayIPSet.IPv6 != nil {
 		result.IPs = append(result.IPs, &current.IPConfig{
-			Version: "6",
-			Address: *containerIPNet.IPv6,
-			Gateway: gatewayIPSet.IPv6,
+			Version:   "6",
+			Address:   *containerIPNet.IPv6,
+			Gateway:   gatewayIPSet.IPv6,
+			Interface: &index0,
 		})
 	}
 

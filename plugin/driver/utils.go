@@ -145,61 +145,70 @@ func EnsureLinkName(link netlink.Link, name string) (bool, error) {
 	return true, LinkSetName(link, name)
 }
 
-// EnsureAddr take the ipNet set and ensure only one IP for each family is present on link
+// EnsureAddrWithPrefix take the ipNet set and ensure only one IP for each family is present on link
 // it will remove other unmatched IPs
-func EnsureAddr(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, prefixRoute bool, scope int) (bool, error) {
+func EnsureAddrWithPrefix(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, prefixRoute bool) (bool, error) {
 	var changed bool
 
-	exec := func(expect *net.IPNet) error {
-		addrList, err := netlink.AddrList(link, NetlinkFamily(expect.IP))
-		if err != nil {
-			return fmt.Errorf("error list address from if %s, %w", link.Attrs().Name, err)
-		}
-
-		found := false
-		for _, addr := range addrList {
-			if !addr.IP.IsGlobalUnicast() {
-				continue
-			}
-
-			if addr.IPNet.String() == expect.String() && (scope == -1 || addr.Scope == scope) {
-				found = true
-				continue
-			}
-
-			err := AddrDel(link, &addr)
-			if err != nil {
-				return err
-			}
-		}
-		if found {
-			return nil
-		}
-		changed = true
-
-		newAddr := &netlink.Addr{IPNet: expect}
-		if scope > 0 {
-			newAddr.Scope = scope
-		}
+	if ipNetSet.IPv4 != nil {
+		newAddr := &netlink.Addr{IPNet: ipNetSet.IPv4}
 		if !prefixRoute {
 			newAddr.Flags = unix.IFA_F_NOPREFIXROUTE
 		}
-		return AddrReplace(link, newAddr)
-	}
-
-	if ipNetSet.IPv4 != nil {
-		err := exec(ipNetSet.IPv4)
+		c, err := EnsureAddr(link, newAddr)
 		if err != nil {
-			return changed, err
+			return c, err
+		}
+		if c {
+			changed = true
 		}
 	}
 	if ipNetSet.IPv6 != nil {
-		err := exec(ipNetSet.IPv6)
+		newAddr := &netlink.Addr{IPNet: ipNetSet.IPv6}
+		if !prefixRoute {
+			newAddr.Flags = unix.IFA_F_NOPREFIXROUTE
+		}
+		c, err := EnsureAddr(link, newAddr)
 		if err != nil {
-			return changed, err
+			return c, err
+		}
+		if c {
+			changed = true
 		}
 	}
 	return changed, nil
+}
+
+// EnsureAddr ensure only one IP for each family is present on link
+func EnsureAddr(link netlink.Link, expect *netlink.Addr) (bool, error) {
+	var changed bool
+
+	addrList, err := netlink.AddrList(link, NetlinkFamily(expect.IP))
+	if err != nil {
+		return false, fmt.Errorf("error list address from if %s, %w", link.Attrs().Name, err)
+	}
+
+	found := false
+	for _, addr := range addrList {
+		if !addr.IP.IsGlobalUnicast() {
+			continue
+		}
+
+		if addr.IPNet.String() == addr.String() && (addr.Scope == expect.Scope) {
+			found = true
+			continue
+		}
+
+		err := AddrDel(link, &addr)
+		if err != nil {
+			return false, err
+		}
+		changed = true
+	}
+	if found {
+		return changed, nil
+	}
+	return true, AddrReplace(link, expect)
 }
 
 func EnsureDefaultRoute(link netlink.Link, gw *terwayTypes.IPSet) (bool, error) {
@@ -361,7 +370,7 @@ func SetupLink(link netlink.Link, cfg *SetupConfig) error {
 		return fmt.Errorf("error set link %s up , %w", link.Attrs().Name, err)
 	}
 
-	_, err = EnsureAddr(link, cfg.ContainerIPNet, !cfg.TrunkENI, -1)
+	_, err = EnsureAddrWithPrefix(link, cfg.ContainerIPNet, !cfg.TrunkENI)
 	return err
 }
 
@@ -433,7 +442,6 @@ func FindIPRules(ipNet *net.IPNet, found func(rule *netlink.Rule) error) error {
 		return fmt.Errorf("error get ip rule, %w", err)
 	}
 	for i := range ruleList {
-		Log.Debugf("get rule %s", ruleList[i].String())
 		if terwayIP.NetEqual(ipNet, ruleList[i].Src) || terwayIP.NetEqual(ipNet, ruleList[i].Dst) {
 			// need check copy
 			err = found(&ruleList[i])
@@ -592,7 +600,7 @@ func GetHostIP(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
 		if !terwayIP.IPv6(v6) {
 			return nil, fmt.Errorf("error get node ipv6 address.This may dure to 1. no ipv6 address 2. no ipv6 default route")
 		}
-		nodeIPv4 = &net.IPNet{
+		nodeIPv6 = &net.IPNet{
 			IP:   v6,
 			Mask: net.CIDRMask(128, 128),
 		}
@@ -646,7 +654,7 @@ func EnsureNeighbor(link netlink.Link, hostIPSet *terwayTypes.IPNetSet) (bool, e
 	var err error
 
 	if hostIPSet.IPv4 != nil {
-		err = netlink.NeighSet(&netlink.Neigh{
+		err = NeighSet(&netlink.Neigh{
 			IP:           hostIPSet.IPv4.IP,
 			Family:       netlink.FAMILY_V4,
 			LinkIndex:    link.Attrs().Index,
@@ -660,7 +668,7 @@ func EnsureNeighbor(link netlink.Link, hostIPSet *terwayTypes.IPNetSet) (bool, e
 		changed = true
 	}
 	if hostIPSet.IPv6 != nil {
-		err = netlink.NeighSet(&netlink.Neigh{
+		err = NeighSet(&netlink.Neigh{
 			IP:           hostIPSet.IPv6.IP,
 			Family:       netlink.FAMILY_V6,
 			LinkIndex:    link.Attrs().Index,
