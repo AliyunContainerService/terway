@@ -1,14 +1,15 @@
 package daemon
 
 import (
+	"github.com/AliyunContainerService/terway/types"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
 
 type networkContext struct {
 	context.Context
-	resources  []ResourceItem
-	pod        *podInfo
+	resources  []types.ResourceItem
+	pod        *types.PodInfo
 	k8sService Kubernetes
 }
 

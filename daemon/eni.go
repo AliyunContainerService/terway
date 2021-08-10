@@ -12,15 +12,17 @@ import (
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/ipam"
+	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/types"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 )
+
+var eniLog = logger.DefaultLogger
 
 const (
 	// vSwitchIPCntTimeout is the duration for the vswitchIPCntMap content's effectiveness
@@ -40,8 +42,8 @@ type eniResourceManager struct {
 	ecs  ipam.API
 }
 
-func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocatedResources []resourceManagerInitItem) (ResourceManager, error) {
-	logrus.Debugf("new ENI Resource Manager, pool config: %+v, allocated resources: %+v", poolConfig, allocatedResources)
+func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocatedResources map[string]resourceManagerInitItem, ipFamily *types.IPFamily) (ResourceManager, error) {
+	eniLog.Debugf("new ENI Resource Manager, pool config: %+v, allocated resources: %+v", poolConfig, allocatedResources)
 	factory, err := newENIFactory(poolConfig, ecs)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error create ENI factory")
@@ -76,17 +78,22 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 		Capacity: capacity,
 		Factory:  factory,
 		Initializer: func(holder pool.ResourceHolder) error {
-			enis, err := ecs.GetAttachedENIs(context.Background(), false)
+			ctx := context.Background()
+			enis, err := ecs.GetAttachedENIs(ctx, false)
 			if err != nil {
-				return errors.Wrapf(err, "error get attach ENI on pool init")
+				return fmt.Errorf("error get attach ENI on pool init, %w", err)
 			}
-			allocatedMap := make(map[string]*podInfo)
-			for _, allocated := range allocatedResources {
-				allocatedMap[allocated.resourceID] = allocated.podInfo
-			}
+
 			for _, e := range enis {
-				if podInfo, ok := allocatedMap[e.GetResourceID()]; ok {
-					holder.AddInuse(e, podInfoKey(podInfo.Namespace, podInfo.Name))
+				if ipFamily.IPv6 {
+					_, ipv6, err := ecs.GetENIIPs(ctx, e.MAC)
+					if err != nil || len(ipv6) == 0 {
+						return errors.Wrapf(err, "error get eni ip")
+					}
+					e.PrimaryIP.IPv6 = ipv6[0]
+				}
+				if item, ok := allocatedResources[e.GetResourceID()]; ok {
+					holder.AddInuse(e, podInfoKey(item.podInfo.Namespace, item.podInfo.Name))
 				} else {
 					holder.AddIdle(e)
 				}
@@ -118,14 +125,14 @@ func (m *eniResourceManager) Allocate(ctx *networkContext, prefer string) (types
 	return m.pool.Acquire(ctx, prefer, podInfoKey(ctx.pod.Namespace, ctx.pod.Name))
 }
 
-func (m *eniResourceManager) Release(context *networkContext, resItem ResourceItem) error {
+func (m *eniResourceManager) Release(context *networkContext, resItem types.ResourceItem) error {
 	if context != nil && context.pod != nil {
 		return m.pool.ReleaseWithReservation(resItem.ID, context.pod.IPStickTime)
 	}
 	return m.pool.Release(resItem.ID)
 }
 
-func (m *eniResourceManager) GarbageCollection(inUseResSet map[string]ResourceItem, expireResSet map[string]ResourceItem) error {
+func (m *eniResourceManager) GarbageCollection(inUseResSet map[string]types.ResourceItem, expireResSet map[string]types.ResourceItem) error {
 	for expireRes, expireItem := range expireResSet {
 		if _, err := m.pool.Stat(expireRes); err == nil {
 			err = m.Release(nil, expireItem)
@@ -164,12 +171,12 @@ func newMapSorter(m map[string]int) MapSorter {
 
 // SortInDescendingOrder is a bubble sort per element's value
 func (ms MapSorter) SortInDescendingOrder() {
-	logrus.Debugf("before sorting, slice = %+v", ms)
+	eniLog.Debugf("before sorting, slice = %+v", ms)
 	sort.Slice(ms, func(i, j int) bool {
 		// reverse sorting
 		return ms[i].Val > ms[j].Val
 	})
-	logrus.Debugf("after sorting, slice = %+v", ms)
+	eniLog.Debugf("after sorting, slice = %+v", ms)
 }
 
 type eniFactory struct {
@@ -273,7 +280,7 @@ func (f *eniFactory) Create(int) ([]types.NetworkResource, error) {
 
 func (f *eniFactory) CreateWithIPCount(count int, trunk bool) ([]types.NetworkResource, error) {
 	vSwitches, _ := f.GetVSwitches()
-	logrus.Infof("adjusted vswitch slice: %+v", vSwitches)
+	eniLog.Infof("adjusted vswitch slice: %+v", vSwitches)
 
 	tags := map[string]string{
 		types.NetworkInterfaceTagCreatorKey: types.NetworkInterfaceTagCreatorValue,
@@ -322,7 +329,7 @@ func (f *eniFactory) Trace() []tracing.MapKeyValueEntry {
 func (f *eniFactory) Execute(cmd string, _ []string, message chan<- string) {
 	switch cmd {
 	case commandMapping:
-		mapping, err := f.GetResource()
+		mapping, err := f.ListResource()
 		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
 	default:
 		message <- "can't recognize command\n"
@@ -331,24 +338,24 @@ func (f *eniFactory) Execute(cmd string, _ []string, message chan<- string) {
 	close(message)
 }
 
-func (f *eniFactory) Get(res types.NetworkResource) (types.NetworkResource, error) {
-	eni := res.(*types.ENI)
-	return f.ecs.GetENIByMac(context.Background(), eni.MAC)
+func (f *eniFactory) Check(res types.NetworkResource) error {
+	eni, ok := res.(*types.ENI)
+	if !ok {
+		return fmt.Errorf("unsupported type %T", res)
+	}
+	_, err := f.ecs.GetENIByMac(context.Background(), eni.MAC)
+	return err
 }
 
-func (f *eniFactory) GetResource() (map[string]types.FactoryResIf, error) {
-	// Get ENIs from Aliyun API
+func (f *eniFactory) ListResource() (map[string]types.NetworkResource, error) {
 	enis, err := f.ecs.GetAttachedENIs(context.Background(), false)
 	if err != nil {
 		return nil, err
 	}
 
-	mapping := make(map[string]types.FactoryResIf, len(enis))
+	mapping := make(map[string]types.NetworkResource, len(enis))
 	for i := 0; i < len(enis); i++ {
-		mapping[enis[i].GetResourceID()] = &types.FactoryRes{
-			ID:   enis[i].GetResourceID(),
-			Type: enis[i].GetType(),
-		}
+		mapping[enis[i].GetResourceID()] = enis[i]
 	}
 
 	return mapping, nil

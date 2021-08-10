@@ -19,7 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-func (e *AliyunImpl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType types.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error) {
+func (e *Impl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType types.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error) {
 	var (
 		eipInfo *types.EIP
 		err     error
@@ -157,11 +157,11 @@ func (e *AliyunImpl) AllocateEipAddress(ctx context.Context, bandwidth int, char
 	return eipInfo, nil
 }
 
-// UnassociateEipAddress
+// UnassociateEipAddress un associate eip
 // 1. if eni is deleted eip auto unassociated
 // 2. if eip is deleted , return code is InvalidAllocationId.NotFound
 // 3. if eip is not bind ,return code is IncorrectEipStatus
-func (e *AliyunImpl) UnassociateEipAddress(ctx context.Context, eipID, eniID, eniIP string) error {
+func (e *Impl) UnassociateEipAddress(ctx context.Context, eipID, eniID, eniIP string) error {
 	var innerErr error
 	err := wait.ExponentialBackoff(ENIOpBackoff,
 		func() (done bool, err error) {
@@ -199,7 +199,7 @@ func (e *AliyunImpl) UnassociateEipAddress(ctx context.Context, eipID, eniID, en
 	return nil
 }
 
-func (e *AliyunImpl) ReleaseEipAddress(ctx context.Context, eipID, eniID string, eniIP net.IP) error {
+func (e *Impl) ReleaseEipAddress(ctx context.Context, eipID, eniID string, eniIP net.IP) error {
 	eip, err := e.WaitForEIP(eipID, "", eniStateBackoff)
 	if err != nil {
 		return fmt.Errorf("error release eip: %w", err)
@@ -241,7 +241,7 @@ func (e *AliyunImpl) ReleaseEipAddress(ctx context.Context, eipID, eniID string,
 }
 
 // WaitForEIP wait status of eni, ignore status if is empty
-func (e *AliyunImpl) WaitForEIP(eipID string, status string, backoff wait.Backoff) (*vpc.EipAddress, error) {
+func (e *Impl) WaitForEIP(eipID string, status string, backoff wait.Backoff) (*vpc.EipAddress, error) {
 	var eip *vpc.EipAddress
 	var innerErr error
 	err := wait.ExponentialBackoff(backoff,
@@ -270,7 +270,7 @@ func (e *AliyunImpl) WaitForEIP(eipID string, status string, backoff wait.Backof
 	return eip, err
 }
 
-func (e *AliyunImpl) describeEipAddresses(eipID, eniID string) ([]vpc.EipAddress, error) {
+func (e *Impl) describeEipAddresses(eipID, eniID string) ([]vpc.EipAddress, error) {
 	req := vpc.CreateDescribeEipAddressesRequest()
 	req.AllocationId = eipID
 	if eniID != "" {
@@ -291,7 +291,7 @@ func (e *AliyunImpl) describeEipAddresses(eipID, eniID string) ([]vpc.EipAddress
 	return resp.EipAddresses.EipAddress, nil
 }
 
-func (e *AliyunImpl) allocateEIPAddress(bandwidth, chargeType string) (*vpc.AllocateEipAddressResponse, error) {
+func (e *Impl) allocateEIPAddress(bandwidth, chargeType string) (*vpc.AllocateEipAddressResponse, error) {
 	req := vpc.CreateAllocateEipAddressRequest()
 	req.Bandwidth = bandwidth
 	req.InternetChargeType = chargeType
@@ -313,7 +313,7 @@ func (e *AliyunImpl) allocateEIPAddress(bandwidth, chargeType string) (*vpc.Allo
 	return resp, nil
 }
 
-func (e *AliyunImpl) unAssociateEIPAddress(eipID, eniID, eniIP string) error {
+func (e *Impl) unAssociateEIPAddress(eipID, eniID, eniIP string) error {
 	req := vpc.CreateUnassociateEipAddressRequest()
 	req.AllocationId = eipID
 	req.InstanceId = eniID
@@ -341,7 +341,7 @@ func (e *AliyunImpl) unAssociateEIPAddress(eipID, eniID, eniIP string) error {
 	return nil
 }
 
-func (e *AliyunImpl) associateEIPAddress(eipID, eniID, privateIP string) error {
+func (e *Impl) associateEIPAddress(eipID, eniID, privateIP string) error {
 	req := vpc.CreateAssociateEipAddressRequest()
 	req.AllocationId = eipID
 	req.InstanceId = eniID
@@ -367,7 +367,7 @@ func (e *AliyunImpl) associateEIPAddress(eipID, eniID, privateIP string) error {
 	return nil
 }
 
-func (e *AliyunImpl) releaseEIPAddress(eipID string) error {
+func (e *Impl) releaseEIPAddress(eipID string) error {
 	req := vpc.CreateReleaseEipAddressRequest()
 	req.AllocationId = eipID
 

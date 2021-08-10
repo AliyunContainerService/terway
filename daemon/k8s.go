@@ -51,43 +51,16 @@ const (
 	labelDynamicConfig = "terway-config"
 )
 
-// podEipInfo store pod eip info
-// NOTE: this is the type store in db
-type podEipInfo struct {
-	PodEip           bool
-	PodEipID         string
-	PodEipIP         string
-	PodEipBandWidth  int
-	PodEipChargeType types.InternetChargeType
-}
-
-// podInfo store the pod info
-// NOTE: this is the type store in db
-type podInfo struct {
-	//K8sPod *v1.Pod
-	Name           string
-	Namespace      string
-	TcIngress      uint64
-	TcEgress       uint64
-	PodNetworkType string
-	PodIP          string      // used for eip and mip
-	PodIPs         types.IPSet // used for eip and mip
-	SandboxExited  bool
-	EipInfo        podEipInfo
-	IPStickTime    time.Duration
-	PodENI         bool
-}
-
 // Kubernetes operation set
 type Kubernetes interface {
-	GetLocalPods() ([]*podInfo, error)
-	GetPod(namespace, name string) (*podInfo, error)
+	GetLocalPods() ([]*types.PodInfo, error)
+	GetPod(namespace, name string) (*types.PodInfo, error)
 	GetServiceCIDR() *types.IPNetSet
 	GetNodeCidr() *net.IPNet
 	SetNodeAllocatablePod(count int) error
-	PatchEipInfo(info *podInfo) error
+	PatchEipInfo(info *types.PodInfo) error
 	PatchTrunkInfo(trunkEni string) error
-	WaitPodENIInfo(info *podInfo) (podEni *podENITypes.PodENI, err error)
+	WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
 	RecordNodeEvent(eventType, reason, message string)
 	RecordPodEvent(podName, podNamespace, eventType, reason, message string) error
 	GetNodeDynamicConfigLabel() string
@@ -152,7 +125,7 @@ func (k *k8s) SetSvcCidr(svcCidr *types.IPNetSet) error {
 	return nil
 }
 
-func (k *k8s) PatchEipInfo(info *podInfo) error {
+func (k *k8s) PatchEipInfo(info *types.PodInfo) error {
 	pod, err := k.client.CoreV1().Pods(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
 		ResourceVersion: "0",
 	})
@@ -181,7 +154,7 @@ func (k *k8s) PatchEipInfo(info *podInfo) error {
 	return nil
 }
 
-func (k *k8s) WaitPodENIInfo(info *podInfo) (podEni *podENITypes.PodENI, err error) {
+func (k *k8s) WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error) {
 	err = wait.ExponentialBackoff(wait.Backoff{
 		Duration: time.Second * 5,
 		Factor:   2,
@@ -422,8 +395,8 @@ func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 	panic(fmt.Errorf("unknown daemon mode %s", daemonMode))
 }
 
-func convertPod(daemonMode string, pod *corev1.Pod) *podInfo {
-	pi := &podInfo{
+func convertPod(daemonMode string, pod *corev1.Pod) *types.PodInfo {
+	pi := &types.PodInfo{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
 		PodIPs:    types.IPSet{},
@@ -552,7 +525,7 @@ func parseBandwidth(s string) (uint64, error) {
 }
 
 type storageItem struct {
-	Pod          *podInfo
+	Pod          *types.PodInfo
 	deletionTime *time.Time
 }
 
@@ -572,7 +545,7 @@ func deserialize(data []byte) (interface{}, error) {
 	return item, nil
 }
 
-func (k *k8s) GetPod(namespace, name string) (*podInfo, error) {
+func (k *k8s) GetPod(namespace, name string) (*types.PodInfo, error) {
 	pod, err := k.client.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{
 		ResourceVersion: "0",
 	})
@@ -607,7 +580,7 @@ func (k *k8s) GetNodeCidr() *net.IPNet {
 	return k.nodeCidr
 }
 
-func (k *k8s) GetLocalPods() ([]*podInfo, error) {
+func (k *k8s) GetLocalPods() ([]*types.PodInfo, error) {
 	options := metav1.ListOptions{
 		FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", k.nodeName).String(),
 		ResourceVersion: "0",
@@ -617,7 +590,7 @@ func (k *k8s) GetLocalPods() ([]*podInfo, error) {
 		k.reconnectOnTimeoutError(err)
 		return nil, errors.Wrapf(err, "failed listting pods on %s from apiserver", k.nodeName)
 	}
-	var ret []*podInfo
+	var ret []*types.PodInfo
 	for _, pod := range list.Items {
 		podInfo := convertPod(k.mode, &pod)
 		ret = append(ret, podInfo)
@@ -648,7 +621,7 @@ func (k *k8s) clean() error {
 	if err != nil {
 		return errors.Wrap(err, "error get local pods")
 	}
-	podsMap := make(map[string]*podInfo)
+	podsMap := make(map[string]*types.PodInfo)
 
 	for _, pod := range localPods {
 		key := podInfoKey(pod.Namespace, pod.Name)

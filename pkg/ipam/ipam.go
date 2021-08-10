@@ -21,6 +21,7 @@ type API interface {
 	GetAttachedSecurityGroups(ctx context.Context, instanceID string) ([]string, error)
 	CheckEniSecurityGroup(ctx context.Context, sgIDs []string) error
 
+	// FIXME remove vendor for vpc
 	DescribeVSwitchByID(ctx context.Context, vSwitch string) (*vpc.VSwitch, error)
 	// EIP
 	AllocateEipAddress(ctx context.Context, bandwidth int, chargeType types.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error)

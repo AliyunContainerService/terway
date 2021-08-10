@@ -42,33 +42,33 @@ func Test_toResMapping(t *testing.T) {
 			},
 		},
 	}
-	pods := []PodResources{
+	pods := []types.PodResources{
 		{
-			PodInfo: &podInfo{
+			PodInfo: &types.PodInfo{
 				Name:      "inuse",
 				Namespace: "inuse",
 			},
-			Resources: []ResourceItem{{
+			Resources: []types.ResourceItem{{
 				Type: "",
 				ID:   "inuse",
 			}},
 		},
 		{
-			PodInfo: &podInfo{
+			PodInfo: &types.PodInfo{
 				Name:      "invalid-remote",
 				Namespace: "invalid-remote",
 			},
-			Resources: []ResourceItem{{
+			Resources: []types.ResourceItem{{
 				Type: "",
 				ID:   "invalid-remote",
 			}},
 		},
 		{
-			PodInfo: &podInfo{
+			PodInfo: &types.PodInfo{
 				Name:      "invalid-lo",
 				Namespace: "invalid-lo",
 			},
-			Resources: []ResourceItem{{
+			Resources: []types.ResourceItem{{
 				Type: "",
 				ID:   "invalid-lo",
 			}},

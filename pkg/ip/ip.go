@@ -28,7 +28,7 @@ func ToIPs(addrs []string) ([]net.IP, error) {
 	return result, nil
 }
 
-func ToTPMap(addrs []net.IP) map[string]net.IP {
+func ToIPMap(addrs []net.IP) map[string]net.IP {
 	result := make(map[string]net.IP)
 
 	for _, addr := range addrs {

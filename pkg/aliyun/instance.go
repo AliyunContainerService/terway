@@ -5,17 +5,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/utils"
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
-	"github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/util/wait"
-
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
+	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/AliyunContainerService/terway/pkg/utils"
+
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 var defaultIns *Instance
 var once sync.Once
+var logIns = logger.DefaultLogger
 
 type Instance struct {
 	RegionID   string
@@ -68,7 +69,7 @@ func GetInstanceMeta() *Instance {
 			InstanceType: instanceType,
 			PrimaryMAC:   mac,
 		}
-		logrus.WithFields(map[string]interface{}{
+		logIns.WithFields(map[string]interface{}{
 			"region-id":     regionID,
 			"zone-id":       zoneID,
 			"vpc-id":        vpcID,
@@ -165,7 +166,7 @@ func UpdateFromAPI(client *ecs.Client, instanceType string) error {
 			IPv6PerAdapter:     utils.Minimal(ipv6PerAdapter),
 			MemberAdapterLimit: utils.Minimal(memberAdapterLimit),
 		}
-		logrus.WithFields(map[string]interface{}{
+		logger.DefaultLogger.WithFields(map[string]interface{}{
 			"instance-type":   instanceType,
 			"adapters":        adapterLimit,
 			"ipv4":            ipv4PerAdapter,

@@ -32,7 +32,7 @@ func NewEncryptedCredentialProvider(credentialPath string) *EncryptedCredentialP
 }
 
 func (e *EncryptedCredentialProvider) Resolve() (*Credential, error) {
-	logrus.Infof("resolve encrypted credential %s", e.credentialPath)
+	log.Infof("resolve encrypted credential %s", e.credentialPath)
 	if e.credentialPath == "" {
 		return nil, nil
 	}

@@ -251,7 +251,7 @@ func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, eniID string, coun
 	return ips, nil
 }
 
-// UnAssignPrivateIPAddresses
+// UnAssignPrivateIPAddresses remove ip from eni
 // return ok if 1. eni is released 2. ip is already released 3. release success
 func (a *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []net.IP) error {
 	req := ecs.CreateUnassignPrivateIpAddressesRequest()
@@ -311,7 +311,7 @@ func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, eniID string, count i
 	return ips, nil
 }
 
-// UnAssignIpv6Addresses
+// UnAssignIpv6Addresses remove ip from eni
 // return ok if 1. eni is released 2. ip is already released 3. release success
 func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []net.IP) error {
 	req := ecs.CreateUnassignIpv6AddressesRequest()
@@ -336,7 +336,7 @@ func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips [
 			l.WithField(LogFieldRequestID, apiErr.ErrRequestID(err)).Infof("unassign private ip ,%s", str)
 			return nil
 		}
-		l.WithField(LogFieldRequestID, apiErr.ErrRequestID(err)).Warnf("unassign private ip failed,%s %s", str, err.Error())
+		l.WithField(LogFieldRequestID, apiErr.ErrRequestID(err)).Warnf("unassign private ipv6 failed,%s %s", str, err.Error())
 		return err
 	}
 	l.WithField(LogFieldRequestID, resp.RequestId).Infof("unassign ipv6 ip ,%s", str)

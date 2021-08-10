@@ -83,7 +83,7 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 	return eipInfo, nil
 }
 
-func (e *eipResourceManager) Release(context *networkContext, resItem ResourceItem) error {
+func (e *eipResourceManager) Release(context *networkContext, resItem types.ResourceItem) error {
 	if resItem.ExtraEipInfo == nil {
 		return nil
 	}
@@ -104,7 +104,7 @@ func (e *eipResourceManager) Release(context *networkContext, resItem ResourceIt
 	return nil
 }
 
-func (e *eipResourceManager) GarbageCollection(inUseResSet map[string]ResourceItem, expireResSet map[string]ResourceItem) error {
+func (e *eipResourceManager) GarbageCollection(inUseResSet map[string]types.ResourceItem, expireResSet map[string]types.ResourceItem) error {
 	for expireRes, expireItem := range expireResSet {
 		if expireItem.ExtraEipInfo == nil {
 			continue

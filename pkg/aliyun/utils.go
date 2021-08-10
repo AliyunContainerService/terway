@@ -61,12 +61,12 @@ var (
 		Steps:    8,
 	}
 
-	// MetadataAssignPrivateIPBackoff about 2s backoff
+	// MetadataAssignPrivateIPBackoff about 10s backoff
 	MetadataAssignPrivateIPBackoff = wait.Backoff{
 		Duration: time.Millisecond * 1100,
 		Factor:   1,
 		Jitter:   0.2,
-		Steps:    2,
+		Steps:    10,
 	}
 
 	// MetadataUnAssignPrivateIPBackoff about 10s backoff

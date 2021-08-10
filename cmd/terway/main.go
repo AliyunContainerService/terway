@@ -6,6 +6,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/daemon"
 	"github.com/AliyunContainerService/terway/pkg/logger"
+	"k8s.io/klog/v2"
 
 	"k8s.io/client-go/pkg/version"
 )
@@ -35,6 +36,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	klog.SetOutput(os.Stderr)
 
 	logger.DefaultLogger.Infof("GitCommit %s BuildDate %s Platform %s",
 		version.Get().GitCommit, version.Get().BuildDate, version.Get().Platform)

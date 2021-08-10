@@ -26,9 +26,9 @@ import (
 
 var log = logger.DefaultLogger.WithField("subSys", "openAPI")
 
-var _ ipam.API = &AliyunImpl{}
+var _ ipam.API = &Impl{}
 
-type AliyunImpl struct {
+type Impl struct {
 	privateIPMutex sync.RWMutex
 	metadata       ENIInfoGetter
 
@@ -42,7 +42,7 @@ type AliyunImpl struct {
 
 // NewAliyunImpl return new API implement object
 func NewAliyunImpl(openAPI *OpenAPI, needENITypeAttr bool, ipFamily *types.IPFamily) ipam.API {
-	return &AliyunImpl{
+	return &Impl{
 		metadata:    NewENIMetadata(ipFamily),
 		ipFamily:    ipFamily,
 		eniTypeAttr: needENITypeAttr,
@@ -51,7 +51,7 @@ func NewAliyunImpl(openAPI *OpenAPI, needENITypeAttr bool, ipFamily *types.IPFam
 }
 
 // AllocateENI for instance
-func (e *AliyunImpl) AllocateENI(ctx context.Context, vSwitch, securityGroup, instanceID string, trunk bool, ipCount int, eniTags map[string]string) (*types.ENI, error) {
+func (e *Impl) AllocateENI(ctx context.Context, vSwitch, securityGroup, instanceID string, trunk bool, ipCount int, eniTags map[string]string) (*types.ENI, error) {
 	if vSwitch == "" || len(securityGroup) == 0 || instanceID == "" {
 		return nil, fmt.Errorf("invalid eni args for allocate")
 	}
@@ -141,11 +141,11 @@ func (e *AliyunImpl) AllocateENI(ctx context.Context, vSwitch, securityGroup, in
 	return eni, nil
 }
 
-func (e *AliyunImpl) FreeENI(ctx context.Context, eniID, instanceID string) error {
+func (e *Impl) FreeENI(ctx context.Context, eniID, instanceID string) error {
 	return e.destroyInterface(ctx, eniID, instanceID, "")
 }
 
-func (e *AliyunImpl) destroyInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error {
+func (e *Impl) destroyInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error {
 	var innerErr error
 	err := wait.ExponentialBackoffWithContext(ctx,
 		eniReleaseBackoff,
@@ -187,7 +187,7 @@ func (e *AliyunImpl) destroyInterface(ctx context.Context, eniID, instanceID, tr
 
 // GetAttachedENIs of instanceId
 // containsMainENI is contains the main interface(eth0) of instance
-func (e *AliyunImpl) GetAttachedENIs(ctx context.Context, containsMainENI bool) ([]*types.ENI, error) {
+func (e *Impl) GetAttachedENIs(ctx context.Context, containsMainENI bool) ([]*types.ENI, error) {
 	enis, err := e.metadata.GetENIs(containsMainENI)
 	if err != nil {
 		return nil, fmt.Errorf("error get eni config by mac, %w", err)
@@ -215,11 +215,11 @@ func (e *AliyunImpl) GetAttachedENIs(ctx context.Context, containsMainENI bool) 
 	return enis, nil
 }
 
-func (e *AliyunImpl) GetSecondaryENIMACs(ctx context.Context) ([]string, error) {
+func (e *Impl) GetSecondaryENIMACs(ctx context.Context) ([]string, error) {
 	return e.metadata.GetSecondaryENIMACs()
 }
 
-func (e *AliyunImpl) GetENIIPs(ctx context.Context, mac string) ([]net.IP, []net.IP, error) {
+func (e *Impl) GetENIIPs(ctx context.Context, mac string) ([]net.IP, []net.IP, error) {
 	e.privateIPMutex.RLock()
 	defer e.privateIPMutex.RUnlock()
 
@@ -240,7 +240,7 @@ func (e *AliyunImpl) GetENIIPs(ctx context.Context, mac string) ([]net.IP, []net
 	return ipv4, ipv6, nil
 }
 
-func (e *AliyunImpl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count int) ([]types.IPSet, error) {
+func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count int) (ipSet []types.IPSet, err error) {
 	if eniID == "" || mac == "" || count <= 0 {
 		return nil, fmt.Errorf("args error")
 	}
@@ -248,104 +248,107 @@ func (e *AliyunImpl) AssignNIPsForENI(ctx context.Context, eniID, mac string, co
 	e.privateIPMutex.Lock()
 	defer e.privateIPMutex.Unlock()
 
-	var errs []error
+	var wg sync.WaitGroup
 	var ipv4s, ipv6s []net.IP
+	var v4Err, v6Err error
 
-	if e.ipFamily.IPv4 {
-		func() {
-			var innerErr error
-			err := wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
-				ipv4s, innerErr = e.AssignPrivateIPAddress(ctx, eniID, count)
-				if innerErr != nil {
-					if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
-						return false, innerErr
-					}
-					return false, nil
-				}
-				return true, nil
-			})
-			if err != nil {
-				errs = append(errs, err)
-				return
-			}
-			if len(ipv4s) != count {
-				errs = append(errs, fmt.Errorf("openAPI return IP error.Want %d got %d", count, len(ipv4s)))
-				return
-			}
-		}()
-	}
-
-	if e.ipFamily.IPv6 && len(errs) == 0 {
-		func() {
-			var innerErr error
-			err := wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
-				ipv6s, innerErr = e.AssignIpv6Addresses(ctx, eniID, count)
-				if innerErr != nil {
-					if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
-						return false, innerErr
-					}
-					return false, nil
-				}
-				return true, nil
-			})
-			if err != nil {
-				errs = append(errs, err)
-			}
-			if len(ipv6s) != count {
-				errs = append(errs, fmt.Errorf("openAPI return IP with incorrect count.Want %d got %d", count, len(ipv6s)))
-				return
-			}
-		}()
-	}
-
-	if len(errs) != 0 {
-		fmtErr := fmt.Sprintf("error assign address for eniID: %v, %v", eniID, k8sErr.NewAggregate(errs))
+	defer func() {
+		if err == nil {
+			return
+		}
+		fmtErr := fmt.Errorf("error assign %d address for eniID: %v, %w", count, eniID, err)
 		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
-			tracing.AllocResourceFailed, fmtErr)
+			tracing.AllocResourceFailed, fmtErr.Error())
 
 		// rollback ips
 		roleBackErr := e.UnAssignIPsForENI(ctx, eniID, mac, ipv4s, ipv6s)
 		if roleBackErr != nil {
-			log.Error(roleBackErr)
+			fmtErr = fmt.Errorf("roll back failed %s, %w", fmtErr, roleBackErr)
+			log.Error(fmtErr.Error())
+			_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
+				tracing.AllocResourceFailed, fmtErr.Error())
 		}
-		return nil, k8sErr.NewAggregate(errs)
-	}
+	}()
 
-	// check ip is ready in metadata
-
-	sets.NewString()
-	err := wait.ExponentialBackoffWithContext(ctx,
-		MetadataAssignPrivateIPBackoff,
-		func() (done bool, err error) {
-			if len(ipv4s) > 0 {
-				leftIPs, err := e.metadata.GetENIPrivateAddressesByMAC(mac)
-				if err != nil {
-					return false, nil
+	if e.ipFamily.IPv4 {
+		var innerErr error
+		err = wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
+			ipv4s, innerErr = e.AssignPrivateIPAddress(ctx, eniID, count)
+			if innerErr != nil {
+				if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
+					return false, innerErr
 				}
-				if !ip.IPsIntersect(ipv4s, leftIPs) {
-					return false, nil
-				}
-			}
-			if len(ipv6s) > 0 {
-				leftIPs, err := e.metadata.GetENIPrivateIPv6AddressesByMAC(mac)
-				if err != nil {
-					return false, nil
-				}
-				if !ip.IPsIntersect(ipv6s, leftIPs) {
-					return false, nil
-				}
+				return false, nil
 			}
 			return true, nil
-		},
-	)
-	if err != nil {
-		return nil, err
+		})
+		if err != nil {
+			return
+		}
+		if len(ipv4s) != count {
+			return nil, fmt.Errorf("openAPI return IP error.Want %d got %d", count, len(ipv4s))
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			v4Err = wait.ExponentialBackoffWithContext(ctx,
+				MetadataAssignPrivateIPBackoff,
+				func() (done bool, err error) {
+					remoteIPs, err := e.metadata.GetENIPrivateAddressesByMAC(mac)
+					if err != nil {
+						return false, nil
+					}
+					if !ip.IPsIntersect(remoteIPs, ipv4s) {
+						return false, nil
+					}
+					return true, nil
+				},
+			)
+		}()
 	}
 
-	return types.MergeIPs(ipv4s, ipv6s), nil
+	if e.ipFamily.IPv6 {
+		var innerErr error
+		err = wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
+			ipv6s, innerErr = e.AssignIpv6Addresses(ctx, eniID, count)
+			if innerErr != nil {
+				if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
+					return false, innerErr
+				}
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			return
+		}
+		if len(ipv6s) != count {
+			return nil, fmt.Errorf("openAPI return IP error.Want %d got %d", count, len(ipv6s))
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			v6Err = wait.ExponentialBackoffWithContext(ctx,
+				MetadataAssignPrivateIPBackoff,
+				func() (done bool, err error) {
+					remoteIPs, err := e.metadata.GetENIPrivateIPv6AddressesByMAC(mac)
+					if err != nil {
+						return false, nil
+					}
+					if !ip.IPsIntersect(remoteIPs, ipv6s) {
+						return false, nil
+					}
+					return true, nil
+				},
+			)
+		}()
+	}
+	wg.Wait()
+
+	return types.MergeIPs(ipv4s, ipv6s), k8sErr.NewAggregate([]error{v4Err, v6Err})
 }
 
-func (e *AliyunImpl) UnAssignIPsForENI(ctx context.Context, eniID, mac string, ipv4s []net.IP, ipv6s []net.IP) error {
+func (e *Impl) UnAssignIPsForENI(ctx context.Context, eniID, mac string, ipv4s []net.IP, ipv6s []net.IP) error {
 	if eniID == "" || mac == "" {
 		return fmt.Errorf("args error")
 	}
@@ -356,37 +359,33 @@ func (e *AliyunImpl) UnAssignIPsForENI(ctx context.Context, eniID, mac string, i
 	var errs []error
 
 	if len(ipv4s) > 0 {
-		func() {
-			var innerErr error
+		var innerErr error
 
-			err := wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
-				innerErr = e.UnAssignPrivateIPAddresses(ctx, eniID, ipv4s)
-				if innerErr != nil {
-					return false, nil
-				}
-				return true, nil
-			})
-			if err != nil {
-				errs = append(errs, err, innerErr)
+		err := wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
+			innerErr = e.UnAssignPrivateIPAddresses(ctx, eniID, ipv4s)
+			if innerErr != nil {
+				return false, nil
 			}
-		}()
+			return true, nil
+		})
+		if err != nil {
+			errs = append(errs, err, innerErr)
+		}
 	}
 
 	if len(ipv6s) > 0 {
-		func() {
-			var innerErr error
+		var innerErr error
 
-			err := wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
-				innerErr = e.UnAssignIpv6Addresses(ctx, eniID, ipv6s)
-				if innerErr != nil {
-					return false, nil
-				}
-				return true, nil
-			})
-			if err != nil {
-				errs = append(errs, err, innerErr)
+		err := wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
+			innerErr = e.UnAssignIpv6Addresses(ctx, eniID, ipv6s)
+			if innerErr != nil {
+				return false, nil
 			}
-		}()
+			return true, nil
+		})
+		if err != nil {
+			errs = append(errs, err, innerErr)
+		}
 	}
 
 	if len(errs) > 0 {
@@ -411,7 +410,7 @@ func (e *AliyunImpl) UnAssignIPsForENI(ctx context.Context, eniID, mac string, i
 				if err != nil {
 					return false, nil
 				}
-				if ip.IPsHasAll(remoteIPs, ipv4s) {
+				if ip.IPsIntersect(remoteIPs, ipv4s) {
 					return false, nil
 				}
 			}
@@ -420,7 +419,7 @@ func (e *AliyunImpl) UnAssignIPsForENI(ctx context.Context, eniID, mac string, i
 				if err != nil {
 					return false, nil
 				}
-				if ip.IPsHasAll(remoteIPs, ipv6s) {
+				if ip.IPsIntersect(remoteIPs, ipv6s) {
 					return false, nil
 				}
 			}
@@ -437,7 +436,7 @@ func (e *AliyunImpl) UnAssignIPsForENI(ctx context.Context, eniID, mac string, i
 	return nil
 }
 
-func (e *AliyunImpl) GetENIByMac(ctx context.Context, mac string) (*types.ENI, error) {
+func (e *Impl) GetENIByMac(ctx context.Context, mac string) (*types.ENI, error) {
 	eni, err := e.metadata.GetENIByMac(mac)
 	if err != nil {
 		return nil, fmt.Errorf("error get eni config by mac, %w", err)
@@ -450,7 +449,7 @@ func (e *AliyunImpl) GetENIByMac(ctx context.Context, mac string) (*types.ENI, e
 	return eni, nil
 }
 
-func (e *AliyunImpl) GetAttachedSecurityGroups(ctx context.Context, instanceID string) ([]string, error) {
+func (e *Impl) GetAttachedSecurityGroups(ctx context.Context, instanceID string) ([]string, error) {
 	var ids []string
 	insType, err := e.GetInstanceAttributesType(ctx, instanceID)
 	if err != nil {
@@ -473,7 +472,7 @@ func (e *AliyunImpl) GetAttachedSecurityGroups(ctx context.Context, instanceID s
 	return nil, fmt.Errorf("error get instance security groups: %s", instanceID)
 }
 
-func (e *AliyunImpl) GetInstanceAttributesType(ctx context.Context, instanceID string) (*ecs.Instance, error) {
+func (e *Impl) GetInstanceAttributesType(ctx context.Context, instanceID string) (*ecs.Instance, error) {
 	req := ecs.CreateDescribeInstancesRequest()
 	req.InstanceIds = fmt.Sprintf("[%q]", instanceID)
 
@@ -489,7 +488,7 @@ func (e *AliyunImpl) GetInstanceAttributesType(ctx context.Context, instanceID s
 	return &resp.Instances.Instance[0], nil
 }
 
-func (e *AliyunImpl) QueryEniIDByIP(ctx context.Context, vpcID string, address net.IP) (string, error) {
+func (e *Impl) QueryEniIDByIP(ctx context.Context, vpcID string, address net.IP) (string, error) {
 	req := ecs.CreateDescribeNetworkInterfacesRequest()
 	req.VpcId = vpcID
 	req.PrivateIpAddress = &[]string{address.String()}
@@ -502,7 +501,7 @@ func (e *AliyunImpl) QueryEniIDByIP(ctx context.Context, vpcID string, address n
 }
 
 // CheckEniSecurityGroup will sync eni's security with ecs's security group
-func (e *AliyunImpl) CheckEniSecurityGroup(ctx context.Context, sg []string) error {
+func (e *Impl) CheckEniSecurityGroup(ctx context.Context, sg []string) error {
 	instanceID := GetInstanceMeta().InstanceID
 
 	// get all attached eni
