@@ -38,9 +38,6 @@ func (e *EncryptedCredentialProvider) Resolve() (*Credential, error) {
 	}
 	_, err := os.Stat(e.credentialPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("failed to read config %s, err: %w", e.credentialPath, err)
 	}
 	var akInfo EncryptedCredentialInfo
