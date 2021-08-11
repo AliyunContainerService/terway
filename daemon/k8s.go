@@ -519,6 +519,10 @@ const (
 )
 
 func parseBandwidth(s string) (uint64, error) {
+	// when bandwidth is "", return
+	if len(s) == 0 {
+		return 0, fmt.Errorf("invalid bandwidth %s", s)
+	}
 
 	s = strings.TrimSpace(s)
 	s = strings.ToUpper(s)
