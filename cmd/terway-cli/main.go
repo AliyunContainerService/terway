@@ -2,292 +2,101 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
+	"log"
 	"net"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/AliyunContainerService/terway/rpc"
+	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 )
 
-const defaultSocketPath = "/var/run/eni/eni.socket"
-const helpString = `Terway Tracing CLI
-    subcommands:
-        list    [type] - show types/resources list
-        show    <type> [resource_name] - get config and trace info of the resource, get the first if name not specified
-        mapping - get terway resource mapping
-        execute <type> <resource> <command> args... - send command to the given resource
-`
-
-type subcommandHandler func(ctx context.Context, c rpc.TerwayTracingClient, args []string) error
-
-var subcommands = map[string]subcommandHandler{
-	"list":    list,
-	"execute": exec,
-	"show":    show,
-	"mapping": mapping,
-}
-
-var outputColors = map[rpc.ResourceMappingType]string{
-	rpc.ResourceMappingType_MappingTypeNormal: "\033[0m",
-	rpc.ResourceMappingType_MappingTypeIdle:   "\033[0;34m",
-	rpc.ResourceMappingType_MappingTypeError:  "\033[1;31m",
-}
-
 const (
-	tableHeaderPodName           = "Pod Name"
-	tableHeaderResourceID        = "Res ID"
-	tableHeaderFactoryResourceID = "Factory Res ID"
+	defaultSocketPath = "/var/run/eni/eni.socket"
+
+	connTimeout = time.Second * 30
 )
 
-func main() {
-	if len(os.Args) < 2 {
-		fmt.Print(helpString)
-		_, _ = fmt.Fprintf(os.Stderr, "parameter error.\n")
-		os.Exit(1)
-	}
+var (
+	grpcConn      *grpc.ClientConn
+	ctx           context.Context
+	contextCancel context.CancelFunc
+	client        rpc.TerwayTracingClient
+)
 
-	// initialize gRPC
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	grpcConn, err := grpc.DialContext(ctx, defaultSocketPath, grpc.WithInsecure(), grpc.WithContextDialer(
-		func(ctx context.Context, s string) (net.Conn, error) {
-			unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
+var (
+	rootCmd = &cobra.Command{
+		Use:   "terway-cli",
+		Short: "terway-cil is a command tool for diagnosing terway & network internal status.",
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			// create connection and grpc client
+			ctx, contextCancel = context.WithTimeout(context.Background(), connTimeout)
+			conn, err := grpc.DialContext(ctx, defaultSocketPath, grpc.WithInsecure(), grpc.WithContextDialer(
+				func(ctx context.Context, s string) (net.Conn, error) {
+					unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
+					if err != nil {
+						return nil, fmt.Errorf("error while resolve unix addr:%w", err)
+					}
+					d := net.Dialer{}
+					return d.DialContext(ctx, "unix", unixAddr.String())
+				}))
+
 			if err != nil {
-				return nil, fmt.Errorf("error while resolve unix addr:%w", err)
+				contextCancel()
+				return err
 			}
-			d := net.Dialer{}
-			return d.DialContext(ctx, "unix", unixAddr.String())
-		}))
 
-	if err != nil {
-		cancel()
-		_, _ = fmt.Fprintf(os.Stderr, "error while dialing to daemon: %s", err.Error())
-		os.Exit(1)
+			grpcConn = conn
+			client = rpc.NewTerwayTracingClient(conn)
+			return nil
+		},
+		PersistentPostRun: func(cmd *cobra.Command, args []string) {
+			contextCancel()
+			_ = grpcConn.Close()
+		},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
-	defer grpcConn.Close()
-	defer cancel()
-	c := rpc.NewTerwayTracingClient(grpcConn)
-
-	args := os.Args[1:]
-	handler, ok := subcommands[args[0]]
-	if ok {
-		err = handler(ctx, c, args[1:])
-	} else {
-		_, _ = fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", args[0])
+	listCmd = &cobra.Command{
+		Use:   "list [type]",
+		Short: "show types/resources list.",
+		RunE:  runList,
 	}
 
-	if err != nil {
-		cancel()
-		_ = grpcConn.Close()
-		_, _ = fmt.Fprintf(os.Stderr, "error: %s\n", err.Error())
-		os.Exit(1)
+	showCmd = &cobra.Command{
+		Use:   "show <type> [resource_name]",
+		Short: "show config",
+		Long:  "show config and trace info of the resource, get the first if name not specified.",
+		RunE:  runShow,
 	}
+
+	mappingCmd = &cobra.Command{
+		Use:   "mapping",
+		Short: "get terway resource mappings.",
+		RunE:  runMapping,
+	}
+
+	executeCmd = &cobra.Command{
+		Use:   "execute <type> <resource> <command> [args...]",
+		Short: "send command to the given resource.",
+		RunE:  runExecute,
+	}
+
+	metadataCmd = &cobra.Command{
+		Use:   "metadata",
+		Short: "Show metadata of this node",
+		RunE:  runMetadata,
+	}
+)
+
+func init() {
+	rootCmd.AddCommand(listCmd, showCmd, mappingCmd, executeCmd, metadataCmd)
 }
 
-func list(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
-	if len(args) > 1 {
-		return errors.New("too many arguments")
-	}
-
-	if len(args) == 0 { // list types
-		placeholder := &rpc.Placeholder{}
-		types, err := c.GetResourceTypes(ctx, placeholder)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("%v\n", types.TypeNames)
-		return nil
-	}
-
-	// list resources
-	resource := args[0]
-	request := &rpc.ResourceTypeRequest{Name: resource}
-	resources, err := c.GetResources(ctx, request)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("%v\n", resources.ResourceNames)
-	return nil
-}
-
-func show(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
-	if len(args) >= 2 {
-		return errors.New("too many arguments")
-	}
-
-	typ, name := args[0], ""
-	if len(args) == 1 { // only type, select the first resource returned
-		n, err := getFirstNameWithType(ctx, c, typ)
-		if err != nil {
-			return err
-		}
-		name = n
-	} else {
-		name = args[1]
-	}
-
-	request := &rpc.ResourceTypeNameRequest{
-		Type: typ,
-		Name: name,
-	}
-
-	cfg, err := c.GetResourceConfig(ctx, request)
-	if err != nil {
-		return err
-	}
-
-	trace, err := c.GetResourceTrace(ctx, request)
-	if err != nil {
-		return err
-	}
-
-	final := append(cfg.Config, trace.Trace...)
-	printMapAsTree(final)
-
-	return nil
-}
-
-func exec(ctx context.Context, c rpc.TerwayTracingClient, args []string) error {
-	// <type> <resource> <command> [args...]
-	if len(args) < 3 {
-		return errors.New("too few arguments")
-	}
-
-	typ, name, command := args[0], args[1], args[2]
-	args = args[3:]
-
-	request := &rpc.ResourceExecuteRequest{
-		Type:    typ,
-		Name:    name,
-		Command: command,
-		Args:    args,
-	}
-
-	stream, err := c.ResourceExecute(ctx, request)
-	if err != nil {
-		return err
-	}
-
-	var message *rpc.ResourceExecuteReply
-
-	for {
-		message, err = stream.Recv()
-		if err != nil {
-			break
-		}
-
-		fmt.Print(message.Message) // print message
-	}
-
-	if err == io.EOF {
-		return nil
-	}
-
-	return err
-}
-
-func mapping(ctx context.Context, c rpc.TerwayTracingClient, _ []string) error {
-	placeholder := &rpc.Placeholder{}
-	result, err := c.GetResourceMapping(ctx, placeholder)
-	if err != nil {
-		return err
-	}
-
-	cPod := len(tableHeaderPodName)
-	cResource := len(tableHeaderResourceID)
-	cFactory := len(tableHeaderFactoryResourceID)
-
-	// calculate the appropriate column length
-	for _, v := range result.Info {
-		if len(v.PodName) == 0 {
-			v.PodName = "X"
-		}
-		if cPod < len(v.PodName) {
-			cPod = len(v.PodName)
-		}
-
-		if len(v.ResourceName) == 0 {
-			v.ResourceName = "X"
-		}
-		if cResource < len(v.ResourceName) {
-			cResource = len(v.ResourceName)
-		}
-
-		if len(v.FactoryResourceName) == 0 {
-			v.FactoryResourceName = "X"
-		}
-		if cFactory < len(v.FactoryResourceName) {
-			cFactory = len(v.FactoryResourceName)
-		}
-	}
-
-	fmtString := fmt.Sprintf("%%-%ds%%-%ds%%-%ds\n", cPod+3, cResource+3, cFactory+3)
-	// print table header
-	fmt.Printf(fmtString, tableHeaderPodName, tableHeaderResourceID, tableHeaderFactoryResourceID)
-	for _, v := range result.Info {
-		fmt.Print(outputColors[v.Type]) // print color
-		fmt.Printf(fmtString, v.PodName, v.ResourceName, v.FactoryResourceName)
-
-		if err == nil && v.Type == rpc.ResourceMappingType_MappingTypeError {
-			err = errors.New("error exists in mapping")
-		}
-	}
-
-	fmt.Print(outputColors[rpc.ResourceMappingType_MappingTypeNormal])
-
-	return err
-}
-
-// getFirstNameWithType finds the first resource in the given type
-func getFirstNameWithType(ctx context.Context, c rpc.TerwayTracingClient, typ string) (string, error) {
-	request := &rpc.ResourceTypeRequest{Name: typ}
-	resource, err := c.GetResources(ctx, request)
-	if err != nil {
-		return "", err
-	}
-
-	if len(resource.ResourceNames) == 0 {
-		return "", errors.New("no resource in the specified type")
-	}
-
-	return resource.ResourceNames[0], nil
-}
-
-//func printMap(m []*rpc.MapKeyValueEntry) {
-//	if len(m) == 0 {
-//		fmt.Printf("no record\n")
-//		return
-//	}
-//
-//	// get the longest length in k
-//	length := 0
-//	for _, v := range m {
-//		if len(v.Key) > length {
-//			length = len(v.Key)
-//		}
-//	}
-//
-//	fmtString := fmt.Sprintf("%%-%ds%%s\n", length+3)
-//	for _, v := range m {
-//		fmt.Printf(fmtString, v.Key+":", v.Value)
-//	}
-//}
-
-func printMapAsTree(m []*rpc.MapKeyValueEntry) {
-	// build a tree
-	t := &tree{}
-	for _, v := range m {
-		t.addLeaf(strings.Split(v.Key, "/"), v.Value)
-	}
-
-	// print the tree
-	for _, v := range t.Leaves {
-		v.print(os.Stdout, "    ", "")
+func main() {
+	if err := rootCmd.Execute(); err != nil {
+		log.Fatalf("terway-cli error: %s", err)
 	}
 }

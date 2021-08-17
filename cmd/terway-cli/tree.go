@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"strings"
+
+	"github.com/AliyunContainerService/terway/rpc"
+	"github.com/pterm/pterm"
 )
 
 type tree struct {
@@ -44,17 +47,39 @@ func (t *tree) addLeaf(path []string, value string) {
 	tree.addLeaf(path[1:], value)
 }
 
-func (t *tree) print(w io.Writer, indent string, level string) {
-	_, _ = fmt.Fprint(w, level)
-
+func (t *tree) leveledList(list pterm.LeveledList, level int) pterm.LeveledList {
 	if t.IsLeaf {
-		_, _ = fmt.Fprintf(w, "%s: %s\n", t.Key, t.Value)
-		return
+		return append(list, pterm.LeveledListItem{
+			Level: level,
+			Text:  fmt.Sprintf("%s: %s", t.Key, pterm.ThemeDefault.WarningMessageStyle.Sprint(t.Value)),
+		})
 	}
 
-	_, _ = fmt.Printf("%s:\n", t.Key)
+	list = append(list, pterm.LeveledListItem{
+		Level: level,
+		Text:  t.Key,
+	})
 
 	for _, v := range t.Leaves {
-		v.print(w, indent, level+indent)
+		list = v.leveledList(list, level+1)
 	}
+
+	return list
+}
+
+func printPTermTree(m []*rpc.MapKeyValueEntry) error {
+	// build a tree
+	t := &tree{}
+	for _, v := range m {
+		t.addLeaf(strings.Split(v.Key, "/"), v.Value)
+	}
+
+	list := pterm.LeveledList{}
+	list = t.leveledList(list, 0)
+
+	root := pterm.NewTreeFromLeveledList(list)
+	return pterm.DefaultTree.
+		WithTextStyle(&pterm.ThemeDefault.BarLabelStyle).
+		WithRoot(root).
+		Render()
 }
