@@ -318,5 +318,4 @@ slave device.
 
 ### DingTalk
 
-Join `DingTalk` group by the QR code below:
-<img src="./docs/images/ding_group_qrcode.jpg" width="300" height="400" />
+Join `DingTalk` group by `DingTalkGroup` id "35924643".
