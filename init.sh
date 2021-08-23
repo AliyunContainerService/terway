@@ -24,25 +24,8 @@ init_node_bpf() {
 setup_networkmanager() {
   nsenter -t 1 -m -- tee /tmp/setup_network.sh<<EOF
 set -x
-config_network_manager_alinux() {
-  echo "setup alinux NetworkManager"
-  if [ -f "/usr/lib/NetworkManager/conf.d/eni.conf" ]; then
-    return
-  fi
-  tee /usr/lib/NetworkManager/conf.d/eni.conf<<EOF2
-[main]
-plugins=keyfile
 
-[keyfile]
-unmanaged-devices=interface-name:eth*, except:interface-name:eth0
-
-[logging]
-
-EOF2
-  systemctl restart NetworkManager
-}
-
-config_network_manager_rh() {
+config_network_manager() {
   echo "setup rh NetworkManager"
   if [ -f "/usr/lib/NetworkManager/conf.d/eni.conf" ]; then
     return
@@ -57,23 +40,21 @@ unmanaged-devices=interface-name:eth*, except:interface-name:eth0
 [logging]
 
 EOF2
-  systemctl restart NetworkManager
-
-  sleep 3
-  systemctl status NetworkManager
+  systemctl reload NetworkManager
 }
 
-if [ -d "/usr/lib/NetworkManager/conf.d/" ]; then
+if [[ "\$(systemctl is-active NetworkManager)" == "active" ]]; then
+  mkdir -p "/usr/lib/NetworkManager/conf.d/"
   OS_ID=\$(awk -F= '\$1=="ID" { print \$2 ;}' /etc/os-release)
   VERSION_ID=\$(awk -F= '\$1=="VERSION_ID" { print \$2 ;}' /etc/os-release)
 
   echo "detect os \${OS_ID} version \${VERSION_ID}"
   if [[ "\$OS_ID" == *alinux* && "\$VERSION_ID" == "\"3\"" ]]; then
-    config_network_manager_alinux
+    config_network_manager
   fi
 
   if [[ "\$OS_ID" == *centos* && "\$VERSION_ID" == "\"8\"" ]]; then
-    config_network_manager_rh
+    config_network_manager
   fi
 fi
 
