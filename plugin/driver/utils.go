@@ -16,8 +16,6 @@ import (
 	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 
-	"github.com/containernetworking/cni/pkg/types"
-	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -259,20 +257,6 @@ func EnsureRoute(link netlink.Link, hostIPSet *terwayTypes.IPNetSet) (bool, erro
 
 func ensureRoute(link netlink.Link, dst *net.IPNet, scope netlink.Scope, flags int, gw net.IP) (bool, error) {
 	var err error
-	if gw != nil {
-		err = ip.ValidateExpectedRoute([]*types.Route{
-			{
-				Dst: *dst,
-				GW:  gw,
-			},
-		})
-		if err == nil {
-			return false, nil
-		}
-		if !strings.Contains(err.Error(), "not found") {
-			return false, err
-		}
-	}
 	r := &netlink.Route{
 		LinkIndex: link.Attrs().Index,
 		Scope:     scope,
@@ -280,6 +264,17 @@ func ensureRoute(link netlink.Link, dst *net.IPNet, scope netlink.Scope, flags i
 		Dst:       dst,
 		Gw:        gw,
 	}
+
+	if gw != nil {
+		err = ValidateExpectedRoute([]*netlink.Route{r})
+		if err == nil {
+			return false, nil
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			return false, err
+		}
+	}
+
 	err = RouteReplace(r)
 	if err != nil {
 		return false, err
@@ -757,5 +752,46 @@ func EnsureClsActQdsic(link netlink.Link) error {
 	if err := netlink.QdiscReplace(qdisc); err != nil {
 		return errors.Wrapf(err, "replace clsact qdisc for dev %s error", link.Attrs().Name)
 	}
+	return nil
+}
+
+func ValidateExpectedRoute(resultRoutes []*netlink.Route) error {
+	for _, route := range resultRoutes {
+		find := *route
+		routeFilter := netlink.RT_FILTER_DST | netlink.RT_FILTER_GW
+		var family int
+
+		switch {
+		case route.Dst.IP.To4() != nil:
+			family = netlink.FAMILY_V4
+			// Default route needs Dst set to nil
+			if route.Dst.String() == "0.0.0.0/0" {
+				find.Dst = nil
+			}
+		case len(route.Dst.IP) == net.IPv6len:
+			family = netlink.FAMILY_V6
+			// Default route needs Dst set to nil
+			if route.Dst.String() == "::/0" {
+				find.Dst = nil
+			}
+		default:
+			return fmt.Errorf("Invalid static route found %v", route)
+		}
+		if route.Scope > 0 {
+			routeFilter = routeFilter | netlink.RT_FILTER_SCOPE
+		}
+		if route.Table > 0 {
+			routeFilter = routeFilter | netlink.RT_FILTER_TABLE
+		}
+
+		wasFound, err := netlink.RouteListFiltered(family, &find, routeFilter)
+		if err != nil {
+			return fmt.Errorf("Expected Route %v not route table lookup error %v", route, err)
+		}
+		if wasFound == nil {
+			return fmt.Errorf("Expected Route %v not found in routing table", route)
+		}
+	}
+
 	return nil
 }
