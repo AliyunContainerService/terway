@@ -1,3 +1,8 @@
+# 开启 IPv6 双栈
+
+## 配置
+
+启用双栈模式，需要在 terway 配置中配置 `ip_stack` 为 `dual`，并重启 Terway Pods
 
 ```yaml
 ❯ kubectl get cm -n kube-system eni-config -oyaml
@@ -21,16 +26,15 @@ data:
 kind: ConfigMap
 ```
 
-
-https://ram.console.aliyun.com/roles/AliyunCSManagedNetworkRole?spm=a2c8b.12215514.permissionlist.principal_detail.5e07336ann7etp
-terway-controlplane 需要授权中包含以下 [`RAM 权限`](https://ram.console.aliyun.com/)
+确保 Terway 使用的 RAM 包含下面 `RAM` 权限
 
 ```json
 {
   "Version": "1",
   "Statement": [{
     "Action": [
-      "ecs:AssignIpv6Addresses"  <--- new
+      "ecs:AssignIpv6Addresses",
+      "ecs:UnassignIpv6Addresses"
     ],
     "Resource": [
       "*"
