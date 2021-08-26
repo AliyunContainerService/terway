@@ -38,6 +38,16 @@ func IsStsPod(pod *corev1.Pod) bool {
 	return false
 }
 
+// IsDaemonSetPod pod is create by daemonSet
+func IsDaemonSetPod(pod *corev1.Pod) bool {
+	for _, own := range pod.GetObjectMeta().GetOwnerReferences() {
+		if own.Kind == "DaemonSet" {
+			return true
+		}
+	}
+	return false
+}
+
 var (
 	// DefaultPatchBackoff for patch status field
 	DefaultPatchBackoff = wait.Backoff{
