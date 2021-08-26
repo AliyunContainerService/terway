@@ -76,6 +76,10 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		return webhook.Allowed("host network")
 	}
 
+	if utils.IsDaemonSetPod(pod) {
+		return webhook.Allowed("daemonSet pod")
+	}
+
 	// 1. check pod with podNetworking config and get one
 	podNetworkings := &v1beta1.PodNetworkingList{}
 	err = client.List(ctx, podNetworkings)
