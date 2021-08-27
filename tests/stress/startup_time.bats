@@ -2,7 +2,7 @@
 load ../helpers
 
 # This testcase for measuring the deployment time of pods for large scale cluster
-# see: templates/testcases/stress/nginx-pod.yml
+# see: templates/testcases/stress/nginx-pod-startup.yml
 
 # get interval of a pod from "Initialized" to "Ready"
 function get_interval() {
@@ -33,7 +33,7 @@ setup() {
 
 @test "startup pod" {
   # apply deployment, with name "nginx-deployment" and pod label "app=nginx-test"
-  kubectl apply -f ../templates/testcases/stress/nginx-pod.yml
+  kubectl apply -f ../templates/testcases/stress/nginx-pod-startup.yml
   # wait for all pods ready
   retry 20 5 deployment_ready deployment nginx-deployment
   retry 20 3 pods_all_running pod -l app=nginx-test

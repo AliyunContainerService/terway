@@ -1,0 +1,11 @@
+apiVersion: network.alibabacloud.com/v1beta1
+kind: PodNetworking
+metadata:
+  name: stress-connection-stateless
+spec:
+  ipType:
+    type: Elastic
+  selector:
+    podSelector:
+      matchLabels:
+        usage: stress-test

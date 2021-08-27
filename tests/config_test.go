@@ -1,7 +1,14 @@
+//go:build e2e
+// +build e2e
+
 package tests
 
 import (
 	"flag"
+
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
 
 var enableTrunk bool
@@ -12,13 +19,38 @@ func init() {
 	flag.BoolVar(&enablePolicy, "policy", false, "install network policy")
 }
 
-type TestResConfig struct {
+type ResConfig struct {
 	Description string
 
-	Name        string
-	Namespace   string
-	Labels      map[string]string
+	Name      string
+	Namespace string
+	Labels    map[string]string
+}
+
+type PodResConfig struct {
+	*ResConfig
 	HostNetwork bool
+}
+
+type ServiceResConfig struct {
+	*ResConfig
+	PodSelectLabels map[string]string
+	Type            corev1.ServiceType
+	Headless        bool
+}
+
+type NetworkPolicyConfig struct {
+	*ResConfig
+	PodSelectLabels        map[string]string
+	IngressPodLabels       map[string]string
+	IngressNamespaceLabels map[string]string
+}
+
+type PodNetworkingConfig struct {
+	*ResConfig
+	PodSelectLabels map[string]string
+	NamespaceLabels map[string]string
+	IPType          v1beta1.IPType
 }
 
 type Resource struct {
@@ -31,45 +63,203 @@ type TestCase struct {
 	Src Resource
 	Dst Resource
 
-	Status bool // status true or fail
+	Status bool // status true or false
 }
 
 type TestType string
 
 const (
-	TestTypePodToPod     TestType = "pod2pod"
-	TestTypePodToService TestType = "pod2service"
+	TestTypePodToPod         TestType = "pod2pod"
+	TestTypePodToServiceIP   TestType = "pod2serviceIP"
+	TestTypePodToServiceName TestType = "pod2serviceName"
 )
 
-var podConnA = TestResConfig{
-	Description: "",
-	Name:        "container-network-pod-src",
-	Namespace:   "network-test",
-	Labels: map[string]string{
-		"app": "container-network-pod-src",
-		"e2e": "true",
+var podConnA = PodResConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "container-network-ds-pod-src",
+		Namespace:   "network-test",
+		Labels: map[string]string{
+			"app":    "container-network-pod-src",
+			"e2e":    "true",
+			"ref":    "daemon-set",
+			"access": "true", // when enable policy, src pod can access dst pod
+		},
 	},
 	HostNetwork: false,
 }
 
-var podConnB = TestResConfig{
-	Description: "",
-	Name:        "container-network-pod-dst",
-	Namespace:   "network-test",
-	Labels: map[string]string{
+var podConnB = PodResConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "host-network-ds-pod-src",
+		Namespace:   "network-test",
+		Labels: map[string]string{
+			"app":    "host-network-pod-src",
+			"e2e":    "true",
+			"ref":    "daemon-set",
+			"access": "false", // when enable policy, src pod can't access dst pod
+		},
+	},
+	HostNetwork: true,
+}
+
+var podConnC = PodResConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "container-network-deploy-pod-dst",
+		Namespace:   "network-test",
+		Labels: map[string]string{
+			"app": "container-network-pod-dst",
+			"e2e": "true",
+			"ref": "deployment",
+		},
+	},
+	HostNetwork: false,
+}
+
+var podConnD = PodResConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "container-network-sts-pod-dst",
+		Namespace:   "network-test",
+		Labels: map[string]string{
+			"app": "container-network-pod-dst",
+			"e2e": "true",
+			"ref": "stateful-set",
+		},
+	},
+	HostNetwork: false,
+}
+
+var clusterIPService = ServiceResConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "cluster-ip-service",
+		Namespace:   "network-test",
+		Labels: map[string]string{
+			"svc": "container-network-svc-dst",
+			"e2e": "true",
+		},
+	},
+	PodSelectLabels: map[string]string{
+		"app": "container-network-pod-dst",
+		"e2e": "true",
+		"ref": "deployment",
+	},
+	Type:     corev1.ServiceTypeClusterIP,
+	Headless: false,
+}
+
+var nodePortService = ServiceResConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "node-port-service",
+		Namespace:   "network-test",
+		Labels: map[string]string{
+			"svc": "container-network-svc-dst",
+			"e2e": "true",
+		},
+	},
+	PodSelectLabels: map[string]string{
+		"app": "container-network-pod-dst",
+		"e2e": "true",
+		"ref": "deployment",
+	},
+	Type:     corev1.ServiceTypeNodePort,
+	Headless: false,
+}
+
+var loadBalancerService = ServiceResConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "load-balancer-service",
+		Namespace:   "network-test",
+		Labels: map[string]string{
+			"svc": "container-network-svc-dst",
+			"e2e": "true",
+		},
+	},
+	PodSelectLabels: map[string]string{
+		"app": "container-network-pod-dst",
+		"e2e": "true",
+		"ref": "deployment",
+	},
+	Type:     corev1.ServiceTypeLoadBalancer,
+	Headless: false,
+}
+
+var headlessService = ServiceResConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "headless-service",
+		Namespace:   "network-test",
+		Labels: map[string]string{
+			"svc": "container-network-svc-dst",
+			"e2e": "true",
+		},
+	},
+	PodSelectLabels: map[string]string{
+		"app": "container-network-pod-dst",
+		"e2e": "true",
+		"ref": "deployment",
+	},
+	Type:     corev1.ServiceTypeClusterIP,
+	Headless: true,
+}
+
+var networkPolicy = NetworkPolicyConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "access-policy",
+		Namespace:   "network-test",
+	},
+	PodSelectLabels: map[string]string{
 		"app": "container-network-pod-dst",
 		"e2e": "true",
 	},
-	HostNetwork: false,
+	IngressPodLabels: map[string]string{
+		"access": "true",
+	},
+	IngressNamespaceLabels: map[string]string{
+		"project": "network-test",
+	},
 }
 
-var hostNetworkPod = TestResConfig{
-	Description: "",
-	Name:        "host-network-pod",
-	Namespace:   "network-test",
-	Labels: map[string]string{
-		"app": "host-network-pod",
-		"e2e": "true",
+var elasticPodNetWorking = PodNetworkingConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "stateless",
 	},
-	HostNetwork: true,
+	PodSelectLabels: map[string]string{
+		"app": "container-network-pod-dst",
+		"e2e": "true",
+		"ref": "deployment",
+	},
+	NamespaceLabels: map[string]string{
+		"project": "network-test",
+	},
+	IPType: v1beta1.IPType{
+		Type: v1beta1.IPAllocTypeElastic,
+	},
+}
+
+var fixedPodNetWorking = PodNetworkingConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "fixed-ip",
+	},
+	PodSelectLabels: map[string]string{
+		"app": "container-network-pod-dst",
+		"e2e": "true",
+		"ref": "stateful-set",
+	},
+	NamespaceLabels: map[string]string{
+		"project": "network-test",
+	},
+	IPType: v1beta1.IPType{
+		Type:            v1beta1.IPAllocTypeFixed,
+		ReleaseStrategy: v1beta1.ReleaseStrategyTTL,
+		ReleaseAfter:    "5m0s",
+	},
 }

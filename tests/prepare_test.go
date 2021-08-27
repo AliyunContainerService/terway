@@ -1,3 +1,6 @@
+//go:build e2e
+// +build e2e
+
 package tests
 
 import (
@@ -8,6 +11,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sLabels "k8s.io/apimachinery/pkg/labels"
@@ -17,6 +21,9 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+
+	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned"
 )
 
 var backoff = wait.Backoff{
@@ -32,6 +39,9 @@ func EnsureNamespace(ctx context.Context, cs kubernetes.Interface, name string) 
 		if errors.IsNotFound(err) {
 			_, err = cs.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 				Name: name,
+				Labels: map[string]string{
+					"project": "network-test",
+				},
 			}}, metav1.CreateOptions{})
 			return err
 		}
@@ -39,7 +49,83 @@ func EnsureNamespace(ctx context.Context, cs kubernetes.Interface, name string) 
 	return err
 }
 
-func EnsureContainerPods(ctx context.Context, cs kubernetes.Interface, cfg TestResConfig) ([]corev1.Pod, error) {
+func EnsurePodNetworking(ctx context.Context, cs *versioned.Clientset, cfg PodNetworkingConfig) (*v1beta1.PodNetworking, error) {
+	pnTpl := &v1beta1.PodNetworking{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: cfg.Name,
+		},
+		Spec: v1beta1.PodNetworkingSpec{
+			IPType: cfg.IPType,
+			Selector: v1beta1.Selector{
+				PodSelector: &metav1.LabelSelector{
+					MatchLabels: cfg.PodSelectLabels,
+				},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: cfg.NamespaceLabels,
+				},
+			},
+		},
+	}
+	_, err := cs.NetworkV1beta1().PodNetworkings().Create(ctx, pnTpl, metav1.CreateOptions{})
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return nil, err
+	}
+	var pn *v1beta1.PodNetworking
+	err = wait.ExponentialBackoff(backoff, func() (bool, error) {
+		pn, err = cs.NetworkV1beta1().PodNetworkings().Get(ctx, cfg.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		if pn.Status.Status != v1beta1.NetworkingStatusReady {
+			return false, nil
+		}
+		return true, nil
+	})
+	return pn, err
+}
+
+func EnsureNetworkPolicy(ctx context.Context, cs kubernetes.Interface, cfg NetworkPolicyConfig) (*v1.NetworkPolicy, error) {
+	networkPolicyTpl := &v1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cfg.Name,
+			Namespace: cfg.Namespace,
+		},
+		Spec: v1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: cfg.PodSelectLabels,
+			},
+			Ingress: []v1.NetworkPolicyIngressRule{
+				{
+					From: []v1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: cfg.IngressPodLabels,
+							},
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: cfg.IngressNamespaceLabels,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := cs.NetworkingV1().NetworkPolicies(cfg.Namespace).Create(ctx, networkPolicyTpl, metav1.CreateOptions{})
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return nil, err
+	}
+	var np *v1.NetworkPolicy
+	err = wait.ExponentialBackoff(backoff, func() (bool, error) {
+		np, err = cs.NetworkingV1().NetworkPolicies(cfg.Namespace).Get(ctx, cfg.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		return true, nil
+	})
+	return np, err
+}
+
+func EnsureDaemonSet(ctx context.Context, cs kubernetes.Interface, cfg PodResConfig) ([]corev1.Pod, error) {
 	dsTpl := &appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cfg.Name,
@@ -93,7 +179,111 @@ func EnsureContainerPods(ctx context.Context, cs kubernetes.Interface, cfg TestR
 	return pods, nil
 }
 
-func EnsureService(ctx context.Context, cs kubernetes.Interface, cfg TestResConfig) (*corev1.Service, error) {
+func EnsureDeployment(ctx context.Context, cs kubernetes.Interface, cfg PodResConfig) ([]corev1.Pod, error) {
+	deplTml := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cfg.Name,
+			Namespace: cfg.Namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: cfg.Labels,
+			},
+			Replicas: func(a int32) *int32 { return &a }(2),
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: cfg.Labels,
+				},
+				Spec: corev1.PodSpec{
+					HostNetwork:                   cfg.HostNetwork,
+					TerminationGracePeriodSeconds: func(a int64) *int64 { return &a }(0),
+					Containers: []corev1.Container{
+						{
+							Name:            "echo",
+							Image:           "l1b0k/echo",
+							ImagePullPolicy: corev1.PullAlways,
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := cs.AppsV1().Deployments(cfg.Namespace).Create(ctx, deplTml, metav1.CreateOptions{})
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return nil, err
+	}
+	uid := ""
+	err = wait.ExponentialBackoff(backoff, func() (bool, error) {
+		delp, err := cs.AppsV1().Deployments(cfg.Namespace).Get(ctx, cfg.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		uid = string(delp.UID)
+		return delp.Status.Replicas == *delp.Spec.Replicas && delp.Status.Replicas == delp.Status.AvailableReplicas, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	pods, err := GetPodsByRef(ctx, cs, uid)
+	if err != nil {
+		return nil, err
+	}
+	return pods, nil
+}
+
+func EnsureStatefulSet(ctx context.Context, cs kubernetes.Interface, cfg PodResConfig) ([]corev1.Pod, error) {
+	stsTml := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cfg.Name,
+			Namespace: cfg.Namespace,
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: cfg.Labels,
+			},
+			Replicas: func(a int32) *int32 { return &a }(2),
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: cfg.Labels,
+				},
+				Spec: corev1.PodSpec{
+					HostNetwork:                   cfg.HostNetwork,
+					TerminationGracePeriodSeconds: func(a int64) *int64 { return &a }(0),
+					Containers: []corev1.Container{
+						{
+							Name:            "echo",
+							Image:           "l1b0k/echo",
+							ImagePullPolicy: corev1.PullAlways,
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := cs.AppsV1().StatefulSets(cfg.Namespace).Create(ctx, stsTml, metav1.CreateOptions{})
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return nil, err
+	}
+	uid := ""
+	err = wait.ExponentialBackoff(backoff, func() (bool, error) {
+		sts, err := cs.AppsV1().StatefulSets(cfg.Namespace).Get(ctx, cfg.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		uid = string(sts.UID)
+		return sts.Status.Replicas == *sts.Spec.Replicas && sts.Status.Replicas == sts.Status.ReadyReplicas, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	pods, err := GetPodsByRef(ctx, cs, uid)
+	if err != nil {
+		return nil, err
+	}
+	return pods, nil
+}
+
+func EnsureService(ctx context.Context, cs kubernetes.Interface, cfg ServiceResConfig) (*corev1.Service, error) {
 	svc, err := cs.CoreV1().Services(cfg.Namespace).Get(ctx, cfg.Name, metav1.GetOptions{})
 	if err == nil {
 		return svc, nil
@@ -102,6 +292,7 @@ func EnsureService(ctx context.Context, cs kubernetes.Interface, cfg TestResConf
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cfg.Name,
 			Namespace: cfg.Namespace,
+			Labels:    cfg.Labels,
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
@@ -111,12 +302,16 @@ func EnsureService(ctx context.Context, cs kubernetes.Interface, cfg TestResConf
 					TargetPort: intstr.FromInt(80),
 				},
 			},
-			Selector:              cfg.Labels,
+			Selector:              cfg.PodSelectLabels,
 			SessionAffinity:       corev1.ServiceAffinityNone,
 			ExternalTrafficPolicy: "",
 			IPFamily:              nil,
-			Type:                  corev1.ServiceTypeLoadBalancer,
+			Type:                  cfg.Type,
 		},
+	}
+
+	if cfg.Headless {
+		svcTpl.Spec.ClusterIP = "None"
 	}
 	svc, err = cs.CoreV1().Services(cfg.Namespace).Create(ctx, svcTpl, metav1.CreateOptions{})
 	if err != nil {
@@ -127,17 +322,49 @@ func EnsureService(ctx context.Context, cs kubernetes.Interface, cfg TestResConf
 		if err != nil {
 			return false, nil
 		}
-		if len(svc.Status.LoadBalancer.Ingress) > 0 {
-			return true, nil
+		if cfg.Type == corev1.ServiceTypeLoadBalancer {
+			if len(svc.Status.LoadBalancer.Ingress) > 0 {
+				return true, nil
+			}
+			return false, nil
 		}
-
-		return false, nil
+		return true, nil
 	})
 
 	return svc, err
 }
 
-func DeleteDs(ctx context.Context, cs kubernetes.Interface, namespace, name string) error {
+func DeletePodNetworking(ctx context.Context, cs *versioned.Clientset, name string) error {
+	err := cs.NetworkV1beta1().PodNetworkings().Delete(ctx, name, metav1.DeleteOptions{})
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	err = wait.ExponentialBackoff(backoff, func() (bool, error) {
+		_, err := cs.NetworkV1beta1().PodNetworkings().Get(ctx, name, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, nil
+	})
+	return err
+}
+
+func DeleteNetworkPolicy(ctx context.Context, cs kubernetes.Interface, namespace, name string) error {
+	err := cs.NetworkingV1().NetworkPolicies(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	err = wait.ExponentialBackoff(backoff, func() (bool, error) {
+		_, err := cs.NetworkingV1().NetworkPolicies(namespace).Get(ctx, name, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, nil
+	})
+	return err
+}
+
+func DeleteDaemonSet(ctx context.Context, cs kubernetes.Interface, namespace, name string) error {
 	err := cs.AppsV1().DaemonSets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if errors.IsNotFound(err) {
 		return nil
@@ -152,7 +379,37 @@ func DeleteDs(ctx context.Context, cs kubernetes.Interface, namespace, name stri
 	return err
 }
 
-func DeleteSvc(ctx context.Context, cs kubernetes.Interface, namespace, name string) error {
+func DeleteDeployment(ctx context.Context, cs kubernetes.Interface, namespace, name string) error {
+	err := cs.AppsV1().Deployments(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	err = wait.ExponentialBackoff(backoff, func() (bool, error) {
+		_, err := cs.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, nil
+	})
+	return err
+}
+
+func DeleteStatefulSet(ctx context.Context, cs kubernetes.Interface, namespace, name string) error {
+	err := cs.AppsV1().StatefulSets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	err = wait.ExponentialBackoff(backoff, func() (bool, error) {
+		_, err := cs.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, nil
+	})
+	return err
+}
+
+func DeleteService(ctx context.Context, cs kubernetes.Interface, namespace, name string) error {
 	err := cs.CoreV1().Services(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if errors.IsNotFound(err) {
 		return nil
@@ -167,7 +424,7 @@ func DeleteSvc(ctx context.Context, cs kubernetes.Interface, namespace, name str
 	return err
 }
 
-func DeleteNs(ctx context.Context, cs kubernetes.Interface, name string) error {
+func DeleteNamespace(ctx context.Context, cs kubernetes.Interface, name string) error {
 	err := cs.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{})
 	if errors.IsNotFound(err) {
 		return nil
@@ -222,7 +479,7 @@ func ListNodeIPs(ctx context.Context, cs kubernetes.Interface) ([]net.IP, error)
 	return result, nil
 }
 
-func Exec(ctx context.Context, cs kubernetes.Interface, restConf *rest.Config, podNamespace, podName string, cmd []string) ([]byte, []byte, error) {
+func Exec(cs kubernetes.Interface, restConf *rest.Config, podNamespace, podName string, cmd []string) ([]byte, []byte, error) {
 	req := cs.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(podName).
@@ -237,6 +494,9 @@ func Exec(ctx context.Context, cs kubernetes.Interface, restConf *rest.Config, p
 		}, scheme.ParameterCodec)
 
 	exec, err := remotecommand.NewSPDYExecutor(restConf, "POST", req.URL())
+	if err != nil {
+		return nil, nil, err
+	}
 
 	buf := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}

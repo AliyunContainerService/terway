@@ -41,6 +41,7 @@ spec:
     metadata:
       labels:
         app: nginx-test
+        usage: stress-test
     spec:
       volumes:
         - name: nginx

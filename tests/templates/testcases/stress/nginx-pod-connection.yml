@@ -1,3 +1,10 @@
+# test namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: stress-connection
+
+---
 # nginx deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -15,6 +22,7 @@ spec:
     metadata:
       labels:
         app: nginx
+        usage: stress-test
     spec:
       containers:
         - image: registry.aliyuncs.com/acs-sample/nginx
@@ -72,6 +80,7 @@ spec:
     metadata:
       labels:
         app: ab-deploy-pod
+        usage: stress-test
     spec:
       containers:
         - image: registry.aliyuncs.com/wangbs/netperf
@@ -102,6 +111,7 @@ spec:
     metadata:
       labels:
         app: ab-deploy-svc
+        usage: stress-test
     spec:
       containers:
         - image: registry.aliyuncs.com/wangbs/netperf
@@ -132,6 +142,7 @@ spec:
     metadata:
       labels:
         app: ab-deploy-svc-nk
+        usage: stress-test
     spec:
       containers:
         - image: registry.aliyuncs.com/wangbs/netperf
@@ -161,6 +172,7 @@ spec:
       name: blackbox
       labels:
         app: blackbox
+        usage: stress-test
     spec:
       containers:
         - name: blackbox
