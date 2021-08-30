@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 	"syscall"
 	"time"
 
@@ -33,6 +32,9 @@ var Log = DefaultLogger.WithField("subSys", "terway-cni")
 // DefaultLogger default log
 var DefaultLogger = NewDefaultLogger()
 
+// Hook for log
+var Hook = &PodInfoHook{ExtraInfo: make(map[string]string)}
+
 func NewDefaultLogger() *logrus.Logger {
 	logger := logrus.New()
 	logger.Formatter = &logrus.TextFormatter{
@@ -41,7 +43,33 @@ func NewDefaultLogger() *logrus.Logger {
 		DisableQuote:     true,
 	}
 	logger.SetLevel(logrus.InfoLevel)
+	logger.AddHook(Hook)
 	return logger
+}
+
+type PodInfoHook struct {
+	ExtraInfo map[string]string
+}
+
+func (p *PodInfoHook) Levels() []logrus.Level {
+	return logrus.AllLevels
+}
+
+func (p *PodInfoHook) Fire(e *logrus.Entry) error {
+	for k, v := range p.ExtraInfo {
+		e.Data[k] = v
+	}
+	return nil
+}
+
+func (p *PodInfoHook) AddExtraInfo(k, v string) {
+	p.ExtraInfo[k] = v
+}
+
+func (p *PodInfoHook) AddExtraInfos(e map[string]string) {
+	for k, v := range e {
+		p.ExtraInfo[k] = v
+	}
 }
 
 func SetLogDebug() {
@@ -107,7 +135,7 @@ func getRouteTableID(linkIndex int) int {
 }
 
 // EnsureHostNsConfig setup host namespace configs
-func EnsureHostNsConfig() error {
+func EnsureHostNsConfig(ipv4, ipv6 bool) error {
 	for _, key := range []string{"default", "all"} {
 		for _, cfg := range ipv4NetConfig {
 			err := terwaySysctl.EnsureConf(fmt.Sprintf(cfg[0], key), cfg[1])
@@ -117,7 +145,7 @@ func EnsureHostNsConfig() error {
 		}
 	}
 
-	return EnsureNetConfSet(true, false)
+	return EnsureNetConfSet(ipv4, ipv6)
 }
 
 // EnsureLinkUp set link up,return changed and err
@@ -209,77 +237,77 @@ func EnsureAddr(link netlink.Link, expect *netlink.Addr) (bool, error) {
 	return true, AddrReplace(link, expect)
 }
 
-func EnsureDefaultRoute(link netlink.Link, gw *terwayTypes.IPSet) (bool, error) {
+// FoundRoutes look up routes
+func FoundRoutes(expected *netlink.Route) ([]netlink.Route, error) {
+	family := NetlinkFamily(expected.Dst.IP)
+	routeFilter := netlink.RT_FILTER_DST
+	if expected.Dst == nil {
+		return nil, fmt.Errorf("dst in route expect not nil")
+	}
+	find := *expected
+
+	if find.Dst.String() == "::/0" || find.Dst.String() == "0.0.0.0/0" {
+		find.Dst = nil
+	}
+	if find.LinkIndex > 0 {
+		routeFilter = routeFilter | netlink.RT_FILTER_OIF
+	}
+	if find.Scope > 0 {
+		routeFilter = routeFilter | netlink.RT_FILTER_SCOPE
+	}
+	if find.Gw != nil {
+		routeFilter = routeFilter | netlink.RT_FILTER_GW
+	}
+	if find.Table > 0 {
+		routeFilter = routeFilter | netlink.RT_FILTER_TABLE
+	}
+	return netlink.RouteListFiltered(family, &find, routeFilter)
+}
+
+// EnsureRoute will call ip route replace if route is not found
+func EnsureRoute(expected *netlink.Route) (bool, error) {
+	routes, err := FoundRoutes(expected)
+	if err != nil {
+		return false, fmt.Errorf("error list expected: %v", err)
+	}
+	if len(routes) > 0 {
+		return false, nil
+	}
+
+	return true, RouteReplace(expected)
+}
+
+func EnsureDefaultRoute(link netlink.Link, gw *terwayTypes.IPSet, table int) (bool, error) {
 	var changed bool
 	if gw.IPv4 != nil {
-		ok, err := ensureRoute(link, defaultRoute, netlink.SCOPE_UNIVERSE, int(netlink.FLAG_ONLINK), gw.IPv4)
+		c, err := EnsureRoute(&netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Dst:       defaultRoute,
+			Gw:        gw.IPv4,
+			Table:     table,
+			Flags:     int(netlink.FLAG_ONLINK),
+		})
 		if err != nil {
 			return changed, err
 		}
-		if ok {
-			changed = true
-		}
+		changed = changed || c
 	}
 	if gw.IPv6 != nil {
-		ok, err := ensureRoute(link, defaultRouteIPv6, netlink.SCOPE_UNIVERSE, int(netlink.FLAG_ONLINK), gw.IPv6)
+		c, err := EnsureRoute(&netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Dst:       defaultRouteIPv6,
+			Gw:        gw.IPv6,
+			Table:     table,
+			Flags:     int(netlink.FLAG_ONLINK),
+		})
 		if err != nil {
 			return changed, err
 		}
-		if ok {
-			changed = true
-		}
+		changed = changed || c
 	}
 	return changed, nil
-}
-
-func EnsureRoute(link netlink.Link, hostIPSet *terwayTypes.IPNetSet) (bool, error) {
-	var changed bool
-	if hostIPSet.IPv4 != nil {
-		ok, err := ensureRoute(link, hostIPSet.IPv4, netlink.SCOPE_LINK, 0, nil)
-		if err != nil {
-			return changed, err
-		}
-		if ok {
-			changed = true
-		}
-	}
-	if hostIPSet.IPv6 != nil {
-		ok, err := ensureRoute(link, hostIPSet.IPv6, netlink.SCOPE_LINK, 0, nil)
-		if err != nil {
-			return changed, err
-		}
-		if ok {
-			changed = true
-		}
-	}
-	return changed, nil
-}
-
-func ensureRoute(link netlink.Link, dst *net.IPNet, scope netlink.Scope, flags int, gw net.IP) (bool, error) {
-	var err error
-	r := &netlink.Route{
-		LinkIndex: link.Attrs().Index,
-		Scope:     scope,
-		Flags:     flags,
-		Dst:       dst,
-		Gw:        gw,
-	}
-
-	if gw != nil {
-		err = ValidateExpectedRoute([]*netlink.Route{r})
-		if err == nil {
-			return false, nil
-		}
-		if !strings.Contains(err.Error(), "not found") {
-			return false, err
-		}
-	}
-
-	err = RouteReplace(r)
-	if err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 // EnsureHostToContainerRoute create host to container route
@@ -425,82 +453,58 @@ func IPNetToMaxMask(ipNet *terwayTypes.IPNetSet) {
 	}
 }
 
-func FindIPRules(ipNet *net.IPNet, found func(rule *netlink.Rule) error) error {
-	var ruleList []netlink.Rule
-	var err error
-	if terwayIP.IPv6(ipNet.IP) {
-		ruleList, err = netlink.RuleList(netlink.FAMILY_V6)
-	} else {
-		ruleList, err = netlink.RuleList(netlink.FAMILY_V4)
+// FindIPRule look up ip rules in config
+func FindIPRule(rule *netlink.Rule) ([]netlink.Rule, error) {
+	var filterMask uint64
+	family := netlink.FAMILY_V4
+	if rule.Src == nil && rule.Dst == nil {
+		return nil, errors.New("both src and dst is nil")
 	}
-	if err != nil {
-		return fmt.Errorf("error get ip rule, %w", err)
+
+	if rule.Src != nil {
+		filterMask = filterMask | netlink.RT_FILTER_SRC
+		family = NetlinkFamily(rule.Src.IP)
 	}
-	for i := range ruleList {
-		if terwayIP.NetEqual(ipNet, ruleList[i].Src) || terwayIP.NetEqual(ipNet, ruleList[i].Dst) {
-			// need check copy
-			err = found(&ruleList[i])
-			if err != nil {
-				return err
-			}
-		}
+	if rule.Dst != nil {
+		filterMask = filterMask | netlink.RT_FILTER_DST
+		family = NetlinkFamily(rule.Dst.IP)
 	}
-	return nil
+
+	return netlink.RuleListFiltered(family, rule, filterMask)
 }
 
-func EnsurePolicyRule(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, tableID int) (bool, error) {
+func EnsureIPRule(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, tableID int) (bool, error) {
 	changed := false
 
 	exec := func(ipNet *net.IPNet, expected *netlink.Rule) error {
-		// 1. clean exist rules
-		found := false
-		ruleList, err := netlink.RuleList(NetlinkFamily(ipNet.IP))
+		// 1. clean exist rules if needed
+		ruleList, err := FindIPRule(expected)
 		if err != nil {
-			return fmt.Errorf("error exec ip rule list, %w", err)
+			return err
 		}
+		found := false
 		for _, rule := range ruleList {
-			if expected.Src != nil && rule.Src != nil {
-				if expected.Src.IP.Equal(rule.Src.IP) {
-					if expected.Src.IP.String() != rule.Src.IP.String() ||
-						expected.Table != rule.Table ||
-						expected.Priority != rule.Priority ||
-						expected.IifName != rule.IifName {
-						err := RuleDel(&rule)
-						if err != nil {
-							if os.IsNotExist(err) {
-								rule.IifName = ""
-								return RuleDel(&rule)
-							}
-						}
-						changed = true
-					} else {
-						found = true
-					}
-				}
+			del := false
+			if rule.Table != tableID {
+				del = true
 			}
-			// won't have src dst both set
-			if expected.Dst != nil && rule.Dst != nil {
-				if expected.Dst.IP.Equal(rule.Dst.IP) {
-					if expected.Dst.IP.String() != rule.Dst.IP.String() ||
-						expected.Table != rule.Table ||
-						expected.Priority != rule.Priority {
-						err := RuleDel(&rule)
-						if err != nil {
-							if os.IsNotExist(err) {
-								rule.IifName = ""
-								return RuleDel(&rule)
-							}
-						}
-						changed = true
-					} else {
-						found = true
-					}
+			if rule.Priority != expected.Priority {
+				del = true
+			}
+			if del {
+				changed = true
+				err = RuleDel(&rule)
+				if err != nil {
+					return err
 				}
+			} else {
+				found = true
 			}
 		}
 		if found {
 			return nil
 		}
+		changed = true
 		return RuleAdd(expected)
 	}
 
@@ -556,6 +560,30 @@ func EnsurePolicyRule(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, tableID
 		}
 	}
 	return changed, nil
+}
+
+func DelIPRulesByIP(ipNet *net.IPNet) error {
+	var ruleList []netlink.Rule
+	var err error
+	if terwayIP.IPv6(ipNet.IP) {
+		ruleList, err = netlink.RuleList(netlink.FAMILY_V6)
+	} else {
+		ruleList, err = netlink.RuleList(netlink.FAMILY_V4)
+	}
+	if err != nil {
+		return fmt.Errorf("error get ip rule, %w", err)
+	}
+
+	for _, rule := range ruleList {
+		if terwayIP.NetEqual(ipNet, rule.Src) || terwayIP.NetEqual(ipNet, rule.Dst) {
+			innerErr := RuleDel(&rule)
+			if innerErr != nil {
+				rule.IifName = ""
+				err = errors.Wrap(RuleDel(&rule), "error de")
+			}
+		}
+	}
+	return err
 }
 
 func EnableIPv6() error {
@@ -752,46 +780,5 @@ func EnsureClsActQdsic(link netlink.Link) error {
 	if err := netlink.QdiscReplace(qdisc); err != nil {
 		return errors.Wrapf(err, "replace clsact qdisc for dev %s error", link.Attrs().Name)
 	}
-	return nil
-}
-
-func ValidateExpectedRoute(resultRoutes []*netlink.Route) error {
-	for _, route := range resultRoutes {
-		find := *route
-		routeFilter := netlink.RT_FILTER_DST | netlink.RT_FILTER_GW
-		var family int
-
-		switch {
-		case route.Dst.IP.To4() != nil:
-			family = netlink.FAMILY_V4
-			// Default route needs Dst set to nil
-			if route.Dst.String() == "0.0.0.0/0" {
-				find.Dst = nil
-			}
-		case len(route.Dst.IP) == net.IPv6len:
-			family = netlink.FAMILY_V6
-			// Default route needs Dst set to nil
-			if route.Dst.String() == "::/0" {
-				find.Dst = nil
-			}
-		default:
-			return fmt.Errorf("Invalid static route found %v", route)
-		}
-		if route.Scope > 0 {
-			routeFilter = routeFilter | netlink.RT_FILTER_SCOPE
-		}
-		if route.Table > 0 {
-			routeFilter = routeFilter | netlink.RT_FILTER_TABLE
-		}
-
-		wasFound, err := netlink.RouteListFiltered(family, &find, routeFilter)
-		if err != nil {
-			return fmt.Errorf("Expected Route %v not route table lookup error %v", route, err)
-		}
-		if wasFound == nil {
-			return fmt.Errorf("Expected Route %v not found in routing table", route)
-		}
-	}
-
 	return nil
 }

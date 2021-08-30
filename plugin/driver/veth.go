@@ -8,6 +8,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/tc"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
+	"golang.org/x/sys/unix"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/pkg/errors"
@@ -21,15 +22,18 @@ const (
 	fromContainerPriority = 2048
 )
 
+// default addrs
 var (
 	_, defaultRoute, _     = net.ParseCIDR("0.0.0.0/0")
 	_, defaultRouteIPv6, _ = net.ParseCIDR("::/0")
-	linkIP                 = &net.IPNet{
-		IP:   net.IPv4(169, 254, 1, 1),
+	LinkIP                 = net.IPv4(169, 254, 1, 1)
+	LinkIPv6               = net.ParseIP("fe80::1")
+	linkIPNet              = &net.IPNet{
+		IP:   LinkIP,
 		Mask: net.CIDRMask(32, 32),
 	}
-	linkIPv6 = &net.IPNet{
-		IP:   net.ParseIP("fe80::1"),
+	linkIPNetv6 = &net.IPNet{
+		IP:   LinkIPv6,
 		Mask: net.CIDRMask(128, 128),
 	}
 )
@@ -92,12 +96,12 @@ func (d *VETHDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 
 		defaultGW := &terwayTypes.IPSet{}
 		if cfg.ContainerIPNet.IPv4 != nil {
-			defaultGW.IPv4 = linkIP.IP
+			defaultGW.IPv4 = linkIPNet.IP
 		}
 		if cfg.ContainerIPNet.IPv6 != nil {
-			defaultGW.IPv6 = linkIPv6.IP
+			defaultGW.IPv6 = linkIPNetv6.IP
 		}
-		_, err = EnsureDefaultRoute(contLink, defaultGW)
+		_, err = EnsureDefaultRoute(contLink, defaultGW, unix.RT_TABLE_MAIN)
 		if err != nil {
 			return err
 		}
@@ -108,23 +112,35 @@ func (d *VETHDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 			return err
 		}
 
-		// fixme
 		if len(cfg.ExtraRoutes) != 0 {
-			err = RouteAdd(&netlink.Route{
-				LinkIndex: contLink.Attrs().Index,
-				Scope:     netlink.SCOPE_LINK,
-				Dst:       linkIP,
-			})
-			if err != nil {
-				return fmt.Errorf("error add route for container veth, %w", err)
+			if d.ipv4 {
+				_, err = EnsureRoute(&netlink.Route{
+					LinkIndex: contLink.Attrs().Index,
+					Scope:     netlink.SCOPE_LINK,
+					Dst:       linkIPNet,
+				})
+				if err != nil {
+					return fmt.Errorf("error add route for container veth, %w", err)
+				}
 			}
+			if d.ipv6 {
+				_, err = EnsureRoute(&netlink.Route{
+					LinkIndex: contLink.Attrs().Index,
+					Scope:     netlink.SCOPE_LINK,
+					Dst:       linkIPNetv6,
+				})
+				if err != nil {
+					return fmt.Errorf("error add route for container veth, %w", err)
+				}
+			}
+
 			for _, extraRoute := range cfg.ExtraRoutes {
 				err = RouteAdd(&netlink.Route{
 					LinkIndex: contLink.Attrs().Index,
 					Scope:     netlink.SCOPE_UNIVERSE,
 					Flags:     int(netlink.FLAG_ONLINK),
 					Dst:       &extraRoute.Dst,
-					Gw:        linkIP.IP,
+					Gw:        extraRoute.GW,
 				})
 				if err != nil {
 					return fmt.Errorf("error add extra route for container veth, %w", err)
@@ -160,11 +176,21 @@ func (d *VETHDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 	}
 
 	if len(cfg.ExtraRoutes) != 0 {
-		err = AddrReplace(hostVETHLink, &netlink.Addr{
-			IPNet: linkIP,
-		})
-		if err != nil {
-			return fmt.Errorf("error add extra addr %s, %w", linkIP.String(), err)
+		if d.ipv4 {
+			err = AddrReplace(hostVETHLink, &netlink.Addr{
+				IPNet: linkIPNet,
+			})
+			if err != nil {
+				return fmt.Errorf("error add extra addr %s, %w", linkIPNet.String(), err)
+			}
+		}
+		if d.ipv6 {
+			err = AddrReplace(hostVETHLink, &netlink.Addr{
+				IPNet: linkIPNetv6,
+			})
+			if err != nil {
+				return fmt.Errorf("error add extra addr %s, %w", linkIPNetv6.String(), err)
+			}
 		}
 	}
 
@@ -178,12 +204,12 @@ func (d *VETHDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		tableID := getRouteTableID(parentLink.Attrs().Index)
 
 		// ensure eni config
-		err = d.ensureENIConfig(parentLink, cfg.TrunkENI, cfg.MTU, tableID, cfg.GatewayIP)
+		err = d.ensureENIConfig(parentLink, cfg.TrunkENI, cfg.MTU, tableID, cfg.GatewayIP, cfg.HostIPSet)
 		if err != nil {
 			return fmt.Errorf("error setup eni config, %w", err)
 		}
 
-		_, err = EnsurePolicyRule(hostVETHLink, cfg.ContainerIPNet, tableID)
+		_, err = EnsureIPRule(hostVETHLink, cfg.ContainerIPNet, tableID)
 		if err != nil {
 			return err
 		}
@@ -212,18 +238,13 @@ func (d *VETHDriver) Teardown(cfg *TeardownCfg, netNS ns.NetNS) error {
 
 	// 3. clean ip rules
 	if containerIP.IPv4 != nil {
-		innerErr := FindIPRules(containerIP.IPv4, func(rule *netlink.Rule) error {
-			rule.IifName = ""
-			return RuleDel(rule)
-		})
+		innerErr := DelIPRulesByIP(containerIP.IPv4)
 		if innerErr != nil {
 			err = fmt.Errorf("%w", innerErr)
 		}
 	}
 	if containerIP.IPv6 != nil {
-		innerErr := FindIPRules(containerIP.IPv6, func(rule *netlink.Rule) error {
-			return RuleDel(rule)
-		})
+		innerErr := DelIPRulesByIP(containerIP.IPv6)
 		if innerErr != nil {
 			err = fmt.Errorf("%w", innerErr)
 		}
@@ -280,14 +301,14 @@ func (d *VETHDriver) Check(cfg *CheckConfig) error {
 	}
 	tableID := getRouteTableID(parentLink.Attrs().Index)
 	// ensure eni config
-	err = d.ensureENIConfig(parentLink, cfg.TrunkENI, cfg.MTU, tableID, cfg.GatewayIP)
+	err = d.ensureENIConfig(parentLink, cfg.TrunkENI, cfg.MTU, tableID, cfg.GatewayIP, cfg.HostIPSet)
 	if err != nil {
 		Log.Debug(errors.Wrapf(err, "vethDriver, fail ensure eni config"))
 		return nil
 	}
 
 	// cfg.HostVETHName
-	_, err = EnsurePolicyRule(hostVETHLink, cfg.ContainerIPNet, tableID)
+	_, err = EnsureIPRule(hostVETHLink, cfg.ContainerIPNet, tableID)
 	if err != nil {
 		return err
 	}
@@ -302,7 +323,7 @@ func (d *VETHDriver) setupTC(link netlink.Link, bandwidthInBytes uint64) error {
 	return tc.SetRule(link, rule)
 }
 
-func (d *VETHDriver) ensureENIConfig(link netlink.Link, trunk bool, mtu, tableID int, gw *terwayTypes.IPSet) error {
+func (d *VETHDriver) ensureENIConfig(link netlink.Link, trunk bool, mtu, tableID int, gw *terwayTypes.IPSet, hostIPSet *terwayTypes.IPNetSet) error {
 	// set link up
 	_, err := EnsureLinkUp(link)
 	if err != nil {
@@ -315,11 +336,7 @@ func (d *VETHDriver) ensureENIConfig(link netlink.Link, trunk bool, mtu, tableID
 		return err
 	}
 
-	nodeIPSet, err := GetHostIP(d.ipv4, d.ipv6)
-	if err != nil {
-		return err
-	}
-	_, err = EnsureAddrWithPrefix(link, nodeIPSet, true)
+	_, err = EnsureAddrWithPrefix(link, hostIPSet, true)
 	if err != nil {
 		return err
 	}
@@ -331,60 +348,8 @@ func (d *VETHDriver) ensureENIConfig(link netlink.Link, trunk bool, mtu, tableID
 	}
 
 	// ensure default route
-	exec := func(expect *netlink.Route) error {
-		eniDefaultRoute, err := netlink.RouteListFiltered(NetlinkFamily(expect.Gw),
-			&netlink.Route{
-				Table: tableID,
-				Dst:   nil,
-			}, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_DST)
-		if err != nil {
-			return fmt.Errorf("error list route for eni route table: %v", err)
-		}
-		routeDelete := 0
-		for _, route := range eniDefaultRoute {
-			if route.LinkIndex == link.Attrs().Index {
-				continue
-			}
-			err = RouteDel(&route)
-			if err != nil {
-				return err
-			}
-			routeDelete++
-		}
-		if routeDelete == len(eniDefaultRoute) {
-			return RouteReplace(expect)
-		}
-		return nil
-	}
-	if gw.IPv4 != nil {
-		err = exec(&netlink.Route{
-			LinkIndex: link.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Dst:       defaultRoute,
-			Table:     tableID,
-			Flags:     int(netlink.FLAG_ONLINK),
-			Gw:        gw.IPv4,
-		})
-		if err != nil {
-			return err
-		}
-	}
-
-	if gw.IPv6 != nil {
-		err = exec(&netlink.Route{
-			LinkIndex: link.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Dst:       defaultRouteIPv6,
-			Table:     tableID,
-			Flags:     int(netlink.FLAG_ONLINK),
-			Gw:        gw.IPv6,
-		})
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	_, err = EnsureDefaultRoute(link, gw, tableID)
+	return err
 }
 
 func setupVETHPair(contVethName, pairName string, mtu int, hostNetNS ns.NetNS) (netlink.Link, netlink.Link, error) {

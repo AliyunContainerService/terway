@@ -25,6 +25,7 @@ type SetupConfig struct {
 	ExtraRoutes []types.Route
 
 	ServiceCIDR *terwayTypes.IPNetSet
+	HostIPSet   *terwayTypes.IPNetSet
 	// ipvlan
 	HostStackCIDRs []*net.IPNet
 
@@ -48,6 +49,7 @@ type CheckConfig struct {
 	ContainerIFName string
 
 	ContainerIPNet *terwayTypes.IPNetSet
+	HostIPSet      *terwayTypes.IPNetSet
 	GatewayIP      *terwayTypes.IPSet
 
 	ENIIndex int32 // phy device
