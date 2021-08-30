@@ -78,11 +78,6 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		return err
 	}
 
-	hostIPSet, err := GetHostIP(d.ipv4, d.ipv6)
-	if err != nil {
-		return err
-	}
-
 	// 2. setup addr and default route
 	err = netNS.Do(func(netNS ns.NetNS) error {
 		if d.ipv6 {
@@ -105,19 +100,19 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 			if err != nil {
 				return err
 			}
-			_, err = EnsureDefaultRoute(link, cfg.GatewayIP)
+			_, err = EnsureDefaultRoute(link, cfg.GatewayIP, unix.RT_TABLE_MAIN)
 			if err != nil {
 				return err
 			}
 
 			// setup route to host ipvlan interface
-			_, err = EnsureRoute(link, hostIPSet)
+			_, err = EnsureHostToContainerRoute(link, cfg.HostIPSet)
 			if err != nil {
-				return fmt.Errorf("add route to host %s %s error, %w", hostIPSet.IPv4, hostIPSet.IPv6, err)
+				return fmt.Errorf("add route to host %s error, %w", cfg.HostIPSet, err)
 			}
 
 			// set host ipvlan interface mac in ARP table
-			_, err = EnsureNeighbor(link, hostIPSet)
+			_, err = EnsureNeighbor(link, cfg.HostIPSet)
 			return err
 		}
 		return err
@@ -203,7 +198,7 @@ func (d *IPvlanDriver) Check(cfg *CheckConfig) error {
 			cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", cfg.ContainerIFName, cfg.MTU))
 		}
 
-		changed, err = EnsureDefaultRoute(link, cfg.GatewayIP)
+		changed, err = EnsureDefaultRoute(link, cfg.GatewayIP, unix.RT_TABLE_MAIN)
 		if err != nil {
 			return err
 		}
@@ -377,22 +372,18 @@ func (d *IPvlanDriver) setupInitNamespace(parentLink netlink.Link, cfg *SetupCon
 		}
 	}
 
-	nodeIPSet, err := GetHostIP(d.ipv4, d.ipv6)
-	if err != nil {
-		return err
-	}
-	if nodeIPSet.IPv4 != nil {
+	if cfg.HostIPSet.IPv4 != nil {
 		_, err = EnsureAddr(slaveLink, &netlink.Addr{
-			IPNet: nodeIPSet.IPv4,
+			IPNet: cfg.HostIPSet.IPv4,
 			Scope: int(netlink.SCOPE_HOST),
 		})
 		if err != nil {
 			return err
 		}
 	}
-	if nodeIPSet.IPv6 != nil {
+	if cfg.HostIPSet.IPv6 != nil {
 		_, err = EnsureAddr(slaveLink, &netlink.Addr{
-			IPNet: nodeIPSet.IPv6,
+			IPNet: cfg.HostIPSet.IPv6,
 			Flags: unix.IFA_F_NODAD,
 			Scope: int(netlink.SCOPE_LINK),
 		})

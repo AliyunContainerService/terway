@@ -8,6 +8,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 // RawNicDriver put nic in net ns
@@ -92,7 +93,7 @@ func (r *RawNicDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		if err != nil {
 			return err
 		}
-		_, err = EnsureDefaultRoute(nicLink, cfg.GatewayIP)
+		_, err = EnsureDefaultRoute(nicLink, cfg.GatewayIP, unix.RT_TABLE_MAIN)
 		return err
 	})
 
@@ -126,7 +127,7 @@ func (r *RawNicDriver) Teardown(cfg *TeardownCfg, netNS ns.NetNS) error {
 			}
 			return netlink.LinkSetNsFd(nicLink, int(hostCurrentNs.Fd()))
 		}
-		return fmt.Errorf("error get link %s, %w", cfg.ContainerIfName, err)
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("error move eni to host net ns, %w", err)
@@ -155,7 +156,7 @@ func (r *RawNicDriver) Check(cfg *CheckConfig) error {
 		if changed {
 			cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", cfg.ContainerIFName, cfg.MTU))
 		}
-		changed, err = EnsureDefaultRoute(link, cfg.GatewayIP)
+		changed, err = EnsureDefaultRoute(link, cfg.GatewayIP, unix.RT_TABLE_MAIN)
 		if err != nil {
 			return err
 		}

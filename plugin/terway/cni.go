@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/ip"
+	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/plugin/backend"
 	"github.com/AliyunContainerService/terway/plugin/driver"
@@ -92,6 +92,19 @@ type NetConf struct {
 	Debug bool `json:"debug"`
 }
 
+func (c *NetConf) GetIPStack() (bool, bool) {
+	ipv4 := false
+	ipv6 := false
+	switch c.IPStack {
+	case "", string(terwayTypes.IPStackIPv4):
+		ipv4 = true
+	case string(terwayTypes.IPStackDual):
+		ipv4 = true
+		ipv6 = true
+	}
+	return ipv4, ipv6
+}
+
 // K8SArgs is cni args of kubernetes
 type K8SArgs struct {
 	types.CommonArgs
@@ -114,6 +127,8 @@ func parseCmdArgs(args *skel.CmdArgs) (string, ns.NetNS, *NetConf, *K8SArgs, err
 		return "", nil, nil, nil, err
 	}
 
+	driver.Hook.AddExtraInfo("ns", args.Netns)
+
 	conf := NetConf{}
 	if err = json.Unmarshal(args.StdinData, &conf); err != nil {
 		return "", nil, nil, nil, fmt.Errorf("error parse args, %w", err)
@@ -123,19 +138,8 @@ func parseCmdArgs(args *skel.CmdArgs) (string, ns.NetNS, *NetConf, *K8SArgs, err
 		conf.MTU = defaultMTU
 	}
 
-	ipv4 := false
-	ipv6 := false
-	switch conf.IPStack {
-	case "":
-		fallthrough
-	case string(terwayTypes.IPStackIPv4):
-		ipv4 = true
-	case string(terwayTypes.IPStackDual):
-		ipv4 = true
-		ipv6 = true
-	default:
-		return "", nil, nil, nil, fmt.Errorf("unsupported ipStack %s", conf.IPStack)
-	}
+	ipv4, ipv6 := conf.GetIPStack()
+
 	veth = driver.NewVETHDriver(ipv4, ipv6)
 	ipvlan = driver.NewIPVlanDriver(ipv4, ipv6)
 	rawNIC = driver.NewRawNICDriver(ipv4, ipv6)
@@ -149,7 +153,7 @@ func parseCmdArgs(args *skel.CmdArgs) (string, ns.NetNS, *NetConf, *K8SArgs, err
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
-	logger := driver.Log.WithField("cmd", "add")
+	driver.Hook.AddExtraInfo("cmd", "add")
 	confVersion, cniNetns, conf, k8sConfig, err := parseCmdArgs(args)
 	if err != nil {
 		return err
@@ -159,7 +163,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	if conf.Debug {
 		driver.SetLogDebug()
 	}
-	logger = logger.WithFields(map[string]interface{}{
+	logger := driver.Log.WithFields(map[string]interface{}{
 		"netns":        args.Netns,
 		"podName":      string(k8sConfig.K8S_POD_NAME),
 		"podNamespace": string(k8sConfig.K8S_POD_NAMESPACE),
@@ -168,7 +172,13 @@ func cmdAdd(args *skel.CmdArgs) error {
 	logger.Debugf("args: %s", driver.JSONStr(args))
 	logger.Debugf("k8s %s, cni std %s", driver.JSONStr(k8sConfig), driver.JSONStr(conf))
 
-	err = driver.EnsureHostNsConfig()
+	ipv4, ipv6 := conf.GetIPStack()
+	hostIPSet, err := driver.GetHostIP(ipv4, ipv6)
+	if err != nil {
+		return err
+	}
+
+	err = driver.EnsureHostNsConfig(ipv4, ipv6)
 	if err != nil {
 		return fmt.Errorf("error setup host ns configs, %w", err)
 	}
@@ -233,7 +243,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	var containerIPNet *terwayTypes.IPNetSet
 	var gatewayIPSet *terwayTypes.IPSet
-
 	switch allocResult.IPType {
 	case rpc.IPType_TypeENIMultiIP:
 		if allocResult.GetENIMultiIP() == nil || allocResult.GetENIMultiIP().GetENIConfig() == nil {
@@ -291,6 +300,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			Ingress:         ingress,
 			Egress:          egress,
 			TrunkENI:        trunkENI,
+			HostIPSet:       hostIPSet,
 		}
 		eniMultiIPDriver := veth
 		if strings.ToLower(conf.ENIIPVirtualType) == eniIPVirtualTypeIPVlan {
@@ -379,6 +389,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			MTU:             conf.MTU,
 			Ingress:         ingress,
 			Egress:          egress,
+			HostIPSet:       hostIPSet,
 		}
 
 		err = veth.Setup(setupCfg, cniNetns)
@@ -418,12 +429,12 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return err
 		}
 
-		// fixme
-		extraRoutes := []types.Route{
-			{
-				Dst: *svc.IPv4,
-				GW:  net.ParseIP("169.254.1.1"),
-			},
+		var extraRoutes []types.Route
+		if ipv4 {
+			extraRoutes = append(extraRoutes, types.Route{Dst: *svc.IPv4, GW: driver.LinkIP})
+		}
+		if ipv6 {
+			extraRoutes = append(extraRoutes, types.Route{Dst: *svc.IPv6, GW: driver.LinkIP})
 		}
 
 		for _, v := range conf.HostStackCIDRs {
@@ -432,10 +443,16 @@ func cmdAdd(args *skel.CmdArgs) error {
 				return fmt.Errorf("host_stack_cidrs(%s) is invaild: %v", v, err)
 
 			}
-			extraRoutes = append(extraRoutes, types.Route{
+			r := types.Route{
 				Dst: *cidr,
-				GW:  net.ParseIP("169.254.1.1"),
-			})
+			}
+
+			if terwayIP.IPv6(cidr.IP) {
+				r.GW = driver.LinkIPv6
+			} else {
+				r.GW = driver.LinkIP
+			}
+			extraRoutes = append(extraRoutes, r)
 		}
 
 		ingress := allocResult.GetVPCENI().GetPodConfig().GetIngress()
@@ -457,6 +474,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			Ingress:         ingress,
 			Egress:          egress,
 			ExtraRoutes:     extraRoutes,
+			HostIPSet:       hostIPSet,
 		}
 
 		err = veth.Setup(setupCfg, cniNetns)
@@ -522,7 +540,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 }
 
 func cmdDel(args *skel.CmdArgs) error {
-	logger := driver.Log.WithField("cmd", "del")
+	driver.Hook.AddExtraInfo("cmd", "del")
 	confVersion, cniNetns, conf, k8sConfig, err := parseCmdArgs(args)
 	if err != nil {
 		return err
@@ -532,7 +550,7 @@ func cmdDel(args *skel.CmdArgs) error {
 	if conf.Debug {
 		driver.SetLogDebug()
 	}
-	logger = logger.WithFields(map[string]interface{}{
+	logger := driver.Log.WithFields(map[string]interface{}{
 		"netns":        args.Netns,
 		"podName":      string(k8sConfig.K8S_POD_NAME),
 		"podNamespace": string(k8sConfig.K8S_POD_NAMESPACE),
@@ -672,7 +690,7 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func cmdCheck(args *skel.CmdArgs) error {
-	logger := driver.Log.WithField("cmd", "check")
+	driver.Hook.AddExtraInfo("cmd", "check")
 	_, cniNetns, conf, k8sConfig, err := parseCmdArgs(args)
 	if err != nil {
 		if _, ok := err.(ns.NSPathNotExistErr); ok {
@@ -685,7 +703,7 @@ func cmdCheck(args *skel.CmdArgs) error {
 	if conf.Debug {
 		driver.SetLogDebug()
 	}
-	logger = logger.WithFields(map[string]interface{}{
+	logger := driver.Log.WithFields(map[string]interface{}{
 		"netns":        args.Netns,
 		"podName":      string(k8sConfig.K8S_POD_NAME),
 		"podNamespace": string(k8sConfig.K8S_POD_NAMESPACE),
@@ -694,7 +712,15 @@ func cmdCheck(args *skel.CmdArgs) error {
 	logger.Debugf("args: %s", driver.JSONStr(args))
 	logger.Debugf("ns %s , k8s %s, cni std %s", cniNetns.Path(), driver.JSONStr(k8sConfig), driver.JSONStr(conf))
 
-	_ = driver.EnsureHostNsConfig()
+	ipv4, ipv6 := conf.GetIPStack()
+	hostIPSet, err := driver.GetHostIP(ipv4, ipv6)
+	if err != nil {
+		return err
+	}
+	err = driver.EnsureHostNsConfig(ipv4, ipv6)
+	if err != nil {
+		return fmt.Errorf("error setup host ns configs, %w", err)
+	}
 
 	terwayBackendClient, closeConn, err := getNetworkClient()
 	if err != nil {
@@ -736,7 +762,7 @@ func cmdCheck(args *skel.CmdArgs) error {
 			return err
 		}
 
-		gw, err := ip.ToIP(getResult.GetENIMultiIP().GetENIConfig().GetGatewayIP().IPv4)
+		gw, err := terwayIP.ToIP(getResult.GetENIMultiIP().GetENIConfig().GetGatewayIP().IPv4)
 		if err != nil {
 			logger.Debug(err)
 			return nil
@@ -768,8 +794,9 @@ func cmdCheck(args *skel.CmdArgs) error {
 			GatewayIP: &terwayTypes.IPSet{
 				IPv4: gw,
 			},
-			ENIIndex: deviceID,
-			MTU:      conf.MTU,
+			ENIIndex:  deviceID,
+			MTU:       conf.MTU,
+			HostIPSet: hostIPSet,
 		}
 		eniMultiIPDriver := veth
 
@@ -816,7 +843,7 @@ func cmdCheck(args *skel.CmdArgs) error {
 			return nil
 		}
 
-		gw, err := ip.ToIP(getResult.GetVPCENI().GetENIConfig().GetGatewayIP().IPv4)
+		gw, err := terwayIP.ToIP(getResult.GetVPCENI().GetENIConfig().GetGatewayIP().IPv4)
 		if err != nil {
 			return nil
 		}
@@ -841,8 +868,9 @@ func cmdCheck(args *skel.CmdArgs) error {
 			GatewayIP: &terwayTypes.IPSet{
 				IPv4: gw,
 			},
-			ENIIndex: deviceID,
-			MTU:      conf.MTU,
+			ENIIndex:  deviceID,
+			MTU:       conf.MTU,
+			HostIPSet: hostIPSet,
 		}
 		l, err := driver.GrabFileLock(terwayCNILock)
 		if err != nil {

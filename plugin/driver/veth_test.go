@@ -1,168 +1,293 @@
+//go:build privileged
+// +build privileged
+
 package driver
 
 import (
-	"fmt"
 	"net"
-	"os"
+	"runtime"
 	"testing"
 
 	terwayTypes "github.com/AliyunContainerService/terway/types"
-	"github.com/containernetworking/cni/pkg/types"
+
 	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/stretchr/testify/suite"
+	"github.com/containernetworking/plugins/pkg/testutils"
+	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
-	"github.com/vishvananda/netns"
+	"golang.org/x/sys/unix"
 )
 
-type VETHSuite struct {
-	suite.Suite
-	VETH1Cfg *SetupConfig
-	VETH2Cfg *SetupConfig
+func TestDataPathVPCRoute(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
-	Driver NetnsDriver
-}
+	var err error
+	hostNS, err := testutils.NewNS()
+	assert.NoError(t, err)
 
-func TestVETHSuite(t *testing.T) {
-	if os.Getuid() != 0 {
-		t.Skip("Test requires root privileges.")
-	}
-	suite.Run(t, new(VETHSuite))
-}
+	containerNS, err := testutils.NewNS()
+	assert.NoError(t, err)
 
-func (s *VETHSuite) SetupSuite() {
-	link, err := netlink.LinkByName("eth0")
-	if err != nil {
-		panic(err)
-	}
+	err = hostNS.Set()
+	assert.NoError(t, err)
 
-	s.Driver = NewVETHDriver(true, true)
-	s.VETH1Cfg = &SetupConfig{
+	defer func() {
+		err := containerNS.Close()
+		assert.NoError(t, err)
+
+		err = testutils.UnmountNS(containerNS)
+		assert.NoError(t, err)
+
+		err = hostNS.Close()
+		assert.NoError(t, err)
+
+		err = testutils.UnmountNS(hostNS)
+		assert.NoError(t, err)
+	}()
+
+	cfg := &SetupConfig{
 		HostVETHName:    "veth1",
 		ContainerIfName: "eth0",
 		ContainerIPNet: &terwayTypes.IPNetSet{
-			IPv4: &net.IPNet{
-				IP:   net.ParseIP("192.168.100.100"),
-				Mask: net.CIDRMask(32, 32),
-			},
-			IPv6: &net.IPNet{
-				IP:   net.ParseIP("fd00::100"),
-				Mask: net.CIDRMask(128, 128),
-			},
+			IPv4: containerIPNet,
+			IPv6: containerIPNetIPv6,
 		},
 		GatewayIP: &terwayTypes.IPSet{
-			IPv4: net.ParseIP("192.168.100.253"),
-			IPv6: net.ParseIP("fd00::253"),
+			IPv4: ipv4GW,
+			IPv6: ipv6GW,
 		},
-		MTU:         1500,
-		ENIIndex:    link.Attrs().Index,
-		ExtraRoutes: []types.Route{},
+		MTU:            1499,
+		ENIIndex:       0,
+		TrunkENI:       false,
+		ExtraRoutes:    nil,
+		ServiceCIDR:    nil,
+		HostStackCIDRs: nil,
+		Ingress:        0,
+		Egress:         0,
 	}
-	s.VETH2Cfg = &SetupConfig{
-		HostVETHName:    "veth2",
-		ContainerIfName: "eth0",
-		ContainerIPNet:  &terwayTypes.IPNetSet{},
-		GatewayIP:       &terwayTypes.IPSet{},
-		MTU:             1500,
-		ENIIndex:        link.Attrs().Index,
-		ExtraRoutes:     []types.Route{},
-	}
+	d := NewVETHDriver(true, true)
 
-	current, err := netns.Get()
-	s.NoError(err)
+	err = d.Setup(cfg, containerNS)
+	assert.NoError(t, err)
 
-	_, err = netns.NewNamed("veth1")
-	if err != nil {
-		panic(err)
-	}
-	_, err = netns.NewNamed("veth2")
-	if err != nil {
-		panic(err)
-	}
+	_ = containerNS.Do(func(netNS ns.NetNS) error {
+		// addr
+		containerLink, err := netlink.LinkByName(cfg.ContainerIfName)
+		assert.NoError(t, err)
+		assert.Equal(t, cfg.MTU, containerLink.Attrs().MTU)
+		assert.True(t, containerLink.Attrs().Flags&net.FlagUp != 0)
 
-	_ = netns.Set(current)
-}
+		ok, err := FindIP(containerLink, cfg.ContainerIPNet)
+		assert.NoError(t, err)
+		assert.True(t, ok)
 
-func (s *VETHSuite) TearDownSuite() {
-	err := netns.DeleteNamed("veth1")
-	s.NoError(err)
-	err = netns.DeleteNamed("veth2")
-	s.NoError(err)
-}
+		// default via 169.254.1.1 dev eth0
+		routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{
+			Dst: nil,
+		}, netlink.RT_FILTER_DST)
+		assert.NoError(t, err)
+		assert.Equal(t, len(routes), 1)
 
-func (s *VETHSuite) TestSetup() {
-	ns1, err := ns.GetNS("/var/run/netns/veth1")
-	s.NoError(err)
-	defer ns1.Close()
-	err = s.Driver.Setup(s.VETH1Cfg, ns1)
-	s.NoError(err)
+		assert.Equal(t, net.ParseIP("169.254.1.1").String(), routes[0].Gw.String())
 
-	// 1. check eth0 in ns
-	err = ns1.Do(func(netNS ns.NetNS) error {
-		cLink, err := netlink.LinkByName(s.VETH1Cfg.ContainerIfName)
-		if err != nil {
-			return err
-		}
-		ok, err := FindIP(cLink, s.VETH1Cfg.ContainerIPNet)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("no match ipv4 addr found")
-		}
-
-		changed, err := EnsureLinkUp(cLink)
-		if err != nil {
-			return err
-		}
-		if changed {
-			return fmt.Errorf("link is not up")
-		}
-		return err
+		return nil
 	})
-	s.NoError(err)
 
-	parentLink, err := netlink.LinkByIndex(s.VETH1Cfg.ENIIndex)
-	s.NoError(err)
+	hostLink, err := netlink.LinkByName(cfg.HostVETHName)
+	assert.NoError(t, err)
+	assert.Equal(t, cfg.MTU, hostLink.Attrs().MTU)
 
-	tableID := getRouteTableID(parentLink.Attrs().Index)
+	// 169.10.0.10 dev eth0
+	routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{
+		Dst:       cfg.ContainerIPNet.IPv4,
+		LinkIndex: hostLink.Attrs().Index,
+	}, netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF)
+	assert.NoError(t, err)
+	assert.Equal(t, len(routes), 1)
 
-	// 2. check ip rule
-	if s.VETH1Cfg.ContainerIPNet.IPv4 != nil {
-		err = FindIPRules(s.VETH1Cfg.ContainerIPNet.IPv4, func(rule *netlink.Rule) error {
-			switch rule.Table {
-			case tableID:
-				s.Equal(fromContainerPriority, rule.Priority)
-			case mainRouteTable:
-				s.Equal(toContainerPriority, rule.Priority)
-			default:
-				return fmt.Errorf("found unexpected ip rule %s", rule.String())
-			}
-			return nil
-		})
-		s.NoError(err)
+	// tear down
+
+	err = d.Teardown(&TeardownCfg{
+		HostVETHName:    cfg.HostVETHName,
+		ContainerIfName: cfg.ContainerIfName,
+		ContainerIPNet:  nil,
+	}, containerNS)
+
+	_, err = netlink.LinkByName(cfg.HostVETHName)
+	assert.Error(t, err)
+	_, ok := err.(netlink.LinkNotFoundError)
+	assert.True(t, ok)
+}
+
+func TestDataPathPolicyRoute(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	var err error
+	hostNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	containerNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	err = hostNS.Set()
+	assert.NoError(t, err)
+
+	defer func() {
+		err := containerNS.Close()
+		assert.NoError(t, err)
+
+		err = testutils.UnmountNS(containerNS)
+		assert.NoError(t, err)
+
+		err = hostNS.Close()
+		assert.NoError(t, err)
+
+		err = testutils.UnmountNS(hostNS)
+		assert.NoError(t, err)
+	}()
+
+	err = netlink.LinkAdd(&netlink.Dummy{
+		LinkAttrs: netlink.LinkAttrs{Name: "eni"},
+	})
+	assert.NoError(t, err)
+	eni, err := netlink.LinkByName("eni")
+	assert.NoError(t, err)
+
+	cfg := &SetupConfig{
+		HostVETHName:    "hostveth",
+		ContainerIfName: "eth0",
+		ContainerIPNet: &terwayTypes.IPNetSet{
+			IPv4: containerIPNet,
+			IPv6: containerIPNetIPv6,
+		},
+		GatewayIP: &terwayTypes.IPSet{
+			IPv4: ipv4GW,
+			IPv6: ipv6GW,
+		},
+		MTU:            1499,
+		ENIIndex:       eni.Attrs().Index,
+		TrunkENI:       false,
+		ExtraRoutes:    nil,
+		ServiceCIDR:    nil,
+		HostStackCIDRs: nil,
+		Ingress:        0,
+		Egress:         0,
+		HostIPSet: &terwayTypes.IPNetSet{
+			IPv4: eth0IPNet,
+			IPv6: eth0IPNetIPv6,
+		},
 	}
-	if s.VETH1Cfg.ContainerIPNet.IPv6 != nil {
-		err = FindIPRules(s.VETH1Cfg.ContainerIPNet.IPv6, func(rule *netlink.Rule) error {
-			switch rule.Table {
-			case tableID:
-				s.Equal(fromContainerPriority, rule.Priority)
-			case mainRouteTable:
-				s.Equal(toContainerPriority, rule.Priority)
-			default:
-				return fmt.Errorf("found unexpected ip rule %s", rule.String())
-			}
-			return nil
-		})
-		s.NoError(err)
-	}
+	d := NewVETHDriver(true, true)
 
-	// 3. teradown
-	err = s.Driver.Teardown(&TeardownCfg{
-		HostVETHName:    s.VETH1Cfg.HostVETHName,
-		ContainerIfName: s.VETH1Cfg.ContainerIfName,
-		ContainerIPNet:  s.VETH1Cfg.ContainerIPNet,
-	}, ns1)
-	s.NoError(err)
+	err = d.Setup(cfg, containerNS)
+	assert.NoError(t, err)
+
+	_ = containerNS.Do(func(netNS ns.NetNS) error {
+		// addr
+		containerLink, err := netlink.LinkByName(cfg.ContainerIfName)
+		assert.NoError(t, err)
+		assert.Equal(t, cfg.MTU, containerLink.Attrs().MTU)
+		assert.True(t, containerLink.Attrs().Flags&net.FlagUp != 0)
+
+		ok, err := FindIP(containerLink, cfg.ContainerIPNet)
+		assert.NoError(t, err)
+		assert.True(t, ok)
+
+		// default via 169.254.1.1 dev eth0
+		routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{
+			Dst: nil,
+		}, netlink.RT_FILTER_DST)
+		assert.NoError(t, err)
+		assert.Equal(t, len(routes), 1)
+
+		assert.Equal(t, net.ParseIP("169.254.1.1").String(), routes[0].Gw.String())
+
+		return nil
+	})
+
+	// eth0's ip 169.20.20.10/32 dev eni
+	ok, err := FindIP(eni, &terwayTypes.IPNetSet{
+		IPv4: &net.IPNet{
+			IP:   cfg.HostIPSet.IPv4.IP,
+			Mask: net.CIDRMask(32, 32),
+		},
+		IPv6: nil,
+	})
+	assert.NoError(t, err)
+	assert.True(t, ok)
+
+	hostVETHLink, err := netlink.LinkByName(cfg.HostVETHName)
+	assert.NoError(t, err)
+	assert.Equal(t, cfg.MTU, hostVETHLink.Attrs().MTU)
+
+	addrs, err := netlink.AddrList(hostVETHLink, netlink.FAMILY_V4)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, len(addrs))
+
+	// 169.10.0.10 dev hostVETH
+	routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{
+		Dst: &net.IPNet{
+			IP:   cfg.ContainerIPNet.IPv4.IP,
+			Mask: net.CIDRMask(32, 32),
+		},
+		LinkIndex: hostVETHLink.Attrs().Index,
+	}, netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(routes))
+
+	// 512 from all to 169.10.0.10 look up main
+	rules, err := netlink.RuleListFiltered(netlink.FAMILY_V4, &netlink.Rule{
+		Priority: toContainerPriority,
+		Table:    unix.RT_TABLE_MAIN,
+		Dst: &net.IPNet{
+			IP:   cfg.ContainerIPNet.IPv4.IP,
+			Mask: net.CIDRMask(32, 32),
+		},
+	}, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_DST|netlink.RT_FILTER_PRIORITY)
+	assert.NoError(t, err)
+	assert.Equal(t, len(rules), 1)
+	assert.Nil(t, rules[0].Src)
+
+	// 2048 from 169.10.0.10 iif hostVETH lookup table
+	rules, err = netlink.RuleListFiltered(netlink.FAMILY_V4, &netlink.Rule{
+		Priority: fromContainerPriority,
+		Table:    getRouteTableID(eni.Attrs().Index),
+		Src: &net.IPNet{
+			IP:   cfg.ContainerIPNet.IPv4.IP,
+			Mask: net.CIDRMask(32, 32),
+		},
+		IifName: cfg.HostVETHName,
+	}, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_SRC|netlink.RT_FILTER_PRIORITY|netlink.RT_FILTER_IIF)
+	assert.NoError(t, err)
+	assert.Equal(t, len(rules), 1)
+
+	// add some ip rule make sure we don't delete it
+	dummyRule := netlink.NewRule()
+	dummyRule.Priority = toContainerPriority
+	dummyRule.Table = unix.RT_TABLE_MAIN
+	dummyRule.Dst = &net.IPNet{
+		IP:   cfg.ContainerIPNet.IPv4.IP,
+		Mask: net.CIDRMask(24, 32),
+	}
+	err = netlink.RuleAdd(dummyRule)
+	assert.NoError(t, err)
+	// tear down
+
+	err = d.Teardown(&TeardownCfg{
+		HostVETHName:    cfg.HostVETHName,
+		ContainerIfName: cfg.ContainerIfName,
+		ContainerIPNet:  nil,
+	}, containerNS)
+
+	_, err = netlink.LinkByName(cfg.HostVETHName)
+	assert.Error(t, err)
+	_, ok = err.(netlink.LinkNotFoundError)
+	assert.True(t, ok)
+
+	rules, err = netlink.RuleList(netlink.FAMILY_V4)
+	assert.NoError(t, err)
+	assert.Equal(t, 4, len(rules))
 }
 
 func FindIP(link netlink.Link, ipNetSet *terwayTypes.IPNetSet) (bool, error) {

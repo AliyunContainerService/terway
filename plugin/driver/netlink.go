@@ -76,6 +76,9 @@ func LinkDel(link netlink.Link) error {
 	Log.Infof(cmd)
 	err := netlink.LinkDel(link)
 	if err != nil {
+		if _, ok := err.(netlink.LinkNotFoundError); ok {
+			return nil
+		}
 		return fmt.Errorf("error %s, %w", cmd, err)
 	}
 	return nil
