@@ -8,13 +8,13 @@
 
 在terway daemon中增加了tracing组件，daemon中的关键组件(`network_service，pool, factory`等)注册到tracing组件中，并且通过接口来提供关键信息或是执行命令。同时，tracing组件提供了对外的`gRPC`接口来与`terway-cli`通信。
 
-![image-20200617110159931](images/terway_tracing.png)
+![terway_tracing](images/terway_tracing.png)
 
 为了保证之后的可扩展性和兼容性，tracing中的组件按照`(type, resource_name)`的形式注册。
 
 ## 命令
 
-目前，在`terway-cli`中提供了4个可用命令
+目前，在`terway-cli`中提供了5个可用命令
 
 - **`list [type]`**- 列出目前已注册的所有资源的类型，如果指定了类型，则列出该类型的所有资源
 
@@ -30,13 +30,19 @@
 
   当出现错误时，`terway-cli`会以 error exists in mapping 错误结束程序，并返回error code为1。
 
-  ![image-20200617114750605](images/terway_cli_mapping.png)
+  ![terway_cli_mapping](images/terway_cli_mapping.png)
 
 - **`execute <type> <resource_name> <command> args...`**  - 在某一资源上执行定义的命令
 
   目前在所有资源上存在mapping命令，以查看当前层的资源映射清单。在`eniip factory`上存在audit指令，进行本地多IP工厂资源与阿里云API资源的对账功能。
 
   因为可以直接使用mapping命令代替这两者的功能，所以不推荐直接使用。
+  
+- **`metadata`** - 通过`metadata`获得资源信息
+
+  使用该指令，可以查询`ECS metadata API`返回的网络资源，以树的形式呈现。该命令用于检视`metadata`内资源是否与本地资源相对应。
+
+   ![terway_cli_metadata](images/terway_cli_metadata.png)
 
 ## 资源配置与追踪信息
 

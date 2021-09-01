@@ -20,13 +20,15 @@ require (
 	github.com/opencontainers/image-spec v1.0.1 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.7.1
+	github.com/pterm/pterm v0.12.29
 	github.com/sirupsen/logrus v1.7.0
+	github.com/spf13/cobra v1.1.1
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.8.1
 	github.com/stretchr/testify v1.7.0
 	github.com/vishvananda/netlink v1.1.1-0.20201206203632-88079d98e65d
 	golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4
-	golang.org/x/sys v0.0.0-20210510120138-977fb7262007
+	golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1
 	gomodules.xyz/jsonpatch/v2 v2.1.0
 	google.golang.org/grpc v1.38.0
 	google.golang.org/protobuf v1.26.0
