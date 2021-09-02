@@ -65,3 +65,15 @@ func TestMergeIPs(t *testing.T) {
 		[]net.IP{net.ParseIP("::1"), net.ParseIP("fd::1")})
 	assert.Equal(t, 2, len(result))
 }
+
+func TestIPNetSet_SetIPNet(t *testing.T) {
+	ipNetSet := &IPNetSet{}
+	assert.Equal(t, "127.0.0.1/32", ipNetSet.SetIPNet("127.0.0.1/32").IPv4.String())
+	assert.NotNil(t, ipNetSet.IPv4)
+	assert.Equal(t, "127.0.0.0/24", ipNetSet.SetIPNet("127.0.0.1/24").IPv4.String())
+	assert.NotNil(t, ipNetSet.IPv4)
+	assert.Equal(t, "127.0.0.0/24", ipNetSet.SetIPNet("127.0.0.x").IPv4.String(), "no change")
+	assert.Nil(t, ipNetSet.IPv6)
+	assert.Equal(t, "fd00::/120", ipNetSet.SetIPNet("fd00::/120").IPv6.String())
+	assert.NotNil(t, ipNetSet.IPv6)
+}

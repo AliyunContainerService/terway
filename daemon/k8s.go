@@ -56,7 +56,7 @@ type Kubernetes interface {
 	GetLocalPods() ([]*types.PodInfo, error)
 	GetPod(namespace, name string) (*types.PodInfo, error)
 	GetServiceCIDR() *types.IPNetSet
-	GetNodeCidr() *net.IPNet
+	GetNodeCidr() *types.IPNetSet
 	SetNodeAllocatablePod(count int) error
 	PatchEipInfo(info *types.PodInfo) error
 	PatchTrunkInfo(trunkEni string) error
@@ -77,7 +77,7 @@ type k8s struct {
 	mode            string
 	nodeName        string
 	daemonNamespace string
-	nodeCidr        *net.IPNet
+	nodeCidr        *types.IPNetSet
 	node            *corev1.Node
 	svcCidr         *types.IPNetSet
 	apiConn         *connTracker
@@ -217,8 +217,9 @@ func newK8S(master, kubeconfig string, daemonMode string) (Kubernetes, error) {
 		return nil, errors.Wrap(err, "failed getting node")
 	}
 
-	var nodeCidr *net.IPNet
+	var nodeCidr *types.IPNetSet
 	if daemonMode == daemonModeVPC {
+		// vpc mode not support ipv6
 		nodeCidr, err = nodeCidrFromAPIServer(client, nodeName)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed getting node cidr")
@@ -292,7 +293,7 @@ func getNodeName(client kubernetes.Interface) (string, error) {
 	return nodeName, nil
 }
 
-func nodeCidrFromAPIServer(client kubernetes.Interface, nodeName string) (*net.IPNet, error) {
+func nodeCidrFromAPIServer(client kubernetes.Interface, nodeName string) (*types.IPNetSet, error) {
 	node, err := client.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving node spec for '%s': %v", nodeName, err)
@@ -300,8 +301,13 @@ func nodeCidrFromAPIServer(client kubernetes.Interface, nodeName string) (*net.I
 	if node.Spec.PodCIDR == "" {
 		return nil, fmt.Errorf("node %q pod cidr not assigned", nodeName)
 	}
+	podCIDR := &types.IPNetSet{}
+	for _, cidr := range node.Spec.PodCIDRs {
+		podCIDR.SetIPNet(cidr)
+	}
+	podCIDR.SetIPNet(node.Spec.PodCIDR)
 
-	return parseCidr(node.Spec.PodCIDR)
+	return podCIDR, nil
 }
 
 func parseCidr(cidrString string) (*net.IPNet, error) {
@@ -576,7 +582,7 @@ func (k *k8s) GetPod(namespace, name string) (*types.PodInfo, error) {
 	return podInfo, nil
 }
 
-func (k *k8s) GetNodeCidr() *net.IPNet {
+func (k *k8s) GetNodeCidr() *types.IPNetSet {
 	return k.nodeCidr
 }
 

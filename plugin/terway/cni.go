@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"runtime"
 	"strings"
 	"time"
 
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/link"
-	"github.com/AliyunContainerService/terway/plugin/backend"
 	"github.com/AliyunContainerService/terway/plugin/driver"
 	"github.com/AliyunContainerService/terway/plugin/version"
 	"github.com/AliyunContainerService/terway/rpc"
@@ -85,24 +83,8 @@ type NetConf struct {
 	// MTU is container and ENI network interface MTU
 	MTU int `json:"mtu"`
 
-	// IPStack is the ip family CNI will config
-	IPStack string `json:"ip_stack"`
-
 	// Debug
 	Debug bool `json:"debug"`
-}
-
-func (c *NetConf) GetIPStack() (bool, bool) {
-	ipv4 := false
-	ipv6 := false
-	switch c.IPStack {
-	case "", string(terwayTypes.IPStackIPv4):
-		ipv4 = true
-	case string(terwayTypes.IPStackDual):
-		ipv4 = true
-		ipv6 = true
-	}
-	return ipv4, ipv6
 }
 
 // K8SArgs is cni args of kubernetes
@@ -138,18 +120,18 @@ func parseCmdArgs(args *skel.CmdArgs) (string, ns.NetNS, *NetConf, *K8SArgs, err
 		conf.MTU = defaultMTU
 	}
 
-	ipv4, ipv6 := conf.GetIPStack()
-
-	veth = driver.NewVETHDriver(ipv4, ipv6)
-	ipvlan = driver.NewIPVlanDriver(ipv4, ipv6)
-	rawNIC = driver.NewRawNICDriver(ipv4, ipv6)
-
 	k8sConfig := K8SArgs{}
 	if err = types.LoadArgs(args.Args, &k8sConfig); err != nil {
 		return "", nil, nil, nil, fmt.Errorf("error parse args, %w", err)
 	}
 
 	return confVersion, netNS, &conf, &k8sConfig, nil
+}
+
+func initDrivers(ipv4, ipv6 bool) {
+	veth = driver.NewVETHDriver(ipv4, ipv6)
+	ipvlan = driver.NewIPVlanDriver(ipv4, ipv6)
+	rawNIC = driver.NewRawNICDriver(ipv4, ipv6)
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
@@ -171,17 +153,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 	})
 	logger.Debugf("args: %s", driver.JSONStr(args))
 	logger.Debugf("k8s %s, cni std %s", driver.JSONStr(k8sConfig), driver.JSONStr(conf))
-
-	ipv4, ipv6 := conf.GetIPStack()
-	hostIPSet, err := driver.GetHostIP(ipv4, ipv6)
-	if err != nil {
-		return err
-	}
-
-	err = driver.EnsureHostNsConfig(ipv4, ipv6)
-	if err != nil {
-		return fmt.Errorf("error setup host ns configs, %w", err)
-	}
 
 	terwayBackendClient, closeConn, err := getNetworkClient()
 	if err != nil {
@@ -239,23 +210,35 @@ func cmdAdd(args *skel.CmdArgs) error {
 		}
 	}()
 
+	ipv4, ipv6 := allocResult.IPv4, allocResult.IPv6
+	initDrivers(ipv4, ipv6)
+	hostIPSet, err := driver.GetHostIP(ipv4, ipv6)
+	if err != nil {
+		return err
+	}
+
+	err = driver.EnsureHostNsConfig(ipv4, ipv6)
+	if err != nil {
+		return fmt.Errorf("error setup host ns configs, %w", err)
+	}
+
 	hostVETHName, _ := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
 
 	var containerIPNet *terwayTypes.IPNetSet
 	var gatewayIPSet *terwayTypes.IPSet
 	switch allocResult.IPType {
 	case rpc.IPType_TypeENIMultiIP:
-		if allocResult.GetENIMultiIP() == nil || allocResult.GetENIMultiIP().GetENIConfig() == nil {
+		if allocResult.GetBasicInfo() == nil || allocResult.GetENIInfo() == nil || allocResult.GetPod() == nil {
 			return fmt.Errorf("eni multi ip return result is empty: %v", allocResult)
 		}
-		podIP := allocResult.GetENIMultiIP().GetENIConfig().GetPodIP()
-		subNet := allocResult.GetENIMultiIP().GetENIConfig().GetSubnet()
-		gatewayIP := allocResult.GetENIMultiIP().GetENIConfig().GetGatewayIP()
-		eniMAC := allocResult.GetENIMultiIP().GetENIConfig().GetMAC()
-		ingress := allocResult.GetENIMultiIP().GetPodConfig().GetIngress()
-		egress := allocResult.GetENIMultiIP().GetPodConfig().GetEgress()
-		serviceCIDR := allocResult.GetENIMultiIP().GetServiceCIDR()
-		trunkENI := allocResult.GetENIMultiIP().GetENIConfig().Trunk
+		podIP := allocResult.GetBasicInfo().GetPodIP()
+		subNet := allocResult.GetBasicInfo().GetPodCIDR()
+		gatewayIP := allocResult.GetBasicInfo().GetGatewayIP()
+		eniMAC := allocResult.GetENIInfo().GetMAC()
+		ingress := allocResult.GetPod().GetIngress()
+		egress := allocResult.GetPod().GetEgress()
+		serviceCIDR := allocResult.GetBasicInfo().GetServiceCIDR()
+		trunkENI := allocResult.GetENIInfo().GetTrunk()
 
 		containerIPNet, err = terwayTypes.BuildIPNet(podIP, subNet)
 		if err != nil {
@@ -332,18 +315,18 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return fmt.Errorf("setup network failed: %v", err)
 		}
 	case rpc.IPType_TypeVPCIP:
-		if allocResult.GetVPCIP() == nil || allocResult.GetVPCIP().GetPodConfig() == nil ||
-			allocResult.GetVPCIP().NodeCidr == "" {
+		if allocResult.GetBasicInfo() == nil || allocResult.GetPod() == nil {
 			return fmt.Errorf("vpc ip result is empty: %v", allocResult)
 		}
-		var subnet *net.IPNet
-		_, subnet, err = net.ParseCIDR(allocResult.GetVPCIP().GetNodeCidr())
-		if err != nil {
-			return fmt.Errorf("vpc veth return subnet is not vaild: %v", allocResult.GetVPCIP().GetNodeCidr())
-		}
+		ingress := allocResult.GetPod().GetIngress()
+		egress := allocResult.GetPod().GetEgress()
 
+		subnet := allocResult.GetBasicInfo().GetPodCIDR().GetIPv4()
+		if subnet == "" {
+			return fmt.Errorf("pod cidr not set")
+		}
 		var r types.Result
-		r, err = ipam.ExecAdd(delegateIpam, []byte(fmt.Sprintf(delegateConf, subnet.String())))
+		r, err = ipam.ExecAdd(delegateIpam, []byte(fmt.Sprintf(delegateConf, subnet)))
 		if err != nil {
 			return fmt.Errorf("error allocate ip from delegate ipam %v: %v", delegateIpam, err)
 		}
@@ -355,7 +338,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 		defer func() {
 			if err != nil {
-				err = ipam.ExecDel(delegateIpam, []byte(fmt.Sprintf(delegateConf, subnet.String())))
+				err = ipam.ExecDel(delegateIpam, []byte(fmt.Sprintf(delegateConf, subnet)))
 			}
 		}()
 
@@ -372,8 +355,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 			IPv4: gateway,
 		}
 
-		ingress := allocResult.GetVPCIP().GetPodConfig().GetIngress()
-		egress := allocResult.GetVPCIP().GetPodConfig().GetEgress()
 		l, err := driver.GrabFileLock(terwayCNILock)
 		if err != nil {
 			logger.Debug(err)
@@ -397,12 +378,12 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return fmt.Errorf("setup network failed: %v", err)
 		}
 	case rpc.IPType_TypeVPCENI:
-		if allocResult.GetVPCENI() == nil || allocResult.GetVPCENI().GetServiceCIDR() == nil ||
-			allocResult.GetVPCENI().GetENIConfig() == nil {
+		if allocResult.GetENIInfo() == nil || allocResult.GetBasicInfo() == nil ||
+			allocResult.GetPod() == nil {
 			return fmt.Errorf("vpcEni ip result is empty: %v", allocResult)
 		}
 
-		serviceCIDR := allocResult.GetVPCENI().GetServiceCIDR()
+		serviceCIDR := allocResult.GetBasicInfo().GetServiceCIDR()
 
 		var svc *terwayTypes.IPNetSet
 		svc, err = terwayTypes.ToIPNetSet(serviceCIDR)
@@ -410,9 +391,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return err
 		}
 
-		podIP := allocResult.GetVPCENI().GetENIConfig().GetPodIP()
-		gatewayIP := allocResult.GetVPCENI().GetENIConfig().GetGatewayIP()
-		eniMAC := allocResult.GetVPCENI().GetENIConfig().GetMAC()
+		podIP := allocResult.GetBasicInfo().GetPodIP()
+		gatewayIP := allocResult.GetBasicInfo().GetGatewayIP()
+		eniMAC := allocResult.GetENIInfo().GetMAC()
 
 		containerIPNet, err = terwayTypes.BuildIPNet(podIP, &rpc.IPSet{IPv4: "0.0.0.0/32", IPv6: "::/128"})
 		if err != nil {
@@ -455,8 +436,8 @@ func cmdAdd(args *skel.CmdArgs) error {
 			extraRoutes = append(extraRoutes, r)
 		}
 
-		ingress := allocResult.GetVPCENI().GetPodConfig().GetIngress()
-		egress := allocResult.GetVPCENI().GetPodConfig().GetEgress()
+		ingress := allocResult.GetPod().GetIngress()
+		egress := allocResult.GetPod().GetEgress()
 		l, err := driver.GrabFileLock(terwayCNILock)
 		if err != nil {
 			logger.Debug(err)
@@ -580,11 +561,18 @@ func cmdDel(args *skel.CmdArgs) error {
 		return fmt.Errorf("error get ip from terway, pod %s/%s, %w", string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME), err)
 	}
 
+	ipv4, ipv6 := infoResult.IPv4, infoResult.IPv6
+	initDrivers(ipv4, ipv6)
+
 	hostVETHName, _ := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
 
 	switch infoResult.IPType {
 	case rpc.IPType_TypeENIMultiIP:
 		eniMultiIPDriver := veth
+		containerIPNet, err := terwayTypes.BuildIPNet(infoResult.GetBasicInfo().GetPodIP(), &rpc.IPSet{IPv4: "0.0.0.0/32", IPv6: "::/128"})
+		if err != nil {
+			return err
+		}
 		if strings.ToLower(conf.ENIIPVirtualType) == eniIPVirtualTypeIPVlan {
 			available, err := driver.CheckIPVLanAvailable()
 			if err != nil {
@@ -592,11 +580,10 @@ func cmdDel(args *skel.CmdArgs) error {
 			}
 			if available {
 				eniMultiIPDriver = ipvlan
+				if containerIPNet == nil {
+					return fmt.Errorf("pod ip is required for ipvlan %#v", infoResult)
+				}
 			}
-		}
-		containerIPNet, err := terwayTypes.BuildIPNet(infoResult.GetPodIP(), &rpc.IPSet{IPv4: "0.0.0.0/32", IPv6: "::/128"})
-		if err != nil {
-			return err
 		}
 
 		var l *driver.Locker
@@ -616,10 +603,9 @@ func cmdDel(args *skel.CmdArgs) error {
 		}
 
 	case rpc.IPType_TypeVPCIP:
-		var subnet *net.IPNet
-		_, subnet, err = net.ParseCIDR(infoResult.GetNodeCidr())
-		if err != nil {
-			return fmt.Errorf("get info return subnet is not vaild: %v", infoResult.GetNodeCidr())
+		subnet := infoResult.GetBasicInfo().GetPodCIDR().GetIPv4()
+		if subnet == "" {
+			return fmt.Errorf("error get pod cidr")
 		}
 		l, err := driver.GrabFileLock(terwayCNILock)
 		if err != nil {
@@ -635,7 +621,7 @@ func cmdDel(args *skel.CmdArgs) error {
 			return fmt.Errorf("error teardown pod %s/%s, %w", string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME), err)
 		}
 
-		err = ipam.ExecDel(delegateIpam, []byte(fmt.Sprintf(delegateConf, subnet.String())))
+		err = ipam.ExecDel(delegateIpam, []byte(fmt.Sprintf(delegateConf, subnet)))
 		if err != nil {
 			return errors.Wrapf(err, "error teardown network ipam for pod: %s-%s",
 				string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME))
@@ -712,16 +698,6 @@ func cmdCheck(args *skel.CmdArgs) error {
 	logger.Debugf("args: %s", driver.JSONStr(args))
 	logger.Debugf("ns %s , k8s %s, cni std %s", cniNetns.Path(), driver.JSONStr(k8sConfig), driver.JSONStr(conf))
 
-	ipv4, ipv6 := conf.GetIPStack()
-	hostIPSet, err := driver.GetHostIP(ipv4, ipv6)
-	if err != nil {
-		return err
-	}
-	err = driver.EnsureHostNsConfig(ipv4, ipv6)
-	if err != nil {
-		return fmt.Errorf("error setup host ns configs, %w", err)
-	}
-
 	terwayBackendClient, closeConn, err := getNetworkClient()
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("add cmd: create grpc client, pod: %s-%s",
@@ -743,32 +719,45 @@ func cmdCheck(args *skel.CmdArgs) error {
 		logger.Debug(err)
 		return nil
 	}
+
+	ipv4, ipv6 := getResult.IPv4, getResult.IPv6
+	initDrivers(ipv4, ipv6)
+	hostIPSet, err := driver.GetHostIP(ipv4, ipv6)
+	if err != nil {
+		return err
+	}
+	err = driver.EnsureHostNsConfig(ipv4, ipv6)
+	if err != nil {
+		return fmt.Errorf("error setup host ns configs, %w", err)
+	}
+
 	hostVethName, _ := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
 
 	var containerIPNet *terwayTypes.IPNetSet
 
 	switch getResult.IPType {
 	case rpc.IPType_TypeENIMultiIP:
-		if getResult.GetENIMultiIP() == nil ||
-			getResult.GetENIMultiIP().GetENIConfig() == nil {
+		if getResult.GetBasicInfo() == nil ||
+			getResult.GetENIInfo() == nil {
 			return nil
 		}
 
-		podIP := getResult.GetENIMultiIP().GetENIConfig().GetPodIP()
-		subNet := getResult.GetENIMultiIP().GetENIConfig().GetSubnet()
+		podIP := getResult.GetBasicInfo().GetPodIP()
+		subNet := getResult.GetBasicInfo().GetPodCIDR()
+		gw := getResult.GetBasicInfo().GetGatewayIP()
+		mac := getResult.GetENIInfo().GetMAC()
 
 		containerIPNet, err = terwayTypes.BuildIPNet(podIP, subNet)
 		if err != nil {
 			return err
 		}
 
-		gw, err := terwayIP.ToIP(getResult.GetENIMultiIP().GetENIConfig().GetGatewayIP().IPv4)
+		gwIPSet, err := terwayTypes.ToIPSet(gw)
 		if err != nil {
-			logger.Debug(err)
-			return nil
+			return err
 		}
-		eniMAC := getResult.GetENIMultiIP().GetENIConfig().GetMAC()
-		deviceID, err := link.GetDeviceNumber(eniMAC)
+
+		deviceID, err := link.GetDeviceNumber(mac)
 		if err != nil {
 			return err
 		}
@@ -791,12 +780,10 @@ func cmdCheck(args *skel.CmdArgs) error {
 			ContainerIFName: args.IfName,
 			HostVETHName:    hostVethName,
 			ContainerIPNet:  containerIPNet,
-			GatewayIP: &terwayTypes.IPSet{
-				IPv4: gw,
-			},
-			ENIIndex:  deviceID,
-			MTU:       conf.MTU,
-			HostIPSet: hostIPSet,
+			GatewayIP:       gwIPSet,
+			ENIIndex:        deviceID,
+			MTU:             conf.MTU,
+			HostIPSet:       hostIPSet,
 		}
 		eniMultiIPDriver := veth
 
@@ -824,26 +811,25 @@ func cmdCheck(args *skel.CmdArgs) error {
 	case rpc.IPType_TypeVPCIP:
 		return nil
 	case rpc.IPType_TypeVPCENI:
-		if getResult.GetVPCENI() == nil ||
-			getResult.GetVPCENI().GetServiceCIDR() != nil ||
-			getResult.GetVPCENI().GetENIConfig() == nil {
+		if getResult.GetPod() == nil ||
+			getResult.GetENIInfo() != nil ||
+			getResult.GetBasicInfo() == nil {
 			return nil
 		}
 
-		podIP := getResult.GetVPCENI().GetENIConfig().GetPodIP()
+		podIP := getResult.GetBasicInfo().GetPodIP()
 		containerIPNet, err = terwayTypes.BuildIPNet(podIP, &rpc.IPSet{IPv4: "0.0.0.0/32", IPv6: "::/128"})
 		if err != nil {
 			return err
 		}
-
-		eniMAC := getResult.GetVPCENI().GetENIConfig().GetMAC()
+		gw := getResult.GetBasicInfo().GetGatewayIP()
+		gwIPSet, err := terwayTypes.ToIPSet(gw)
+		if err != nil {
+			return err
+		}
+		eniMAC := getResult.GetENIInfo().GetMAC()
 		var deviceID int32
 		deviceID, err = link.GetDeviceNumber(eniMAC)
-		if err != nil {
-			return nil
-		}
-
-		gw, err := terwayIP.ToIP(getResult.GetVPCENI().GetENIConfig().GetGatewayIP().IPv4)
 		if err != nil {
 			return nil
 		}
@@ -865,12 +851,10 @@ func cmdCheck(args *skel.CmdArgs) error {
 			NetNS:           cniNetns,
 			ContainerIFName: args.IfName,
 			ContainerIPNet:  containerIPNet,
-			GatewayIP: &terwayTypes.IPSet{
-				IPv4: gw,
-			},
-			ENIIndex:  deviceID,
-			MTU:       conf.MTU,
-			HostIPSet: hostIPSet,
+			GatewayIP:       gwIPSet,
+			ENIIndex:        deviceID,
+			MTU:             conf.MTU,
+			HostIPSet:       hostIPSet,
 		}
 		l, err := driver.GrabFileLock(terwayCNILock)
 		if err != nil {
@@ -890,10 +874,6 @@ func cmdCheck(args *skel.CmdArgs) error {
 }
 
 func getNetworkClient() (rpc.TerwayBackendClient, func(), error) {
-	// if test
-	if os.Getenv("TERWAY_E2E") == "true" {
-		return backend.NewMock(), func() {}, nil
-	}
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout)
 	grpcConn, err := grpc.DialContext(timeoutCtx, defaultSocketPath, grpc.WithInsecure(), grpc.WithContextDialer(
 		func(ctx context.Context, s string) (net.Conn, error) {

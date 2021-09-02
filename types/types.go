@@ -164,6 +164,22 @@ func (i *IPNetSet) String() string {
 	return strings.Join(result, "-")
 }
 
+func (i *IPNetSet) SetIPNet(str string) *IPNetSet {
+	ip, ipNet, err := net.ParseCIDR(str)
+	if err != nil {
+		return i
+	}
+	if ip == nil {
+		return i
+	}
+	if terwayIP.IPv6(ip) {
+		i.IPv6 = ipNet
+		return i
+	}
+	i.IPv4 = ipNet
+	return i
+}
+
 // ENI aliyun ENI resource
 type ENI struct {
 	ID               string

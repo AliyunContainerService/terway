@@ -10,7 +10,7 @@ apiVersion: v1
 data:
   10-terway.conf: |
     {
-      "cniVersion": "0.3.0",
+      "cniVersion": "0.3.1",
       "name": "terway",
       "eniip_virtual_type": "IPVlan",
       "ip_stack": "dual",   <----- 启用双栈支持
@@ -19,8 +19,7 @@ data:
   disable_network_policy: "false"
   eni_conf: |
     {
-      "min_pool_size": 0,
-      "ip_stack": "dual",   <----- 启用双栈支持
+      "min_pool_size": 0
       ...
     }
 kind: ConfigMap

@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/types"
+
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
@@ -14,7 +16,7 @@ type networkContext struct {
 }
 
 func (networkContext *networkContext) Log() *logrus.Entry {
-	return logrus.StandardLogger().
+	return logger.DefaultLogger.
 		WithField("podName", networkContext.pod.Name).
 		WithField("podNs", networkContext.pod.Namespace).
 		WithField("resources", networkContext.resources)
