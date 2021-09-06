@@ -144,4 +144,20 @@ function status_code() {
 	echo ${lines[${#lines[@]}-1]}
 }
 
+function parse_args() {
+  while [[ $# -ge 1 ]]; do
+    key=$1
+      shift
+      case "$key" in
+        --trunk)
+          export trunk=1
+          ;;
+        *)
+          echo 'invalid argument'
+          exit 1
+          ;;
+      esac
+  done
+}
+
 prepare_curl_options
