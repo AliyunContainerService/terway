@@ -18,6 +18,7 @@ rules:
       - events
     verbs:
       - create
+      - patch
   - apiGroups: [ "network.alibabacloud.com" ]
     resources: [ "*" ]
     verbs: [ "*" ]

@@ -1,0 +1,16 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: job-complete
+spec:
+  template:
+    metadata:
+      labels:
+        pod-ip: elastic
+    spec:
+      containers:
+        - name: busybox
+          image: busybox
+          command: ["sleep",  "10"]
+      restartPolicy: Never
+  backoffLimit: 0

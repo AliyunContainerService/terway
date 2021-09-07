@@ -17,6 +17,7 @@ limitations under the License.
 package common
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
@@ -25,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // MatchOnePodNetworking will range all podNetworking and try to found a matched podNetworking for this pod
@@ -78,4 +80,17 @@ func PodMatchSelector(labelSelector *metav1.LabelSelector, l labels.Set) (bool, 
 		return false, err
 	}
 	return selector.Matches(l), nil
+}
+
+// SetPodENIStatus set cr status
+func SetPodENIStatus(ctx context.Context, c client.Client, update, old *v1beta1.PodENI) (*v1beta1.PodENI, error) {
+	var err error
+	for i := 0; i < 2; i++ {
+		err = c.Status().Patch(ctx, update, client.MergeFrom(old))
+		if err != nil {
+			continue
+		}
+		return update, nil
+	}
+	return nil, err
 }
