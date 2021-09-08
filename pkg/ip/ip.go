@@ -3,8 +3,11 @@ package ip
 import (
 	"fmt"
 	"net"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
+// ToIP parse str to net.IP and return error is parse failed
 func ToIP(addr string) (net.IP, error) {
 	ip := net.ParseIP(addr)
 	if ip == nil {
@@ -25,6 +28,16 @@ func ToIPs(addrs []string) ([]net.IP, error) {
 	return result, nil
 }
 
+func ToIPMap(addrs []net.IP) map[string]net.IP {
+	result := make(map[string]net.IP)
+
+	for _, addr := range addrs {
+		result[addr.String()] = addr
+	}
+
+	return result
+}
+
 func IPv6(ip net.IP) bool {
 	return ip.To4() == nil
 }
@@ -39,4 +52,22 @@ func NetEqual(ipn1 *net.IPNet, ipn2 *net.IPNet) bool {
 	}
 
 	return ipn1.String() == ipn2.String()
+}
+
+func IPs2str(ips []net.IP) []string {
+	var result []string
+	for _, ip := range ips {
+		result = append(result, ip.String())
+	}
+	return result
+}
+
+// IPsIntersect return is 2 set is intersect
+func IPsIntersect(a []net.IP, b []net.IP) bool {
+	return sets.NewString(IPs2str(a)...).HasAny(IPs2str(b)...)
+}
+
+// IPsHasAll return true if all b is in a
+func IPsHasAll(a []net.IP, b []net.IP) bool {
+	return sets.NewString(IPs2str(a)...).HasAll(IPs2str(b)...)
 }

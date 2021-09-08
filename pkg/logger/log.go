@@ -10,7 +10,7 @@ var DefaultLogger = NewDefaultLogger()
 func NewDefaultLogger() *logrus.Logger {
 	l := logrus.New()
 	l.Formatter = &logrus.TextFormatter{
-		DisableTimestamp: false,
+		DisableTimestamp: true,
 		DisableColors:    true,
 		DisableQuote:     true,
 	}

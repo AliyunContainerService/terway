@@ -33,7 +33,6 @@ type Configure struct {
 	MaxENI                 int                 `yaml:"max_eni" json:"max_eni"`
 	Prefix                 string              `yaml:"prefix" json:"prefix"`
 	SecurityGroup          string              `yaml:"security_group" json:"security_group"`
-	HotPlug                string              `yaml:"hot_plug" json:"hot_plug"`
 	EniCapRatio            float64             `yaml:"eni_cap_ratio" json:"eni_cap_ratio"`
 	EniCapShift            int                 `yaml:"eni_cap_shift" json:"eni_cap_shift"`
 	VSwitchSelectionPolicy string              `yaml:"vswitch_selection_policy" json:"vswitch_selection_policy"`
@@ -58,7 +57,6 @@ type PoolConfig struct {
 	InstanceID             string
 	AccessID               string
 	AccessSecret           string
-	HotPlug                bool
 	EniCapRatio            float64
 	EniCapShift            int
 	VSwitchSelectionPolicy string

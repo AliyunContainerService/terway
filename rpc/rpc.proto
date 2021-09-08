@@ -27,68 +27,38 @@ message AllocIPRequest {
   string IfName = 5;
 }
 
+message AllocIPReply {
+  bool Success = 1;
+  IPType IPType = 2;
+  BasicInfo BasicInfo = 3;
+  ENIInfo ENIInfo = 4;
+  Pod Pod = 5;
+  bool IPv4 = 6;
+  bool IPv6 = 7;
+}
+
+message BasicInfo {
+  IPSet PodIP = 1;
+  IPSet PodCIDR = 2; // subnet for pod, value form vSwitch CIDR or podCIDR
+  IPSet GatewayIP = 3; // gw for the subnet
+  IPSet ServiceCIDR = 4;
+}
+
+message ENIInfo {
+  string MAC = 1;
+  bool Trunk = 2; // eni is trunk
+}
 
 enum IPType {
   TypeVPCIP = 0;
   TypeVPCENI = 1;
-  TypeManagedK8S = 2;
-  TypeENIMultiIP = 3;
+  TypeENIMultiIP = 2;
 }
 
 // VETH Basic
 message Pod {
   uint64 Ingress = 1;
   uint64 Egress = 2;
-}
-
-// VPC route veth
-message VPCIP {
-  Pod PodConfig = 1;
-  string NodeCidr = 2;
-}
-
-// ENI Basic
-message ENI {
-  IPSet PodIP = 1; // ip for pod
-  IPSet Subnet = 2;
-  string MAC = 3; // mac for eni
-  IPSet GatewayIP = 4; // gw for eni
-  bool Trunk = 5; // eni is trunk
-}
-
-// Dedicated ENI
-message VPCENI {
-  ENI ENIConfig = 1;
-  Pod PodConfig = 2;
-  IPSet ServiceCIDR = 3;
-}
-
-// Managed k8s ENI
-message ManagedK8SENI {
-  ENI EniConfig = 1;
-  Pod PodConfig = 2;
-  string PodCidr = 3;
-  string VpcCidr = 4;
-  string NodeCidr = 5;
-  IPSet ServiceCIDR = 6;
-}
-
-// ENI Multiple IP
-message ENIMultiIP {
-  ENI ENIConfig = 1;
-  Pod PodConfig = 2;
-  IPSet ServiceCIDR = 3;
-}
-
-message AllocIPReply {
-  bool Success = 1;
-  IPType IPType = 2;
-  oneof NetworkInfo {
-    VPCIP VPCIP = 3;
-    VPCENI VPCENI = 4;
-    ManagedK8SENI ManagedK8S = 5;
-    ENIMultiIP ENIMultiIP = 6;
-  }
 }
 
 message ReleaseIPRequest {
@@ -105,6 +75,8 @@ message ReleaseIPReply {
   bool Success = 1;
   IPSet IPv4Addr = 2;
   int32 DeviceNumber = 3;
+  bool IPv4 = 4;
+  bool IPv6 = 5;
 }
 
 message GetInfoRequest {
@@ -115,15 +87,11 @@ message GetInfoRequest {
 
 message GetInfoReply {
   IPType IPType = 1;
-  Pod PodConfig = 2;
-  string NodeCidr = 3;
-  IPSet PodIP = 4;
-  oneof NetworkInfo {
-    VPCIP VPCIP = 5;
-    VPCENI VPCENI = 6;
-    ManagedK8SENI ManagedK8S = 7;
-    ENIMultiIP ENIMultiIP = 8;
-  }
+  BasicInfo BasicInfo = 2;
+  ENIInfo ENIInfo = 3;
+  Pod Pod = 4;
+  bool IPv4 = 5;
+  bool IPv6 = 6;
 }
 
 enum EventTarget {

@@ -3,7 +3,6 @@ package aliyun
 import (
 	"encoding/hex"
 	"math/rand"
-	"net"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -61,6 +60,22 @@ var (
 		Jitter:   0.5,
 		Steps:    8,
 	}
+
+	// MetadataAssignPrivateIPBackoff about 10s backoff
+	MetadataAssignPrivateIPBackoff = wait.Backoff{
+		Duration: time.Millisecond * 1100,
+		Factor:   1,
+		Jitter:   0.2,
+		Steps:    10,
+	}
+
+	// MetadataUnAssignPrivateIPBackoff about 10s backoff
+	MetadataUnAssignPrivateIPBackoff = wait.Backoff{
+		Duration: time.Millisecond * 1100,
+		Factor:   1,
+		Jitter:   0.2,
+		Steps:    10,
+	}
 )
 
 func generateEniName() string {
@@ -71,26 +86,4 @@ func generateEniName() string {
 		panic(err)
 	}
 	return eniNamePrefix + hex.EncodeToString(b)
-}
-
-func ips2str(ips []net.IP) []string {
-	var result []string
-	for _, ip := range ips {
-		result = append(result, ip.String())
-	}
-	return result
-}
-
-func ipIntersect(a []net.IP, b []net.IP) bool {
-	for _, a1 := range a {
-		if a1 == nil {
-			continue
-		}
-		for _, b1 := range b {
-			if a1.Equal(b1) {
-				return true
-			}
-		}
-	}
-	return false
 }

@@ -5,16 +5,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
-	"github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/util/wait"
-
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
+	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/AliyunContainerService/terway/pkg/utils"
+
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 var defaultIns *Instance
 var once sync.Once
+var logIns = logger.DefaultLogger
 
 type Instance struct {
 	RegionID   string
@@ -67,7 +69,7 @@ func GetInstanceMeta() *Instance {
 			InstanceType: instanceType,
 			PrimaryMAC:   mac,
 		}
-		logrus.WithFields(map[string]interface{}{
+		logIns.WithFields(map[string]interface{}{
 			"region-id":     regionID,
 			"zone-id":       zoneID,
 			"vpc-id":        vpcID,
@@ -95,6 +97,22 @@ type Limits struct {
 
 	// MemberAdapterLimit is the number interfaces that type is member
 	MemberAdapterLimit int
+}
+
+func (l *Limits) SupportIPv6() bool {
+	return l.IPv4PerAdapter <= l.IPv6PerAdapter
+}
+
+func (l *Limits) TrunkPod() int {
+	return l.MemberAdapterLimit
+}
+
+func (l *Limits) MIPPod() int {
+	return (l.Adapters - 1) * l.IPv4PerAdapter
+}
+
+func (l *Limits) ENIOnlyPod() int {
+	return l.Adapters - 1
 }
 
 var limits = struct {
@@ -144,11 +162,11 @@ func UpdateFromAPI(client *ecs.Client, instanceType string) error {
 
 		limits.m[instanceType] = Limits{
 			Adapters:           adapterLimit,
-			IPv4PerAdapter:     ipv4PerAdapter,
-			IPv6PerAdapter:     ipv6PerAdapter,
-			MemberAdapterLimit: memberAdapterLimit,
+			IPv4PerAdapter:     utils.Minimal(ipv4PerAdapter),
+			IPv6PerAdapter:     utils.Minimal(ipv6PerAdapter),
+			MemberAdapterLimit: utils.Minimal(memberAdapterLimit),
 		}
-		logrus.WithFields(map[string]interface{}{
+		logger.DefaultLogger.WithFields(map[string]interface{}{
 			"instance-type":   instanceType,
 			"adapters":        adapterLimit,
 			"ipv4":            ipv4PerAdapter,

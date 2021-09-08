@@ -14,71 +14,111 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type mockObjectFactory struct {
-	createDelay   time.Duration
-	disposeDeplay time.Duration
-	err           error
-	totalCreated  int
-	totalDisposed int
-	idGenerator   int
-	lock          sync.Mutex
-}
-
-func (f *mockObjectFactory) GetResource() (map[string]types.FactoryResIf, error) {
-	f.lock.Lock()
-	defer f.lock.Unlock()
-
-	mapping := make(map[string]types.FactoryResIf)
-	for i := 1; i <= f.idGenerator; i++ {
-		mapping[fmt.Sprint(i)] = &types.FactoryRes{
-			ID: fmt.Sprint(i),
-		}
-	}
-
-	return mapping, nil
-}
-
 type mockNetworkResource struct {
-	id string
+	ID string
+}
+
+func (n *mockNetworkResource) ToResItems() []types.ResourceItem {
+	return []types.ResourceItem{
+		{
+			Type: n.GetType(),
+			ID:   n.GetResourceID(),
+		},
+	}
 }
 
 func (n mockNetworkResource) GetResourceID() string {
-	return n.id
+	return n.ID
 }
 
 func (n mockNetworkResource) GetType() string {
 	return "mock"
 }
 
-func (f *mockObjectFactory) Create(int) ([]types.NetworkResource, error) {
+type mockObjectFactory struct {
+	createDelay   time.Duration
+	disposeDeplay time.Duration
+	err           error
+	totalCreated  int
+	totalDisposed int
+	idBegin       int
+
+	Res map[string]string
+
+	lock sync.Mutex
+}
+
+func newMockObjectFactory(id int) *mockObjectFactory {
+	return &mockObjectFactory{
+		idBegin: id,
+		Res:     map[string]string{},
+	}
+}
+
+func (f *mockObjectFactory) ListResource() (map[string]types.NetworkResource, error) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	mapping := make(map[string]types.NetworkResource)
+	for _, id := range f.Res {
+		mapping[id] = &mockNetworkResource{
+			ID: id,
+		}
+	}
+	return mapping, nil
+}
+
+func (f *mockObjectFactory) Create(count int) ([]types.NetworkResource, error) {
 	time.Sleep(f.createDelay)
 	if f.err != nil {
 		return nil, f.err
 	}
 	f.lock.Lock()
 	defer f.lock.Unlock()
-	if f.idGenerator == 0 {
-		//start from 1000
-		f.idGenerator = 1000
+
+	var result []types.NetworkResource
+	for i := 0; i < count; i++ {
+		f.totalCreated++
+		f.idBegin++
+		res := &mockNetworkResource{ID: fmt.Sprintf("%d", f.idBegin)}
+		f.Res[res.GetResourceID()] = res.GetResourceID()
+		result = append(result, res)
 	}
 
-	f.idGenerator++
-	f.totalCreated++
-	return []types.NetworkResource{&mockNetworkResource{
-		id: fmt.Sprintf("%d", f.idGenerator),
-	}}, nil
+	return result, nil
 }
 
-func (f *mockObjectFactory) Dispose(types.NetworkResource) error {
+func (f *mockObjectFactory) Put(count int) ([]types.NetworkResource, error) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	var result []types.NetworkResource
+	for i := 0; i < count; i++ {
+		f.idBegin++
+		res := &mockNetworkResource{ID: fmt.Sprintf("%d", f.idBegin)}
+		f.Res[res.GetResourceID()] = res.GetResourceID()
+		result = append(result, res)
+	}
+
+	return result, nil
+}
+
+func (f *mockObjectFactory) Dispose(in types.NetworkResource) error {
 	time.Sleep(f.disposeDeplay)
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	f.totalDisposed++
+
+	res, ok := in.(*mockNetworkResource)
+	if !ok {
+		return fmt.Errorf("err type")
+	}
+	delete(f.Res, res.ID)
 	return f.err
 }
 
-func (f *mockObjectFactory) Get(in types.NetworkResource) (types.NetworkResource, error) {
-	return in, nil
+func (f *mockObjectFactory) Check(in types.NetworkResource) error {
+	return nil
 }
 
 func (f *mockObjectFactory) Reconcile() {}
@@ -96,7 +136,7 @@ func (f *mockObjectFactory) getTotalCreated() int {
 }
 
 func TestInitializerWithoutAutoCreate(t *testing.T) {
-	factory := &mockObjectFactory{idGenerator: 20}
+	factory := newMockObjectFactory(1000)
 	createPool(factory, 3, 5, 3, 0)
 	time.Sleep(time.Second)
 	assert.Equal(t, 0, factory.getTotalCreated())
@@ -104,26 +144,33 @@ func TestInitializerWithoutAutoCreate(t *testing.T) {
 }
 
 func TestInitializerWithAutoCreate(t *testing.T) {
-	factory := &mockObjectFactory{idGenerator: 20}
+	factory := newMockObjectFactory(1000)
 	createPool(factory, 3, 5, 0, 0)
 	time.Sleep(time.Second)
 	assert.Equal(t, 3, factory.getTotalCreated())
 	assert.Equal(t, 0, factory.getTotalDisposed())
 }
 
-func createPool(factory ObjectFactory, minIdle, maxIdle, initIdle, initInuse int) ObjectPool {
-	id := 0
+func createPool(factory *mockObjectFactory, minIdle, maxIdle, initIdle, initInuse int) ObjectPool {
 	cfg := Config{
 		Factory: factory,
 		Initializer: func(holder ResourceHolder) error {
-			for i := 0; i < initIdle; i++ {
-				id++
-				holder.AddIdle(mockNetworkResource{fmt.Sprintf("%d", id)})
+			idleRes, err := factory.Put(initIdle)
+			if err != nil {
+				panic(err)
 			}
-			for i := 0; i < initInuse; i++ {
-				id++
-				holder.AddInuse(mockNetworkResource{fmt.Sprintf("%d", id)}, "")
+			for _, res := range idleRes {
+				holder.AddIdle(res)
 			}
+
+			inuseRes, err := factory.Put(initInuse)
+			if err != nil {
+				panic(err)
+			}
+			for _, res := range inuseRes {
+				holder.AddInuse(res, "")
+			}
+
 			return nil
 		},
 		MinIdle:  minIdle,
@@ -143,7 +190,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestInitializerExceedMaxIdle(t *testing.T) {
-	factory := &mockObjectFactory{idGenerator: 20}
+	factory := newMockObjectFactory(1000)
 	createPool(factory, 3, 5, 6, 0)
 	time.Sleep(1 * time.Second)
 	assert.Equal(t, 0, factory.getTotalCreated())
@@ -151,7 +198,7 @@ func TestInitializerExceedMaxIdle(t *testing.T) {
 }
 
 func TestInitializerExceedCapacity(t *testing.T) {
-	factory := &mockObjectFactory{idGenerator: 20}
+	factory := newMockObjectFactory(1000)
 	createPool(factory, 3, 5, 1, 10)
 	time.Sleep(time.Second)
 	assert.Equal(t, 0, factory.getTotalCreated())
@@ -159,7 +206,7 @@ func TestInitializerExceedCapacity(t *testing.T) {
 }
 
 func TestAcquireIdle(t *testing.T) {
-	factory := &mockObjectFactory{}
+	factory := newMockObjectFactory(1000)
 	pool := createPool(factory, 0, 5, 3, 0)
 	_, err := pool.Acquire(context.Background(), "", "")
 	assert.Nil(t, err)
@@ -167,7 +214,7 @@ func TestAcquireIdle(t *testing.T) {
 }
 
 func TestAutoAddition(t *testing.T) {
-	factory := &mockObjectFactory{idGenerator: 20}
+	factory := newMockObjectFactory(1000)
 	pool := createPool(factory, 3, 5, 0, 0)
 	time.Sleep(1 * time.Second)
 	_, err := pool.Acquire(context.Background(), "", "")
@@ -181,7 +228,7 @@ func TestAutoAddition(t *testing.T) {
 }
 
 func TestAcquireNonExists(t *testing.T) {
-	factory := &mockObjectFactory{idGenerator: 20}
+	factory := newMockObjectFactory(1000)
 	pool := createPool(factory, 0, 5, 3, 0)
 	_, err := pool.Acquire(context.Background(), "1000", "")
 	assert.Nil(t, err)
@@ -189,7 +236,7 @@ func TestAcquireNonExists(t *testing.T) {
 }
 
 func TestAcquireExists(t *testing.T) {
-	factory := &mockObjectFactory{idGenerator: 20}
+	factory := newMockObjectFactory(0)
 	pool := createPool(factory, 0, 5, 3, 0)
 	res, err := pool.Acquire(context.Background(), "2", "")
 	assert.Nil(t, err)
@@ -198,10 +245,8 @@ func TestAcquireExists(t *testing.T) {
 }
 
 func TestConcurrencyAcquireNoMoreThanCapacity(t *testing.T) {
-	factory := &mockObjectFactory{
-		createDelay: 2 * time.Millisecond,
-		idGenerator: 20,
-	}
+	factory := newMockObjectFactory(0)
+
 	pool := createPool(factory, 0, 5, 1, 0)
 	wg := sync.WaitGroup{}
 	for i := 0; i < 10; i++ {
@@ -218,10 +263,8 @@ func TestConcurrencyAcquireNoMoreThanCapacity(t *testing.T) {
 }
 
 func TestConcurrencyAcquireMoreThanCapacity(t *testing.T) {
-	factory := &mockObjectFactory{
-		createDelay: 2 * time.Millisecond,
-		idGenerator: 20,
-	}
+	factory := newMockObjectFactory(1000)
+
 	pool := createPool(factory, 3, 5, 3, 0)
 	wg := sync.WaitGroup{}
 	for i := 0; i < 20; i++ {
@@ -239,10 +282,8 @@ func TestConcurrencyAcquireMoreThanCapacity(t *testing.T) {
 }
 
 func TestRelease(t *testing.T) {
-	factory := &mockObjectFactory{
-		createDelay: 1 * time.Millisecond,
-		idGenerator: 20,
-	}
+	factory := newMockObjectFactory(1000)
+
 	pool := createPool(factory, 0, 5, 3, 0)
 	n1, _ := pool.Acquire(context.Background(), "", "")
 	n2, _ := pool.Acquire(context.Background(), "", "")
@@ -272,17 +313,14 @@ func TestRelease(t *testing.T) {
 }
 
 func TestReleaseInvalid(t *testing.T) {
-	factory := &mockObjectFactory{idGenerator: 20}
+	factory := newMockObjectFactory(1000)
 	pool := createPool(factory, 3, 5, 3, 0)
 	err := pool.Release("not-exists")
 	assert.Equal(t, err, ErrInvalidState)
 }
 
 func TestGetResourceMapping(t *testing.T) {
-	factory := &mockObjectFactory{
-		createDelay: 1 * time.Millisecond,
-		idGenerator: 20,
-	}
+	factory := newMockObjectFactory(1000)
 	pool := createPool(factory, 3, 5, 3, 2)
 
 	for i := 0; i < 5; i++ {

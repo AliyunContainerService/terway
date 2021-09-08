@@ -44,11 +44,6 @@ const (
 	commandMapping = "mapping"
 )
 
-type UsageIf interface {
-	types.FactoryResIf
-	GetStatus() types.ResStatus
-}
-
 // ResUsage ResUsage
 type ResUsage struct {
 	ID     string
@@ -96,15 +91,18 @@ type ObjectPool interface {
 // ResourceHolder interface to initialize pool
 type ResourceHolder interface {
 	AddIdle(resource types.NetworkResource)
+	AddInvalid(resource types.NetworkResource)
 	AddInuse(resource types.NetworkResource, idempotentKey string)
 }
 
 // ObjectFactory interface of network resource object factory
 type ObjectFactory interface {
-	Create(int) ([]types.NetworkResource, error)
+	// Create res with count
+	Create(count int) ([]types.NetworkResource, error)
 	Dispose(types.NetworkResource) error
-	GetResource() (map[string]types.FactoryResIf, error)
-	Get(types.NetworkResource) (types.NetworkResource, error)
+	ListResource() (map[string]types.NetworkResource, error)
+	Check(types.NetworkResource) error
+	// Reconcile run periodicity
 	Reconcile()
 }
 
@@ -112,6 +110,7 @@ type simpleObjectPool struct {
 	name     string
 	inuse    map[string]poolItem
 	idle     *priorityQueue
+	invalid  map[string]poolItem // hole invalid also idle resource
 	lock     sync.Mutex
 	factory  ObjectFactory
 	maxIdle  int
@@ -125,14 +124,6 @@ type simpleObjectPool struct {
 	metricIdle     prometheus.Gauge
 	metricTotal    prometheus.Gauge
 	metricDisposed prometheus.Counter
-
-	// reconcile is a delegate ,called when pool try to sync local cache witch remote
-	// pod     pool     metadata     action
-	// ☑️       ☑️       ☑️          -
-	// ☑️       ☑️       -           try recreate（only ENIIP）
-	// ☑️       -        -           put in pool (should not happen)
-	// -        ☑️       ☑️          delete from pool
-	//reconcile func()
 }
 
 // Config configuration of pool
@@ -174,6 +165,7 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 		factory:     cfg.Factory,
 		inuse:       make(map[string]poolItem),
 		idle:        newPriorityQueue(),
+		invalid:     make(map[string]poolItem),
 		maxIdle:     cfg.MaxIdle,
 		minIdle:     cfg.MinIdle,
 		capacity:    cfg.Capacity,
@@ -200,12 +192,14 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 		return nil, err
 	}
 
-	log.Infof("pool initial state, capacity %d, maxIdle: %d, minIdle %d, idle: %s, inuse: %s",
-		pool.capacity,
-		pool.maxIdle,
-		pool.minIdle,
-		queueKeys(pool.idle),
-		mapKeys(pool.inuse))
+	log.WithFields(map[string]interface{}{
+		"capacity": pool.capacity,
+		"maxIdle":  pool.maxIdle,
+		"minIdle":  pool.minIdle,
+		"idle":     pool.idle.Size(),
+		"inUse":    len(pool.inuse),
+		"invalid":  len(pool.invalid),
+	}).Infof("pool initial state ,idle: %s, inuse: %s, invalid: %s", queueKeys(pool.idle), mapKeys(pool.inuse), mapKeys(pool.invalid))
 
 	go pool.startCheckIdleTicker()
 
@@ -373,7 +367,7 @@ func (p *simpleObjectPool) preload() error {
 }
 
 func (p *simpleObjectPool) sizeLocked() int {
-	return p.idle.Size() + len(p.inuse)
+	return p.idle.Size() + len(p.inuse) + len(p.invalid)
 }
 
 func (p *simpleObjectPool) getOneLocked(resID string) *poolItem {
@@ -502,7 +496,7 @@ func (p *simpleObjectPool) ReleaseWithReservation(resID string, reservation time
 	delete(p.inuse, resID)
 
 	// check metadata
-	_, err := p.factory.Get(res.res)
+	err := p.factory.Check(res.res)
 	if errors.Is(err, apiErr.ErrNotFound) {
 		log.Warnf("release %s, resource not exist in metadata, ignored", resID)
 		if err = p.factory.Dispose(res.res); err == nil {
@@ -538,6 +532,17 @@ func (p *simpleObjectPool) AddIdle(resource types.NetworkResource) {
 	p.metricIdle.Inc()
 }
 
+func (p *simpleObjectPool) AddInvalid(resource types.NetworkResource) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	p.invalid[resource.GetResourceID()] = poolItem{
+		res: resource,
+	}
+	p.metricTotal.Inc()
+	p.metricIdle.Inc() // use idle metric here
+}
+
 func (p *simpleObjectPool) AddInuse(res types.NetworkResource, idempotentKey string) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -565,6 +570,23 @@ func (p *simpleObjectPool) GetResourceMapping() (tracing.ResourcePoolStats, erro
 func (p *simpleObjectPool) checkResSync() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+
+	for _, invalid := range p.invalid {
+		l := log.WithFields(map[string]interface{}{
+			"id":     invalid.res.GetResourceID(),
+			"reason": "invalid",
+		})
+		err := p.factory.Dispose(invalid.res)
+		if err != nil {
+			l.Warnf("dispose failed %s", err.Error())
+			continue
+		}
+		l.Infof("dispose succeed")
+		p.tokenCh <- struct{}{}
+		p.metricTotal.Dec()
+		p.metricDisposed.Inc()
+	}
+
 	usage, err := p.getResUsage()
 	if err != nil {
 		log.Error(err)
@@ -575,12 +597,11 @@ func (p *simpleObjectPool) checkResSync() {
 		if ok {
 			continue
 		}
-		// res store in pool but can not found in remote(metadata)
+		// res store in pool but can not find in remote(metadata)
 		if r.GetStatus() == types.ResStatusIdle {
-			// safe to remove
-			p.idle.Rob(r.GetID())
-			log.Warnf("res %s, type %s is removed from remote,remove from pool", r.GetID(), r.GetType())
-			continue
+			log.Warnf("res %s, type %s is removed from remote,mark as invalid", r.GetID(), r.GetType())
+			invalid := p.idle.Rob(r.GetID())
+			p.invalid[r.GetID()] = *invalid
 		}
 		log.Errorf("res %s, type %s is removed from remote,but is in use", r.GetID(), r.GetType())
 	}
@@ -606,8 +627,16 @@ func (p *simpleObjectPool) getResUsage() (*Usage, error) {
 			Status: types.ResStatusInUse,
 		}
 	}
+	// invalid
+	for _, v := range p.invalid {
+		localRes[v.res.GetResourceID()] = &ResUsage{
+			ID:     v.res.GetResourceID(),
+			Type:   v.res.GetType(),
+			Status: types.ResStatusInvalid,
+		}
+	}
 
-	factoryRes, err := p.factory.GetResource()
+	factoryRes, err := p.factory.ListResource()
 	if err != nil {
 		return nil, err
 	}
@@ -616,13 +645,13 @@ func (p *simpleObjectPool) getResUsage() (*Usage, error) {
 	// map to factory
 	for _, v := range factoryRes {
 		status := types.ResStatusInvalid
-		lo, ok := localRes[v.GetID()]
+		lo, ok := localRes[v.GetResourceID()]
 		if ok {
 			status = lo.GetStatus()
 		}
 
-		remoteRes[v.GetID()] = &ResUsage{
-			ID:     v.GetID(),
+		remoteRes[v.GetResourceID()] = &ResUsage{
+			ID:     v.GetResourceID(),
 			Status: status,
 		}
 	}

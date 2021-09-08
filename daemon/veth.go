@@ -38,11 +38,11 @@ func (*vethResourceManager) Allocate(context *networkContext, prefer string) (ty
 	}, nil
 }
 
-func (*vethResourceManager) Release(context *networkContext, resItem ResourceItem) error {
+func (*vethResourceManager) Release(context *networkContext, resItem types.ResourceItem) error {
 	return nil
 }
 
-func (f *vethResourceManager) GarbageCollection(inUseResSet map[string]ResourceItem, expireResSet map[string]ResourceItem) error {
+func (f *vethResourceManager) GarbageCollection(inUseResSet map[string]types.ResourceItem, expireResSet map[string]types.ResourceItem) error {
 	// fixme do gc on cni binary
 	lock, err := disk.NewFileLock(defaultIpamPath)
 	if err != nil {

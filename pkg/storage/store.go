@@ -4,9 +4,12 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/AliyunContainerService/terway/pkg/logger"
+
 	"github.com/boltdb/bolt"
-	log "github.com/sirupsen/logrus"
 )
+
+var log = logger.DefaultLogger.WithField("subSys", "storage")
 
 // ErrNotFound key not found in store
 var ErrNotFound = errors.New("not found")

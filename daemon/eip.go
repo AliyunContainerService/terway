@@ -1,12 +1,14 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"net"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/AliyunContainerService/terway/pkg/ipam"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -14,12 +16,12 @@ import (
 
 // eip resource manager for pod public ip address
 type eipResourceManager struct {
-	ecs         aliyun.ECS
+	ecs         ipam.API
 	k8s         Kubernetes
 	allowEipRob bool
 }
 
-func newEipResourceManager(e aliyun.ECS, k Kubernetes, allowEipRob bool) ResourceManager {
+func newEipResourceManager(e ipam.API, k Kubernetes, allowEipRob bool) ResourceManager {
 	return &eipResourceManager{
 		ecs:         e,
 		k8s:         k,
@@ -37,6 +39,7 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 		eniIP net.IP
 		err   error
 	)
+	ctx := context.Context
 	podIP := context.pod.PodIPs.IPv4
 	if podIP == nil {
 		return nil, errors.Errorf("invalid pod ip: %v", context.pod.PodIP)
@@ -44,7 +47,7 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 	for _, res := range context.resources {
 		switch res.Type {
 		case types.ResourceTypeENI, types.ResourceTypeENIIP:
-			eniID, err = e.ecs.QueryEniIDByIP(podIP)
+			eniID, err = e.ecs.QueryEniIDByIP(ctx, aliyun.GetInstanceMeta().VPCID, podIP)
 			if err != nil {
 				return nil, errors.Wrapf(err, "error Query ENI by pod IP, %v", context.pod)
 			}
@@ -58,7 +61,7 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 	if eipID == "" {
 		eipID = prefer
 	}
-	eipInfo, err := e.ecs.AllocateEipAddress(context.pod.EipInfo.PodEipBandWidth, context.pod.EipInfo.PodEipChargeType,
+	eipInfo, err := e.ecs.AllocateEipAddress(ctx, context.pod.EipInfo.PodEipBandWidth, context.pod.EipInfo.PodEipChargeType,
 		eipID, eniID, eniIP, e.allowEipRob)
 	if err != nil {
 		return nil, errors.Errorf("error allocate eip info: %v", err)
@@ -68,9 +71,9 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 	if err != nil {
 		var err1 error
 		if eipInfo.Delete {
-			err1 = e.ecs.ReleaseEipAddress(eipInfo.ID, eniID, eniIP)
+			err1 = e.ecs.ReleaseEipAddress(ctx, eipInfo.ID, eniID, eniIP)
 		} else {
-			err1 = e.ecs.UnassociateEipAddress(eipInfo.ID, eniID, eniIP.String())
+			err1 = e.ecs.UnassociateEipAddress(ctx, eipInfo.ID, eniID, eniIP.String())
 		}
 		if err1 != nil {
 			logrus.Errorf("error rollback eip: %v", err1)
@@ -80,18 +83,20 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 	return eipInfo, nil
 }
 
-func (e *eipResourceManager) Release(context *networkContext, resItem ResourceItem) error {
+func (e *eipResourceManager) Release(context *networkContext, resItem types.ResourceItem) error {
 	if resItem.ExtraEipInfo == nil {
 		return nil
 	}
 	logrus.Infof("release eip: %v, %v", resItem.ID, resItem.ExtraEipInfo)
+	ctx := context.Context
+
 	if resItem.ExtraEipInfo.Delete {
-		err := e.ecs.ReleaseEipAddress(resItem.ID, resItem.ExtraEipInfo.AssociateENI, resItem.ExtraEipInfo.AssociateENIIP)
+		err := e.ecs.ReleaseEipAddress(ctx, resItem.ID, resItem.ExtraEipInfo.AssociateENI, resItem.ExtraEipInfo.AssociateENIIP)
 		if err != nil {
 			return err
 		}
 	} else {
-		err := e.ecs.UnassociateEipAddress(resItem.ID, resItem.ExtraEipInfo.AssociateENI, resItem.ExtraEipInfo.AssociateENIIP.String())
+		err := e.ecs.UnassociateEipAddress(ctx, resItem.ID, resItem.ExtraEipInfo.AssociateENI, resItem.ExtraEipInfo.AssociateENIIP.String())
 		if err != nil {
 			return err
 		}
@@ -99,19 +104,19 @@ func (e *eipResourceManager) Release(context *networkContext, resItem ResourceIt
 	return nil
 }
 
-func (e *eipResourceManager) GarbageCollection(inUseResSet map[string]ResourceItem, expireResSet map[string]ResourceItem) error {
+func (e *eipResourceManager) GarbageCollection(inUseResSet map[string]types.ResourceItem, expireResSet map[string]types.ResourceItem) error {
 	for expireRes, expireItem := range expireResSet {
 		if expireItem.ExtraEipInfo == nil {
 			continue
 		}
 		logrus.Infof("release eip: %v, %v", expireRes, expireItem)
 		if expireItem.ExtraEipInfo.Delete {
-			err := e.ecs.ReleaseEipAddress(expireRes, expireItem.ExtraEipInfo.AssociateENI, expireItem.ExtraEipInfo.AssociateENIIP)
+			err := e.ecs.ReleaseEipAddress(context.Background(), expireRes, expireItem.ExtraEipInfo.AssociateENI, expireItem.ExtraEipInfo.AssociateENIIP)
 			if err != nil {
 				return err
 			}
 		} else {
-			err := e.ecs.UnassociateEipAddress(expireRes, expireItem.ExtraEipInfo.AssociateENI, expireItem.ExtraEipInfo.AssociateENIIP.String())
+			err := e.ecs.UnassociateEipAddress(context.Background(), expireRes, expireItem.ExtraEipInfo.AssociateENI, expireItem.ExtraEipInfo.AssociateENIIP.String())
 			if err != nil {
 				return err
 			}

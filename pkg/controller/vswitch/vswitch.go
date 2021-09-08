@@ -95,7 +95,7 @@ func (s *SwitchPool) SyncSwitch() error {
 	})
 
 	for _, id := range ids {
-		resp, err := s.aliyun.DescribeVSwitchByID(id)
+		resp, err := s.aliyun.DescribeVSwitchByID(context.Background(), id)
 		if err != nil {
 			if errors.Is(err, apiErr.ErrNotFound) {
 				log.Info("vSwitch deleted", "ID", resp.VSwitchId)
@@ -149,7 +149,7 @@ func (s *SwitchPool) GetOne(zone string, ids sets.String) (string, error) {
 func (s *SwitchPool) GetByID(id string) (*Switch, error) {
 	v, ok := s.switches.Load(id)
 	if !ok {
-		resp, err := s.aliyun.DescribeVSwitchByID(id)
+		resp, err := s.aliyun.DescribeVSwitchByID(context.Background(), id)
 		if err != nil {
 			return nil, fmt.Errorf("error get vSwitch %s, %w", id, err)
 		}

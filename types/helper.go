@@ -10,7 +10,9 @@ import (
 
 func BuildIPNet(ip, subnet *rpc.IPSet) (*IPNetSet, error) {
 	ipnet := &IPNetSet{}
-
+	if ip == nil || subnet == nil {
+		return ipnet, nil
+	}
 	exec := func(ip, subnet string) (*net.IPNet, error) {
 		i, err := terwayIP.ToIP(ip)
 		if err != nil {

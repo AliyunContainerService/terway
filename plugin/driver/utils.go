@@ -220,7 +220,7 @@ func EnsureAddr(link netlink.Link, expect *netlink.Addr) (bool, error) {
 			continue
 		}
 
-		if addr.IPNet.String() == addr.String() && (addr.Scope == expect.Scope) {
+		if (addr.IPNet.String() == expect.IPNet.String()) && (addr.Scope == expect.Scope) {
 			found = true
 			continue
 		}
@@ -485,7 +485,7 @@ func EnsureIPRule(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, tableID int
 		found := false
 		for _, rule := range ruleList {
 			del := false
-			if rule.Table != tableID {
+			if rule.Table != expected.Table {
 				del = true
 			}
 			if rule.Priority != expected.Priority {

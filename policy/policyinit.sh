@@ -48,9 +48,9 @@ if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = 
     echo "using cilium as network routing & policy"
     # shellcheck disable=SC2086
     exec cilium-agent --tunnel=disabled --enable-ipv4-masquerade=false --enable-ipv6-masquerade=false \
-         --enable-ipv6=false --enable-policy=$ENABLE_POLICY \
+         --enable-policy=$ENABLE_POLICY \
          --agent-health-port=9099 --disable-envoy-version-check=true \
-         --enable-local-node-route=false --ipv4-range=169.254.10.0/30 --enable-endpoint-health-checking=false \
+         --enable-local-node-route=false --ipv4-range=169.254.10.0/30 --ipv6-range=fe80:2400:3200:baba::/30 --enable-endpoint-health-checking=false \
          --ipam=cluster-pool --bpf-map-dynamic-size-ratio=0.0025 ${extra_args}
   fi
 fi

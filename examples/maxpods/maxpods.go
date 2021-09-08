@@ -18,6 +18,7 @@ var (
 	credentialPath  string
 	region          string
 	mode            string
+	ipStack         string
 )
 
 func init() {
@@ -26,6 +27,7 @@ func init() {
 	flag.StringVar(&credentialPath, "credential-path", "", "AlibabaCloud credential path")
 	flag.StringVar(&region, "region", "", "AlibabaCloud Access Key Secret")
 	flag.StringVar(&mode, "mode", "terway-eniip", "max pod cal mode: eni-ip|eni")
+	flag.StringVar(&ipStack, "ip-stack", "ipv4", "ip stack")
 }
 
 func main() {
@@ -33,11 +35,23 @@ func main() {
 	log.SetOutput(ioutil.Discard)
 	logrus.SetOutput(ioutil.Discard)
 	ins := aliyun.GetInstanceMeta()
-	_, err := aliyun.NewECS(accessKeyID, accessKeySecret, credentialPath, false, false, ins.VPCID, ins.RegionID, &types.IPFamily{IPv4: true})
+	api, err := aliyun.NewAliyun(accessKeyID, accessKeySecret, ins.RegionID, credentialPath)
 	if err != nil {
 		panic(err)
 	}
 
+	f := &types.IPFamily{}
+	if ipStack == "ipv4" || ipStack == "dual" {
+		f.IPv4 = true
+	}
+	if ipStack == "dual" || ipStack == "ipv6" {
+		f.IPv6 = true
+	}
+
+	err = aliyun.UpdateFromAPI(api.ClientSet.ECS(), aliyun.GetInstanceMeta().InstanceType)
+	if err != nil {
+		panic(err)
+	}
 	if mode == "terway-eniip" {
 		limit, ok := aliyun.GetLimit(aliyun.GetInstanceMeta().InstanceType)
 		if !ok {

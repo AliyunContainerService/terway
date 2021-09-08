@@ -15,7 +15,7 @@ func TestInit(t *testing.T) {
 }
 
 func createNetworkResource(id string) types.NetworkResource {
-	return mockNetworkResource{id: id}
+	return &mockNetworkResource{ID: id}
 }
 
 func createPoolItem(id int) *poolItem {
