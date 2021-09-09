@@ -1,0 +1,16 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: job-fail
+spec:
+  template:
+    metadata:
+      labels:
+        pod-ip: elastic
+    spec:
+      containers:
+        - name: busybox
+          image: busybox
+          command: ["cmd-not-exist"]
+      restartPolicy: Never
+  backoffLimit: 0

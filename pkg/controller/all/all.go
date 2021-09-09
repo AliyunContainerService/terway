@@ -19,6 +19,7 @@ package all
 
 import (
 	// register all controllers
+	_ "github.com/AliyunContainerService/terway/pkg/controller/pod"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/pod-eni"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/pod-networking"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/vswitch"

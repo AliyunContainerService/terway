@@ -92,9 +92,32 @@ type IPType struct {
 
 type ENIStatus string
 
+//            pod create
+//                |
+//                |   podENI create
+//                |
+//         ENIStatusInitial
+//                |
+//                |   bind eni
+//          ENIStatusBind        <-----   ENIStatusBinding  <----- sts pod recreate
+//                |                               |
+//                |                               |
+//                |                               |              gc reserved resource for sts pods
+//                |                         ENIStatusUnbind    ---------
+//                |                               |                     |
+//                |   sts pod delete              |                     |
+//                |-----------------------> ENIStatusDeleting           |
+//                |                                                     |
+//                |   stateless pod delete                              |
+//                |        <---------------------------------------------
+//          del podENI
 const (
+	// ENIStatusInitial the status when pod first created
+	ENIStatusInitial = ""
 	// ENIStatusBind the status ENI is bind to ECS
 	ENIStatusBind = "Bind"
+	// ENIStatusBinding the status ENI need to bind to ECS, usually when sts pod require the previous ENI
+	ENIStatusBinding = "Binding"
 	// ENIStatusUnbind the status ENI is not bind to ECS
 	ENIStatusUnbind = "Unbind"
 	// ENIStatusDeleting the status when CR is removing
