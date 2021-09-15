@@ -73,7 +73,7 @@ RUN cd cilium && make NOSTRIP=$NOSTRIP LOCKDEBUG=$LOCKDEBUG PKG_BUILD=1 V=$V LIB
 RUN cp /tmp/install/opt/cni/bin/cilium-cni /tmp/install/usr/bin/
 
 FROM ubuntu:20.04
-RUN apt-get update && apt-get install -y kmod libelf1 libmnl0 iptables nftables kmod curl ipset bash ethtool bridge-utils socat grep findutils jq && \
+RUN apt-get update && apt-get install -y kmod libelf1 libmnl0 iptables nftables kmod curl ipset bash ethtool bridge-utils socat grep findutils jq conntrack iputils-ping && \
     apt-get purge --auto-remove && apt-get clean && rm -rf /var/lib/apt/lists/*
 COPY --from=llvm-dist /usr/local/bin/clang /usr/local/bin/llc /bin/
 COPY --from=bpftool-dist /usr/local /usr/local

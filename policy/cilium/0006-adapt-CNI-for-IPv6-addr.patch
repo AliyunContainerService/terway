@@ -1,26 +1,27 @@
-From 2045fcf3c1e34f8b9358c91d4f367203b979b49b Mon Sep 17 00:00:00 2001
+From 9586087dd445d5fd4652df9211ddd0bfd42df2a6 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
-Date: Thu, 5 Aug 2021 15:03:38 +0800
+Date: Mon, 6 Sep 2021 19:59:03 +0800
 Subject: [PATCH] adapt CNI for IPv6 addr
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
- pkg/datapath/linux/config/config.go          |  1 +
+ bpf/lib/icmp6.h                              |  2 +-
  plugins/cilium-cni/chaining/terway/terway.go | 57 ++++++++++----------
- 2 files changed, 30 insertions(+), 28 deletions(-)
+ 2 files changed, 30 insertions(+), 29 deletions(-)
 
-diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
-index 0b4ae87c51..31b5a0bfda 100644
---- a/pkg/datapath/linux/config/config.go
-+++ b/pkg/datapath/linux/config/config.go
-@@ -758,6 +758,7 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, e datapath.Endp
- 		fmt.Fprint(fw, "#define ENABLE_ARP_PASSTHROUGH 1\n")
+diff --git a/bpf/lib/icmp6.h b/bpf/lib/icmp6.h
+index 2401132e9d..5534599c8b 100644
+--- a/bpf/lib/icmp6.h
++++ b/bpf/lib/icmp6.h
+@@ -394,7 +394,7 @@ static __always_inline int __icmp6_handle_ns(struct __ctx_buff *ctx, int nh_off)
  	}
 
-+	fmt.Fprintf(fw, "#define SKIP_ICMPV6_NS_HANDLING 1\n")
- 	if !e.HasIpvlanDataPath() {
- 		if !e.RequireARPPassthrough() {
- 			fmt.Fprint(fw, "#define ENABLE_ARP_RESPONDER 1\n")
+ 	/* Unknown target address, drop */
+-	return ACTION_UNKNOWN_ICMP6_NS;
++	return 0;
+ }
+
+ #ifndef SKIP_ICMPV6_NS_HANDLING
 diff --git a/plugins/cilium-cni/chaining/terway/terway.go b/plugins/cilium-cni/chaining/terway/terway.go
 index 7c5752bc15..05d700f403 100644
 --- a/plugins/cilium-cni/chaining/terway/terway.go

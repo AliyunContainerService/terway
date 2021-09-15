@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"syscall"
 
+	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -56,6 +57,11 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		return err
 	}
 
+	if d.ipv6 {
+		_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", parentLink.Attrs().Name), "0")
+		_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/forwarding", parentLink.Attrs().Name), "1")
+	}
+
 	err = LinkAdd(&netlink.IPVlan{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:        cfg.HostVETHName,
@@ -92,6 +98,7 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 			return fmt.Errorf("error list links, %w", err)
 		}
 
+		// accept_ra
 		for _, link := range linkList {
 			if link.Attrs().Name != cfg.HostVETHName {
 				continue
@@ -100,6 +107,11 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 			if err != nil {
 				return err
 			}
+
+			if d.ipv6 {
+				_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", cfg.ContainerIfName), "0")
+			}
+
 			_, err = EnsureDefaultRoute(link, cfg.GatewayIP, unix.RT_TABLE_MAIN)
 			if err != nil {
 				return err
