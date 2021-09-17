@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	apiTypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -66,22 +67,24 @@ type Kubernetes interface {
 	GetNodeDynamicConfigLabel() string
 	GetDynamicConfigWithName(name string) (string, error)
 	SetSvcCidr(svcCidr *types.IPNetSet) error
+	SetCustomStatefulWorkloadKinds(kinds []string) error
 }
 
 type k8s struct {
-	client          kubernetes.Interface
-	podEniClient    v1beta1.NetworkV1beta1Interface
-	storage         storage.Storage
-	broadcaster     record.EventBroadcaster
-	recorder        record.EventRecorder
-	mode            string
-	nodeName        string
-	daemonNamespace string
-	nodeCidr        *types.IPNetSet
-	node            *corev1.Node
-	svcCidr         *types.IPNetSet
-	apiConn         *connTracker
-	apiConnTime     time.Time
+	client                  kubernetes.Interface
+	podEniClient            v1beta1.NetworkV1beta1Interface
+	storage                 storage.Storage
+	broadcaster             record.EventBroadcaster
+	recorder                record.EventRecorder
+	mode                    string
+	nodeName                string
+	daemonNamespace         string
+	nodeCidr                *types.IPNetSet
+	node                    *corev1.Node
+	svcCidr                 *types.IPNetSet
+	apiConn                 *connTracker
+	apiConnTime             time.Time
+	statefulWorkloadKindSet sets.String
 	sync.Locker
 }
 
@@ -112,7 +115,26 @@ func (k *k8s) PatchTrunkInfo(trunkEni string) error {
 	return nil
 }
 
+func (k *k8s) SetCustomStatefulWorkloadKinds(kinds []string) error {
+	k.Lock()
+	defer k.Unlock()
+
+	// init kubernetes built-in stateful workload kind
+	if len(k.statefulWorkloadKindSet) == 0 {
+		k.statefulWorkloadKindSet = sets.NewString("statefulset")
+	}
+
+	// uniform and merge all custom stateful workload kinds
+	for i := range kinds {
+		k.statefulWorkloadKindSet.Insert(strings.TrimSpace(strings.ToLower(kinds[i])))
+	}
+	return nil
+}
+
 func (k *k8s) SetSvcCidr(svcCidr *types.IPNetSet) error {
+	k.Lock()
+	defer k.Unlock()
+
 	var err error
 	if svcCidr.IPv4 == nil {
 		svcCidr.IPv4, err = serviceCidrFromAPIServer(k.client)
@@ -401,7 +423,7 @@ func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 	panic(fmt.Errorf("unknown daemon mode %s", daemonMode))
 }
 
-func convertPod(daemonMode string, pod *corev1.Pod) *types.PodInfo {
+func convertPod(daemonMode string, statefulWorkloadKindSet sets.String, pod *corev1.Pod) *types.PodInfo {
 	pi := &types.PodInfo{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
@@ -478,14 +500,27 @@ func convertPod(daemonMode string, pod *corev1.Pod) *types.PodInfo {
 		}
 	}
 
-	if len(pod.OwnerReferences) != 0 {
-		switch strings.ToLower(pod.OwnerReferences[0].Kind) {
-		case "statefulset":
-			pi.IPStickTime = defaultStickTimeForSts
+	// determine whether pod's IP will stick 5 minutes for a reuse, priorities as below,
+	// 1. pod has a positive pod-ip-reservation annotation
+	// 2. pod is owned by a known stateful workload
+	switch {
+	case parseBool(pod.Annotations[types.PodIPReservation]):
+		pi.IPStickTime = defaultStickTimeForSts
+	case len(pod.OwnerReferences) > 0:
+		for i := range pod.OwnerReferences {
+			if statefulWorkloadKindSet.Has(strings.ToLower(pod.OwnerReferences[i].Kind)) {
+				pi.IPStickTime = defaultStickTimeForSts
+				break
+			}
 		}
 	}
 
 	return pi
+}
+
+func parseBool(s string) bool {
+	b, _ := strconv.ParseBool(s)
+	return b
 }
 
 // bandwidth limit unit
@@ -571,7 +606,7 @@ func (k *k8s) GetPod(namespace, name string) (*types.PodInfo, error) {
 		k.reconnectOnTimeoutError(err)
 		return nil, err
 	}
-	podInfo := convertPod(k.mode, pod)
+	podInfo := convertPod(k.mode, k.statefulWorkloadKindSet, pod)
 	item := &storageItem{
 		Pod: podInfo,
 	}
@@ -598,7 +633,7 @@ func (k *k8s) GetLocalPods() ([]*types.PodInfo, error) {
 	}
 	var ret []*types.PodInfo
 	for _, pod := range list.Items {
-		podInfo := convertPod(k.mode, &pod)
+		podInfo := convertPod(k.mode, k.statefulWorkloadKindSet, &pod)
 		ret = append(ret, podInfo)
 	}
 
