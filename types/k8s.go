@@ -33,6 +33,9 @@ const (
 	// PodENI whether pod is using eni (trunking mode)
 	PodENI        = AnnotationPrefix + "pod-eni"
 	PodNetworking = AnnotationPrefix + "pod-networking"
+
+	// PodIPReservation whether pod's IP will be reserved for a reuse
+	PodIPReservation = AnnotationPrefix + "pod-ip-reservation"
 )
 
 // FinalizerPodENI finalizer for podENI resource

@@ -39,8 +39,9 @@ type Configure struct {
 	EnableEIPPool          string              `yaml:"enable_eip_pool" json:"enable_eip_pool"`
 	IPStack                string              `yaml:"ip_stack" json:"ip_stack"` // default ipv4 , support ipv4 dual
 	// rob the eip instance even the eip already bound to other resource
-	AllowEIPRob       string `yaml:"allow_eip_rob" json:"allow_eip_rob"`
-	EnableENITrunking bool   `yaml:"enable_eni_trunking" json:"enable_eni_trunking"`
+	AllowEIPRob                 string   `yaml:"allow_eip_rob" json:"allow_eip_rob"`
+	EnableENITrunking           bool     `yaml:"enable_eni_trunking" json:"enable_eni_trunking"`
+	CustomStatefulWorkloadKinds []string `yaml:"custom_stateful_workload_kinds" json:"custom_stateful_workload_kinds"`
 }
 
 // PoolConfig configuration of pool and resource factory

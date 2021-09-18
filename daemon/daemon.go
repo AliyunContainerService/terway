@@ -1094,6 +1094,8 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, errors.Wrapf(err, "error set k8s svcCidr")
 	}
 
+	_ = netSrv.k8s.SetCustomStatefulWorkloadKinds(config.CustomStatefulWorkloadKinds)
+
 	netSrv.resourceDB, err = storage.NewDiskStorage(
 		resDBName, resDBPath, json.Marshal, func(bytes []byte) (interface{}, error) {
 			resourceRel := &types.PodResources{}
