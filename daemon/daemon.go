@@ -118,7 +118,7 @@ func (networkService *networkService) allocateVeth(ctx *networkContext, old *typ
 		if len(oldVethRes) == 0 {
 			ctx.Log().Debugf("veth for pod %s is zero", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else if len(oldVethRes) > 1 {
-			ctx.Log().Warnf("veth for pod %s is zero", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
+			ctx.Log().Warnf("veth for pod %s is more than one", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else {
 			oldVethID = oldVethRes[0].ID
 		}
@@ -138,7 +138,7 @@ func (networkService *networkService) allocateENI(ctx *networkContext, old *type
 		if len(oldENIRes) == 0 {
 			ctx.Log().Debugf("eniip for pod %s is zero", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else if len(oldENIRes) > 1 {
-			ctx.Log().Warnf("eniip for pod %s more than one", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
+			ctx.Log().Warnf("eniip for pod %s is more than one", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else {
 			oldENIID = oldENIRes[0].ID
 		}
@@ -158,7 +158,7 @@ func (networkService *networkService) allocateENIMultiIP(ctx *networkContext, ol
 		if len(oldENIIPRes) == 0 {
 			ctx.Log().Debugf("eniip for pod %s is zero", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else if len(oldENIIPRes) > 1 {
-			ctx.Log().Warnf("eniip for pod %s more than one", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
+			ctx.Log().Warnf("eniip for pod %s is more than one", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else {
 			oldENIIPID = oldENIIPRes[0].ID
 		}
@@ -178,7 +178,7 @@ func (networkService *networkService) allocateEIP(ctx *networkContext, old *type
 		if len(oldEIPRes) == 0 {
 			ctx.Log().Debugf("eip for pod %s is zero", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else if len(oldEIPRes) > 1 {
-			ctx.Log().Warnf("eip for pod %s more than one", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
+			ctx.Log().Warnf("eip for pod %s is more than one", podInfoKey(old.PodInfo.Namespace, old.PodInfo.Name))
 		} else {
 			oldEIPID = oldEIPRes[0].ID
 		}
