@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"net"
 	"time"
 
 	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
@@ -96,6 +97,17 @@ func (r *RawNicDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		}
 
 		if r.ipv6 {
+			_, err = EnsureRoute(&netlink.Route{
+				LinkIndex: nicLink.Attrs().Index,
+				Scope:     netlink.SCOPE_LINK,
+				Dst: &net.IPNet{
+					IP:   cfg.GatewayIP.IPv6,
+					Mask: net.CIDRMask(128, 128),
+				},
+			})
+			if err != nil {
+				return err
+			}
 			_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", cfg.ContainerIfName), "0")
 		}
 
