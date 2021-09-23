@@ -288,7 +288,9 @@ func (d *VETHDriver) Check(cfg *CheckConfig) error {
 		return nil
 	})
 	if err != nil {
-		cfg.RecordPodEvent(fmt.Sprintf("veth driver failed to check nic %#v", err))
+		if _, ok := err.(ns.NSPathNotExistErr); !ok {
+			cfg.RecordPodEvent(fmt.Sprintf("veth driver failed to check nic %v", err))
+		}
 		return nil
 	}
 
@@ -313,8 +315,8 @@ func (d *VETHDriver) Check(cfg *CheckConfig) error {
 	// sync policy route
 	parentLink, err := netlink.LinkByIndex(int(cfg.ENIIndex))
 	if err != nil {
-		cfg.RecordPodEvent(fmt.Sprintf("failed to get nic by id %d %#v", cfg.ENIIndex, err))
-		Log.Debugf("failed to get nic by id %d %#v", cfg.ENIIndex, err)
+		cfg.RecordPodEvent(fmt.Sprintf("failed to get nic by id %d %v", cfg.ENIIndex, err))
+		Log.Debugf("failed to get nic by id %d %v", cfg.ENIIndex, err)
 		return nil
 	}
 	tableID := getRouteTableID(parentLink.Attrs().Index)
