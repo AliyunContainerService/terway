@@ -222,6 +222,9 @@ func (d *IPvlanDriver) Check(cfg *CheckConfig) error {
 		return EnsureNetConfSet(true, false)
 	})
 	if err != nil {
+		if _, ok := err.(ns.NSPathNotExistErr); ok {
+			return nil
+		}
 		return err
 	}
 	// 2. check parent link ( this is called in every setup it is safe)
