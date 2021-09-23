@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"time"
 
+	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -93,6 +94,11 @@ func (r *RawNicDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		if err != nil {
 			return err
 		}
+
+		if r.ipv6 {
+			_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", cfg.ContainerIfName), "0")
+		}
+
 		_, err = EnsureDefaultRoute(nicLink, cfg.GatewayIP, unix.RT_TABLE_MAIN)
 		return err
 	})

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/AliyunContainerService/terway/pkg/ip"
+	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
 	"github.com/AliyunContainerService/terway/pkg/tc"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 	"golang.org/x/sys/unix"
@@ -60,6 +61,19 @@ func (d *VETHDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		}
 	}
 
+	// disable ra first
+	if cfg.ENIIndex != 0 {
+		parentLink, err := netlink.LinkByIndex(cfg.ENIIndex)
+		if err != nil {
+			return fmt.Errorf("error get eni by index %d, %w", cfg.ENIIndex, err)
+		}
+
+		if d.ipv6 {
+			_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", parentLink.Attrs().Name), "0")
+			_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/forwarding", parentLink.Attrs().Name), "1")
+		}
+	}
+
 	hostNetNS, err := ns.GetCurrentNS()
 	if err != nil {
 		return fmt.Errorf("err get host net ns, %w", err)
@@ -92,6 +106,10 @@ func (d *VETHDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		err = SetupLink(contLink, cfg)
 		if err != nil {
 			return err
+		}
+
+		if d.ipv6 {
+			_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", cfg.ContainerIfName), "0")
 		}
 
 		defaultGW := &terwayTypes.IPSet{}

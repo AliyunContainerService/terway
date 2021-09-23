@@ -279,7 +279,7 @@ func (s *ConnectionTestSuite) TestPod2Pod() {
 				s.T().Logf("src %s -> dst %s", podInfo(&src), podInfo(&dst))
 				for _, ip := range podIPs(&dst) {
 					l := fmt.Sprintf("src %s -> dst %s", podInfo(&src), ip)
-					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, ip)
+					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlIP(ip))
 					s.Expected(c.Status, stdErrOut, err, l)
 				}
 			}
@@ -394,7 +394,7 @@ func podIPs(pod *corev1.Pod) []string {
 
 func curlIP(ip string) string {
 	if terwayIP.IPv6(net.ParseIP(ip)) {
-		return fmt.Sprintf("-6 %s", ip)
+		return fmt.Sprintf("-g -6 http://[%s]", ip)
 	}
 	return ip
 }

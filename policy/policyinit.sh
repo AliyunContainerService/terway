@@ -64,7 +64,7 @@ fi
   # shellcheck disable=SC2154
   export CALICO_IPV4POOL_CIDR=${Network}
   export FELIX_IPTABLESREFRESHINTERVAL=${IPTABLESREFRESHINTERVAL:-60}
-  export FELIX_IPV6SUPPORT=false
+  export FELIX_IPV6SUPPORT=true
   export WAIT_FOR_DATASTORE=true
   export IP=""
   export NO_DEFAULT_POOLS=true
