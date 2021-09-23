@@ -367,6 +367,20 @@ func (d *VETHDriver) ensureENIConfig(link netlink.Link, trunk bool, mtu, tableID
 		}
 	}
 
+	if gw.IPv6 != nil {
+		_, err = EnsureRoute(&netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Scope:     netlink.SCOPE_LINK,
+			Dst: &net.IPNet{
+				IP:   gw.IPv6,
+				Mask: net.CIDRMask(128, 128),
+			},
+		})
+		if err != nil {
+			return err
+		}
+	}
+
 	// ensure default route
 	_, err = EnsureDefaultRoute(link, gw, tableID)
 	return err

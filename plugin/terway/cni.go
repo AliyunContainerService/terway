@@ -415,7 +415,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			extraRoutes = append(extraRoutes, types.Route{Dst: *svc.IPv4, GW: driver.LinkIP})
 		}
 		if ipv6 {
-			extraRoutes = append(extraRoutes, types.Route{Dst: *svc.IPv6, GW: driver.LinkIP})
+			extraRoutes = append(extraRoutes, types.Route{Dst: *svc.IPv6, GW: driver.LinkIPv6})
 		}
 
 		for _, v := range conf.HostStackCIDRs {

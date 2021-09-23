@@ -58,6 +58,17 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 	}
 
 	if d.ipv6 {
+		_, err = EnsureRoute(&netlink.Route{
+			LinkIndex: parentLink.Attrs().Index,
+			Scope:     netlink.SCOPE_LINK,
+			Dst: &net.IPNet{
+				IP:   cfg.GatewayIP.IPv6,
+				Mask: net.CIDRMask(128, 128),
+			},
+		})
+		if err != nil {
+			return err
+		}
 		_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", parentLink.Attrs().Name), "0")
 		_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/forwarding", parentLink.Attrs().Name), "1")
 	}
