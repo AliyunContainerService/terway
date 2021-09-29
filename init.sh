@@ -20,50 +20,6 @@ init_node_bpf() {
   echo "Node initialization complete"
 }'
 }
-
-setup_networkmanager() {
-  nsenter -t 1 -m -- tee /tmp/setup_network.sh<<EOF
-set -x
-
-config_network_manager() {
-  echo "setup rh NetworkManager"
-  if [ -f "/usr/lib/NetworkManager/conf.d/eni.conf" ]; then
-    return
-  fi
-  tee /usr/lib/NetworkManager/conf.d/eni.conf<<EOF2
-[main]
-plugins = ifcfg-rh,keyfile
-
-[keyfile]
-unmanaged-devices=interface-name:eth*, except:interface-name:eth0
-
-[logging]
-
-EOF2
-  systemctl reload NetworkManager
-}
-
-if [[ "\$(systemctl is-active NetworkManager)" == "active" ]]; then
-  mkdir -p "/usr/lib/NetworkManager/conf.d/"
-  OS_ID=\$(awk -F= '\$1=="ID" { print \$2 ;}' /etc/os-release)
-  VERSION_ID=\$(awk -F= '\$1=="VERSION_ID" { print \$2 ;}' /etc/os-release)
-
-  echo "detect os \${OS_ID} version \${VERSION_ID}"
-  if [[ "\$OS_ID" == *alinux* && "\$VERSION_ID" == "\"3\"" ]]; then
-    config_network_manager
-  fi
-
-  if [[ "\$OS_ID" == *centos* && "\$VERSION_ID" == "\"8\"" ]]; then
-    config_network_manager
-  fi
-fi
-
-EOF
-  nsenter -t 1 -m -- chmod +x /tmp/setup_network.sh
-  nsenter -t 1 -m -- bash -c /tmp/setup_network.sh
-}
-
-
 set -o errexit
 set -o nounset
 
@@ -109,5 +65,3 @@ fi
 sysctl -w net.ipv4.conf.eth0.rp_filter=0
 modprobe sch_htb || true
 chroot /host sh -c "systemctl disable eni.service; rm -f /etc/udev/rules.d/75-persistent-net-generator.rules /lib/udev/rules.d/60-net.rules /lib/udev/rules.d/61-eni.rules /lib/udev/write_net_rules && udevadm control --reload-rules && udevadm trigger"
-
-setup_networkmanager
