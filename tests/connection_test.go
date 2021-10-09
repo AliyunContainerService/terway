@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,7 +18,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned"
-	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 )
 
@@ -278,8 +278,9 @@ func (s *ConnectionTestSuite) TestPod2Pod() {
 			for _, dst := range dstPods {
 				s.T().Logf("src %s -> dst %s", podInfo(&src), podInfo(&dst))
 				for _, ip := range podIPs(&dst) {
-					l := fmt.Sprintf("src %s -> dst %s", podInfo(&src), ip)
-					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlIP(ip))
+					addr := net.JoinHostPort(ip, "80")
+					l := fmt.Sprintf("src %s -> dst %s", podInfo(&src), addr)
+					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
 					s.Expected(c.Status, stdErrOut, err, l)
 				}
 			}
@@ -304,26 +305,26 @@ func (s *ConnectionTestSuite) TestPod2ServiceIP() {
 
 		for _, src := range srcPods {
 			for _, svc := range dstServices {
-				var ips []string
+				var addrs []string
 				if svc.Spec.ClusterIP != corev1.ClusterIPNone {
-					ips = append(ips, svc.Spec.ClusterIP)
+					addrs = append(addrs, net.JoinHostPort(svc.Spec.ClusterIP, fmt.Sprintf("%d", svc.Spec.Ports[0].Port)))
 				}
 
 				if !enablePolicy {
 					if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
-						ips = append(ips, svc.Status.LoadBalancer.Ingress[0].IP)
+						addrs = append(addrs, net.JoinHostPort(svc.Status.LoadBalancer.Ingress[0].IP, fmt.Sprintf("%d", svc.Spec.Ports[0].Port)))
 					}
 
 					if svc.Spec.Type == corev1.ServiceTypeNodePort || svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
 						for _, nodeIP := range nodeIPs {
-							ips = append(ips, net.JoinHostPort(nodeIP.String(), fmt.Sprintf("%d", svc.Spec.Ports[0].NodePort)))
+							addrs = append(addrs, net.JoinHostPort(nodeIP.String(), fmt.Sprintf("%d", svc.Spec.Ports[0].NodePort)))
 						}
 					}
 				}
 
-				for _, ip := range ips {
-					l := fmt.Sprintf("src %s -> dst svc name %s, ip %s", podInfo(&src), svc.Name, ip)
-					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlIP(ip))
+				for _, addr := range addrs {
+					l := fmt.Sprintf("src %s -> dst svc name %s, addr %s", podInfo(&src), svc.Name, addr)
+					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
 					s.Expected(c.Status, stdErrOut, err, l)
 				}
 			}
@@ -392,9 +393,9 @@ func podIPs(pod *corev1.Pod) []string {
 	return result
 }
 
-func curlIP(ip string) string {
-	if terwayIP.IPv6(net.ParseIP(ip)) {
-		return fmt.Sprintf("-g -6 http://[%s]", ip)
+func curlAddr(addr string) string {
+	if strings.Contains(addr, "[") {
+		return fmt.Sprintf("-g -6 http://%s", addr)
 	}
-	return ip
+	return addr
 }
