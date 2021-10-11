@@ -22,20 +22,19 @@ RUN cd cmd/terway && CGO_ENABLED=0 GOOS=linux go build \
 RUN cd plugin/terway && CGO_ENABLED=0 GOOS=linux go build -o terway .
 RUN cd cmd/terway-cli && CGO_ENABLED=0 GOOS=linux go build -o terway-cli .
 
-FROM calico/go-build:v0.20 as felix-builder
+FROM calico/go-build:v0.57 as felix-builder
 ARG GOPROXY
 ENV GOPROXY $GOPROXY
-RUN apk --no-cache add ip6tables tini ipset iputils iproute2 conntrack-tools file git
-ENV GIT_BRANCH=v3.5.8
-ENV GIT_COMMIT=7e12e362499ed281e5f5ca2747a0ba4e76e896b6
+ENV GIT_BRANCH=v3.20.2
+ENV GIT_COMMIT=ab06c3940caa8ac201f85c1313b2d72d724409d2
 
 RUN mkdir -p /go/src/github.com/projectcalico/ && cd /go/src/github.com/projectcalico/ && \
     git clone -b ${GIT_BRANCH} --depth 1 https://github.com/projectcalico/felix.git && \
     cd felix && [ "`git rev-parse HEAD`" = "${GIT_COMMIT}" ]
 COPY policy/felix /terway_patch
-RUN cd /go/src/github.com/projectcalico/felix && git apply /terway_patch/*.patch && glide up --strip-vendor || glide install --strip-vendor
+RUN cd /go/src/github.com/projectcalico/felix && git apply /terway_patch/*.patch
 RUN cd /go/src/github.com/projectcalico/felix && \
-    go build -v -i -o bin/calico-felix -v -ldflags \
+    go build -v -o bin/calico-felix -v -ldflags \
     "-X github.com/projectcalico/felix/buildinfo.GitVersion=${GIT_BRANCH} \
     -X github.com/projectcalico/felix/buildinfo.BuildDate=$(date -u +'%FT%T%z') \
     -X github.com/projectcalico/felix/buildinfo.GitRevision=${GIT_COMMIT} \
