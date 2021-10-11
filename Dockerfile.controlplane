@@ -1,7 +1,6 @@
 FROM golang:1.17.0 as builder
 ARG GOPROXY
 ENV GOPROXY $GOPROXY
-ENV GOPROXY https://goproxy.io,direct
 WORKDIR /go/src/github.com/AliyunContainerService/terway/
 COPY go.sum go.sum
 COPY go.mod go.mod
