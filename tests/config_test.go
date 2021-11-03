@@ -5,6 +5,8 @@ package tests
 
 import (
 	"flag"
+	"strconv"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -13,6 +15,7 @@ import (
 
 var enableTrunk bool
 var enablePolicy bool
+var testNamespace = "network-test" + strconv.FormatInt(time.Now().Unix(), 10)
 
 func init() {
 	flag.BoolVar(&enableTrunk, "trunk", false, "install trunk policy")
@@ -59,6 +62,7 @@ type Resource struct {
 
 type TestCase struct {
 	Type TestType
+	Skip bool // skip this case or not
 
 	Src Resource
 	Dst Resource
@@ -77,8 +81,8 @@ const (
 var podConnA = PodResConfig{
 	ResConfig: &ResConfig{
 		Description: "",
-		Name:        "container-network-ds-pod-src",
-		Namespace:   "network-test",
+		Name:        "container-network-ds-src",
+		Namespace:   testNamespace,
 		Labels: map[string]string{
 			"app":    "container-network-pod-src",
 			"e2e":    "true",
@@ -92,8 +96,8 @@ var podConnA = PodResConfig{
 var podConnB = PodResConfig{
 	ResConfig: &ResConfig{
 		Description: "",
-		Name:        "host-network-ds-pod-src",
-		Namespace:   "network-test",
+		Name:        "host-network-ds-src",
+		Namespace:   testNamespace,
 		Labels: map[string]string{
 			"app":    "host-network-pod-src",
 			"e2e":    "true",
@@ -107,8 +111,8 @@ var podConnB = PodResConfig{
 var podConnC = PodResConfig{
 	ResConfig: &ResConfig{
 		Description: "",
-		Name:        "container-network-deploy-pod-dst",
-		Namespace:   "network-test",
+		Name:        "container-network-deploy-dst",
+		Namespace:   testNamespace,
 		Labels: map[string]string{
 			"app": "container-network-pod-dst",
 			"e2e": "true",
@@ -121,8 +125,8 @@ var podConnC = PodResConfig{
 var podConnD = PodResConfig{
 	ResConfig: &ResConfig{
 		Description: "",
-		Name:        "container-network-sts-pod-dst",
-		Namespace:   "network-test",
+		Name:        "container-network-sts-dst",
+		Namespace:   testNamespace,
 		Labels: map[string]string{
 			"app": "container-network-pod-dst",
 			"e2e": "true",
@@ -132,11 +136,26 @@ var podConnD = PodResConfig{
 	HostNetwork: false,
 }
 
+var podConnPolicy = PodResConfig{
+	ResConfig: &ResConfig{
+		Description: "",
+		Name:        "container-network-policy-ds-src",
+		Namespace:   testNamespace,
+		Labels: map[string]string{
+			"app":    "container-network-policy-pod-src",
+			"e2e":    "true",
+			"ref":    "daemon-set",
+			"access": "false", // when enable policy, src pod can't access dst pod
+		},
+	},
+	HostNetwork: false,
+}
+
 var clusterIPService = ServiceResConfig{
 	ResConfig: &ResConfig{
 		Description: "",
 		Name:        "cluster-ip-service",
-		Namespace:   "network-test",
+		Namespace:   testNamespace,
 		Labels: map[string]string{
 			"svc": "container-network-svc-dst",
 			"e2e": "true",
@@ -155,7 +174,7 @@ var nodePortService = ServiceResConfig{
 	ResConfig: &ResConfig{
 		Description: "",
 		Name:        "node-port-service",
-		Namespace:   "network-test",
+		Namespace:   testNamespace,
 		Labels: map[string]string{
 			"svc": "container-network-svc-dst",
 			"e2e": "true",
@@ -174,7 +193,7 @@ var loadBalancerService = ServiceResConfig{
 	ResConfig: &ResConfig{
 		Description: "",
 		Name:        "load-balancer-service",
-		Namespace:   "network-test",
+		Namespace:   testNamespace,
 		Labels: map[string]string{
 			"svc": "container-network-svc-dst",
 			"e2e": "true",
@@ -193,7 +212,7 @@ var headlessService = ServiceResConfig{
 	ResConfig: &ResConfig{
 		Description: "",
 		Name:        "headless-service",
-		Namespace:   "network-test",
+		Namespace:   testNamespace,
 		Labels: map[string]string{
 			"svc": "container-network-svc-dst",
 			"e2e": "true",
@@ -212,7 +231,7 @@ var networkPolicy = NetworkPolicyConfig{
 	ResConfig: &ResConfig{
 		Description: "",
 		Name:        "access-policy",
-		Namespace:   "network-test",
+		Namespace:   testNamespace,
 	},
 	PodSelectLabels: map[string]string{
 		"app": "container-network-pod-dst",
