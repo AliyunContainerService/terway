@@ -374,8 +374,9 @@ func (s *ConnectionTestSuite) TestPod2Pod() {
 				for _, ip := range podIPs(&dst) {
 					addr := net.JoinHostPort(ip, "80")
 					l := fmt.Sprintf("src %s -> dst %s", podInfo(&src), addr)
-					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
-					s.Expected(c.Status, stdErrOut, err, l)
+					var stdErrOut []byte
+					_, stdErrOut, s.err = s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
+					s.Expected(c.Status, stdErrOut, s.err, l)
 				}
 			}
 		}
@@ -442,8 +443,9 @@ func (s *ConnectionTestSuite) TestPod2ServiceIP() {
 
 				for _, addr := range addrs {
 					l := fmt.Sprintf("src %s -> dst svc name %s, addr %s", podInfo(&src), svc.Name, addr)
-					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
-					s.Expected(c.Status, stdErrOut, err, l)
+					var stdErrOut []byte
+					_, stdErrOut, s.err = s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
+					s.Expected(c.Status, stdErrOut, s.err, l)
 				}
 			}
 		}
@@ -471,8 +473,9 @@ func (s *ConnectionTestSuite) TestPod2ServiceName() {
 		for _, src := range srcPods {
 			for _, svc := range dstServices {
 				l := fmt.Sprintf("src %s -> dst svc name %s", podInfo(&src), svc.Name)
-				_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, svc.Name)
-				s.Expected(c.Status, stdErrOut, err, l)
+				var stdErrOut []byte
+				_, stdErrOut, s.err = s.ExecHTTPGet(src.Namespace, src.Name, svc.Name)
+				s.Expected(c.Status, stdErrOut, s.err, l)
 			}
 		}
 	}
