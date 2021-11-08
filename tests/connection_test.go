@@ -277,9 +277,10 @@ func (s *ConnectionTestSuite) SetupSuite() {
 func (s *ConnectionTestSuite) TearDownSuite() {
 
 	if s.err != nil {
-		s.T().Errorf("skip tear down resource in namespace %s, because of an error occurred.", testNamespace)
+		s.T().Error(errors.Wrapf(s.err, "skip tear down resource in namespace %s, because of an error occurred.", testNamespace))
 		return
 	}
+
 	ctx := context.Background()
 	if enablePolicy {
 		s.T().Logf("delete %s", networkPolicy.Name)
@@ -374,9 +375,8 @@ func (s *ConnectionTestSuite) TestPod2Pod() {
 				for _, ip := range podIPs(&dst) {
 					addr := net.JoinHostPort(ip, "80")
 					l := fmt.Sprintf("src %s -> dst %s", podInfo(&src), addr)
-					var stdErrOut []byte
-					_, stdErrOut, s.err = s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
-					s.Expected(c.Status, stdErrOut, s.err, l)
+					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
+					s.Expected(c.Status, stdErrOut, err, l)
 				}
 			}
 		}
@@ -443,9 +443,8 @@ func (s *ConnectionTestSuite) TestPod2ServiceIP() {
 
 				for _, addr := range addrs {
 					l := fmt.Sprintf("src %s -> dst svc name %s, addr %s", podInfo(&src), svc.Name, addr)
-					var stdErrOut []byte
-					_, stdErrOut, s.err = s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
-					s.Expected(c.Status, stdErrOut, s.err, l)
+					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
+					s.Expected(c.Status, stdErrOut, err, l)
 				}
 			}
 		}
@@ -473,9 +472,8 @@ func (s *ConnectionTestSuite) TestPod2ServiceName() {
 		for _, src := range srcPods {
 			for _, svc := range dstServices {
 				l := fmt.Sprintf("src %s -> dst svc name %s", podInfo(&src), svc.Name)
-				var stdErrOut []byte
-				_, stdErrOut, s.err = s.ExecHTTPGet(src.Namespace, src.Name, svc.Name)
-				s.Expected(c.Status, stdErrOut, s.err, l)
+				_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, svc.Name)
+				s.Expected(c.Status, stdErrOut, err, l)
 			}
 		}
 	}
@@ -486,6 +484,7 @@ func (s *ConnectionTestSuite) Expected(status bool, stdErrOut []byte, err error,
 		if assert.NoError(s.T(), err, msg) && assert.Equal(s.T(), 0, len(stdErrOut), msg) {
 			s.T().Logf(msg + ", test pass")
 		} else {
+			s.err = err
 			s.T().Error(errors.Wrapf(err, "%s, test failed, expected connection success, but connection failure", msg))
 		}
 	} else {
