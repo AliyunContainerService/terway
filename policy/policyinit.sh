@@ -26,7 +26,7 @@ if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = 
   # kernel version equal and above 4.19
   if { [ "$KERNEL_MAJOR_VERSION" -eq 4 ] && [ "$KERNEL_MINOR_VERSION" -ge 19 ]; } ||
      [ "$KERNEL_MAJOR_VERSION" -gt 4 ]; then
-    if [ -z "$DISABLE_POLICY" ] || [ x"$DISABLE_POLICY" = x"false" ] || [ x"$DISABLE_POLICY" = x"0" ]; then
+    if [ -z "$DISABLE_POLICY" ] || [ "$DISABLE_POLICY" = "false" ] || [ "$DISABLE_POLICY" = "0" ]; then
       ENABLE_POLICY="default"
     else
       ENABLE_POLICY="never"
@@ -62,8 +62,8 @@ fi
   export CLUSTER_TYPE=k8s,aliyun
   export CALICO_DISABLE_FILE_LOGGING=true
   # shellcheck disable=SC2154
-  export CALICO_IPV4POOL_CIDR=${Network}
-  export FELIX_IPTABLESREFRESHINTERVAL=${IPTABLESREFRESHINTERVAL:-60}
+  export CALICO_IPV4POOL_CIDR="${Network}"
+  export FELIX_IPTABLESREFRESHINTERVAL="${IPTABLESREFRESHINTERVAL:-60}"
   export FELIX_IPV6SUPPORT=true
   export WAIT_FOR_DATASTORE=true
   export IP=""
@@ -76,14 +76,14 @@ fi
   export FELIX_BPFCONNECTTIMELOADBALANCINGENABLED=false
   export FELIX_BPFKUBEPROXYIPTABLESCLEANUPENABLED=false
   exec 2>&1
-  if [ ! -z "$NODENAME" ]; then
-      export FELIX_FELIXHOSTNAME=$NODENAME
+  if [ -n "$NODENAME" ]; then
+      export FELIX_FELIXHOSTNAME="$NODENAME"
   fi
-  if [ ! -z $DATASTORE_TYPE ]; then
-      export FELIX_DATASTORETYPE=$DATASTORE_TYPE
+  if [ -n "$DATASTORE_TYPE" ]; then
+      export FELIX_DATASTORETYPE="$DATASTORE_TYPE"
   fi
 
-  if [ -z "$DISABLE_POLICY" ] || [ x"$DISABLE_POLICY" = x"false" ] || [ x"$DISABLE_POLICY" = x"0" ]; then
+  if [ -z "$DISABLE_POLICY" ] || [ "$DISABLE_POLICY" = "false" ] || [ "$DISABLE_POLICY" = "0" ]; then
       exec calico-felix
   else
       exec uninstall_policy.sh
