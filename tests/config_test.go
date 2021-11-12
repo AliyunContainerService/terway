@@ -15,7 +15,7 @@ import (
 
 var enableTrunk bool
 var enablePolicy bool
-var testNamespace = "network-test" + strconv.FormatInt(time.Now().Unix(), 10)
+var testNamespace = "network-test-" + strconv.FormatInt(time.Now().Unix(), 10)
 
 func init() {
 	flag.BoolVar(&enableTrunk, "trunk", false, "install trunk policy")
