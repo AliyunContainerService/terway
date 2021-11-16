@@ -73,17 +73,25 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 		_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/forwarding", parentLink.Attrs().Name), "1")
 	}
 
-	err = LinkAdd(&netlink.IPVlan{
+	ipvlanLink := &netlink.IPVlan{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:        cfg.HostVETHName,
 			ParentIndex: cfg.ENIIndex,
 			MTU:         cfg.MTU,
 		},
 		Mode: netlink.IPVLAN_MODE_L2,
-	})
+	}
+	err = LinkAdd(ipvlanLink)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err != nil {
+			if err = LinkDel(ipvlanLink); err != nil {
+				Log.Errorf("failed to clean up ipvlan link %s %v", ipvlanLink.Name, err)
+			}
+		}
+	}()
 
 	slaveLink, err := netlink.LinkByName(cfg.HostVETHName)
 	if err != nil {
@@ -277,17 +285,26 @@ func (d *IPvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slaveName 
 		return slaveLink, nil
 	}
 
-	err = LinkAdd(&netlink.IPVlan{
+	ipvlanLink := &netlink.IPVlan{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:        slaveName,
 			ParentIndex: parentLink.Attrs().Index,
 			MTU:         mtu,
 		},
 		Mode: netlink.IPVLAN_MODE_L2,
-	})
+	}
+	err = LinkAdd(ipvlanLink)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			if err = LinkDel(ipvlanLink); err != nil {
+				Log.Errorf("failed to clean up ipvlan link %s %v", ipvlanLink.Name, err)
+			}
+		}
+	}()
+
 	link, err := netlink.LinkByName(slaveName)
 	if err != nil {
 		return nil, fmt.Errorf("error get ipvlan link %s", slaveName)

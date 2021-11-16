@@ -399,6 +399,13 @@ func setupVETHPair(contVethName, pairName string, mtu int, hostNetNS ns.NetNS) (
 	if err != nil {
 		return nil, nil, err
 	}
+	defer func() {
+		if err != nil {
+			if err = LinkDel(contVETH); err != nil {
+				Log.Errorf("failed to clean up veth link %s %v", contVETH.Name, err)
+			}
+		}
+	}()
 
 	hostVETH, err := netlink.LinkByName(pairName)
 	if err != nil {
