@@ -302,7 +302,7 @@ type AllocIPReply struct {
 	unknownFields protoimpl.UnknownFields
 
 	Success   bool       `protobuf:"varint,1,opt,name=Success,proto3" json:"Success,omitempty"`
-	IPType    IPType     `protobuf:"varint,2,opt,name=IPType,proto3,enum=rpc.IPType" json:"IPType,omitempty"`
+	IPType    IPType     `protobuf:"varint,2,opt,name=AllocationType,proto3,enum=rpc.AllocationType" json:"AllocationType,omitempty"`
 	BasicInfo *BasicInfo `protobuf:"bytes,3,opt,name=BasicInfo,proto3" json:"BasicInfo,omitempty"`
 	ENIInfo   *ENIInfo   `protobuf:"bytes,4,opt,name=ENIInfo,proto3" json:"ENIInfo,omitempty"`
 	Pod       *Pod       `protobuf:"bytes,5,opt,name=Pod,proto3" json:"Pod,omitempty"`
@@ -581,7 +581,7 @@ type ReleaseIPRequest struct {
 	K8SPodName             string `protobuf:"bytes,1,opt,name=K8sPodName,proto3" json:"K8sPodName,omitempty"`
 	K8SPodNamespace        string `protobuf:"bytes,2,opt,name=K8sPodNamespace,proto3" json:"K8sPodNamespace,omitempty"`
 	K8SPodInfraContainerId string `protobuf:"bytes,3,opt,name=K8sPodInfraContainerId,proto3" json:"K8sPodInfraContainerId,omitempty"`
-	IPType                 IPType `protobuf:"varint,4,opt,name=IPType,proto3,enum=rpc.IPType" json:"IPType,omitempty"`
+	IPType                 IPType `protobuf:"varint,4,opt,name=AllocationType,proto3,enum=rpc.AllocationType" json:"AllocationType,omitempty"`
 	IPv4Addr               *IPSet `protobuf:"bytes,5,opt,name=IPv4Addr,proto3" json:"IPv4Addr,omitempty"`
 	MacAddr                string `protobuf:"bytes,6,opt,name=MacAddr,proto3" json:"MacAddr,omitempty"`
 	Reason                 string `protobuf:"bytes,7,opt,name=Reason,proto3" json:"Reason,omitempty"`
@@ -815,7 +815,7 @@ type GetInfoReply struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	IPType    IPType     `protobuf:"varint,1,opt,name=IPType,proto3,enum=rpc.IPType" json:"IPType,omitempty"`
+	IPType    IPType     `protobuf:"varint,1,opt,name=AllocationType,proto3,enum=rpc.AllocationType" json:"AllocationType,omitempty"`
 	BasicInfo *BasicInfo `protobuf:"bytes,2,opt,name=BasicInfo,proto3" json:"BasicInfo,omitempty"`
 	ENIInfo   *ENIInfo   `protobuf:"bytes,3,opt,name=ENIInfo,proto3" json:"ENIInfo,omitempty"`
 	Pod       *Pod       `protobuf:"bytes,4,opt,name=Pod,proto3" json:"Pod,omitempty"`
@@ -1203,7 +1203,7 @@ func file_rpc_proto_rawDescGZIP() []byte {
 var file_rpc_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_rpc_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_rpc_proto_goTypes = []interface{}{
-	(IPType)(0),              // 0: rpc.IPType
+	(IPType)(0),              // 0: rpc.AllocationType
 	(EventTarget)(0),         // 1: rpc.EventTarget
 	(EventType)(0),           // 2: rpc.EventType
 	(*IPSet)(nil),            // 3: rpc.IPSet
@@ -1220,7 +1220,7 @@ var file_rpc_proto_goTypes = []interface{}{
 	(*EventReply)(nil),       // 14: rpc.EventReply
 }
 var file_rpc_proto_depIdxs = []int32{
-	0,  // 0: rpc.AllocIPReply.IPType:type_name -> rpc.IPType
+	0,  // 0: rpc.AllocIPReply.AllocationType:type_name -> rpc.AllocationType
 	6,  // 1: rpc.AllocIPReply.BasicInfo:type_name -> rpc.BasicInfo
 	7,  // 2: rpc.AllocIPReply.ENIInfo:type_name -> rpc.ENIInfo
 	8,  // 3: rpc.AllocIPReply.Pod:type_name -> rpc.Pod
@@ -1228,10 +1228,10 @@ var file_rpc_proto_depIdxs = []int32{
 	3,  // 5: rpc.BasicInfo.PodCIDR:type_name -> rpc.IPSet
 	3,  // 6: rpc.BasicInfo.GatewayIP:type_name -> rpc.IPSet
 	3,  // 7: rpc.BasicInfo.ServiceCIDR:type_name -> rpc.IPSet
-	0,  // 8: rpc.ReleaseIPRequest.IPType:type_name -> rpc.IPType
+	0,  // 8: rpc.ReleaseIPRequest.AllocationType:type_name -> rpc.AllocationType
 	3,  // 9: rpc.ReleaseIPRequest.IPv4Addr:type_name -> rpc.IPSet
 	3,  // 10: rpc.ReleaseIPReply.IPv4Addr:type_name -> rpc.IPSet
-	0,  // 11: rpc.GetInfoReply.IPType:type_name -> rpc.IPType
+	0,  // 11: rpc.GetInfoReply.AllocationType:type_name -> rpc.AllocationType
 	6,  // 12: rpc.GetInfoReply.BasicInfo:type_name -> rpc.BasicInfo
 	7,  // 13: rpc.GetInfoReply.ENIInfo:type_name -> rpc.ENIInfo
 	8,  // 14: rpc.GetInfoReply.Pod:type_name -> rpc.Pod

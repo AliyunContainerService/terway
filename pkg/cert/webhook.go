@@ -17,7 +17,6 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/utils"
 
-	"github.com/spf13/viper"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,23 +32,20 @@ const (
 )
 
 // SyncCert sync cert for webhook
-func SyncCert() error {
-
+func SyncCert(ns, name, domain, certDir string) error {
+	secretName := fmt.Sprintf("%s-webhook-cert", name)
 	cs := utils.K8sClient
 	// check secret
 	var serverCertBytes, serverKeyBytes, caCertBytes []byte
 
-	ns := viper.GetString("controller-namespace")
-	name := viper.GetString("controller-name")
-
 	// get cert from secret or generate it
-	existSecret, err := cs.CoreV1().Secrets(ns).Get(context.Background(), name, metav1.GetOptions{})
+	existSecret, err := cs.CoreV1().Secrets(ns).Get(context.Background(), secretName, metav1.GetOptions{})
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			return fmt.Errorf("error get cert from secret, %w", err)
 		}
 		// create certs
-		s, err := GenerateCerts(ns, name, viper.GetString("cluster-domain"))
+		s, err := GenerateCerts(ns, name, domain)
 		if err != nil {
 			return fmt.Errorf("error generate cert, %w", err)
 		}
@@ -57,7 +53,7 @@ func SyncCert() error {
 		serverCertBytes = s.Data[serverCertKey]
 		serverKeyBytes = s.Data[serverKeyKey]
 		caCertBytes = s.Data[caCertKey]
-		s.Name = name
+		s.Name = secretName
 		s.Namespace = ns
 		// create secret this make sure one is the leader
 		_, err = cs.CoreV1().Secrets(ns).Create(context.Background(), s, metav1.CreateOptions{})
@@ -65,7 +61,7 @@ func SyncCert() error {
 			if !errors.IsAlreadyExists(err) {
 				return fmt.Errorf("error create cert to secret, %w", err)
 			}
-			secret, err := cs.CoreV1().Secrets(ns).Get(context.Background(), name, metav1.GetOptions{})
+			secret, err := cs.CoreV1().Secrets(ns).Get(context.Background(), secretName, metav1.GetOptions{})
 			if err != nil {
 				return fmt.Errorf("error get cert from secret, %w", err)
 			}
@@ -79,7 +75,6 @@ func SyncCert() error {
 		caCertBytes = existSecret.Data[caCertKey]
 	}
 
-	certDir := viper.GetString("cert-dir")
 	err = os.MkdirAll(certDir, os.ModeDir)
 	if err != nil {
 		return err
@@ -240,9 +235,11 @@ func GenerateCerts(serviceNamespace, serviceName, clusterDomain string) (*corev1
 		return nil, err
 	}
 
-	return &corev1.Secret{Data: map[string][]byte{
-		caCertKey:     caPEM.Bytes(),
-		serverCertKey: serverCertPEM.Bytes(),
-		serverKeyKey:  serverPrivateKeyPEM.Bytes(),
-	}}, nil
+	return &corev1.Secret{
+		Type: corev1.SecretTypeTLS,
+		Data: map[string][]byte{
+			caCertKey:     caPEM.Bytes(),
+			serverCertKey: serverCertPEM.Bytes(),
+			serverKeyKey:  serverPrivateKeyPEM.Bytes(),
+		}}, nil
 }

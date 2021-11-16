@@ -48,7 +48,3 @@ Selector labels
 {{- define "terway-controlplane.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "terway-controlplane.name" . }}
 {{- end }}
-
-{{- define "terway-controlplane.serviceAccountName" -}}
-{{- default .Chart.Name }}
-{{- end }}

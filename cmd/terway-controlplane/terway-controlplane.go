@@ -17,7 +17,7 @@ limitations under the License.
 package main
 
 import (
-	goflag "flag"
+	"flag"
 	"fmt"
 	"math/rand"
 	"time"
@@ -30,12 +30,9 @@ import (
 	_ "github.com/AliyunContainerService/terway/pkg/controller/all"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
-	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/types/controlplane"
 
-	"github.com/sirupsen/logrus"
-	flag "github.com/spf13/pflag"
-	"github.com/spf13/viper"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -46,69 +43,25 @@ import (
 )
 
 var (
-	leaseLockName      string
-	leaseLockNamespace string
-	healthzBindAddress string
-
 	scheme = runtime.NewScheme()
 	log    = ctrl.Log.WithName("setup")
 )
 
 func init() {
-	flag.CommandLine.AddGoFlagSet(goflag.CommandLine)
-
-	flag.StringVar(&leaseLockName, "lease-lock-name", "terway-controller-lock", "the lease lock resource name")
-	flag.StringVar(&leaseLockNamespace, "lease-lock-namespace", "kube-system", "the lease lock resource namespace")
-	flag.StringVar(&healthzBindAddress, "healthzBindAddress", "0.0.0.0:80", "for health check")
-
-	flag.String("cluster-id", "", "cluster id for the cluster")
-	flag.String("vpc-id", "", "vpc id for the cluster")
-
-	flag.String("cluster-domain", "cluster.local", "domain for the cluster")
-	flag.String("controller-namespace", "kube-system", "specific controller run namespace")
-	flag.String("controller-name", "terway-controlplane", "specific controller name")
-	flag.String("cert-dir", "/var/run/webhook-cert", "webhook cert dir")
-	flag.Int("webhook-port", 443, "port for webhook")
-	flag.Int("v", 4, "log level")
-
-	_ = viper.BindPFlag("cluster-id", flag.CommandLine.Lookup("cluster-id"))
-	_ = viper.BindPFlag("vpc-id", flag.CommandLine.Lookup("vpc-id"))
-
-	_ = viper.BindPFlag("cluster-domain", flag.CommandLine.Lookup("cluster-domain"))
-	_ = viper.BindPFlag("controller-namespace", flag.CommandLine.Lookup("controller-namespace"))
-	_ = viper.BindPFlag("controller-name", flag.CommandLine.Lookup("controller-name"))
-	_ = viper.BindPFlag("cert-dir", flag.CommandLine.Lookup("cert-dir"))
-	_ = viper.BindPFlag("webhook-port", flag.CommandLine.Lookup("webhook-port"))
-
-	_ = viper.BindPFlag("podeni-max-concurrent-reconciles", flag.CommandLine.Lookup("podeni-max-concurrent-reconciles"))
-
-	_ = viper.BindPFlag("v", flag.CommandLine.Lookup("v"))
-
-	_ = viper.BindEnv("ALIBABA_CLOUD_REGION_ID")
-	_ = viper.BindEnv("ALIBABA_CLOUD_ACCESS_KEY_ID")
-	_ = viper.BindEnv("ALIBABA_CLOUD_ACCESS_KEY_SECRET")
-
-	viper.SetDefault("v", 4)
-	viper.SetDefault("podeni-max-concurrent-reconciles", 1)
-
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(networkv1beta1.AddToScheme(scheme))
 }
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
-
-	if viper.GetInt("v") > len(logrus.AllLevels) {
-		_ = logger.SetLevel(logrus.AllLevels[len(logrus.AllLevels)-1].String())
-	} else {
-		_ = logger.SetLevel(logrus.AllLevels[viper.GetInt("v")].String())
-	}
+	flag.Parse()
 
 	ctrl.SetLogger(klogr.New())
 	log.Info(fmt.Sprintf("GitCommit %s BuildDate %s Platform %s",
 		version.Get().GitCommit, version.Get().BuildDate, version.Get().Platform))
 
-	flag.Parse()
+	cfg := controlplane.GetConfig()
+	log.Info("using config", "config", cfg)
 
 	utils.RegisterClients(ctrl.GetConfigOrDie())
 
@@ -117,19 +70,12 @@ func main() {
 		panic(err)
 	}
 
-	err = cert.SyncCert()
+	err = cert.SyncCert(cfg.ControllerNamespace, cfg.ControllerName, cfg.ClusterDomain, cfg.CertDir)
 	if err != nil {
 		panic(err)
 	}
 
-	err = utils.ParseClusterConfig()
-	if err != nil {
-		panic(err)
-	}
-
-	log.Info("init cluster config", "clusterID", viper.GetString("cluster-id"), "vpcID", viper.GetString("vpc-id"))
-
-	aliyunClient, err := aliyun.NewAliyun(viper.GetString("ALIBABA_CLOUD_ACCESS_KEY_ID"), viper.GetString("ALIBABA_CLOUD_ACCESS_KEY_SECRET"), viper.GetString("ALIBABA_CLOUD_REGION_ID"), "")
+	aliyunClient, err := aliyun.NewAliyun(string(cfg.Credential.AccessKey), string(cfg.Credential.AccessSecret), cfg.RegionID, cfg.CredentialPath)
 	if err != nil {
 		panic(err)
 	}
@@ -139,15 +85,15 @@ func main() {
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                     scheme,
-		HealthProbeBindAddress:     healthzBindAddress,
+		HealthProbeBindAddress:     cfg.HealthzBindAddress,
 		Host:                       "0.0.0.0",
-		Port:                       viper.GetInt("webhook-port"),
-		CertDir:                    viper.GetString("cert-dir"),
-		LeaderElection:             true,
-		LeaderElectionID:           viper.GetString("controller-name"),
-		LeaderElectionNamespace:    viper.GetString("controller-namespace"),
+		Port:                       cfg.WebhookPort,
+		CertDir:                    cfg.CertDir,
+		LeaderElection:             cfg.LeaderElection,
+		LeaderElectionID:           cfg.ControllerName,
+		LeaderElectionNamespace:    cfg.ControllerNamespace,
 		LeaderElectionResourceLock: "leases",
-		MetricsBindAddress:         "0",
+		MetricsBindAddress:         cfg.MetricsBindAddress,
 	})
 	if err != nil {
 		panic(err)

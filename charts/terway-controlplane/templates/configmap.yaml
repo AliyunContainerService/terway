@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+  {{- include "terway-controlplane.labels" . | nindent 4 }}
+data:
+  ctrl-config.yaml: |
+    leaseLockName: "terway-controller-lock"
+    leaseLockNamespace: "kube-system"
+    controllerNamespace: "kube-system"
+    controllerName: "{{ .Release.Name }}"
+    healthzBindAddress: "0.0.0.0:80"
+    clusterDomain: "cluster.local"
+    leaderElection: true
+    webhookPort: 443
+    certDir: "/var/run/webhook-cert"
+    regionID: "{{ .Values.regionID }}"
+    clusterID: "{{ .Values.clusterID }}"
+    vpcID: "{{ .Values.vpcID }}"
+    ipStack: "{{ .Values.ipStack }}"

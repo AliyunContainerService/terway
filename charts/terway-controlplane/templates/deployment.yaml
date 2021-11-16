@@ -1,35 +1,28 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Chart.Name }}
+  name: {{ .Release.Name }}
   labels:
-    {{- include "terway-controlplane.labels" . | nindent 4 }}
+  {{- include "terway-controlplane.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "terway-controlplane.selectorLabels" . | nindent 6 }}
+  {{- include "terway-controlplane.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+      {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "terway-controlplane.selectorLabels" . | nindent 8 }}
+    {{- include "terway-controlplane.selectorLabels" . | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "terway-controlplane.serviceAccountName" . }}
-      securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      serviceAccountName: {{ .Release.Name }}
       containers:
         - name: terway-controlplane
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          envFrom:
-          - secretRef:
-              name: {{ .Chart.Name }}-credential
           env:
             - name: K8S_POD_NAME
               valueFrom:
@@ -54,16 +47,33 @@ spec:
               path: /readyz
               port: 80
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+          {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config-vol
+              mountPath: /etc/config
+              readOnly: true
+            - name: secret-vol
+              mountPath: /etc/credential
+              readOnly: true
+      volumes:
+        - name: config-vol
+          configMap:
+            name: {{ .Release.Name }}
+            items:
+              - key: ctrl-config.yaml
+                path: ctrl-config.yaml
+        - name: secret-vol
+          secret:
+            secretName: {{ .Release.Name }}-credential
       {{- with .Values.nodeSelector }}
       nodeSelector:
-        {{- toYaml . | nindent 8 }}
+      {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.affinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+      {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- toYaml . | nindent 8 }}
+  {{- end }}

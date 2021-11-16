@@ -32,65 +32,102 @@ spec:
           spec:
             description: PodENISpec defines the desired state of PodENI
             properties:
-              allocation:
+              allocations:
                 description: Allocation store the state for eni
-                properties:
-                  eni:
-                    description: ENI eni info
-                    properties:
-                      id:
-                        type: string
-                      mac:
-                        type: string
-                      securityGroupIDs:
-                        items:
+                items:
+                  description: Allocation for eni record
+                  properties:
+                    allocationType:
+                      description: AllocationType ip type and release strategy
+                      properties:
+                        releaseAfter:
                           type: string
-                        type: array
-                      vSwitchID:
-                        type: string
-                      zone:
-                        type: string
-                    type: object
-                  ipType:
-                    description: IPType ip type and release strategy
-                    properties:
-                      releaseAfter:
-                        type: string
-                      releaseStrategy:
-                        description: ReleaseStrategy is the type for ip release strategy
-                        enum:
-                        - TTL
-                        - Never
-                        type: string
-                      type:
-                        default: Elastic
-                        description: IPAllocType is the type for ip alloc strategy
-                        enum:
-                        - Elastic
-                        - Fixed
-                        type: string
-                    type: object
-                  ipv4:
-                    type: string
-                  ipv6:
-                    type: string
-                type: object
+                        releaseStrategy:
+                          description: ReleaseStrategy is the type for ip release strategy
+                          enum:
+                          - TTL
+                          - Never
+                          type: string
+                        type:
+                          default: Elastic
+                          description: IPAllocType is the type for ip alloc strategy
+                          enum:
+                          - Elastic
+                          - Fixed
+                          type: string
+                      type: object
+                    defaultRoute:
+                      type: boolean
+                    eni:
+                      description: ENI eni info
+                      properties:
+                        id:
+                          type: string
+                        mac:
+                          type: string
+                        securityGroupIDs:
+                          items:
+                            type: string
+                          type: array
+                        vSwitchID:
+                          type: string
+                        zone:
+                          type: string
+                      type: object
+                    extraRoutes:
+                      items:
+                        properties:
+                          dst:
+                            type: string
+                        type: object
+                      type: array
+                    interface:
+                      type: string
+                    ipv4:
+                      type: string
+                    ipv4CIDR:
+                      type: string
+                    ipv6:
+                      type: string
+                    ipv6CIDR:
+                      type: string
+                  type: object
+                type: array
+              zone:
+                description: Zone zone
+                type: string
             type: object
           status:
             description: PodENIStatus defines the observed state of PodENI
             properties:
+              eniInfos:
+                additionalProperties:
+                  properties:
+                    id:
+                      type: string
+                    status:
+                      description: ENIBindStatus is the current status for the eni
+                      type: string
+                    type:
+                      description: ENIType for this eni, only Secondary and Member is supported
+                      type: string
+                    vid:
+                      type: integer
+                  type: object
+                description: ENIInfos is the status after eni is attached, it is indexed by eni id
+                type: object
               instanceID:
                 description: InstanceID for ecs
                 type: string
               msg:
                 description: Msg additional info
                 type: string
+              phase:
+                description: Phase is the status for the eni binding
+                type: string
               podLastSeen:
                 description: PodLastSeen is the timestamp when pod resource last seen
                 format: date-time
-                type: string
-              status:
-                description: Status is the status for the eni binding
                 type: string
               trunkENIID:
                 description: TrunkENIID is the trunk eni id

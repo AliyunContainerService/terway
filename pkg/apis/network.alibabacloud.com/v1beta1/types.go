@@ -48,13 +48,15 @@ type PodENIList struct {
 // PodENISpec defines the desired state of PodENI
 type PodENISpec struct {
 	// Allocation store the state for eni
-	Allocation Allocation `json:"allocation,omitempty"`
+	Allocations []Allocation `json:"allocations,omitempty"`
+	// Zone zone
+	Zone string `json:"zone,omitempty"`
 }
 
 // PodENIStatus defines the observed state of PodENI
 type PodENIStatus struct {
-	// Status is the status for the eni binding
-	Status ENIStatus `json:"status,omitempty"`
+	// Phase is the status for the eni binding
+	Phase Phase `json:"phase,omitempty"`
 	// InstanceID for ecs
 	InstanceID string `json:"instanceID,omitempty"`
 	// TrunkENIID is the trunk eni id
@@ -63,14 +65,25 @@ type PodENIStatus struct {
 	Msg string `json:"msg,omitempty"`
 	// PodLastSeen is the timestamp when pod resource last seen
 	PodLastSeen metav1.Time `json:"podLastSeen,omitempty"`
+	// ENIInfos is the status after eni is attached, it is indexed by eni id
+	ENIInfos map[string]ENIInfo `json:"eniInfos,omitempty"`
 }
 
 // Allocation for eni record
 type Allocation struct {
-	ENI    ENI    `json:"eni,omitempty"`
-	IPv4   string `json:"ipv4,omitempty"`
-	IPv6   string `json:"ipv6,omitempty"`
-	IPType IPType `json:"ipType,omitempty"`
+	AllocationType AllocationType `json:"allocationType,omitempty"`
+	ENI            ENI            `json:"eni,omitempty"`
+	IPv4           string         `json:"ipv4,omitempty"`
+	IPv6           string         `json:"ipv6,omitempty"`
+	IPv4CIDR       string         `json:"ipv4CIDR,omitempty"`
+	IPv6CIDR       string         `json:"ipv6CIDR,omitempty"`
+	Interface      string         `json:"interface,omitempty"`
+	DefaultRoute   bool           `json:"defaultRoute,omitempty"`
+	ExtraRoutes    []Route        `json:"extraRoutes,omitempty"`
+}
+
+type Route struct {
+	Dst string `json:"dst,omitempty"`
 }
 
 // ENI eni info
@@ -82,46 +95,76 @@ type ENI struct {
 	SecurityGroupIDs []string `json:"securityGroupIDs,omitempty"`
 }
 
-// IPType ip type and release strategy
-type IPType struct {
+// AllocationType ip type and release strategy
+type AllocationType struct {
 	// +kubebuilder:default:=Elastic
 	Type            IPAllocType     `json:"type,omitempty"`
 	ReleaseStrategy ReleaseStrategy `json:"releaseStrategy,omitempty"`
 	ReleaseAfter    string          `json:"releaseAfter,omitempty"` // go type 5m0s
 }
 
-type ENIStatus string
+type Phase string
 
 //            pod create
 //                |
 //                |   podENI create
 //                |
-//         ENIStatusInitial
+//         ENIPhaseInitial
 //                |
 //                |   bind eni
-//          ENIStatusBind        <-----   ENIStatusBinding  <----- sts pod recreate
+//          ENIPhaseBind        <-----   ENIPhaseBinding  <----- sts pod recreate
 //                |                               |
 //                |                               |
 //                |                               |              gc reserved resource for sts pods
-//                |                         ENIStatusUnbind    ---------
+//                |                         ENIPhaseUnbind    ---------
 //                |                               |                     |
 //                |   sts pod delete              |                     |
-//                |-----------------------> ENIStatusDeleting           |
+//                |-----------------------> ENIPhaseDeleting           |
 //                |                                                     |
 //                |   stateless pod delete                              |
 //                |        <---------------------------------------------
 //          del podENI
 const (
-	// ENIStatusInitial the status when pod first created
-	ENIStatusInitial = ""
-	// ENIStatusBind the status ENI is bind to ECS
-	ENIStatusBind = "Bind"
-	// ENIStatusBinding the status ENI need to bind to ECS, usually when sts pod require the previous ENI
-	ENIStatusBinding = "Binding"
-	// ENIStatusUnbind the status ENI is not bind to ECS
-	ENIStatusUnbind = "Unbind"
-	// ENIStatusDeleting the status when CR is removing
-	ENIStatusDeleting = "Deleting"
+	// ENIPhaseInitial the status when pod first created
+	ENIPhaseInitial = ""
+	// ENIPhaseBind the status ENI is bind to ECS
+	ENIPhaseBind = "Bind"
+	// ENIPhaseBinding the status ENI need to bind to ECS, usually when sts pod require the previous ENI
+	ENIPhaseBinding = "Binding"
+	// ENIPhaseUnbind the status ENI is not bind to ECS
+	ENIPhaseUnbind = "Unbind"
+	// ENIPhaseDeleting the status when CR is removing
+	ENIPhaseDeleting = "Deleting"
+)
+
+// ENIBindStatus is the current status for the eni
+type ENIBindStatus string
+
+const (
+	// ENIStatusBind eni is bind
+	ENIStatusBind ENIBindStatus = "Bind"
+	// ENIStatusUnBind eni is not attached
+	ENIStatusUnBind ENIBindStatus = "Unbind"
+	// ENIStatusDeleted eni is already deleted
+	ENIStatusDeleted ENIBindStatus = "Deleted"
+)
+
+type ENIInfo struct {
+	ID     string        `json:"id,omitempty"`
+	Type   ENIType       `json:"type,omitempty"`
+	Vid    int           `json:"vid,omitempty"`    // vlan id for trunk
+	Status ENIBindStatus `json:"status,omitempty"` // the status for operate the eni
+}
+
+// ENIType for this eni, only Secondary and Member is supported
+type ENIType string
+
+// status for ENIType
+const (
+	ENITypePrimary   ENIType = "Primary"
+	ENITypeSecondary ENIType = "Secondary"
+	ENITypeTrunk     ENIType = "Trunk"
+	ENITypeMember    ENIType = "Member"
 )
 
 // +kubebuilder:validation:Enum=Elastic;Fixed
@@ -175,7 +218,7 @@ type PodNetworkingList struct {
 
 // PodNetworkingSpec defines the desired state of PodNetworking
 type PodNetworkingSpec struct {
-	IPType IPType `json:"ipType,omitempty"`
+	IPType AllocationType `json:"ipType,omitempty"`
 
 	Selector Selector `json:"selector,omitempty"`
 

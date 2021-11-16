@@ -181,7 +181,7 @@ func (k *k8s) WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, e
 		Duration: time.Second * 5,
 		Factor:   2,
 		Jitter:   0.3,
-		Steps:    6,
+		Steps:    3,
 	}, func() (bool, error) {
 		podEni, err = k.podEniClient.PodENIs(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
 			ResourceVersion: "0",
@@ -193,7 +193,7 @@ func (k *k8s) WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, e
 			}
 			return false, errors.Wrapf(err, "error get pod eni info")
 		}
-		if podEni.Status.Status != podENITypes.ENIStatusBind {
+		if podEni.Status.Phase != podENITypes.ENIPhaseBind {
 			// wait pod eni bind
 			return false, nil
 		}

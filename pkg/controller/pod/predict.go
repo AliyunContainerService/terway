@@ -43,12 +43,16 @@ func (p *predicateForPodEvent) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	if !OKToProcess(oldPod) {
+	if !types.PodUseENI(oldPod) {
 		return false
 	}
-	if !OKToProcess(newPod) {
+	if !types.PodUseENI(newPod) {
 		return false
 	}
+	if newPod.Spec.NodeName == "" {
+		return false
+	}
+
 	oldPodCopy := oldPod.DeepCopy()
 	newPodCopy := newPod.DeepCopy()
 

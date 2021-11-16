@@ -33,7 +33,7 @@ spec:
             description: PodNetworkingSpec defines the desired state of PodNetworking
             properties:
               ipType:
-                description: IPType ip type and release strategy
+                description: AllocationType ip type and release strategy
                 properties:
                   releaseAfter:
                     type: string

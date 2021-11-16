@@ -50,23 +50,7 @@ kind: ConfigMap
 >
 > 修改 config-map 后请重启 Terway pod 生效配置
 
-terway-controlplane 需要通过  openAPI 去操作网络资源
-在部署前，需要创建一个 `terway-controlplane-credential` 的 secret
-
-```yaml
-apiVersion: v1
-data:
-  ALIBABA_CLOUD_ACCESS_KEY_ID: 
-  ALIBABA_CLOUD_ACCESS_KEY_SECRET: 
-  ALIBABA_CLOUD_REGION_ID: 
-kind: Secret
-metadata:
-  name: terway-controlplane-credential
-  namespace: kube-system
-type: Opaque
-```
-
-terway-controlplane 需要授权中包含以下 [`RAM 权限`](https://ram.console.aliyun.com/)
+terway-controlplane 需要通过  openAPI 去操作网络资源，请确保授权中包含以下 [`RAM 权限`](https://ram.console.aliyun.com/)
 
 ```json
 {

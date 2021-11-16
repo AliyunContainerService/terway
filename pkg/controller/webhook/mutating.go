@@ -20,12 +20,15 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/controlplane"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"gomodules.xyz/jsonpatch/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -76,34 +79,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		return webhook.Allowed("host network")
 	}
 
-	if utils.IsDaemonSetPod(pod) {
-		return webhook.Allowed("daemonSet pod")
-	}
-
-	// 1. check pod with podNetworking config and get one
-	podNetworkings := &v1beta1.PodNetworkingList{}
-	err = client.List(ctx, podNetworkings)
-	if err != nil {
-		return webhook.Errored(1, fmt.Errorf("error list podNetworking, %w", err))
-	}
-
-	ns := &corev1.Namespace{}
-	err = client.Get(ctx, k8stypes.NamespacedName{
-		Name: req.Namespace,
-	}, ns)
-	if err != nil {
-		return webhook.Errored(1, fmt.Errorf("error get namespace, %w", err))
-	}
-
-	podNetworking, err := common.MatchOnePodNetworking(pod, ns, podNetworkings.Items)
-	if err != nil {
-		l.Error(err, "error match podNetworking")
-		return webhook.Errored(1, err)
-	}
-	if podNetworking == nil {
-		l.V(4).Info("no selector is matched or CRD is not ready")
-		return webhook.Allowed("not match")
-	}
+	ds := utils.IsDaemonSetPod(pod)
 
 	if len(pod.Spec.Containers) == 0 {
 		return webhook.Allowed("pod do not have containers")
@@ -112,18 +88,6 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 	if pod.Annotations == nil {
 		pod.Annotations = map[string]string{}
 	}
-	pod.Annotations[types.PodENI] = "true"
-	pod.Annotations[types.PodNetworking] = podNetworking.Name
-
-	// we only patch one container for res request
-	if pod.Spec.Containers[0].Resources.Requests == nil {
-		pod.Spec.Containers[0].Resources.Requests = make(corev1.ResourceList)
-	}
-	if pod.Spec.Containers[0].Resources.Limits == nil {
-		pod.Spec.Containers[0].Resources.Limits = make(corev1.ResourceList)
-	}
-	pod.Spec.Containers[0].Resources.Requests[deviceplugin.MemberENIResName] = resource.MustParse("1")
-	pod.Spec.Containers[0].Resources.Limits[deviceplugin.MemberENIResName] = resource.MustParse("1")
 
 	// 2. get pod previous zone
 	previousZone, err := getPreviousZone(client, pod)
@@ -132,16 +96,91 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		l.Error(err, msg)
 		return webhook.Errored(1, fmt.Errorf(msg))
 	}
-	var zones []string
+
+	zones := sets.NewString()
 	if previousZone != "" {
-		zones = []string{previousZone}
+		zones.Insert(previousZone)
+	}
+
+	memberCount := 0
+
+	// 1. check pod annotation config first
+	if pod.Annotations[types.PodNetworking] != "" && pod.Annotations[types.PodNetworks] != "" {
+		return webhook.Denied("can not use pod annotation and podNetworking at same time")
+	}
+
+	if types.PodUseENI(pod) {
+		allocs, zone, err := controlplane.ParsePodNetworksFromAnnotation(pod)
+		if err != nil {
+			return webhook.Denied(fmt.Sprintf("unable parse annotation field %s", types.PodNetworks))
+		}
+		if len(allocs) == 0 {
+			return webhook.Denied("unable pod have no valid network config")
+		}
+
+		// for now use trunk only
+		memberCount = len(allocs)
+
+		if previousZone == "" && zone != "" {
+			zones.Insert(zone)
+		}
 	} else {
-		// 3. if no previous conf found, we will add zone limit by vSwitches
-		for _, vsw := range podNetworking.Status.VSwitches {
-			zones = append(zones, vsw.Zone)
+		if pod.Annotations[types.PodNetworks] != "" {
+			return webhook.Denied("can not use pod annotation and podNetworking at same time, pod-eni is missing")
+		}
+
+		memberCount = 1
+
+		// 1. check pod with podNetworking config and get one
+		podNetworkings := &v1beta1.PodNetworkingList{}
+		err = client.List(ctx, podNetworkings)
+		if err != nil {
+			return webhook.Errored(1, fmt.Errorf("error list podNetworking, %w", err))
+		}
+
+		ns := &corev1.Namespace{}
+		err = client.Get(ctx, k8stypes.NamespacedName{
+			Name: req.Namespace,
+		}, ns)
+		if err != nil {
+			return webhook.Errored(1, fmt.Errorf("error get namespace, %w", err))
+		}
+
+		podNetworking, err := common.MatchOnePodNetworking(pod, ns, podNetworkings.Items)
+		if err != nil {
+			l.Error(err, "error match podNetworking")
+			return webhook.Errored(1, err)
+		}
+		if podNetworking == nil {
+			l.V(4).Info("no selector is matched or CRD is not ready")
+			return webhook.Allowed("not match")
+		}
+		pod.Annotations[types.PodENI] = "true"
+		pod.Annotations[types.PodNetworking] = podNetworking.Name
+
+		if previousZone == "" {
+			// 3. if no previous conf found, we will add zone limit by vSwitches
+			for _, vsw := range podNetworking.Status.VSwitches {
+				zones.Insert(vsw.Zone)
+			}
 		}
 	}
-	if len(zones) > 0 {
+
+	// we only patch one container for res request
+	if pod.Spec.Containers[0].Resources.Requests == nil {
+		pod.Spec.Containers[0].Resources.Requests = make(corev1.ResourceList)
+	}
+	if pod.Spec.Containers[0].Resources.Limits == nil {
+		pod.Spec.Containers[0].Resources.Limits = make(corev1.ResourceList)
+	}
+	resName := deviceplugin.MemberENIResName
+	if !*controlplane.GetConfig().EnableTrunk {
+		resName = deviceplugin.ENIResName
+	}
+	pod.Spec.Containers[0].Resources.Requests[corev1.ResourceName(resName)] = resource.MustParse(strconv.Itoa(memberCount))
+	pod.Spec.Containers[0].Resources.Limits[corev1.ResourceName(resName)] = resource.MustParse(strconv.Itoa(memberCount))
+
+	if !ds && len(zones) > 0 {
 		if pod.Spec.Affinity == nil {
 			pod.Spec.Affinity = &corev1.Affinity{}
 		}
@@ -158,7 +197,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 					{
 						Key:      corev1.LabelZoneFailureDomainStable,
 						Operator: corev1.NodeSelectorOpIn,
-						Values:   zones,
+						Values:   zones.List(),
 					},
 				},
 			})
@@ -245,5 +284,8 @@ func getPreviousZone(client client.Client, pod *corev1.Pod) (string, error) {
 		}
 		return "", err
 	}
-	return podENI.Spec.Allocation.ENI.Zone, nil
+	if len(podENI.Spec.Allocations) == 0 {
+		return "", nil
+	}
+	return podENI.Spec.Zone, nil
 }

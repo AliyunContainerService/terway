@@ -1,11 +1,16 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: {{ .Chart.Name }}
+  name: {{ .Release.Name }}
   labels:
     {{- include "terway-controlplane.labels" . | nindent 4 }}
 webhooks:
   - name: {{ .Chart.Name }}.mutating.k8s.io
+    namespaceSelector:
+      matchExpressions:
+        - key: k8s.aliyun.com/pod-eni
+          operator: NotIn
+          values: ["false"]
     rules:
       - apiGroups:   [""]
         apiVersions: ["v1"]
@@ -20,17 +25,17 @@ webhooks:
     clientConfig:
       service:
         namespace: {{ .Release.Namespace }}
-        name: {{ .Chart.Name }}
+        name: {{ .Release.Name }}
         path: /mutating
     admissionReviewVersions: ["v1", "v1beta1"]
     sideEffects: None
-    timeoutSeconds: 10
-    failurePolicy: Ignore
+    timeoutSeconds: {{ .Values.webhookTimeoutSeconds }}
+    failurePolicy: {{ .Values.webhookFailurePolicy }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: {{ .Chart.Name }}
+  name: {{ .Release.Name }}
   labels:
   {{- include "terway-controlplane.labels" . | nindent 4 }}
 webhooks:
@@ -44,9 +49,9 @@ webhooks:
     clientConfig:
       service:
         namespace: {{ .Release.Namespace }}
-        name: {{ .Chart.Name }}
+        name: {{ .Release.Name }}
         path: /validate
     admissionReviewVersions: ["v1", "v1beta1"]
     sideEffects: None
-    timeoutSeconds: 10
+    timeoutSeconds: {{ .Values.webhookTimeoutSeconds }}
     failurePolicy: Fail
