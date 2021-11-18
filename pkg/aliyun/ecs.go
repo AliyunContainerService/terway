@@ -25,11 +25,11 @@ type OpenAPI struct {
 	MutatingRateLimiter flowcontrol.RateLimiter
 }
 
-func NewAliyun(ak, sk, regionID, credentialPath string) (*OpenAPI, error) {
+func NewAliyun(ak, sk, regionID, credentialPath, secretNamespace, secretName string) (*OpenAPI, error) {
 	if regionID == "" {
 		return nil, fmt.Errorf("regionID unset")
 	}
-	clientSet, err := NewClientMgr(ak, sk, credentialPath, regionID)
+	clientSet, err := NewClientMgr(ak, sk, credentialPath, regionID, secretNamespace, secretName)
 	if err != nil {
 		return nil, fmt.Errorf("error get clientset, %w", err)
 	}

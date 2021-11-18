@@ -10,10 +10,10 @@ data:
     leaseLockNamespace: "kube-system"
     controllerNamespace: "kube-system"
     controllerName: "{{ .Release.Name }}"
-    healthzBindAddress: "0.0.0.0:80"
+    healthzBindAddress: "0.0.0.0:8080"
     clusterDomain: "cluster.local"
     leaderElection: true
-    webhookPort: 443
+    webhookPort: 4443
     certDir: "/var/run/webhook-cert"
     regionID: "{{ .Values.regionID }}"
     clusterID: "{{ .Values.clusterID }}"

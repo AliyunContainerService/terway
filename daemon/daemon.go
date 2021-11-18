@@ -1065,7 +1065,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	ipFamily := types.NewIPFamilyFromIPStack(types.IPStack(config.IPStack))
 	netSrv.ipFamily = ipFamily
 
-	aliyunClient, err := aliyun.NewAliyun(config.AccessID, config.AccessSecret, ins.RegionID, config.CredentialPath)
+	aliyunClient, err := aliyun.NewAliyun(config.AccessID, config.AccessSecret, ins.RegionID, config.CredentialPath, "", "")
 	if err != nil {
 		return nil, errors.Wrapf(err, "error create aliyun client")
 	}

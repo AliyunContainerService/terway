@@ -75,7 +75,7 @@ func main() {
 		panic(err)
 	}
 
-	aliyunClient, err := aliyun.NewAliyun(string(cfg.Credential.AccessKey), string(cfg.Credential.AccessSecret), cfg.RegionID, cfg.CredentialPath)
+	aliyunClient, err := aliyun.NewAliyun(string(cfg.Credential.AccessKey), string(cfg.Credential.AccessSecret), cfg.RegionID, cfg.CredentialPath, cfg.SecretNamespace, cfg.SecretName)
 	if err != nil {
 		panic(err)
 	}

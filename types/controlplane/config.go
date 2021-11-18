@@ -64,7 +64,7 @@ type Config struct {
 	HealthzBindAddress string `json:"healthzBindAddress" validate:"required,tcp_addr" mod:"default=0.0.0.0:80"`
 	MetricsBindAddress string `json:"metricsBindAddress" validate:"required" mod:"default=0"`
 	ClusterDomain      string `json:"clusterDomain" validate:"required,fqdn" mod:"default=cluster.local"`
-	WebhookPort        int    `json:"webhookPort" validate:"gt=0,lte=65535" mod:"default=443"`
+	WebhookPort        int    `json:"webhookPort" validate:"gt=0,lte=65535" mod:"default=4443"`
 	CertDir            string `json:"certDir" validate:"required" mod:"default=/var/run/webhook-cert"`
 	LeaderElection     bool   `json:"leaderElection"`
 
@@ -88,9 +88,11 @@ type Config struct {
 }
 
 type Credential struct {
-	AccessKey      secret.Secret `json:"accessKey" validate:"required_with=AccessSecret"`
-	AccessSecret   secret.Secret `json:"accessSecret" validate:"required_with=AccessKey"`
-	CredentialPath string        `json:"credentialPath" validate:"required_without_all=AccessKey AccessSecret"`
+	AccessKey       secret.Secret `json:"accessKey" validate:"required_with=AccessSecret"`
+	AccessSecret    secret.Secret `json:"accessSecret" validate:"required_with=AccessKey"`
+	CredentialPath  string        `json:"credentialPath"`
+	SecretNamespace string        `json:"secretNamespace" validate:"required_with=SecretName"`
+	SecretName      string        `json:"secretName" validate:"required_with=SecretNamespace"`
 }
 
 func ParseAndValidateCredential(file string) (*Credential, error) {

@@ -23,6 +23,10 @@ spec:
         - name: terway-controlplane
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 1000
           env:
             - name: K8S_POD_NAME
               valueFrom:
@@ -38,14 +42,14 @@ spec:
             timeoutSeconds: 5
             httpGet:
               path: /healthz
-              port: 80
+              port: 8080
           readinessProbe:
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
             httpGet:
               path: /readyz
-              port: 80
+              port: 8080
           resources:
           {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
@@ -55,6 +59,8 @@ spec:
             - name: secret-vol
               mountPath: /etc/credential
               readOnly: true
+            - name: webhook-vol
+              mountPath: /var/run/webhook-cert
       volumes:
         - name: config-vol
           configMap:
@@ -65,6 +71,8 @@ spec:
         - name: secret-vol
           secret:
             secretName: {{ .Release.Name }}-credential
+        - name: webhook-vol
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
       {{- toYaml . | nindent 8 }}

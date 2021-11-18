@@ -35,7 +35,7 @@ func main() {
 	log.SetOutput(ioutil.Discard)
 	logrus.SetOutput(ioutil.Discard)
 	ins := aliyun.GetInstanceMeta()
-	api, err := aliyun.NewAliyun(accessKeyID, accessKeySecret, ins.RegionID, credentialPath)
+	api, err := aliyun.NewAliyun(accessKeyID, accessKeySecret, ins.RegionID, credentialPath, "", "")
 	if err != nil {
 		panic(err)
 	}
