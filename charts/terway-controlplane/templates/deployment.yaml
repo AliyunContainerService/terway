@@ -37,6 +37,10 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: spec.nodeName
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
           livenessProbe:
             periodSeconds: 10
             timeoutSeconds: 5

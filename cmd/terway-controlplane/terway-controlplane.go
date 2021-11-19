@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
+	"os"
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
@@ -28,6 +29,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/cert"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/all"
+	"github.com/AliyunContainerService/terway/pkg/controller/endpoint"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
 	"github.com/AliyunContainerService/terway/pkg/utils"
@@ -117,6 +119,19 @@ func main() {
 	err = mgr.Add(vSwitchCtrl)
 	if err != nil {
 		panic(err)
+	}
+
+	if cfg.RegisterEndpoint {
+		ipStr := os.Getenv("MY_POD_IP")
+		if ipStr == "" {
+			panic("podIP is not found")
+		}
+		// if enable Service name should equal cfg.ControllerName
+		ep := &endpoint.Endpoint{PodIP: ipStr, Namespace: cfg.ControllerNamespace, Name: cfg.ControllerName}
+		err = mgr.Add(ep)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	for name := range register.Controllers {
