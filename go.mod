@@ -3,7 +3,7 @@ module github.com/AliyunContainerService/terway
 go 1.16
 
 require (
-	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1185
+	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1333
 	github.com/boltdb/bolt v1.3.1
 	github.com/containerd/containerd v1.4.11 // indirect
 	github.com/containernetworking/cni v0.8.0
