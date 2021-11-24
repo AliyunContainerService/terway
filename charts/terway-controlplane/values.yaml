@@ -7,24 +7,12 @@ replicaCount: 2
 image:
   repository: l1b0k/terway-controlplane
   pullPolicy: Always
-  # Overrides the image tag whose default is the chart appVersion.
   tag: "latest"
 
 nameOverride: ""
 fullnameOverride: ""
 
 podAnnotations: {}
-
-podSecurityContext: {}
-  # fsGroup: 2000
-
-securityContext: {}
-#   capabilities:
-#     drop:
-#     - ALL
-#   readOnlyRootFilesystem: true
-#   runAsNonRoot: true
-#   runAsUser: 1000
 
 service:
   type: ClusterIP
@@ -40,3 +28,17 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+webhookFailurePolicy: Ignore
+webhookTimeoutSeconds: 10
+
+# configmap
+regionID: ch-hangzhou
+clusterID: ""
+vpcID: ""
+
+ipStack: ipv4
+
+# secrets
+accessKey: ""
+accessSecret: ""

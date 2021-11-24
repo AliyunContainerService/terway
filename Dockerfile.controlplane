@@ -16,4 +16,6 @@ FROM ubuntu:20.04
 RUN apt-get update && apt-get install -y curl jq && \
     apt-get purge --auto-remove && apt-get clean && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terway-controlplane /usr/bin/terway-controlplane
+RUN useradd -U -u 1000 nonroot
+USER 1000
 ENTRYPOINT ["/usr/bin/terway-controlplane"]

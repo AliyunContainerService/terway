@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
@@ -10,8 +11,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth/credentials"
 	"github.com/sirupsen/logrus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type EncryptedCredentialInfo struct {
@@ -23,28 +26,48 @@ type EncryptedCredentialInfo struct {
 }
 
 type EncryptedCredentialProvider struct {
-	credentialPath string
+	credentialPath  string
+	secretNamespace string
+	secretName      string
 }
 
-// NewEncryptedCredentialProvider get token from /var/addon/token-config
-func NewEncryptedCredentialProvider(credentialPath string) *EncryptedCredentialProvider {
-	return &EncryptedCredentialProvider{credentialPath: credentialPath}
+// NewEncryptedCredentialProvider get token from file or secret. default filepath /var/addon/token-config
+func NewEncryptedCredentialProvider(credentialPath, secretNamespace, secretName string) *EncryptedCredentialProvider {
+	return &EncryptedCredentialProvider{credentialPath: credentialPath, secretNamespace: secretNamespace, secretName: secretName}
 }
 
 func (e *EncryptedCredentialProvider) Resolve() (*Credential, error) {
-	log.Infof("resolve encrypted credential %s", e.credentialPath)
-	if e.credentialPath == "" {
+	if e.credentialPath == "" && e.secretNamespace == "" && e.secretName == "" {
 		return nil, nil
 	}
-	_, err := os.Stat(e.credentialPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config %s, err: %w", e.credentialPath, err)
-	}
+	var encodeTokenCfg []byte
+	var err error
 	var akInfo EncryptedCredentialInfo
-	encodeTokenCfg, err := ioutil.ReadFile(e.credentialPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read token config, err: %w", err)
+
+	if e.credentialPath != "" {
+		log.Infof("resolve encrypted credential %s", e.credentialPath)
+		_, err := os.Stat(e.credentialPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read config %s, err: %w", e.credentialPath, err)
+		}
+		encodeTokenCfg, err = ioutil.ReadFile(e.credentialPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read token config, err: %w", err)
+		}
+	} else {
+		log.Infof("resolve secret %s/%s", e.secretNamespace, e.secretName)
+
+		secret, err := utils.K8sClient.CoreV1().Secrets(e.secretNamespace).Get(context.Background(), e.secretName, metav1.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		var ok bool
+		encodeTokenCfg, ok = secret.Data["addon.token.config"]
+		if !ok {
+			return nil, fmt.Errorf("token is not found in addon.network.token")
+		}
 	}
+
 	err = json.Unmarshal(encodeTokenCfg, &akInfo)
 	if err != nil {
 		return nil, fmt.Errorf("error unmarshal token config: %w", err)

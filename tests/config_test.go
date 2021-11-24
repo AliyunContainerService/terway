@@ -53,7 +53,7 @@ type PodNetworkingConfig struct {
 	*ResConfig
 	PodSelectLabels map[string]string
 	NamespaceLabels map[string]string
-	IPType          v1beta1.IPType
+	IPType          v1beta1.AllocationType
 }
 
 type Resource struct {
@@ -258,7 +258,7 @@ var elasticPodNetWorking = PodNetworkingConfig{
 	NamespaceLabels: map[string]string{
 		"project": "network-test",
 	},
-	IPType: v1beta1.IPType{
+	IPType: v1beta1.AllocationType{
 		Type: v1beta1.IPAllocTypeElastic,
 	},
 }
@@ -276,7 +276,7 @@ var fixedPodNetWorking = PodNetworkingConfig{
 	NamespaceLabels: map[string]string{
 		"project": "network-test",
 	},
-	IPType: v1beta1.IPType{
+	IPType: v1beta1.AllocationType{
 		Type:            v1beta1.IPAllocTypeFixed,
 		ReleaseStrategy: v1beta1.ReleaseStrategyTTL,
 		ReleaseAfter:    "5m0s",

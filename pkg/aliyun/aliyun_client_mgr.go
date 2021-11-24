@@ -47,13 +47,13 @@ type ClientMgr struct {
 }
 
 // NewClientMgr return new aliyun client manager
-func NewClientMgr(key, secret, credentialPath, regionID string) (*ClientMgr, error) {
+func NewClientMgr(key, secret, credentialPath, regionID, secretNamespace, secretName string) (*ClientMgr, error) {
 	mgr := &ClientMgr{
 		regionID: regionID,
 	}
 	providers := []credential.Interface{
 		credential.NewAKPairProvider(key, secret),
-		credential.NewEncryptedCredentialProvider(credentialPath),
+		credential.NewEncryptedCredentialProvider(credentialPath, secretNamespace, secretName),
 		credential.NewMetadataProvider(),
 	}
 	for _, p := range providers {

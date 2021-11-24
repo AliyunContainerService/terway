@@ -274,6 +274,11 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 			if err != nil {
 				return nil, errors.Wrapf(err, "error wait pod eni info")
 			}
+
+			if len(podEni.Spec.Allocations) <= 0 {
+				return nil, fmt.Errorf("podENI has no allocation info")
+			}
+
 			nodeTrunkENI := networkService.eniIPResMgr.(*eniIPResourceManager).trunkENI
 			if nodeTrunkENI == nil || nodeTrunkENI.ID != podEni.Status.TrunkENIID {
 				return nil, fmt.Errorf("pod status eni parent not match instance trunk eni")
@@ -281,8 +286,8 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 			eniMultiIP = &types.ENIIP{
 				ENI: nodeTrunkENI,
 				IPSet: types.IPSet{
-					IPv4: net.ParseIP(podEni.Spec.Allocation.IPv4),
-					IPv6: net.ParseIP(podEni.Spec.Allocation.IPv6),
+					IPv4: net.ParseIP(podEni.Spec.Allocations[0].IPv4),
+					IPv6: net.ParseIP(podEni.Spec.Allocations[0].IPv6),
 				},
 			}
 
@@ -1060,7 +1065,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	ipFamily := types.NewIPFamilyFromIPStack(types.IPStack(config.IPStack))
 	netSrv.ipFamily = ipFamily
 
-	aliyunClient, err := aliyun.NewAliyun(config.AccessID, config.AccessSecret, ins.RegionID, config.CredentialPath)
+	aliyunClient, err := aliyun.NewAliyun(config.AccessID, config.AccessSecret, ins.RegionID, config.CredentialPath, "", "")
 	if err != nil {
 		return nil, errors.Wrapf(err, "error create aliyun client")
 	}

@@ -30,12 +30,15 @@ const (
 	// TrunkOn is the key for eni
 	TrunkOn = AnnotationPrefix + "trunk-on"
 
-	// PodENI whether pod is using eni (trunking mode)
+	// PodENI whether pod is using podENI cr resource
 	PodENI        = AnnotationPrefix + "pod-eni"
 	PodNetworking = AnnotationPrefix + "pod-networking"
 
 	// PodIPReservation whether pod's IP will be reserved for a reuse
 	PodIPReservation = AnnotationPrefix + "pod-ip-reservation"
+
+	// PodNetworks for additional net config
+	PodNetworks = AnnotationPrefix + "pod-networks"
 )
 
 // FinalizerPodENI finalizer for podENI resource
@@ -56,7 +59,7 @@ const (
 	EventUpdatePodENIFailed = "UpdatePodENIFailed"
 )
 
-// PodUseENI whether pod is use eni
+// PodUseENI whether pod is use podENI cr res
 func PodUseENI(pod *corev1.Pod) bool {
 	key, ok := pod.GetAnnotations()[PodENI]
 	if !ok {

@@ -1,22 +1,11 @@
 package types
 
 import (
-	"flag"
 	"os"
 
 	jsonpatch "github.com/evanphx/json-patch"
 	"k8s.io/apimachinery/pkg/util/json"
 )
-
-var (
-	terwayConfigmapNamespace string
-	terwayConfigmapName      string
-)
-
-func init() {
-	flag.StringVar(&terwayConfigmapName, "terway-configmap-name", "eni-config", "read terway config from configmap")
-	flag.StringVar(&terwayConfigmapNamespace, "terway-configmap-namespace", "kube-system", "read terway config from configmap")
-}
 
 // Configure configuration of terway daemon
 type Configure struct {
