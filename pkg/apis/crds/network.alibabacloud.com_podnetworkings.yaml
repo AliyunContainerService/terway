@@ -32,7 +32,7 @@ spec:
           spec:
             description: PodNetworkingSpec defines the desired state of PodNetworking
             properties:
-              ipType:
+              allocationType:
                 description: AllocationType ip type and release strategy
                 properties:
                   releaseAfter:

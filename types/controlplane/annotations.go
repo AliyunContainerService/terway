@@ -22,26 +22,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-type PodNetworksAnnotation struct {
-	PodNetworks []PodNetworkAnnotation `json:"podNetworks"`
-	Zone        string                 `json:"zone"`
-}
-
-type PodNetworkAnnotation struct {
-	RoleName         string   `json:"roleName"`
-	Interface        string   `json:"interface"`
-	UserID           string   `json:"userID"`
-	SwitchID         string   `json:"switchID"`
-	SecurityGroupIDs []string `json:"securityGroupIDs"`
-	ResourceGroupID  string   `json:"resourceGroupID"`
-	DefaultRoute     bool     `json:"defaultRoute"`
-	ExtraRoutes      []Route  `json:"extraRoutes"`
-}
-
-type Route struct {
-	Dst string `json:"dst"`
-}
-
 // ParsePodNetworksFromAnnotation parse annotation and convert to []v1beta1.Allocation
 func ParsePodNetworksFromAnnotation(pod *corev1.Pod) ([]*v1beta1.Allocation, string, error) {
 	return nil, "", nil

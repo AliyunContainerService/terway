@@ -270,22 +270,22 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 			},
 		})
 
-		if podNetworking.Spec.IPType.Type == v1beta1.IPAllocTypeFixed {
+		if podNetworking.Spec.AllocationType.Type == v1beta1.IPAllocTypeFixed {
 			allocType.Type = v1beta1.IPAllocTypeFixed
 		}
 
 		allocType.ReleaseStrategy = v1beta1.ReleaseStrategyTTL
-		if podNetworking.Spec.IPType.ReleaseStrategy != "" {
-			allocType.ReleaseStrategy = podNetworking.Spec.IPType.ReleaseStrategy
+		if podNetworking.Spec.AllocationType.ReleaseStrategy != "" {
+			allocType.ReleaseStrategy = podNetworking.Spec.AllocationType.ReleaseStrategy
 		}
 
 		allocType.ReleaseAfter = "10m"
-		if podNetworking.Spec.IPType.ReleaseAfter != "" {
-			_, err := time.ParseDuration(podNetworking.Spec.IPType.ReleaseAfter)
+		if podNetworking.Spec.AllocationType.ReleaseAfter != "" {
+			_, err := time.ParseDuration(podNetworking.Spec.AllocationType.ReleaseAfter)
 			if err != nil {
 				return reconcile.Result{}, fmt.Errorf("error parse ReleaseAfter, %w", err)
 			}
-			allocType.ReleaseAfter = podNetworking.Spec.IPType.ReleaseAfter
+			allocType.ReleaseAfter = podNetworking.Spec.AllocationType.ReleaseAfter
 		}
 	} else {
 		// try get v1beta1.IPType from annotation
