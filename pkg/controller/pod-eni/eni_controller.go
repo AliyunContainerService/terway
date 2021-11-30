@@ -361,7 +361,7 @@ func (m *ReconcilePodENI) gcENIs(enis []ecs.NetworkInterfaceSet, force bool) err
 	}
 	layout := "2006-01-02T15:04:05Z"
 	now := time.Now()
-	for _, eni := range enis {
+	for i, eni := range enis {
 		if !m.eniFilter(eni, tagFilter) {
 			continue
 		}
@@ -376,7 +376,7 @@ func (m *ReconcilePodENI) gcENIs(enis []ecs.NetworkInterfaceSet, force bool) err
 				continue
 			}
 		}
-		eniMap[eni.NetworkInterfaceId] = &eni
+		eniMap[eni.NetworkInterfaceId] = &enis[i]
 	}
 	if len(eniMap) == 0 {
 		return nil
@@ -403,21 +403,21 @@ func (m *ReconcilePodENI) gcENIs(enis []ecs.NetworkInterfaceSet, force bool) err
 	}
 
 	// 4. the left eni is going to be deleted
-	for id, eni := range eniMap {
+	for _, eni := range eniMap {
 		if eni.Type == string(aliyun.ENITypeMember) && eni.Status == string(aliyun.ENIStatusInUse) {
-			l.Info("detach eni", "eni", id, "trunk-eni", eni.Attachment.TrunkNetworkInterfaceId)
-			err = m.aliyun.DetachNetworkInterface(context.Background(), id, eni.Attachment.InstanceId, eni.Attachment.TrunkNetworkInterfaceId)
+			l.Info("detach eni", "eni", eni.NetworkInterfaceId, "trunk-eni", eni.Attachment.TrunkNetworkInterfaceId)
+			err = m.aliyun.DetachNetworkInterface(context.Background(), eni.NetworkInterfaceId, eni.Attachment.InstanceId, eni.Attachment.TrunkNetworkInterfaceId)
 			if err != nil {
-				l.Error(err, fmt.Sprintf("errot detach eni %s", id))
+				l.Error(err, fmt.Sprintf("errot detach eni %s", eni.NetworkInterfaceId))
 			}
 			// we continue here because we can delete eni in next check
 			continue
 		}
 		if eni.Status == string(aliyun.ENIStatusAvailable) {
-			l.Info("delete eni", "eni", id)
-			err = m.aliyun.DeleteNetworkInterface(context.Background(), id)
+			l.Info("delete eni", "eni", eni.NetworkInterfaceId)
+			err = m.aliyun.DeleteNetworkInterface(context.Background(), eni.NetworkInterfaceId)
 			if err != nil {
-				l.Info(fmt.Sprintf("delete leaked eni %s, %s", id, err))
+				l.Info(fmt.Sprintf("delete leaked eni %s, %s", eni.NetworkInterfaceId, err))
 			}
 			continue
 		}
