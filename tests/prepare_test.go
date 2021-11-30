@@ -55,7 +55,7 @@ func EnsurePodNetworking(ctx context.Context, cs *versioned.Clientset, cfg PodNe
 			Name: cfg.Name,
 		},
 		Spec: v1beta1.PodNetworkingSpec{
-			IPType: cfg.IPType,
+			AllocationType: cfg.IPType,
 			Selector: v1beta1.Selector{
 				PodSelector: &metav1.LabelSelector{
 					MatchLabels: cfg.PodSelectLabels,

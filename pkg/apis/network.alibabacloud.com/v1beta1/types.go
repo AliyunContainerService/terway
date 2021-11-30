@@ -218,7 +218,7 @@ type PodNetworkingList struct {
 
 // PodNetworkingSpec defines the desired state of PodNetworking
 type PodNetworkingSpec struct {
-	IPType AllocationType `json:"ipType,omitempty"`
+	AllocationType AllocationType `json:"allocationType,omitempty"`
 
 	Selector Selector `json:"selector,omitempty"`
 

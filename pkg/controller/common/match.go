@@ -40,7 +40,7 @@ func MatchOnePodNetworking(pod *corev1.Pod, ns *corev1.Namespace, networkings []
 		}
 		if !utils.IsStsPod(pod) {
 			// for fixed ip , only match sts pod
-			if podNetworking.Spec.IPType.Type == v1beta1.IPAllocTypeFixed {
+			if podNetworking.Spec.AllocationType.Type == v1beta1.IPAllocTypeFixed {
 				continue
 			}
 		}
