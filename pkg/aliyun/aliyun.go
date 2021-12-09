@@ -261,7 +261,7 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 			tracing.AllocResourceFailed, fmtErr.Error())
 
 		// rollback ips
-		roleBackErr := e.UnAssignIPsForENI(ctx, eniID, mac, ipv4s, ipv6s)
+		roleBackErr := e.unAssignIPsForENIUnSafe(ctx, eniID, mac, ipv4s, ipv6s)
 		if roleBackErr != nil {
 			fmtErr = fmt.Errorf("roll back failed %s, %w", fmtErr, roleBackErr)
 			log.Error(fmtErr.Error())
@@ -349,12 +349,16 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 }
 
 func (e *Impl) UnAssignIPsForENI(ctx context.Context, eniID, mac string, ipv4s []net.IP, ipv6s []net.IP) error {
+	e.privateIPMutex.Lock()
+	defer e.privateIPMutex.Unlock()
+
+	return e.unAssignIPsForENIUnSafe(ctx, eniID, mac, ipv4s, ipv6s)
+}
+
+func (e *Impl) unAssignIPsForENIUnSafe(ctx context.Context, eniID, mac string, ipv4s []net.IP, ipv6s []net.IP) error {
 	if eniID == "" || mac == "" {
 		return fmt.Errorf("args error")
 	}
-
-	e.privateIPMutex.Lock()
-	defer e.privateIPMutex.Unlock()
 
 	var errs []error
 
