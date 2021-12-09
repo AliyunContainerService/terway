@@ -45,6 +45,11 @@ if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = 
       echo "turning up hubble, passing args \"${extra_args}\""
     fi
 
+		if [ "$IN_CLUSTER_LOADBALANCE" = "true" ]; then
+				extra_args="${extra_args} --enable-in-cluster-loadbalance=true "
+				echo "turning up in cluster loadbalance, passing args \"${extra_args}\""
+		fi
+
     echo "using cilium as network routing & policy"
     # shellcheck disable=SC2086
     exec cilium-agent --tunnel=disabled --enable-ipv4-masquerade=false --enable-ipv6-masquerade=false \
