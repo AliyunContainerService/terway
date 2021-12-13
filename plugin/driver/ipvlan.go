@@ -153,45 +153,13 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 }
 
 func (d *IPvlanDriver) Teardown(cfg *TeardownCfg, netNS ns.NetNS) error {
-	parents := make(map[int]struct{})
-	link, err := netlink.LinkByName(cfg.HostVETHName)
+	err := DelLinkByName(cfg.HostVETHName)
 	if err != nil {
-		if _, ok := err.(netlink.LinkNotFoundError); !ok {
-			return fmt.Errorf("error get link %s, %w", cfg.HostVETHName, err)
-		}
-	} else {
-		parents[link.Attrs().ParentIndex] = struct{}{}
-		_ = LinkSetDown(link)
-		err = LinkDel(link)
-		if err != nil {
-			return fmt.Errorf("error del link, %w", err)
-		}
-	}
-	err = netNS.Do(func(netNS ns.NetNS) error {
-		for _, ifName := range []string{cfg.HostVETHName, cfg.ContainerIfName} {
-			link, err := netlink.LinkByName(ifName)
-			if err != nil {
-				if _, ok := err.(netlink.LinkNotFoundError); !ok {
-					return fmt.Errorf("error get link %s, %w", ifName, err)
-				}
-				continue
-			}
-
-			parents[link.Attrs().ParentIndex] = struct{}{}
-			_ = LinkSetDown(link)
-			err = LinkDel(link)
-			if err != nil {
-				return fmt.Errorf("error del link, %w", err)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("error teardown container, %w", err)
+		return err
 	}
 
-	delete(parents, 0)
-	return d.teardownInitNamespace(parents, cfg.ContainerIPNet)
+	// del route to container
+	return d.teardownInitNamespace(cfg.ContainerIPNet)
 }
 
 func (d *IPvlanDriver) Check(cfg *CheckConfig) error {
@@ -445,20 +413,17 @@ func (d *IPvlanDriver) setupInitNamespace(parentLink netlink.Link, cfg *SetupCon
 	return nil
 }
 
-func (d *IPvlanDriver) teardownInitNamespace(parents map[int]struct{}, containerIP *terwayTypes.IPNetSet) error {
+func (d *IPvlanDriver) teardownInitNamespace(containerIP *terwayTypes.IPNetSet) error {
 	if containerIP == nil {
 		return nil
 	}
 
-	exec := func(link netlink.Link, ipNet *net.IPNet) error {
-		rt := &netlink.Route{
-			LinkIndex: link.Attrs().Index,
-			Dst:       NewIPNetWithMaxMask(ipNet),
-		}
-
-		routes, err := netlink.RouteListFiltered(NetlinkFamily(ipNet.IP), rt, netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF)
+	exec := func(ipNet *net.IPNet) error {
+		routes, err := FoundRoutes(&netlink.Route{
+			Dst: ipNet,
+		})
 		if err != nil {
-			return fmt.Errorf("error get route by filter %s, %w", rt.String(), err)
+			return err
 		}
 		for _, route := range routes {
 			err = RouteDel(&route)
@@ -468,37 +433,25 @@ func (d *IPvlanDriver) teardownInitNamespace(parents map[int]struct{}, container
 		}
 		return nil
 	}
-	// get slave link
-	for index := range parents {
-		initLink, err := d.initSlaveLink(index)
+
+	if containerIP.IPv4 != nil {
+		err := exec(NewIPNetWithMaxMask(containerIP.IPv4))
 		if err != nil {
-			if _, ok := err.(netlink.LinkNotFoundError); !ok {
-				return fmt.Errorf("error get link by index %d, %w", index, err)
-			}
-			continue
-		}
-		if containerIP.IPv4 != nil {
-			err = exec(initLink, NewIPNetWithMaxMask(containerIP.IPv4))
-			if err != nil {
-				return err
-			}
-		}
-		if containerIP.IPv6 != nil {
-			err = exec(initLink, NewIPNetWithMaxMask(containerIP.IPv6))
-			if err != nil {
-				return err
-			}
+			return err
 		}
 	}
+	if containerIP.IPv6 != nil {
+		err := exec(NewIPNetWithMaxMask(containerIP.IPv6))
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (d *IPvlanDriver) initSlaveName(parentIndex int) string {
 	return fmt.Sprintf("ipvl_%d", parentIndex)
-}
-
-func (d *IPvlanDriver) initSlaveLink(parentIndex int) (netlink.Link, error) {
-	return netlink.LinkByName(d.initSlaveName(parentIndex))
 }
 
 type redirectRule struct {

@@ -5,7 +5,6 @@ import (
 	"net"
 	"os"
 
-	"github.com/AliyunContainerService/terway/pkg/ip"
 	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
 	"github.com/AliyunContainerService/terway/pkg/tc"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
@@ -241,39 +240,7 @@ func (d *VETHDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 }
 
 func (d *VETHDriver) Teardown(cfg *TeardownCfg, netNS ns.NetNS) error {
-	// 1. get container ip
-	hostVeth, err := netlink.LinkByName(cfg.HostVETHName)
-	if err != nil {
-		return fmt.Errorf("error get link %s, %w", cfg.HostVETHName, err)
-	}
-
-	containerIP, err := getIPsByNS(cfg.ContainerIfName, netNS)
-	if err != nil {
-		return fmt.Errorf("error get container ip %s, %w", cfg.HostVETHName, err)
-	}
-
-	// 2. fixme remove ingress/egress rule for pod ip
-
-	// 3. clean ip rules
-	if containerIP.IPv4 != nil {
-		innerErr := DelIPRulesByIP(containerIP.IPv4)
-		if innerErr != nil {
-			err = fmt.Errorf("%w", innerErr)
-		}
-	}
-	if containerIP.IPv6 != nil {
-		innerErr := DelIPRulesByIP(containerIP.IPv6)
-		if innerErr != nil {
-			err = fmt.Errorf("%w", innerErr)
-		}
-	}
-	if err != nil {
-		return err
-	}
-
-	// 4. remove container veth
-	Log.Infof("ip link del %s", hostVeth.Attrs().Name)
-	return netlink.LinkDel(hostVeth)
+	return nil
 }
 
 func (d *VETHDriver) Check(cfg *CheckConfig) error {
@@ -420,34 +387,4 @@ func setupVETHPair(contVethName, pairName string, mtu int, hostNetNS ns.NetNS) (
 		return nil, nil, err
 	}
 	return hostVETH, contVETH, nil
-}
-
-func getIPsByNS(ifName string, nsHandler ns.NetNS) (*terwayTypes.IPNetSet, error) {
-	ipSet := &terwayTypes.IPNetSet{}
-	err := nsHandler.Do(func(netNS ns.NetNS) error {
-		link, err := netlink.LinkByName(ifName)
-		if err != nil {
-			return err
-		}
-		addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
-		if err != nil {
-			return err
-		}
-		for _, addr := range addrs {
-			if !addr.IP.IsGlobalUnicast() {
-				continue
-			}
-			if ip.IPv6(addr.IP) {
-				ipSet.IPv6 = NewIPNetWithMaxMask(&net.IPNet{
-					IP: addr.IP,
-				})
-			} else {
-				ipSet.IPv4 = NewIPNetWithMaxMask(&net.IPNet{
-					IP: addr.IP,
-				})
-			}
-		}
-		return nil
-	})
-	return ipSet, err
 }
