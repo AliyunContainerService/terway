@@ -183,7 +183,7 @@ type eniFactory struct {
 	name                   string
 	switches               []string
 	eniTags                map[string]string
-	securityGroup          string
+	securityGroups         []string
 	instanceID             string
 	ecs                    ipam.API
 	vswitchIPCntMap        map[string]int
@@ -193,18 +193,18 @@ type eniFactory struct {
 }
 
 func newENIFactory(poolConfig *types.PoolConfig, ecs ipam.API) (*eniFactory, error) {
-	if poolConfig.SecurityGroup == "" {
+	if len(poolConfig.SecurityGroups) == 0 {
 		securityGroups, err := ecs.GetAttachedSecurityGroups(context.Background(), poolConfig.InstanceID)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error get security group on factory init")
 		}
-		poolConfig.SecurityGroup = securityGroups[0]
+		poolConfig.SecurityGroups = securityGroups
 	}
 	return &eniFactory{
 		name:                   factoryNameENI,
 		switches:               poolConfig.VSwitch,
 		eniTags:                poolConfig.ENITags,
-		securityGroup:          poolConfig.SecurityGroup,
+		securityGroups:         poolConfig.SecurityGroups,
 		instanceID:             poolConfig.InstanceID,
 		ecs:                    ecs,
 		vswitchIPCntMap:        make(map[string]int),
@@ -288,7 +288,7 @@ func (f *eniFactory) CreateWithIPCount(count int, trunk bool) ([]types.NetworkRe
 	for k, v := range f.eniTags {
 		tags[k] = v
 	}
-	eni, err := f.ecs.AllocateENI(context.Background(), vSwitches[0], f.securityGroup, f.instanceID, trunk, count, tags)
+	eni, err := f.ecs.AllocateENI(context.Background(), vSwitches[0], f.securityGroups, f.instanceID, trunk, count, tags)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +363,7 @@ func (f *eniFactory) ListResource() (map[string]types.NetworkResource, error) {
 
 func (f *eniFactory) Reconcile() {
 	// check security group
-	err := f.ecs.CheckEniSecurityGroup(context.Background(), []string{f.securityGroup})
+	err := f.ecs.CheckEniSecurityGroup(context.Background(), f.securityGroups)
 	if err != nil {
 		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, "ResourceInvalid", fmt.Sprintf("eni has misconfiged security group. %s", err.Error()))
 	}

@@ -513,7 +513,7 @@ func (f *eniIPFactory) ListResource() (map[string]types.NetworkResource, error) 
 
 func (f *eniIPFactory) Reconcile() {
 	// check security group
-	err := f.eniFactory.ecs.CheckEniSecurityGroup(context.Background(), []string{f.eniFactory.securityGroup})
+	err := f.eniFactory.ecs.CheckEniSecurityGroup(context.Background(), f.eniFactory.securityGroups)
 	if err != nil {
 		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, "ResourceInvalid", fmt.Sprintf("eni has misconfiged security group. %s", err.Error()))
 	}
