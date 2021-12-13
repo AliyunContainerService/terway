@@ -22,6 +22,7 @@ type Configure struct {
 	MaxENI                 int                 `yaml:"max_eni" json:"max_eni"`
 	Prefix                 string              `yaml:"prefix" json:"prefix"`
 	SecurityGroup          string              `yaml:"security_group" json:"security_group"`
+	SecurityGroups         []string            `yaml:"security_groups" json:"security_groups"`
 	EniCapRatio            float64             `yaml:"eni_cap_ratio" json:"eni_cap_ratio"`
 	EniCapShift            int                 `yaml:"eni_cap_shift" json:"eni_cap_shift"`
 	VSwitchSelectionPolicy string              `yaml:"vswitch_selection_policy" json:"vswitch_selection_policy"`
@@ -43,7 +44,7 @@ type PoolConfig struct {
 	Zone                   string
 	VSwitch                []string
 	ENITags                map[string]string
-	SecurityGroup          string
+	SecurityGroups         []string
 	InstanceID             string
 	AccessID               string
 	AccessSecret           string

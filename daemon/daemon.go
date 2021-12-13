@@ -25,6 +25,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/containernetworking/cni/libcni"
 	containertypes "github.com/containernetworking/cni/pkg/types"
@@ -1286,6 +1287,7 @@ func validateConfig(cfg *types.Configure) error {
 }
 
 func getPoolConfig(cfg *types.Configure) (*types.PoolConfig, error) {
+	sgIDs := sets.NewString(cfg.SecurityGroup).Insert(cfg.SecurityGroups...)
 	poolConfig := &types.PoolConfig{
 		MaxPoolSize:            cfg.MaxPoolSize,
 		MinPoolSize:            cfg.MinPoolSize,
@@ -1295,7 +1297,7 @@ func getPoolConfig(cfg *types.Configure) (*types.PoolConfig, error) {
 		AccessSecret:           cfg.AccessSecret,
 		EniCapRatio:            cfg.EniCapRatio,
 		EniCapShift:            cfg.EniCapShift,
-		SecurityGroup:          cfg.SecurityGroup,
+		SecurityGroups:         sgIDs.List(),
 		VSwitchSelectionPolicy: cfg.VSwitchSelectionPolicy,
 		EnableENITrunking:      cfg.EnableENITrunking,
 	}

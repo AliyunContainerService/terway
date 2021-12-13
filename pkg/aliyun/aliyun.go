@@ -51,8 +51,8 @@ func NewAliyunImpl(openAPI *OpenAPI, needENITypeAttr bool, ipFamily *types.IPFam
 }
 
 // AllocateENI for instance
-func (e *Impl) AllocateENI(ctx context.Context, vSwitch, securityGroup, instanceID string, trunk bool, ipCount int, eniTags map[string]string) (*types.ENI, error) {
-	if vSwitch == "" || len(securityGroup) == 0 || instanceID == "" {
+func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups []string, instanceID string, trunk bool, ipCount int, eniTags map[string]string) (*types.ENI, error) {
+	if vSwitch == "" || len(securityGroups) == 0 || instanceID == "" {
 		return nil, fmt.Errorf("invalid eni args for allocate")
 	}
 
@@ -68,7 +68,7 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch, securityGroup, instance
 		ipv6Count = ipCount
 	}
 
-	resp, err := e.CreateNetworkInterface(ctx, instanceType, vSwitch, []string{securityGroup}, ipv4Count, ipv6Count, eniTags)
+	resp, err := e.CreateNetworkInterface(ctx, instanceType, vSwitch, securityGroups, ipv4Count, ipv6Count, eniTags)
 	if err != nil {
 		return nil, err
 	}

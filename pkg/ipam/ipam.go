@@ -10,7 +10,7 @@ import (
 
 // API the interface of ecs operation set
 type API interface {
-	AllocateENI(ctx context.Context, vSwitch, securityGroup, instanceID string, trunk bool, ipCount int, eniTags map[string]string) (*types.ENI, error)
+	AllocateENI(ctx context.Context, vSwitch string, securityGroup []string, instanceID string, trunk bool, ipCount int, eniTags map[string]string) (*types.ENI, error)
 	GetAttachedENIs(ctx context.Context, containsMainENI bool) ([]*types.ENI, error)
 	GetSecondaryENIMACs(ctx context.Context) ([]string, error)
 	GetENIByMac(ctx context.Context, mac string) (*types.ENI, error)
