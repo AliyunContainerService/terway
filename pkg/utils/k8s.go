@@ -28,11 +28,20 @@ func RegisterClients(restConfig *rest.Config) {
 	NetworkClient = networkingclientset.NewForConfigOrDie(restConfig)
 }
 
+var stsKinds = []string{"StatefulSet"}
+
+// SetStsKinds set custom sts workload kinds
+func SetStsKinds(kids []string) {
+	stsKinds = append(stsKinds, kids...)
+}
+
 // IsStsPod pod is sts
 func IsStsPod(pod *corev1.Pod) bool {
 	for _, own := range pod.GetObjectMeta().GetOwnerReferences() {
-		if own.Kind == "StatefulSet" {
-			return true
+		for _, kind := range stsKinds {
+			if own.Kind == kind {
+				return true
+			}
 		}
 	}
 	return false

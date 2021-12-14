@@ -69,6 +69,8 @@ func main() {
 	cfg := controlplane.GetConfig()
 	log.Info("using config", "config", cfg)
 
+	utils.SetStsKinds(cfg.CustomStatefulWorkloadKinds)
+
 	utils.RegisterClients(ctrl.GetConfigOrDie())
 
 	err := crds.RegisterCRDs()
