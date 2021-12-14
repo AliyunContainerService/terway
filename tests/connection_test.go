@@ -11,10 +11,10 @@ import (
 	"testing"
 
 	"github.com/pkg/errors"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -278,8 +278,10 @@ func (s *ConnectionTestSuite) TearDownSuite() {
 
 	if s.err != nil {
 		s.T().Error(errors.Wrapf(s.err, "skip tear down resource in namespace %s, because of an error occurred.", testNamespace))
-		return
 	}
+
+	s.PrintEvents(testNamespace)
+	s.PrintPods(testNamespace)
 
 	ctx := context.Background()
 	if enablePolicy {
@@ -503,6 +505,20 @@ func (s *ConnectionTestSuite) ExecHTTPGet(namespace, name string, dst string) ([
 		"-c",
 		cmd,
 	})
+}
+
+func (s *ConnectionTestSuite) PrintEvents(namespace string) {
+	events, _ := s.ClientSet.CoreV1().Events(namespace).List(context.TODO(), metav1.ListOptions{})
+	for i, e := range events.Items {
+		s.T().Logf("event #%d: %v", i, e)
+	}
+}
+
+func (s *ConnectionTestSuite) PrintPods(namespace string) {
+	pods, _ := s.ClientSet.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
+	for i, e := range pods.Items {
+		s.T().Logf("pod #%d: %v", i, e)
+	}
 }
 
 func podInfo(pod *corev1.Pod) string {
