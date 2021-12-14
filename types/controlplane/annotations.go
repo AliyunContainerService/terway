@@ -23,8 +23,8 @@ import (
 )
 
 // ParsePodNetworksFromAnnotation parse annotation and convert to []v1beta1.Allocation
-func ParsePodNetworksFromAnnotation(pod *corev1.Pod) ([]*v1beta1.Allocation, string, error) {
-	return nil, "", nil
+func ParsePodNetworksFromAnnotation(pod *corev1.Pod) ([]*v1beta1.Allocation, error) {
+	return nil, nil
 }
 
 // ParsePodIPTypeFromAnnotation parse annotation and convert to v1beta1.IPType

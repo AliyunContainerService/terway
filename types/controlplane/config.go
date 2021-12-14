@@ -85,6 +85,9 @@ type Config struct {
 	MutatingQPS   int `json:"mutatingQPS" validate:"gt=0,lte=10000" mod:"default=4"`
 	MutatingBurst int `json:"mutatingBurst" validate:"gt=0,lte=10000" mod:"default=5"`
 
+	VSwitchPoolSize int    `json:"vSwitchPoolSize" validate:"gt=0" mod:"default=1000"`
+	VSwitchCacheTTL string `json:"vSwitchCacheTTL" mod:"default=20m0s"`
+
 	Credential
 }
 

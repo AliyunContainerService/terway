@@ -18,29 +18,14 @@ package vswitch
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
-	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
-	"k8s.io/apimachinery/pkg/util/sets"
 
-	"k8s.io/apimachinery/pkg/util/wait"
-	ctrl "sigs.k8s.io/controller-runtime"
+	"k8s.io/apimachinery/pkg/util/cache"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
-
-var log = ctrl.Log.WithName("switch")
-
-var (
-	vSwitchSyncPeriod string
-)
-
-func init() {
-	flag.StringVar(&vSwitchSyncPeriod, "vswitch-sync-period", "20m", "The period sync with openAPI.Default 20m.")
-}
 
 // Switch hole all switch info from both terway config and podNetworking
 type Switch struct {
@@ -48,108 +33,66 @@ type Switch struct {
 	Zone string
 
 	AvailableIPCount int64 // for ipv4
+	IPv4CIDR         string
+	IPv6CIDR         string
 }
 
 // SwitchPool contain all vSwitches
 type SwitchPool struct {
-	switches sync.Map
+	cache *cache.LRUExpireCache
+	ttl   time.Duration
 
-	aliyun *aliyun.OpenAPI
-
-	vSwitchSyncPeriod time.Duration
+	ignoreZone bool
 }
 
 // NewSwitchPool create pool and set vSwitches to pool
-func NewSwitchPool(aliyun *aliyun.OpenAPI) (*SwitchPool, error) {
-	period, err := time.ParseDuration(vSwitchSyncPeriod)
+func NewSwitchPool(size int, ttl string) (*SwitchPool, error) {
+	t, err := time.ParseDuration(ttl)
 	if err != nil {
 		return nil, err
 	}
-	sw := &SwitchPool{aliyun: aliyun, vSwitchSyncPeriod: period}
-	return sw, sw.SyncSwitch()
+
+	return &SwitchPool{cache: cache.NewLRUExpireCache(size), ttl: t}, nil
 }
 
-// Start the controller
-func (s *SwitchPool) Start(ctx context.Context) error {
-	wait.Until(func() {
-		err := s.SyncSwitch()
-		if err != nil {
-			log.Error(err, "error sync all vSwitch")
-		}
-	}, s.vSwitchSyncPeriod, ctx.Done())
-	return fmt.Errorf("vSwitch sync loop end")
-}
-
-// NeedLeaderElection need election
-func (s *SwitchPool) NeedLeaderElection() bool {
-	return true
-}
-
-// SyncSwitch will sync all cached vSwitch info with openAPI
-func (s *SwitchPool) SyncSwitch() error {
-	ids := []string{}
-
-	s.switches.Range(func(key, value interface{}) bool {
-		ids = append(ids, key.(string))
-		return true
-	})
-
+// GetOne get one vSwitch by zone and limit in ids
+func (s *SwitchPool) GetOne(ctx context.Context, client aliyun.VPCOps, zone string, ids []string) (*Switch, error) {
+	var fallBackSwitches []*Switch
+	// lookup all vsw in cache and get one matched
 	for _, id := range ids {
-		resp, err := s.aliyun.DescribeVSwitchByID(context.Background(), id)
+		vsw, err := s.GetByID(ctx, client, id)
 		if err != nil {
-			if errors.Is(err, apiErr.ErrNotFound) {
-				log.Info("vSwitch deleted", "ID", resp.VSwitchId)
-				s.switches.Delete(id)
-				continue
-			}
-			return fmt.Errorf("error sync vSwitch %s, %w", id, err)
+			log.FromContext(ctx).Error(err, "get vSwitch", "id", id)
+			continue
 		}
 
-		s.switches.Store(resp.VSwitchId, &Switch{
-			ID:               resp.VSwitchId,
-			Zone:             resp.ZoneId,
-			AvailableIPCount: resp.AvailableIpAddressCount,
-		})
-		log.Info("sync vSwitch", "ID", resp.VSwitchId, "Zone", resp.ZoneId, "IPCount", resp.AvailableIpAddressCount)
-	}
-
-	return nil
-}
-
-// GetOne get one vSwitch by zone, if ids is set will limit vSwitch in this ids
-func (s *SwitchPool) GetOne(zone string, ids sets.String) (string, error) {
-	id := ""
-	s.switches.Range(func(key, value interface{}) bool {
-		vsw := value.(*Switch)
-		if zone != "" {
-			if vsw.Zone != zone {
-				return true
+		if vsw.Zone != zone {
+			if s.ignoreZone {
+				fallBackSwitches = append(fallBackSwitches, vsw)
 			}
+			continue
 		}
 		if vsw.AvailableIPCount == 0 {
-			return true
+			continue
 		}
-
-		if ids.Len() > 0 {
-			if _, ok := ids[vsw.ID]; !ok {
-				return true
-			}
-		}
-		id = vsw.ID
-
-		return false
-	})
-	if id == "" {
-		return "", fmt.Errorf("no available vswitch")
+		return vsw, nil
 	}
-	return id, nil
+
+	for _, vsw := range fallBackSwitches {
+		if vsw.AvailableIPCount == 0 {
+			continue
+		}
+		return vsw, nil
+	}
+
+	return nil, fmt.Errorf("no available vSwitch for zone %s", zone)
 }
 
-// GetByID will get vSwitch info from local store
-func (s *SwitchPool) GetByID(id string) (*Switch, error) {
-	v, ok := s.switches.Load(id)
+// GetByID will get vSwitch info from local store or openAPI
+func (s *SwitchPool) GetByID(ctx context.Context, client aliyun.VPCOps, id string) (*Switch, error) {
+	v, ok := s.cache.Get(id)
 	if !ok {
-		resp, err := s.aliyun.DescribeVSwitchByID(context.Background(), id)
+		resp, err := client.DescribeVSwitchByID(ctx, id)
 		if err != nil {
 			return nil, fmt.Errorf("error get vSwitch %s, %w", id, err)
 		}
@@ -157,14 +100,12 @@ func (s *SwitchPool) GetByID(id string) (*Switch, error) {
 			ID:               resp.VSwitchId,
 			Zone:             resp.ZoneId,
 			AvailableIPCount: resp.AvailableIpAddressCount,
+			IPv4CIDR:         resp.CidrBlock,
+			IPv6CIDR:         resp.Ipv6CidrBlock,
 		}
-		s.switches.Store(resp.VSwitchId, sw)
+		s.cache.Add(resp.VSwitchId, sw, s.ttl)
 		return sw, nil
 	}
 	sw := v.(*Switch)
-	return &Switch{
-		ID:               sw.ID,
-		Zone:             sw.Zone,
-		AvailableIPCount: sw.AvailableIPCount,
-	}, nil
+	return sw, nil
 }

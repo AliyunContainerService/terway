@@ -109,7 +109,7 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 	var statusVSW []v1beta1.VSwitch
 	err = func() error {
 		for _, id := range old.Spec.VSwitchIDs {
-			sw, innerErr := m.swPool.GetByID(id)
+			sw, innerErr := m.swPool.GetByID(ctx, m.aliyunClient, id)
 			if innerErr != nil {
 				return innerErr
 			}

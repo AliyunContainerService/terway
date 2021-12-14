@@ -112,11 +112,7 @@ func main() {
 	mgr.GetWebhookServer().Register("/mutating", webhook.MutatingHook(mgr.GetClient()))
 	mgr.GetWebhookServer().Register("/validate", webhook.ValidateHook())
 
-	vSwitchCtrl, err := vswitch.NewSwitchPool(aliyunClient)
-	if err != nil {
-		panic(err)
-	}
-	err = mgr.Add(vSwitchCtrl)
+	vSwitchCtrl, err := vswitch.NewSwitchPool(cfg.VSwitchPoolSize, cfg.VSwitchCacheTTL)
 	if err != nil {
 		panic(err)
 	}
