@@ -32,6 +32,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/controller/endpoint"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
+	terwayMetric "github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 
@@ -42,6 +43,7 @@ import (
 	"k8s.io/klog/v2/klogr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 var (
@@ -52,6 +54,8 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(networkv1beta1.AddToScheme(scheme))
+
+	metrics.Registry.MustRegister(terwayMetric.OpenAPILatency)
 }
 
 func main() {
@@ -100,6 +104,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	err = mgr.AddHealthzCheck("healthz", healthz.Ping)
 	if err != nil {
 		panic(err)
