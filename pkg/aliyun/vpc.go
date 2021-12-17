@@ -11,6 +11,10 @@ import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 )
 
+type VPCOps interface {
+	DescribeVSwitchByID(ctx context.Context, vSwitch string) (*vpc.VSwitch, error)
+}
+
 // DescribeVSwitchByID get vsw by id
 func (a *OpenAPI) DescribeVSwitchByID(ctx context.Context, vSwitch string) (*vpc.VSwitch, error) {
 	req := vpc.CreateDescribeVSwitchesRequest()

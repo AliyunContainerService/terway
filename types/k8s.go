@@ -57,6 +57,9 @@ const (
 	EventDeleteENIFailed  = "DeleteENIFailed"
 
 	EventUpdatePodENIFailed = "UpdatePodENIFailed"
+
+	EventSyncPodNetworkingSucceed = "SyncPodNetworkingSucceed"
+	EventSyncPodNetworkingFailed  = "SyncPodNetworkingFailed"
 )
 
 // PodUseENI whether pod is use podENI cr res

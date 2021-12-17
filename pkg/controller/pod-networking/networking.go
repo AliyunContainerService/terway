@@ -24,7 +24,9 @@ import (
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/types"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -109,7 +111,7 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 	var statusVSW []v1beta1.VSwitch
 	err = func() error {
 		for _, id := range old.Spec.VSwitchIDs {
-			sw, innerErr := m.swPool.GetByID(id)
+			sw, innerErr := m.swPool.GetByID(ctx, m.aliyunClient, id)
 			if innerErr != nil {
 				return innerErr
 			}
@@ -124,9 +126,11 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 		update.Status.VSwitches = statusVSW
 		update.Status.Status = v1beta1.NetworkingStatusReady
 		update.Status.Message = ""
+		m.record.Eventf(update, corev1.EventTypeNormal, types.EventSyncPodNetworkingSucceed, "Synced")
 	} else {
 		update.Status.Status = v1beta1.NetworkingStatusFail
 		update.Status.Message = err.Error()
+		m.record.Eventf(update, corev1.EventTypeWarning, types.EventSyncPodNetworkingFailed, "Sync failed %s", err.Error())
 	}
 
 	return reconcile.Result{}, m.updateStatus(ctx, update, old)

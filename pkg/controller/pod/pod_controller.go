@@ -30,15 +30,13 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -238,13 +236,13 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	// 2.1 fill config
 	allocType := &v1beta1.AllocationType{Type: v1beta1.IPAllocTypeElastic}
 
-	allocs, _, err := controlplane.ParsePodNetworksFromAnnotation(pod)
+	allocs, err := controlplane.ParsePodNetworksFromAnnotation(pod)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("error parse pod annotation, %w", err)
 	}
 
 	if len(allocs) == 0 {
-		// use config form podNetwokring
+		// use config from podNetworking
 
 		podNetwokingName := pod.Annotations[types.PodNetworking]
 		if podNetwokingName == "" {
@@ -258,7 +256,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("error get podNetworking %s, %w", podNetwokingName, err)
 		}
-		vsw, err := m.swPool.GetOne(nodeInfo.Zone, sets.NewString(podNetworking.Spec.VSwitchIDs...))
+		vsw, err := m.swPool.GetOne(ctx, m.aliyun, nodeInfo.Zone, podNetworking.Spec.VSwitchIDs)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.Zone, err)
 		}
@@ -266,8 +264,10 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		allocs = append(allocs, &v1beta1.Allocation{
 			ENI: v1beta1.ENI{
 				SecurityGroupIDs: podNetworking.Spec.SecurityGroupIDs,
-				VSwitchID:        vsw,
+				VSwitchID:        vsw.ID,
 			},
+			IPv4CIDR: vsw.IPv4CIDR,
+			IPv6CIDR: vsw.IPv6CIDR,
 		})
 
 		if podNetworking.Spec.AllocationType.Type == v1beta1.IPAllocTypeFixed {
@@ -316,14 +316,6 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	for _, alloc := range allocs {
 		var eni *ecs.CreateNetworkInterfaceResponse
 
-		var vsw *vpc.VSwitch
-		vsw, err = m.aliyun.DescribeVSwitchByID(ctx, alloc.ENI.VSwitchID)
-		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("error get vswitch info %s, %w", alloc.ENI.VSwitchID, err)
-		}
-		if vsw.AvailableIpAddressCount == 0 {
-			return reconcile.Result{}, fmt.Errorf("error vswith has no available ip %s", alloc.ENI.VSwitchID)
-		}
 		clusterID := controlplane.GetConfig().ClusterID
 
 		eni, err = m.aliyun.CreateNetworkInterface(ctx, aliyun.ENITypeSecondary, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, 1, ipv6Count, map[string]string{
@@ -340,23 +332,18 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		if len(eni.Ipv6Sets.Ipv6Set) > 0 {
 			v6 = eni.Ipv6Sets.Ipv6Set[0].Ipv6Address
 		}
-		podENI.Spec.Allocations = append(podENI.Spec.Allocations, v1beta1.Allocation{
-			ENI: v1beta1.ENI{
-				ID:               eni.NetworkInterfaceId,
-				MAC:              eni.MacAddress,
-				Zone:             eni.ZoneId,
-				VSwitchID:        eni.VSwitchId,
-				SecurityGroupIDs: eni.SecurityGroupIds.SecurityGroupId,
-			},
-			IPv4:           eni.PrivateIpAddress,
-			IPv6:           v6,
-			IPv4CIDR:       vsw.CidrBlock,
-			IPv6CIDR:       vsw.Ipv6CidrBlock,
-			Interface:      alloc.Interface,
-			DefaultRoute:   alloc.DefaultRoute,
-			ExtraRoutes:    alloc.ExtraRoutes,
-			AllocationType: *allocType,
-		})
+		alloc.ENI = v1beta1.ENI{
+			ID:               eni.NetworkInterfaceId,
+			MAC:              eni.MacAddress,
+			Zone:             eni.ZoneId,
+			VSwitchID:        eni.VSwitchId,
+			SecurityGroupIDs: eni.SecurityGroupIds.SecurityGroupId,
+		}
+		alloc.IPv4 = eni.PrivateIpAddress
+		alloc.IPv6 = v6
+		alloc.AllocationType = *allocType
+
+		podENI.Spec.Allocations = append(podENI.Spec.Allocations, *alloc)
 	}
 
 	// 2.5 create cr

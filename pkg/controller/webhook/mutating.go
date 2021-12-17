@@ -110,7 +110,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 	}
 
 	if types.PodUseENI(pod) {
-		allocs, zone, err := controlplane.ParsePodNetworksFromAnnotation(pod)
+		allocs, err := controlplane.ParsePodNetworksFromAnnotation(pod)
 		if err != nil {
 			return webhook.Denied(fmt.Sprintf("unable parse annotation field %s", types.PodNetworks))
 		}
@@ -120,10 +120,6 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 
 		// for now use trunk only
 		memberCount = len(allocs)
-
-		if previousZone == "" && zone != "" {
-			zones.Insert(zone)
-		}
 	} else {
 		if pod.Annotations[types.PodNetworks] != "" {
 			return webhook.Denied("can not use pod annotation and podNetworking at same time, pod-eni is missing")
