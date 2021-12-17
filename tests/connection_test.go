@@ -11,10 +11,10 @@ import (
 	"testing"
 
 	"github.com/pkg/errors"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -49,71 +49,84 @@ func (s *ConnectionTestSuite) SetupSuite() {
 	s.T().Logf("enable trunk: %v", enableTrunk)
 	s.T().Logf("enable policy: %v", enablePolicy)
 	s.T().Logf("creating namespace %s", testNamespace)
-	if s.err = EnsureNamespace(ctx, s.ClientSet, testNamespace); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to create namespace %s", testNamespace))
+	if err := EnsureNamespace(ctx, s.ClientSet, testNamespace); err != nil {
+		s.err = err
+		s.T().Error(errors.Wrapf(err, "fail to create namespace %s", testNamespace))
 	}
 
 	if enableTrunk {
 		s.T().Logf("creating %s pod networking", elasticPodNetWorking.Name)
-		if _, s.err = EnsurePodNetworking(ctx, s.PodNetworkingClientSet, elasticPodNetWorking); s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to create pod networking %s", elasticPodNetWorking.Name))
+		if _, err := EnsurePodNetworking(ctx, s.PodNetworkingClientSet, elasticPodNetWorking); err != nil {
+			s.err = err
+			s.T().Error(errors.Wrapf(err, "fail to create pod networking %s", elasticPodNetWorking.Name))
 		}
 
 		s.T().Logf("creating %s pod networking", fixedPodNetWorking.Name)
-		if _, s.err = EnsurePodNetworking(ctx, s.PodNetworkingClientSet, fixedPodNetWorking); s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to create pod networking %s", fixedPodNetWorking.Name))
+		if _, err := EnsurePodNetworking(ctx, s.PodNetworkingClientSet, fixedPodNetWorking); err != nil {
+			s.err = err
+			s.T().Error(errors.Wrapf(err, "fail to create pod networking %s", fixedPodNetWorking.Name))
 		}
 	}
 
 	s.T().Logf("creating %s", podConnA.Name)
-	if _, s.err = EnsureDaemonSet(ctx, s.ClientSet, podConnA); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to create pod %s", podConnA.Name))
+	if _, err := EnsureDaemonSet(ctx, s.ClientSet, podConnA); err != nil {
+		s.err = err
+		s.T().Error(errors.Wrapf(err, "fail to create pod %s", podConnA.Name))
 	}
 
 	s.T().Logf("creating %s", podConnB.Name)
-	if _, s.err = EnsureDaemonSet(ctx, s.ClientSet, podConnB); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to create pod %s", podConnB.Name))
+	if _, err := EnsureDaemonSet(ctx, s.ClientSet, podConnB); err != nil {
+		s.err = err
+		s.T().Error(errors.Wrapf(err, "fail to create pod %s", podConnB.Name))
 	}
 
 	s.T().Logf("creating %s", podConnC.Name)
-	if _, s.err = EnsureDeployment(ctx, s.ClientSet, podConnC); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to create pod %s", podConnC.Name))
+	if _, err := EnsureDeployment(ctx, s.ClientSet, podConnC); err != nil {
+		s.err = err
+		s.T().Error(errors.Wrapf(err, "fail to create pod %s", podConnC.Name))
 	}
 
 	s.T().Logf("creating %s", podConnD.Name)
-	if _, s.err = EnsureStatefulSet(ctx, s.ClientSet, podConnD); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to create pod %s", podConnD.Name))
+	if _, err := EnsureStatefulSet(ctx, s.ClientSet, podConnD); err != nil {
+		s.err = err
+		s.T().Error(errors.Wrapf(err, "fail to create pod %s", podConnD.Name))
 	}
 
 	s.T().Logf("creating %s", podConnPolicy.Name)
-	if _, s.err = EnsureDaemonSet(ctx, s.ClientSet, podConnPolicy); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to create network policy %s", podConnPolicy.Name))
+	if _, err := EnsureDaemonSet(ctx, s.ClientSet, podConnPolicy); err != nil {
+		s.err = err
+		s.T().Error(errors.Wrapf(err, "fail to create network policy %s", podConnPolicy.Name))
 	}
 
 	s.T().Logf("creating %s for %s", clusterIPService.Name, podConnC.Name)
-	if _, s.err = EnsureService(ctx, s.ClientSet, clusterIPService); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to create service %s", clusterIPService.Name))
+	if _, err := EnsureService(ctx, s.ClientSet, clusterIPService); err != nil {
+		s.err = err
+		s.T().Error(errors.Wrapf(err, "fail to create service %s", clusterIPService.Name))
 	}
 
 	s.T().Logf("creating %s for %s", nodePortService.Name, podConnC.Name)
-	if _, s.err = EnsureService(ctx, s.ClientSet, nodePortService); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to create service %s", nodePortService.Name))
+	if _, err := EnsureService(ctx, s.ClientSet, nodePortService); err != nil {
+		s.err = err
+		s.T().Error(errors.Wrapf(err, "fail to create service %s", nodePortService.Name))
 	}
 
 	s.T().Logf("creating %s for %s", loadBalancerService.Name, podConnC.Name)
-	if _, s.err = EnsureService(ctx, s.ClientSet, loadBalancerService); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to create service %s", loadBalancerService.Name))
+	if _, err := EnsureService(ctx, s.ClientSet, loadBalancerService); err != nil {
+		s.err = err
+		s.T().Error(errors.Wrapf(err, "fail to create service %s", loadBalancerService.Name))
 	}
 
 	s.T().Logf("creating %s for %s", headlessService.Name, podConnC.Name)
-	if _, s.err = EnsureService(ctx, s.ClientSet, headlessService); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to create service %s", headlessService.Name))
+	if _, err := EnsureService(ctx, s.ClientSet, headlessService); err != nil {
+		s.err = err
+		s.T().Error(errors.Wrapf(err, "fail to create service %s", headlessService.Name))
 	}
 
 	if enablePolicy {
 		s.T().Logf("creating network policy %s", networkPolicy.Name)
-		if _, s.err = EnsureNetworkPolicy(ctx, s.ClientSet, networkPolicy); s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to create network policy %s", networkPolicy.Name))
+		if _, err := EnsureNetworkPolicy(ctx, s.ClientSet, networkPolicy); err != nil {
+			s.err = err
+			s.T().Error(errors.Wrapf(err, "fail to create network policy %s", networkPolicy.Name))
 		}
 	}
 
@@ -278,77 +291,79 @@ func (s *ConnectionTestSuite) TearDownSuite() {
 
 	if s.err != nil {
 		s.T().Error(errors.Wrapf(s.err, "skip tear down resource in namespace %s, because of an error occurred.", testNamespace))
-		return
 	}
+
+	s.PrintEvents(testNamespace)
+	s.PrintPods(testNamespace)
 
 	ctx := context.Background()
 	if enablePolicy {
 		s.T().Logf("delete %s", networkPolicy.Name)
-		if s.err = DeleteNetworkPolicy(ctx, s.ClientSet, testNamespace, networkPolicy.Name); s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to delete network policy %s", networkPolicy.Name))
+		if err := DeleteNetworkPolicy(ctx, s.ClientSet, testNamespace, networkPolicy.Name); err != nil {
+			s.T().Error(errors.Wrapf(err, "fail to delete network policy %s", networkPolicy.Name))
 		}
 	}
 
 	s.T().Logf("delete %s", clusterIPService.Name)
-	if s.err = DeleteService(ctx, s.ClientSet, testNamespace, clusterIPService.Name); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to delete service %s", clusterIPService.Name))
+	if err := DeleteService(ctx, s.ClientSet, testNamespace, clusterIPService.Name); err != nil {
+		s.T().Error(errors.Wrapf(err, "fail to delete service %s", clusterIPService.Name))
 	}
 
 	s.T().Logf("delete %s", nodePortService.Name)
-	if s.err = DeleteService(ctx, s.ClientSet, testNamespace, nodePortService.Name); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to delete service %s", nodePortService.Name))
+	if err := DeleteService(ctx, s.ClientSet, testNamespace, nodePortService.Name); err != nil {
+		s.T().Error(errors.Wrapf(err, "fail to delete service %s", nodePortService.Name))
 	}
 
 	s.T().Logf("delete %s", loadBalancerService.Name)
-	if s.err = DeleteService(ctx, s.ClientSet, testNamespace, loadBalancerService.Name); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to delete service %s", loadBalancerService.Name))
+	if err := DeleteService(ctx, s.ClientSet, testNamespace, loadBalancerService.Name); err != nil {
+		s.T().Error(errors.Wrapf(err, "fail to delete service %s", loadBalancerService.Name))
 	}
 
 	s.T().Logf("delete %s", headlessService.Name)
-	if s.err = DeleteService(ctx, s.ClientSet, testNamespace, headlessService.Name); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to delete service %s", headlessService.Name))
+	if err := DeleteService(ctx, s.ClientSet, testNamespace, headlessService.Name); err != nil {
+		s.T().Error(errors.Wrapf(err, "fail to delete service %s", headlessService.Name))
 	}
 
 	s.T().Logf("delete %s", podConnA.Name)
-	if s.err = DeleteDaemonSet(ctx, s.ClientSet, testNamespace, podConnA.Name); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to delete pod %s", podConnA.Name))
+	if err := DeleteDaemonSet(ctx, s.ClientSet, testNamespace, podConnA.Name); err != nil {
+		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnA.Name))
 	}
 
 	s.T().Logf("delete %s", podConnB.Name)
-	if s.err = DeleteDaemonSet(ctx, s.ClientSet, testNamespace, podConnB.Name); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to delete pod %s", podConnB.Name))
+	if err := DeleteDaemonSet(ctx, s.ClientSet, testNamespace, podConnB.Name); err != nil {
+		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnB.Name))
 	}
 
 	s.T().Logf("delete %s", podConnC.Name)
-	if s.err = DeleteDeployment(ctx, s.ClientSet, testNamespace, podConnC.Name); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to delete pod %s", podConnC.Name))
+	if err := DeleteDeployment(ctx, s.ClientSet, testNamespace, podConnC.Name); err != nil {
+		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnC.Name))
 	}
 
 	s.T().Logf("delete %s", podConnD.Name)
-	if s.err = DeleteStatefulSet(ctx, s.ClientSet, testNamespace, podConnD.Name); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to delete pod %s", podConnD.Name))
+	if err := DeleteStatefulSet(ctx, s.ClientSet, testNamespace, podConnD.Name); err != nil {
+		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnD.Name))
 	}
 
 	s.T().Logf("delete %s", podConnPolicy.Name)
-	if s.err = DeleteDaemonSet(ctx, s.ClientSet, testNamespace, podConnPolicy.Name); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to delete pod %s", podConnPolicy.Name))
+	if err := DeleteDaemonSet(ctx, s.ClientSet, testNamespace, podConnPolicy.Name); err != nil {
+		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnPolicy.Name))
 	}
 
 	if enableTrunk {
 		s.T().Logf("delete %s pod networking", elasticPodNetWorking.Name)
-		if s.err = DeletePodNetworking(ctx, s.PodNetworkingClientSet, elasticPodNetWorking.Name); s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to delete pod networking %s", elasticPodNetWorking.Name))
+		if err := DeletePodNetworking(ctx, s.PodNetworkingClientSet, elasticPodNetWorking.Name); err != nil {
+			s.T().Error(errors.Wrapf(err, "fail to delete pod networking %s", elasticPodNetWorking.Name))
 		}
 
 		s.T().Logf("delete %s pod networking", fixedPodNetWorking.Name)
-		if s.err = DeletePodNetworking(ctx, s.PodNetworkingClientSet, fixedPodNetWorking.Name); s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to delete pod networking %s", fixedPodNetWorking.Name))
+		if err := DeletePodNetworking(ctx, s.PodNetworkingClientSet, fixedPodNetWorking.Name); err != nil {
+			s.T().Error(errors.Wrapf(err, "fail to delete pod networking %s", fixedPodNetWorking.Name))
 		}
 	}
 
 	s.T().Logf("delete ns")
-	if s.err = DeleteNamespace(ctx, s.ClientSet, testNamespace); s.err != nil {
-		s.T().Error(errors.Wrapf(s.err, "fail to delete namespace %s", testNamespace))
+	if err := DeleteNamespace(ctx, s.ClientSet, testNamespace); err != nil {
+		s.T().Error(errors.Wrapf(err, "fail to delete namespace %s", testNamespace))
 	}
 }
 
@@ -359,15 +374,18 @@ func (s *ConnectionTestSuite) TestPod2Pod() {
 		}
 		ctx := context.Background()
 		var srcPods []corev1.Pod
-		srcPods, s.err = ListPods(ctx, s.ClientSet, testNamespace, c.Src.Label)
-		if s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to list src pod %v", c.Src.Label))
+		var err error
+		srcPods, err = ListPods(ctx, s.ClientSet, testNamespace, c.Src.Label)
+		if err != nil {
+			s.err = err
+			s.T().Error(errors.Wrapf(err, "fail to list src pod %v", c.Src.Label))
 		}
 
 		var dstPods []corev1.Pod
-		dstPods, s.err = ListPods(ctx, s.ClientSet, testNamespace, c.Dst.Label)
-		if s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to list dst pod %v", c.Dst.Label))
+		dstPods, err = ListPods(ctx, s.ClientSet, testNamespace, c.Dst.Label)
+		if err != nil {
+			s.err = err
+			s.T().Error(errors.Wrapf(err, "fail to list dst pod %v", c.Dst.Label))
 		}
 		for _, src := range srcPods {
 			for _, dst := range dstPods {
@@ -390,21 +408,25 @@ func (s *ConnectionTestSuite) TestPod2ServiceIP() {
 		}
 		ctx := context.Background()
 		var srcPods []corev1.Pod
-		srcPods, s.err = ListPods(ctx, s.ClientSet, testNamespace, c.Src.Label)
-		if s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to list src pod %v", c.Src.Label))
+		var err error
+		srcPods, err = ListPods(ctx, s.ClientSet, testNamespace, c.Src.Label)
+		if err != nil {
+			s.err = err
+			s.T().Error(errors.Wrapf(err, "fail to list src pod %v", c.Src.Label))
 		}
 
 		var dstServices []corev1.Service
-		dstServices, s.err = ListServices(ctx, s.ClientSet, testNamespace, c.Dst.Label)
-		if s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to list dst pod %v", c.Dst.Label))
+		dstServices, err = ListServices(ctx, s.ClientSet, testNamespace, c.Dst.Label)
+		if err != nil {
+			s.err = err
+			s.T().Error(errors.Wrapf(err, "fail to list dst pod %v", c.Dst.Label))
 		}
 
 		var nodeIPs []net.IP
-		nodeIPs, s.err = ListNodeIPs(context.Background(), s.ClientSet)
-		if s.err != nil {
-			s.T().Error(errors.Wrap(s.err, "fail to list node ip"))
+		nodeIPs, err = ListNodeIPs(context.Background(), s.ClientSet)
+		if err != nil {
+			s.err = err
+			s.T().Error(errors.Wrap(err, "fail to list node ip"))
 		}
 
 		for _, src := range srcPods {
@@ -458,15 +480,18 @@ func (s *ConnectionTestSuite) TestPod2ServiceName() {
 		}
 		ctx := context.Background()
 		var srcPods []corev1.Pod
-		srcPods, s.err = ListPods(ctx, s.ClientSet, testNamespace, c.Src.Label)
-		if s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to list src pod %v", c.Src.Label))
+		var err error
+		srcPods, err = ListPods(ctx, s.ClientSet, testNamespace, c.Src.Label)
+		if err != nil {
+			s.err = err
+			s.T().Error(errors.Wrapf(err, "fail to list src pod %v", c.Src.Label))
 		}
 
 		var dstServices []corev1.Service
-		dstServices, s.err = ListServices(ctx, s.ClientSet, testNamespace, c.Dst.Label)
-		if s.err != nil {
-			s.T().Error(errors.Wrapf(s.err, "fail to list dst service %v", c.Dst.Label))
+		dstServices, err = ListServices(ctx, s.ClientSet, testNamespace, c.Dst.Label)
+		if err != nil {
+			s.err = err
+			s.T().Error(errors.Wrapf(err, "fail to list dst service %v", c.Dst.Label))
 		}
 
 		for _, src := range srcPods {
@@ -503,6 +528,20 @@ func (s *ConnectionTestSuite) ExecHTTPGet(namespace, name string, dst string) ([
 		"-c",
 		cmd,
 	})
+}
+
+func (s *ConnectionTestSuite) PrintEvents(namespace string) {
+	events, _ := s.ClientSet.CoreV1().Events(namespace).List(context.TODO(), metav1.ListOptions{})
+	for i, e := range events.Items {
+		s.T().Logf("event #%d: %v", i, e)
+	}
+}
+
+func (s *ConnectionTestSuite) PrintPods(namespace string) {
+	pods, _ := s.ClientSet.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
+	for i, e := range pods.Items {
+		s.T().Logf("pod #%d: %v", i, e)
+	}
 }
 
 func podInfo(pod *corev1.Pod) string {
