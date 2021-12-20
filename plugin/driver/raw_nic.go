@@ -119,37 +119,6 @@ func (r *RawNicDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 }
 
 func (r *RawNicDriver) Teardown(cfg *TeardownCfg, netNS ns.NetNS) error {
-	// 1. move link out
-	hostCurrentNs, err := ns.GetCurrentNS()
-	defer func() {
-		err = hostCurrentNs.Close()
-	}()
-	if err != nil {
-		return fmt.Errorf("error get host net ns, %w", err)
-	}
-	err = netNS.Do(func(netNS ns.NetNS) error {
-		var nicLink netlink.Link
-		nicLink, err = netlink.LinkByName(cfg.ContainerIfName)
-		if err == nil {
-			nicName, err1 := r.randomNicName()
-			if err1 != nil {
-				return fmt.Errorf("error generate random nic name, %w", err)
-			}
-			err = netlink.LinkSetDown(nicLink)
-			if err != nil {
-				return fmt.Errorf("error set link %s down, %w", nicLink.Attrs().Name, err)
-			}
-			err = netlink.LinkSetName(nicLink, nicName)
-			if err != nil {
-				return fmt.Errorf("error set link %s name %s, %w", nicLink.Attrs().Name, nicName, err)
-			}
-			return netlink.LinkSetNsFd(nicLink, int(hostCurrentNs.Fd()))
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("error move eni to host net ns, %w", err)
-	}
 	return nil
 }
 

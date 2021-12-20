@@ -179,7 +179,13 @@ func RuleDel(rule *netlink.Rule) error {
 	Log.Infof(cmd)
 	err := netlink.RuleDel(rule)
 	if err != nil {
-		return fmt.Errorf("error %s, %w", cmd, err)
+		rule.IifName = ""
+		rule.OifName = ""
+
+		err = netlink.RuleDel(rule)
+		if err != nil {
+			return fmt.Errorf("error %s, %w", cmd, err)
+		}
 	}
 	return nil
 }

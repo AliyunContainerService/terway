@@ -224,6 +224,12 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	hostVETHName, _ := link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), defaultVethPrefix)
 
+	l, err := driver.GrabFileLock(terwayCNILock)
+	if err != nil {
+		return err
+	}
+	defer l.Close()
+
 	var containerIPNet *terwayTypes.IPNetSet
 	var gatewayIPSet *terwayTypes.IPSet
 	switch allocResult.IPType {
@@ -304,12 +310,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 				eniMultiIPDriver = ipvlan
 			}
 		}
-		l, err := driver.GrabFileLock(terwayCNILock)
-		if err != nil {
-			logger.Debug(err)
-			return nil
-		}
-		defer l.Close()
+
 		err = eniMultiIPDriver.Setup(setupCfg, cniNetns)
 		if err != nil {
 			return fmt.Errorf("setup network failed: %v", err)
@@ -354,13 +355,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 		gatewayIPSet = &terwayTypes.IPSet{
 			IPv4: gateway,
 		}
-
-		l, err := driver.GrabFileLock(terwayCNILock)
-		if err != nil {
-			logger.Debug(err)
-			return nil
-		}
-		defer l.Close()
 
 		setupCfg := &driver.SetupConfig{
 			HostVETHName:    hostVETHName,
@@ -438,12 +432,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 		ingress := allocResult.GetPod().GetIngress()
 		egress := allocResult.GetPod().GetEgress()
-		l, err := driver.GrabFileLock(terwayCNILock)
-		if err != nil {
-			logger.Debug(err)
-			return nil
-		}
-		defer l.Close()
 
 		setupCfg := &driver.SetupConfig{
 			HostVETHName:    hostVETHName,
@@ -465,11 +453,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 		defer func() {
 			if err != nil {
-				if e := veth.Teardown(&driver.TeardownCfg{
-					HostVETHName:    hostVETHName,
-					ContainerIfName: args.IfName,
-				}, cniNetns); e != nil {
-					err = errors.Wrapf(err, "tear down veth network for eni failed: %v", e)
+				e := driver.GenericTearDown(cniNetns)
+				if e != nil {
+					err = fmt.Errorf("tear down veth network for eni failed: %w", e)
 				}
 			}
 		}()
@@ -540,6 +526,22 @@ func cmdDel(args *skel.CmdArgs) error {
 	logger.Debugf("args: %s", driver.JSONStr(args))
 	logger.Debugf("ns %s , k8s %s, cni std %s", cniNetns.Path(), driver.JSONStr(k8sConfig), driver.JSONStr(conf))
 
+	l, err := driver.GrabFileLock(terwayCNILock)
+	if err != nil {
+		return err
+	}
+	// try cleanup all resource
+	err = driver.GenericTearDown(cniNetns)
+	if err != nil {
+		_ = l.Close()
+		logger.Errorf("error teardown %s", err.Error())
+
+		return types.PrintResult(&current.Result{
+			CNIVersion: conf.CNIVersion,
+		}, conf.CNIVersion)
+	}
+	_ = l.Close()
+
 	terwayBackendClient, closeConn, err := getNetworkClient()
 	if err != nil {
 		return fmt.Errorf("error create grpc client, pod %s/%s, %w", string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME), err)
@@ -560,6 +562,12 @@ func cmdDel(args *skel.CmdArgs) error {
 	if err != nil {
 		return fmt.Errorf("error get ip from terway, pod %s/%s, %w", string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME), err)
 	}
+
+	l, err = driver.GrabFileLock(terwayCNILock)
+	if err != nil {
+		return nil
+	}
+	defer l.Close()
 
 	ipv4, ipv6 := infoResult.IPv4, infoResult.IPv6
 	initDrivers(ipv4, ipv6)
@@ -586,13 +594,6 @@ func cmdDel(args *skel.CmdArgs) error {
 			}
 		}
 
-		var l *driver.Locker
-		l, err = driver.GrabFileLock(terwayCNILock)
-		if err != nil {
-			logger.Debug(err)
-			return nil
-		}
-		defer l.Close()
 		err = eniMultiIPDriver.Teardown(&driver.TeardownCfg{
 			HostVETHName:    hostVETHName,
 			ContainerIfName: args.IfName,
@@ -607,19 +608,6 @@ func cmdDel(args *skel.CmdArgs) error {
 		if subnet == "" {
 			return fmt.Errorf("error get pod cidr")
 		}
-		l, err := driver.GrabFileLock(terwayCNILock)
-		if err != nil {
-			logger.Debug(err)
-			return nil
-		}
-		defer l.Close()
-		err = veth.Teardown(&driver.TeardownCfg{
-			HostVETHName:    hostVETHName,
-			ContainerIfName: args.IfName,
-		}, cniNetns)
-		if err != nil {
-			return fmt.Errorf("error teardown pod %s/%s, %w", string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME), err)
-		}
 
 		err = ipam.ExecDel(delegateIpam, []byte(fmt.Sprintf(delegateConf, subnet)))
 		if err != nil {
@@ -628,28 +616,7 @@ func cmdDel(args *skel.CmdArgs) error {
 		}
 
 	case rpc.IPType_TypeVPCENI:
-		l, err := driver.GrabFileLock(terwayCNILock)
-		if err != nil {
-			logger.Debug(err)
-			return nil
-		}
-		defer l.Close()
-		_ = veth.Teardown(&driver.TeardownCfg{
-			HostVETHName:    hostVETHName,
-			ContainerIfName: defaultVethForENI,
-		}, cniNetns)
-		// ignore ENI veth release error
-		//if err != nil {
-		//	// ignore ENI veth release error
-		//}
-		err = rawNIC.Teardown(&driver.TeardownCfg{
-			HostVETHName:    hostVETHName,
-			ContainerIfName: args.IfName,
-		}, cniNetns)
-		if err != nil {
-			return fmt.Errorf("error teardown pod %s/%s, %w", string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME), err)
-		}
-
+		break
 	default:
 		return fmt.Errorf("not support this network type")
 	}

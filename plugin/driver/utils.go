@@ -9,7 +9,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/containernetworking/plugins/pkg/ip"
+	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/pkg/errors"
+	k8sErr "k8s.io/apimachinery/pkg/util/errors"
 
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
@@ -169,6 +172,17 @@ func EnsureLinkName(link netlink.Link, name string) (bool, error) {
 		return false, nil
 	}
 	return true, LinkSetName(link, name)
+}
+
+// DelLinkByName del by name and ignore if link not present
+func DelLinkByName(ifName string) error {
+	contLink, err := netlink.LinkByName(ifName)
+	if err != nil {
+		if _, ok := err.(netlink.LinkNotFoundError); ok { //nolint
+			return nil
+		}
+	}
+	return LinkDel(contLink)
 }
 
 // EnsureAddrWithPrefix take the ipNet set and ensure only one IP for each family is present on link
@@ -562,30 +576,6 @@ func EnsureIPRule(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, tableID int
 	return changed, nil
 }
 
-func DelIPRulesByIP(ipNet *net.IPNet) error {
-	var ruleList []netlink.Rule
-	var err error
-	if terwayIP.IPv6(ipNet.IP) {
-		ruleList, err = netlink.RuleList(netlink.FAMILY_V6)
-	} else {
-		ruleList, err = netlink.RuleList(netlink.FAMILY_V4)
-	}
-	if err != nil {
-		return fmt.Errorf("error get ip rule, %w", err)
-	}
-
-	for _, rule := range ruleList {
-		if terwayIP.NetEqual(ipNet, rule.Src) || terwayIP.NetEqual(ipNet, rule.Dst) {
-			innerErr := RuleDel(&rule)
-			if innerErr != nil {
-				rule.IifName = ""
-				err = errors.Wrap(RuleDel(&rule), "error de")
-			}
-		}
-	}
-	return err
-}
-
 func EnableIPv6() error {
 	err := terwaySysctl.EnsureConf("/proc/sys/net/ipv6/conf/all/disable_ipv6", "0")
 	if err != nil {
@@ -780,5 +770,120 @@ func EnsureClsActQdsic(link netlink.Link) error {
 	if err := netlink.QdiscReplace(qdisc); err != nil {
 		return errors.Wrapf(err, "replace clsact qdisc for dev %s error", link.Attrs().Name)
 	}
+	return nil
+}
+
+// GenericTearDown target to clean all related resource as much as possible
+func GenericTearDown(netNS ns.NetNS) error {
+	var errList []error
+	hostNetNS, err := ns.GetCurrentNS()
+	if err != nil {
+		return fmt.Errorf("err get host net ns, %w", err)
+	}
+	err = netNS.Do(func(netNS ns.NetNS) error {
+		linkList, err := netlink.LinkList()
+		if err != nil {
+			return fmt.Errorf("error get link list from netlink, %w", err)
+		}
+		for _, l := range linkList {
+			_ = LinkSetDown(l)
+			switch l.(type) {
+			case *netlink.IPVlan, *netlink.Vlan, *netlink.Veth, *netlink.Ifb, *netlink.Dummy:
+				errList = append(errList, LinkDel(l))
+			case *netlink.Device:
+				name, err := ip.RandomVethName()
+				if err != nil {
+					errList = append(errList, err)
+					continue
+				}
+				errList = append(errList, LinkSetName(l, name))
+				errList = append(errList, LinkSetNsFd(l, hostNetNS))
+			default:
+				continue
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if _, ok := err.(ns.NSPathNotExistErr); !ok {
+			errList = append(errList, err)
+		}
+	}
+	errList = append(errList, CleanIPRules())
+	return k8sErr.NewAggregate(errList)
+}
+
+// CleanIPRules del ip rule for detached devs
+func CleanIPRules() (err error) {
+	var rules []netlink.Rule
+	rules, err = netlink.RuleList(netlink.FAMILY_ALL)
+	if err != nil {
+		return err
+	}
+
+	var ipNets []*net.IPNet
+	defer func() {
+		for _, r := range rules {
+			if r.Priority != 512 && r.Priority != 2048 {
+				continue
+			}
+			if r.IifName != "" || r.OifName != "" {
+				continue
+			}
+			found := false
+
+			for _, ipNet := range ipNets {
+				if r.Dst != nil {
+					if r.Dst.String() == ipNet.String() {
+						found = true
+						break
+					}
+				}
+				if r.Src != nil {
+					if r.Src.String() == ipNet.String() {
+						found = true
+						break
+					}
+				}
+			}
+			if !found {
+				continue
+			}
+			_ = RuleDel(&r)
+		}
+	}()
+	for _, r := range rules {
+		if r.Priority != 512 && r.Priority != 2048 {
+			continue
+		}
+		name := r.IifName
+		if name == "" {
+			name = r.OifName
+		}
+		if name == "" {
+			continue
+		}
+		_, err = netlink.LinkByName(name)
+		if err != nil {
+			if _, ok := err.(netlink.LinkNotFoundError); !ok {
+				return err
+			}
+			err = RuleDel(&r)
+			if err != nil {
+				return err
+			}
+			var ipNet *net.IPNet
+			if r.Dst != nil {
+				ipNet = r.Dst
+			}
+			if r.Src != nil {
+				ipNet = r.Src
+			}
+			if ipNet != nil {
+				ipNets = append(ipNets, ipNet)
+			}
+		}
+	}
+
 	return nil
 }
