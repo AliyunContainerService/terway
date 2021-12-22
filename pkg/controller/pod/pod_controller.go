@@ -236,7 +236,12 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	// 2.1 fill config
 	allocType := &v1beta1.AllocationType{Type: v1beta1.IPAllocTypeElastic}
 
-	allocs, err := controlplane.ParsePodNetworksFromAnnotation(pod)
+	anno, err := controlplane.ParsePodNetworksFromAnnotation(pod)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("error parse pod annotation, %w", err)
+	}
+
+	allocs, err := m.ParsePodNetworksFromAnnotation(ctx, nodeInfo.Zone, anno)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("error parse pod annotation, %w", err)
 	}
@@ -288,7 +293,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 			allocType.ReleaseAfter = podNetworking.Spec.AllocationType.ReleaseAfter
 		}
 	} else {
-		// try get v1beta1.IPType from annotation
+		// try get v1beta1.PodAllocType from annotation
 		allocType, err = controlplane.ParsePodIPTypeFromAnnotation(pod)
 		if err != nil {
 			return reconcile.Result{}, err

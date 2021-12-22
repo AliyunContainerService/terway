@@ -43,7 +43,7 @@ jobs:
         uses: golangci/golangci-lint-action@v2.5.2
         with:
           version: v1.40.1
-          args: --timeout 300s --skip-dirs-use-default -v -E goconst -E gofmt -E ineffassign -E goimports -E revive -E misspell -E vet -E deadcode
+          args: --build-tags default_build --timeout 300s --skip-dirs-use-default -v -E goconst -E gofmt -E ineffassign -E goimports -E revive -E misspell -E vet -E deadcode
 
   shellcheck:
     name: Shellcheck
@@ -62,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Lint Code Base
-        uses: github/super-linter@v3.17.1
+        uses: github/super-linter@v4.8.5
         env:
           VALIDATE_ALL_CODEBASE: true
           VALIDATE_MARKDOWN: true
