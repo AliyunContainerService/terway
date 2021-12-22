@@ -35,6 +35,13 @@ func (in *Allocation) DeepCopyInto(out *Allocation) {
 		*out = make([]Route, len(*in))
 		copy(*out, *in)
 	}
+	if in.ExtraConfig != nil {
+		in, out := &in.ExtraConfig, &out.ExtraConfig
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	return
 }
 
