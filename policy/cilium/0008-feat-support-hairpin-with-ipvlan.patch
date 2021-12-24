@@ -1,0 +1,46 @@
+From 2c80cab103fab2bba41ad646013e89e4251aa2cd Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Wed, 15 Dec 2021 18:40:13 +0800
+Subject: [PATCH] feat: support hairpin with ipvlan
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ plugins/cilium-cni/chaining/terway/terway.go | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/plugins/cilium-cni/chaining/terway/terway.go b/plugins/cilium-cni/chaining/terway/terway.go
+index 05d700f403..e6184af217 100644
+--- a/plugins/cilium-cni/chaining/terway/terway.go
++++ b/plugins/cilium-cni/chaining/terway/terway.go
+@@ -32,9 +32,8 @@ import (
+ )
+
+ var (
+-	name             = "terway-chainer"
+-	log              = logging.DefaultLogger.WithField(logfields.LogSubsys, name)
+-	vpcNetGatewayMac = "ee:ff:ff:ff:ff:ff"
++	name = "terway-chainer"
++	log  = logging.DefaultLogger.WithField(logfields.LogSubsys, name)
+ )
+
+ // TerwayChainer is terway chain object
+@@ -79,7 +78,6 @@ func (f *TerwayChainer) Add(ctx context.Context, pluginCtx chainingapi.PluginCon
+ 		disabled                                   = false
+ 		containerIPv4, containerIPv6, containerMac string
+ 		containerIfIndex                           int
+-		hostMac                                    = vpcNetGatewayMac
+ 	)
+
+ 	if len(prevRes.Interfaces) == 0 {
+@@ -131,7 +129,7 @@ func (f *TerwayChainer) Add(ctx context.Context, pluginCtx chainingapi.PluginCon
+ 		},
+ 		ContainerID:       pluginCtx.Args.ContainerID,
+ 		State:             models.EndpointStateWaitingForIdentity,
+-		HostMac:           hostMac,
++		HostMac:           containerMac,
+ 		InterfaceIndex:    int64(containerIfIndex),
+ 		Mac:               containerMac,
+ 		InterfaceName:     ifName,
+-- 
+2.34.1
+
