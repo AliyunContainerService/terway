@@ -94,7 +94,7 @@ kind: PodNetworking
 metadata:
   name: your-networking
 spec:
-  ipType:
+  allocationType:
     type: Elastic/Fixed
     releaseStrategy: TTL
     releaseAfter: "5m0s"
@@ -186,7 +186,7 @@ kind: PodNetworking
 metadata:
   name: stateless
 spec:
-  ipType:
+  allocationType:
     type: Elastic
   selector:
     podSelector:
@@ -238,7 +238,7 @@ kind: PodNetworking
 metadata:
   name: fixed-ip
 spec:
-  ipType:
+  allocationType:
     type: Fixed              <--- podIP 模式
     releaseStrategy: TTL
     releaseAfter: "5m0s"     <--- pod 删除后回收策略，golang 时间类型

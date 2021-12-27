@@ -50,9 +50,6 @@ func MutatingHook(client client.Client) *webhook.Admission {
 		Handler: admission.HandlerFunc(func(ctx context.Context, req webhook.AdmissionRequest) webhook.AdmissionResponse {
 			switch req.Kind.Kind {
 			case "Pod":
-				if req.Namespace == "kube-system" {
-					return webhook.Allowed("namespace is kube-system")
-				}
 				return podWebhook(ctx, &req, client)
 			case "PodNetworking":
 				return podNetworkingWebhook(ctx, req, client)
