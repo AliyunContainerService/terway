@@ -4,6 +4,7 @@
 package link
 
 import (
+	"fmt"
 	"net"
 	"os"
 
@@ -16,7 +17,7 @@ import (
 func GetDeviceNumber(mac string) (int32, error) {
 	linkList, err := netlink.LinkList()
 	if err != nil {
-		return 0, errors.Wrapf(err, "error get link list from netlink")
+		return 0, fmt.Errorf("error get link list from netlink, %w", err)
 	}
 
 	for _, link := range linkList {

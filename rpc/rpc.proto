@@ -27,14 +27,22 @@ message AllocIPRequest {
   string IfName = 5;
 }
 
+message NetConf {
+  BasicInfo BasicInfo = 1;
+  ENIInfo ENIInfo = 2;
+  Pod Pod = 3;
+  string IfName = 4;
+  repeated Route ExtraRoutes = 5;
+  bool DefaultRoute = 6;
+}
+
 message AllocIPReply {
   bool Success = 1;
-  IPType IPType = 2;
-  BasicInfo BasicInfo = 3;
-  ENIInfo ENIInfo = 4;
-  Pod Pod = 5;
-  bool IPv4 = 6;
-  bool IPv6 = 7;
+  IPType   IPType = 2;
+  bool IPv4 = 3;
+  bool IPv6 = 4;
+  repeated NetConf NetConfs = 5;
+  bool EnableTrunking = 6;
 }
 
 message BasicInfo {
@@ -47,6 +55,11 @@ message BasicInfo {
 message ENIInfo {
   string MAC = 1;
   bool Trunk = 2; // eni is trunk
+  uint32 Vid = 3;
+}
+
+message Route {
+  string Dst = 1;
 }
 
 enum IPType {
@@ -86,12 +99,18 @@ message GetInfoRequest {
 }
 
 message GetInfoReply {
-  IPType IPType = 1;
-  BasicInfo BasicInfo = 2;
-  ENIInfo ENIInfo = 3;
-  Pod Pod = 4;
-  bool IPv4 = 5;
-  bool IPv6 = 6;
+  IPType   IPType = 1;
+  bool Success = 2;
+  bool IPv4 = 3;
+  bool IPv6 = 4;
+  repeated NetConf NetConfs = 5;
+  bool EnableTrunking = 6;
+  Error Error = 7;
+}
+
+enum Error {
+  ErrNoErr = 0;
+  ErrCRDNotFound = 1;
 }
 
 enum EventTarget {

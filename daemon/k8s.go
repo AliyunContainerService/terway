@@ -62,6 +62,7 @@ type Kubernetes interface {
 	PatchEipInfo(info *types.PodInfo) error
 	PatchTrunkInfo(trunkEni string) error
 	WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
+	GetPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
 	RecordNodeEvent(eventType, reason, message string)
 	RecordPodEvent(podName, podNamespace, eventType, reason, message string) error
 	GetNodeDynamicConfigLabel() string
@@ -196,6 +197,27 @@ func (k *k8s) WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, e
 		if podEni.Status.Phase != podENITypes.ENIPhaseBind {
 			// wait pod eni bind
 			return false, nil
+		}
+		return true, nil
+	})
+	return podEni, err
+}
+
+func (k *k8s) GetPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error) {
+	err = wait.ExponentialBackoff(wait.Backoff{
+		Duration: time.Second * 1,
+		Factor:   2,
+		Jitter:   0.3,
+		Steps:    3,
+	}, func() (bool, error) {
+		podEni, err = k.podEniClient.PodENIs(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return true, err
+			}
+			return false, fmt.Errorf("error get pod eni info, %w", err)
 		}
 		return true, nil
 	})

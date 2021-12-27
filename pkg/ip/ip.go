@@ -5,6 +5,8 @@ import (
 	"net"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	ciliumIP "github.com/cilium/cilium/pkg/ip"
 )
 
 // ToIP parse str to net.IP and return error is parse failed
@@ -70,4 +72,20 @@ func IPsIntersect(a []net.IP, b []net.IP) bool {
 // IPsHasAll return true if all b is in a
 func IPsHasAll(a []net.IP, b []net.IP) bool {
 	return sets.NewString(IPs2str(a)...).HasAll(IPs2str(b)...)
+}
+
+// DeriveGatewayIP gateway ip from cidr
+func DeriveGatewayIP(cidr string) string {
+	if cidr == "" {
+		return ""
+	}
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return ""
+	}
+	gw := ciliumIP.GetIPAtIndex(*ipNet, int64(-3))
+	if gw == nil {
+		return ""
+	}
+	return gw.String()
 }

@@ -1,10 +1,9 @@
 //go:build privileged
 // +build privileged
 
-package driver
+package utils
 
 import (
-	"net"
 	"runtime"
 	"testing"
 
@@ -53,37 +52,4 @@ func TestEnsureVlanUntagger(t *testing.T) {
 		t.Errorf("error ensure vlan untagger, %v", err)
 		t.Fail()
 	}
-}
-
-var containerIPNet = &net.IPNet{
-	IP:   net.ParseIP("169.10.0.10"),
-	Mask: net.CIDRMask(24, 32),
-}
-
-var containerIPNetIPv6 = &net.IPNet{
-	IP:   net.ParseIP("fd00:10::10"),
-	Mask: net.CIDRMask(120, 128),
-}
-
-var eth0IPNet = &net.IPNet{
-	IP:   net.ParseIP("169.20.0.10"),
-	Mask: net.CIDRMask(24, 32),
-}
-
-var eth0IPNetIPv6 = &net.IPNet{
-	IP:   net.ParseIP("fd00:20::10"),
-	Mask: net.CIDRMask(120, 128),
-}
-
-var ipv4GW = net.ParseIP("169.10.0.253")
-var ipv6GW = net.ParseIP("fd00:10::fffd")
-
-var serviceCIDR = &net.IPNet{
-	IP:   net.ParseIP("169.30.0.10"),
-	Mask: net.CIDRMask(24, 32),
-}
-
-var serviceCIDRIPv6 = &net.IPNet{
-	IP:   net.ParseIP("fd00:30::1234"),
-	Mask: net.CIDRMask(120, 128),
 }

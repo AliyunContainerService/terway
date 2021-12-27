@@ -1,4 +1,4 @@
-package driver
+package datapath
 
 import (
 	"encoding/binary"
@@ -8,7 +8,10 @@ import (
 	"strconv"
 	"syscall"
 
-	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
+	"github.com/AliyunContainerService/terway/plugin/driver/ipvlan"
+	"github.com/AliyunContainerService/terway/plugin/driver/nic"
+	"github.com/AliyunContainerService/terway/plugin/driver/types"
+	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -27,120 +30,230 @@ var (
 	regexKernelVersion = regexp.MustCompile(`^(\d+)\.(\d+)`)
 )
 
-type IPvlanDriver struct {
-	name string
-	ipv4 bool
-	ipv6 bool
+type IPvlanDriver struct{}
+
+func NewIPVlanDriver() *IPvlanDriver {
+	return &IPvlanDriver{}
 }
 
-func NewIPVlanDriver(ipv4, ipv6 bool) *IPvlanDriver {
-	return &IPvlanDriver{
-		name: "IPVLanL2",
-		ipv4: ipv4,
-		ipv6: ipv6,
+func generateContCfgForIPVlan(cfg *types.SetupConfig, link netlink.Link) *nic.Conf {
+	var addrs []*netlink.Addr
+	var routes []*netlink.Route
+	var rules []*netlink.Rule
+
+	var neighs []*netlink.Neigh
+	var sysctl map[string][]string
+
+	if cfg.MultiNetwork {
+		table := utils.GetRouteTableID(link.Attrs().Index)
+
+		ruleIf := netlink.NewRule()
+		ruleIf.OifName = cfg.ContainerIfName
+		ruleIf.Table = table
+		ruleIf.Priority = toContainerPriority
+
+		rules = append(rules, ruleIf)
 	}
+
+	if cfg.ContainerIPNet.IPv4 != nil {
+		addrs = append(addrs, &netlink.Addr{IPNet: cfg.ContainerIPNet.IPv4})
+
+		// add default route
+		if cfg.DefaultRoute {
+			routes = append(routes, &netlink.Route{
+				LinkIndex: link.Attrs().Index,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Dst:       defaultRoute,
+				Gw:        cfg.GatewayIP.IPv4,
+				Flags:     int(netlink.FLAG_ONLINK),
+			})
+		}
+		routes = append(routes, &netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Scope:     netlink.SCOPE_LINK,
+			Dst:       utils.NewIPNetWithMaxMask(cfg.HostIPSet.IPv4),
+		})
+
+		neighs = append(neighs, &netlink.Neigh{
+			LinkIndex:    link.Attrs().Index,
+			IP:           cfg.HostIPSet.IPv4.IP,
+			HardwareAddr: link.Attrs().HardwareAddr,
+			State:        netlink.NUD_PERMANENT,
+		})
+
+		if cfg.MultiNetwork {
+			table := utils.GetRouteTableID(link.Attrs().Index)
+
+			v4 := utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv4)
+
+			ruleSrc := netlink.NewRule()
+			ruleSrc.Src = v4
+			ruleSrc.Table = table
+			ruleSrc.Priority = toContainerPriority
+
+			rules = append(rules, ruleSrc)
+
+			routes = append(routes, &netlink.Route{
+				LinkIndex: link.Attrs().Index,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Dst:       defaultRoute,
+				Gw:        cfg.GatewayIP.IPv4,
+				Flags:     int(netlink.FLAG_ONLINK),
+				Table:     table,
+			})
+		}
+	}
+	if cfg.ContainerIPNet.IPv6 != nil {
+		addrs = append(addrs, &netlink.Addr{IPNet: cfg.ContainerIPNet.IPv6})
+
+		// add default route
+		if cfg.DefaultRoute {
+			routes = append(routes, &netlink.Route{
+				LinkIndex: link.Attrs().Index,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Dst:       defaultRouteIPv6,
+				Gw:        cfg.GatewayIP.IPv6,
+				Flags:     int(netlink.FLAG_ONLINK),
+			})
+		}
+		routes = append(routes, &netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Scope:     netlink.SCOPE_LINK,
+			Dst:       utils.NewIPNetWithMaxMask(cfg.HostIPSet.IPv6),
+		})
+
+		neighs = append(neighs, &netlink.Neigh{
+			LinkIndex:    link.Attrs().Index,
+			IP:           cfg.HostIPSet.IPv6.IP,
+			HardwareAddr: link.Attrs().HardwareAddr,
+			State:        netlink.NUD_PERMANENT,
+		})
+
+		if cfg.MultiNetwork {
+			table := utils.GetRouteTableID(link.Attrs().Index)
+
+			v6 := utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv6)
+
+			ruleSrc := netlink.NewRule()
+			ruleSrc.Src = v6
+			ruleSrc.Table = table
+			ruleSrc.Priority = toContainerPriority
+
+			rules = append(rules, ruleSrc)
+
+			routes = append(routes, &netlink.Route{
+				LinkIndex: link.Attrs().Index,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Dst:       defaultRouteIPv6,
+				Gw:        cfg.GatewayIP.IPv6,
+				Flags:     int(netlink.FLAG_ONLINK),
+				Table:     table,
+			})
+		}
+		sysctl = utils.GenerateIPv6Sysctl(cfg.ContainerIfName, true, false)
+	}
+
+	contCfg := &nic.Conf{
+		IfName:    cfg.ContainerIfName,
+		MTU:       cfg.MTU,
+		Addrs:     addrs,
+		Routes:    routes,
+		Rules:     rules,
+		Neighs:    neighs,
+		SysCtl:    sysctl,
+		StripVlan: false,
+	}
+
+	return contCfg
 }
 
-func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
+func generateENICfgForIPVlan(cfg *types.SetupConfig, link netlink.Link) *nic.Conf {
+	var routes []*netlink.Route
+	var sysctl map[string][]string
+
+	if cfg.ContainerIPNet.IPv6 != nil {
+		sysctl = utils.GenerateIPv6Sysctl(link.Attrs().Name, true, true)
+	}
+
+	contCfg := &nic.Conf{
+		MTU:       cfg.MTU,
+		Routes:    routes,
+		SysCtl:    sysctl,
+		StripVlan: cfg.StripVlan, // if trunk enabled, will remote vlan tag
+	}
+
+	return contCfg
+}
+
+// for ipvl_x
+func generateSlaveLinkCfgForIPVlan(cfg *types.SetupConfig, link netlink.Link) *nic.Conf {
+	var addrs []*netlink.Addr
+	var routes []*netlink.Route
+	var sysctl map[string][]string
+
+	if cfg.ContainerIPNet.IPv4 != nil {
+		addrs = append(addrs, &netlink.Addr{IPNet: utils.NewIPNetWithMaxMask(cfg.HostIPSet.IPv4), Scope: int(netlink.SCOPE_HOST)})
+
+		// add route to container
+		routes = append(routes, &netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Scope:     netlink.SCOPE_LINK,
+			Dst:       utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv4),
+		})
+	}
+	if cfg.ContainerIPNet.IPv6 != nil {
+		addrs = append(addrs, &netlink.Addr{IPNet: utils.NewIPNetWithMaxMask(cfg.HostIPSet.IPv6), Flags: unix.IFA_F_NODAD})
+
+		// add route to container
+		routes = append(routes, &netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Scope:     netlink.SCOPE_LINK,
+			Dst:       utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv6),
+		})
+	}
+
+	contCfg := &nic.Conf{
+		MTU:    cfg.MTU,
+		Addrs:  addrs,
+		Routes: routes,
+		SysCtl: sysctl,
+	}
+
+	return contCfg
+}
+
+func (d *IPvlanDriver) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	var err error
 
 	parentLink, err := netlink.LinkByIndex(cfg.ENIIndex)
 	if err != nil {
 		return fmt.Errorf("error get eni by index %d, %w", cfg.ENIIndex, err)
 	}
-	_, err = EnsureLinkUp(parentLink)
-	if err != nil {
-		return err
-	}
-	_, err = EnsureLinkMTU(parentLink, cfg.MTU)
-	if err != nil {
-		return err
-	}
-
-	if d.ipv6 {
-		_, err = EnsureRoute(&netlink.Route{
-			LinkIndex: parentLink.Attrs().Index,
-			Scope:     netlink.SCOPE_LINK,
-			Dst: &net.IPNet{
-				IP:   cfg.GatewayIP.IPv6,
-				Mask: net.CIDRMask(128, 128),
-			},
-		})
-		if err != nil {
-			return err
-		}
-		_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", parentLink.Attrs().Name), "0")
-		_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/forwarding", parentLink.Attrs().Name), "1")
-	}
-
-	err = LinkAdd(&netlink.IPVlan{
-		LinkAttrs: netlink.LinkAttrs{
-			Name:        cfg.HostVETHName,
-			ParentIndex: cfg.ENIIndex,
-			MTU:         cfg.MTU,
-		},
-		Mode: netlink.IPVLAN_MODE_L2,
-	})
+	eniCfg := generateENICfgForIPVlan(cfg, parentLink)
+	err = nic.Setup(parentLink, eniCfg)
 	if err != nil {
 		return err
 	}
 
-	slaveLink, err := netlink.LinkByName(cfg.HostVETHName)
-	if err != nil {
-		return fmt.Errorf("error find ipvlan link %s, %w", cfg.HostVETHName, err)
-	}
-
-	err = LinkSetNsFd(slaveLink, netNS)
+	err = ipvlan.Setup(&ipvlan.IPVlan{
+		Parent:  parentLink.Attrs().Name,
+		PreName: cfg.HostVETHName,
+		IfName:  cfg.ContainerIfName,
+		MTU:     cfg.MTU,
+	}, netNS)
 	if err != nil {
 		return err
 	}
 
 	// 2. setup addr and default route
 	err = netNS.Do(func(netNS ns.NetNS) error {
-		if d.ipv6 {
-			err := EnableIPv6()
-			if err != nil {
-				return err
-			}
-		}
-
-		linkList, err := netlink.LinkList()
+		contLink, err := netlink.LinkByName(cfg.ContainerIfName)
 		if err != nil {
-			return fmt.Errorf("error list links, %w", err)
+			return fmt.Errorf("error find link %s in container, %w", cfg.ContainerIfName, err)
 		}
-
-		// accept_ra
-		for _, link := range linkList {
-			if link.Attrs().Name != cfg.HostVETHName {
-				continue
-			}
-			err = SetupLink(link, cfg)
-			if err != nil {
-				return err
-			}
-
-			if d.ipv6 {
-				_ = terwaySysctl.EnsureConf(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", cfg.ContainerIfName), "0")
-			}
-
-			_, err = EnsureDefaultRoute(link, cfg.GatewayIP, unix.RT_TABLE_MAIN)
-			if err != nil {
-				return err
-			}
-
-			// setup route to host ipvlan interface
-			_, err = EnsureHostToContainerRoute(link, cfg.HostIPSet)
-			if err != nil {
-				return fmt.Errorf("add route to host %s error, %w", cfg.HostIPSet, err)
-			}
-
-			// set host ipvlan interface mac in ARP table
-			_, err = EnsureNeighbor(link, cfg.HostIPSet)
-			return err
-		}
-		return err
+		contCfg := generateContCfgForIPVlan(cfg, contLink)
+		return nic.Setup(contLink, contCfg)
 	})
-
 	if err != nil {
 		return fmt.Errorf("error set container link/address/route, %w", err)
 	}
@@ -152,8 +265,8 @@ func (d *IPvlanDriver) Setup(cfg *SetupConfig, netNS ns.NetNS) error {
 	return nil
 }
 
-func (d *IPvlanDriver) Teardown(cfg *TeardownCfg, netNS ns.NetNS) error {
-	err := DelLinkByName(cfg.HostVETHName)
+func (d *IPvlanDriver) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
+	err := utils.DelLinkByName(cfg.HostVETHName)
 	if err != nil {
 		return err
 	}
@@ -162,43 +275,34 @@ func (d *IPvlanDriver) Teardown(cfg *TeardownCfg, netNS ns.NetNS) error {
 	return d.teardownInitNamespace(cfg.ContainerIPNet)
 }
 
-func (d *IPvlanDriver) Check(cfg *CheckConfig) error {
+func (d *IPvlanDriver) Check(cfg *types.CheckConfig) error {
 	parentLinkIndex := 0
 	// 1. check addr and default route
 	err := cfg.NetNS.Do(func(netNS ns.NetNS) error {
-		link, err := netlink.LinkByName(cfg.ContainerIFName)
+		link, err := netlink.LinkByName(cfg.ContainerIfName)
 		if err != nil {
 			return err
 		}
 		parentLinkIndex = link.Attrs().ParentIndex
-		changed, err := EnsureLinkUp(link)
+		changed, err := utils.EnsureLinkUp(link)
 		if err != nil {
 			return err
 		}
 
 		if changed {
-			cfg.RecordPodEvent(fmt.Sprintf("link %s set to up", cfg.ContainerIFName))
+			cfg.RecordPodEvent(fmt.Sprintf("link %s set to up", cfg.ContainerIfName))
 		}
 
-		changed, err = EnsureLinkMTU(link, cfg.MTU)
+		changed, err = utils.EnsureLinkMTU(link, cfg.MTU)
 		if err != nil {
 			return err
 		}
 
 		if changed {
-			cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", cfg.ContainerIFName, cfg.MTU))
+			cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", cfg.ContainerIfName, cfg.MTU))
 		}
 
-		changed, err = EnsureDefaultRoute(link, cfg.GatewayIP, unix.RT_TABLE_MAIN)
-		if err != nil {
-			return err
-		}
-		if changed {
-			Log.Debugf("route is changed")
-			cfg.RecordPodEvent("default route is updated")
-		}
-
-		return EnsureNetConfSet(true, false)
+		return utils.EnsureNetConfSet(true, false)
 	})
 	if err != nil {
 		if _, ok := err.(ns.NSPathNotExistErr); ok {
@@ -207,19 +311,19 @@ func (d *IPvlanDriver) Check(cfg *CheckConfig) error {
 		return err
 	}
 	// 2. check parent link ( this is called in every setup it is safe)
-	Log.Debugf("parent link is %d", parentLinkIndex)
+	utils.Log.Debugf("parent link is %d", parentLinkIndex)
 	parentLink, err := netlink.LinkByIndex(parentLinkIndex)
 	if err != nil {
-		return errors.Wrapf(err, "%s, get device by index %d error.", d.name, cfg.ENIIndex)
+		return fmt.Errorf("error get parent link, %w", err)
 	}
-	changed, err := EnsureLinkUp(parentLink)
+	changed, err := utils.EnsureLinkUp(parentLink)
 	if err != nil {
 		return err
 	}
 	if changed {
 		cfg.RecordPodEvent(fmt.Sprintf("parent link id %d set to up", int(cfg.ENIIndex)))
 	}
-	changed, err = EnsureLinkMTU(parentLink, cfg.MTU)
+	changed, err = utils.EnsureLinkMTU(parentLink, cfg.MTU)
 	if err != nil {
 		return err
 	}
@@ -228,24 +332,24 @@ func (d *IPvlanDriver) Check(cfg *CheckConfig) error {
 		cfg.RecordPodEvent(fmt.Sprintf("link %s set mtu to %v", parentLink.Attrs().Name, cfg.MTU))
 	}
 
-	return err
+	return nil
 }
 
 func (d *IPvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slaveName string, mtu int) (netlink.Link, error) {
 	slaveLink, err := netlink.LinkByName(slaveName)
 	if err != nil {
 		if _, ok := err.(netlink.LinkNotFoundError); !ok {
-			return nil, errors.Wrapf(err, "%s, get device %s error", d.name, slaveName)
+			return nil, fmt.Errorf("get device %s error, %w", slaveName, err)
 		}
 	} else {
-		_, err = EnsureLinkMTU(slaveLink, mtu)
+		_, err = utils.EnsureLinkMTU(slaveLink, mtu)
 		if err != nil {
 			return nil, err
 		}
 		return slaveLink, nil
 	}
 
-	err = LinkAdd(&netlink.IPVlan{
+	err = utils.LinkAdd(&netlink.IPVlan{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:        slaveName,
 			ParentIndex: parentLink.Attrs().Index,
@@ -264,57 +368,18 @@ func (d *IPvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slaveName 
 	return link, nil
 }
 
-func (d *IPvlanDriver) setupRouteIfNotExist(link netlink.Link, dst *terwayTypes.IPNetSet) error {
-	exec := func(ipNet *net.IPNet) error {
-		family := NetlinkFamily(ipNet.IP)
-		route := &netlink.Route{
-			Protocol:  netlink.RouteProtocol(family),
-			LinkIndex: link.Attrs().Index,
-			Scope:     netlink.SCOPE_LINK,
-			Dst:       ipNet,
-		}
-		routes, err := netlink.RouteListFiltered(family, route, netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF)
-		if err != nil {
-			return fmt.Errorf("error list route %s, %w", route.String(), err)
-		}
-		if len(routes) != 0 {
-			return nil
-		}
-
-		err = RouteReplace(route)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	if dst.IPv4 != nil {
-		err := exec(NewIPNetWithMaxMask(dst.IPv4))
-		if err != nil {
-			return err
-		}
-	}
-	if dst.IPv6 != nil {
-		err := exec(NewIPNetWithMaxMask(dst.IPv6))
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func (d *IPvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIndex int) error {
 	parent := uint32(netlink.HANDLE_CLSACT&0xffff0000 | netlink.HANDLE_MIN_EGRESS&0x0000ffff)
 	filters, err := netlink.FilterList(link, parent)
 	if err != nil {
-		return errors.Wrapf(err, "%s, list egress filter for %s error", d.name, link.Attrs().Name)
+		return fmt.Errorf("list egress filter for %s error, %w", link.Attrs().Name, err)
 	}
 
 	ruleInFilter := make(map[*redirectRule]bool)
 	for _, v := range cidrs {
 		rule, err := dstIPRule(link.Attrs().Index, v, dstIndex, netlink.TCA_INGRESS_REDIR)
 		if err != nil {
-			return errors.Wrapf(err, "%s, create redirect rule error", d.name)
+			return fmt.Errorf("create redirect rule error, %w", err)
 		}
 		ruleInFilter[rule] = false
 	}
@@ -332,7 +397,7 @@ func (d *IPvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIn
 			continue
 		}
 		if err := netlink.FilterDel(filter); err != nil {
-			return errors.Wrapf(err, "%s, delete filter of %s error", d.name, link.Attrs().Name)
+			return fmt.Errorf("delete filter of %s error, %w", link.Attrs().Name, err)
 		}
 	}
 
@@ -341,71 +406,40 @@ func (d *IPvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIn
 			u32 := rule.toU32Filter()
 			u32.Parent = parent
 			if err := netlink.FilterAdd(u32); err != nil {
-				return errors.Wrapf(err, "%s, add filter for %s error", d.name, link.Attrs().Name)
+				return fmt.Errorf("add filter for %s error, %w", link.Attrs().Name, err)
 			}
 		}
 	}
 	return nil
 }
 
-func (d *IPvlanDriver) setupInitNamespace(parentLink netlink.Link, cfg *SetupConfig) error {
+func (d *IPvlanDriver) setupInitNamespace(parentLink netlink.Link, cfg *types.SetupConfig) error {
 	// setup slave nic
 	slaveName := d.initSlaveName(parentLink.Attrs().Index)
 	slaveLink, err := d.createSlaveIfNotExist(parentLink, slaveName, cfg.MTU)
 	if err != nil {
 		return err
 	}
-	_, err = EnsureLinkUp(slaveLink)
-	if err != nil {
-		return err
-	}
 
 	if slaveLink.Attrs().Flags&unix.IFF_NOARP == 0 {
 		if err := netlink.LinkSetARPOff(slaveLink); err != nil {
-			return errors.Wrapf(err, "%s, set device %s noarp error", d.name, slaveLink.Attrs().Name)
+			return fmt.Errorf("set device %s noarp error, %w", slaveLink.Attrs().Name, err)
 		}
 	}
-
-	if cfg.HostIPSet.IPv4 != nil {
-		_, err = EnsureAddr(slaveLink, &netlink.Addr{
-			IPNet: cfg.HostIPSet.IPv4,
-			Scope: int(netlink.SCOPE_HOST),
-		})
-		if err != nil {
-			return err
-		}
-	}
-	if cfg.HostIPSet.IPv6 != nil {
-		_, err = EnsureAddr(slaveLink, &netlink.Addr{
-			IPNet: cfg.HostIPSet.IPv6,
-			Flags: unix.IFA_F_NODAD,
-			Scope: int(netlink.SCOPE_LINK),
-		})
-		if err != nil {
-			return err
-		}
-	}
-
-	// check tc rule
-	err = EnsureClsActQdsic(parentLink)
+	slaveCfg := generateSlaveLinkCfgForIPVlan(cfg, slaveLink)
+	err = nic.Setup(slaveLink, slaveCfg)
 	if err != nil {
 		return err
 	}
 
-	if cfg.TrunkENI {
-		err = EnsureVlanUntagger(parentLink)
-		if err != nil {
-			return err
-		}
+	// check tc rule
+	err = utils.EnsureClsActQdsic(parentLink)
+	if err != nil {
+		return err
 	}
 
 	redirectCIDRs := append(cfg.HostStackCIDRs, cfg.ServiceCIDR.IPv4)
 	err = d.setupFilters(parentLink, redirectCIDRs, slaveLink.Attrs().Index)
-	if err != nil {
-		return err
-	}
-
-	err = d.setupRouteIfNotExist(slaveLink, cfg.ContainerIPNet)
 	if err != nil {
 		return err
 	}
@@ -419,14 +453,14 @@ func (d *IPvlanDriver) teardownInitNamespace(containerIP *terwayTypes.IPNetSet) 
 	}
 
 	exec := func(ipNet *net.IPNet) error {
-		routes, err := FoundRoutes(&netlink.Route{
+		routes, err := utils.FoundRoutes(&netlink.Route{
 			Dst: ipNet,
 		})
 		if err != nil {
 			return err
 		}
 		for _, route := range routes {
-			err = RouteDel(&route)
+			err = utils.RouteDel(&route)
 			if err != nil {
 				return err
 			}
@@ -435,13 +469,13 @@ func (d *IPvlanDriver) teardownInitNamespace(containerIP *terwayTypes.IPNetSet) 
 	}
 
 	if containerIP.IPv4 != nil {
-		err := exec(NewIPNetWithMaxMask(containerIP.IPv4))
+		err := exec(utils.NewIPNetWithMaxMask(containerIP.IPv4))
 		if err != nil {
 			return err
 		}
 	}
 	if containerIP.IPv6 != nil {
-		err := exec(NewIPNetWithMaxMask(containerIP.IPv6))
+		err := exec(utils.NewIPNetWithMaxMask(containerIP.IPv6))
 		if err != nil {
 			return err
 		}

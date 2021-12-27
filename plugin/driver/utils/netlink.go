@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package driver
+package utils
 
 import (
 	"fmt"
@@ -114,16 +114,6 @@ func AddrReplace(link netlink.Link, addr *netlink.Addr) error {
 	return nil
 }
 
-func RouteAdd(route *netlink.Route) error {
-	cmd := fmt.Sprintf("ip route add %s", route.String())
-	Log.Infof(cmd)
-	err := netlink.RouteAdd(route)
-	if err != nil {
-		return fmt.Errorf("error %s, %w", cmd, err)
-	}
-	return nil
-}
-
 func RouteReplace(route *netlink.Route) error {
 	cmd := fmt.Sprintf("ip route replace %s", route.String())
 	Log.Infof(cmd)
@@ -138,16 +128,6 @@ func RouteDel(route *netlink.Route) error {
 	cmd := fmt.Sprintf("ip route del %s", route.String())
 	Log.Infof(cmd)
 	err := netlink.RouteDel(route)
-	if err != nil {
-		return fmt.Errorf("error %s, %w", cmd, err)
-	}
-	return nil
-}
-
-func NeighAdd(neigh *netlink.Neigh) error {
-	cmd := fmt.Sprintf("ip neigh add %s", neigh.String())
-	Log.Infof(cmd)
-	err := netlink.NeighAdd(neigh)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
 	}
@@ -194,6 +174,16 @@ func LinkSetNsFd(link netlink.Link, netNS ns.NetNS) error {
 	cmd := fmt.Sprintf("ip link set %s netns %s", link.Attrs().Name, netNS.Path())
 	Log.Infof(cmd)
 	err := netlink.LinkSetNsFd(link, int(netNS.Fd()))
+	if err != nil {
+		return fmt.Errorf("error %s, %w", cmd, err)
+	}
+	return nil
+}
+
+func QdiscReplace(qdisc *netlink.GenericQdisc) error {
+	cmd := fmt.Sprintf("tc qdisc replace  %s", qdisc.String())
+	Log.Infof(cmd)
+	err := netlink.QdiscReplace(qdisc)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
 	}

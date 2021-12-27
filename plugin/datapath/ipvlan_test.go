@@ -1,13 +1,15 @@
 //go:build privileged
 // +build privileged
 
-package driver
+package datapath
 
 import (
 	"net"
 	"runtime"
 	"testing"
 
+	types2 "github.com/AliyunContainerService/terway/plugin/driver/types"
+	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 	"github.com/AliyunContainerService/terway/types"
 
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -158,7 +160,7 @@ func TestDataPathIPvlanL2(t *testing.T) {
 	eni, err := netlink.LinkByName("eni")
 	assert.NoError(t, err)
 
-	cfg := &SetupConfig{
+	cfg := &types2.SetupConfig{
 		HostVETHName:    "hostipvl",
 		ContainerIfName: "eth0",
 		ContainerIPNet: &types.IPNetSet{
@@ -171,7 +173,7 @@ func TestDataPathIPvlanL2(t *testing.T) {
 		},
 		MTU:            1499,
 		ENIIndex:       eni.Attrs().Index,
-		TrunkENI:       false,
+		StripVlan:      false,
 		HostStackCIDRs: nil,
 		Ingress:        0,
 		Egress:         0,
@@ -183,8 +185,9 @@ func TestDataPathIPvlanL2(t *testing.T) {
 			IPv4: eth0IPNet,
 			IPv6: eth0IPNetIPv6,
 		},
+		DefaultRoute: true,
 	}
-	d := NewIPVlanDriver(true, true)
+	d := NewIPVlanDriver()
 
 	err = d.Setup(cfg, containerNS)
 	assert.NoError(t, err)
@@ -207,6 +210,15 @@ func TestDataPathIPvlanL2(t *testing.T) {
 		assert.Equal(t, len(routes), 1)
 
 		assert.Equal(t, ipv4GW.String(), routes[0].Gw.String())
+
+		// neigh should be added
+		ok, err = FindNeigh(containerLink, eth0IPNet.IP, eni.Attrs().HardwareAddr)
+		assert.NoError(t, err)
+		assert.True(t, ok)
+
+		ok, err = FindNeigh(containerLink, eth0IPNetIPv6.IP, eni.Attrs().HardwareAddr)
+		assert.NoError(t, err)
+		assert.True(t, ok)
 
 		return nil
 	})
@@ -233,7 +245,10 @@ func TestDataPathIPvlanL2(t *testing.T) {
 			IP:   cfg.HostIPSet.IPv4.IP,
 			Mask: net.CIDRMask(32, 32),
 		},
-		IPv6: nil,
+		IPv6: &net.IPNet{
+			IP:   cfg.HostIPSet.IPv6.IP,
+			Mask: net.CIDRMask(128, 128),
+		},
 	})
 	assert.NoError(t, err)
 	assert.True(t, ok)
@@ -261,7 +276,10 @@ func TestDataPathIPvlanL2(t *testing.T) {
 	assert.NoError(t, err)
 
 	// tear down
-	err = d.Teardown(&TeardownCfg{
+	err = utils.GenericTearDown(containerNS)
+	assert.NoError(t, err)
+
+	err = d.Teardown(&types2.TeardownCfg{
 		HostVETHName:    cfg.HostVETHName,
 		ContainerIfName: cfg.ContainerIfName,
 		ContainerIPNet: &types.IPNetSet{
@@ -269,6 +287,7 @@ func TestDataPathIPvlanL2(t *testing.T) {
 			IPv6: containerIPNetIPv6,
 		},
 	}, containerNS)
+	assert.NoError(t, err)
 
 	// check ipvl_x is up
 	slaveLink, err = netlink.LinkByIndex(slaveLink.Attrs().Index)
@@ -276,7 +295,7 @@ func TestDataPathIPvlanL2(t *testing.T) {
 	assert.True(t, slaveLink.Attrs().Flags&net.FlagUp != 0)
 
 	// route 169.10.0.10 dev ipvl_x should be removed
-	routes, err = FoundRoutes(&netlink.Route{
+	routes, err = utils.FoundRoutes(&netlink.Route{
 		Dst: &net.IPNet{
 			IP:   cfg.ContainerIPNet.IPv4.IP,
 			Mask: net.CIDRMask(32, 32),

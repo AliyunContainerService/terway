@@ -67,6 +67,25 @@ type IPFamily struct {
 	IPv6 bool
 }
 
+// IPAMType how terway deal with ip resource
+type IPAMType string
+
+// how terway deal with ip resource
+const (
+	IPAMTypeCRD       = "crd"
+	IPAMTypePreferCRD = "preferCRD"
+	IPAMTypeDefault   = ""
+)
+
+// ENICapPolicy how eni cap is calculated
+type ENICapPolicy string
+
+// how eni cap is calculated
+const (
+	ENICapPolicyPreferTrunk = "preferTrunk"
+	ENICapPolicyDefault     = ""
+)
+
 // NewIPFamilyFromIPStack parse IPStack to IPFamily
 func NewIPFamilyFromIPStack(ipStack IPStack) *IPFamily {
 	f := &IPFamily{}
@@ -170,6 +189,9 @@ func (i *IPNetSet) ToRPC() *rpc.IPSet {
 	}
 }
 func (i *IPNetSet) String() string {
+	if i == nil {
+		return ""
+	}
 	var result []string
 	if i.IPv4 != nil {
 		result = append(result, i.IPv4.String())
