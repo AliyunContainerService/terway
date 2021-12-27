@@ -17,19 +17,76 @@ limitations under the License.
 package controlplane
 
 import (
+	"encoding/json"
+	"fmt"
+	"time"
+
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	terwayTypes "github.com/AliyunContainerService/terway/types"
 
 	corev1 "k8s.io/api/core/v1"
 )
 
-// ParsePodNetworksFromAnnotation parse annotation and convert to []v1beta1.Allocation
-func ParsePodNetworksFromAnnotation(pod *corev1.Pod) ([]*v1beta1.Allocation, error) {
-	return nil, nil
+type PodNetworksAnnotation struct {
+	PodNetworks []PodNetworks `json:"podNetworks"`
 }
 
-// ParsePodIPTypeFromAnnotation parse annotation and convert to v1beta1.IPType
+// ParsePodNetworksFromAnnotation parse annotation and convert to PodNetworksAnnotation
+func ParsePodNetworksFromAnnotation(pod *corev1.Pod) (*PodNetworksAnnotation, error) {
+	v, ok := pod.GetAnnotations()[terwayTypes.PodNetworks]
+	if !ok {
+		return &PodNetworksAnnotation{}, nil
+	}
+
+	var annoConf PodNetworksAnnotation
+	err := json.Unmarshal([]byte(v), &annoConf)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s from pod annotataion, %w", terwayTypes.PodNetworks, err)
+	}
+	return &annoConf, nil
+}
+
+// ParsePodIPTypeFromAnnotation parse annotation and convert to v1beta1.AllocationType
 func ParsePodIPTypeFromAnnotation(pod *corev1.Pod) (*v1beta1.AllocationType, error) {
-	return &v1beta1.AllocationType{
+	v, ok := pod.GetAnnotations()[terwayTypes.PodAllocType]
+	if !ok {
+		return &v1beta1.AllocationType{
+			Type: v1beta1.IPAllocTypeElastic,
+		}, nil
+	}
+	// will not be nil
+	var annoConf v1beta1.AllocationType
+	err := json.Unmarshal([]byte(v), &annoConf)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAllocationType(&annoConf)
+}
+
+// ParseAllocationType parse and set default val
+func ParseAllocationType(old *v1beta1.AllocationType) (*v1beta1.AllocationType, error) {
+	res := &v1beta1.AllocationType{
 		Type: v1beta1.IPAllocTypeElastic,
-	}, nil
+	}
+	if old == nil {
+		return res, nil
+	}
+
+	if old.Type == v1beta1.IPAllocTypeFixed {
+		res.Type = v1beta1.IPAllocTypeFixed
+		res.ReleaseStrategy = v1beta1.ReleaseStrategyTTL
+		res.ReleaseAfter = "10m"
+
+		if old.ReleaseStrategy == v1beta1.ReleaseStrategyNever {
+			res.ReleaseStrategy = v1beta1.ReleaseStrategyNever
+		}
+		if old.ReleaseAfter != "" {
+			_, err := time.ParseDuration(old.ReleaseAfter)
+			if err != nil {
+				return nil, fmt.Errorf("error parse ReleaseAfter, %w", err)
+			}
+			res.ReleaseAfter = old.ReleaseAfter
+		}
+	}
+	return res, nil
 }

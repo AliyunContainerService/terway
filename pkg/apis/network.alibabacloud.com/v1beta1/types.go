@@ -71,15 +71,16 @@ type PodENIStatus struct {
 
 // Allocation for eni record
 type Allocation struct {
-	AllocationType AllocationType `json:"allocationType,omitempty"`
-	ENI            ENI            `json:"eni,omitempty"`
-	IPv4           string         `json:"ipv4,omitempty"`
-	IPv6           string         `json:"ipv6,omitempty"`
-	IPv4CIDR       string         `json:"ipv4CIDR,omitempty"`
-	IPv6CIDR       string         `json:"ipv6CIDR,omitempty"`
-	Interface      string         `json:"interface,omitempty"`
-	DefaultRoute   bool           `json:"defaultRoute,omitempty"`
-	ExtraRoutes    []Route        `json:"extraRoutes,omitempty"`
+	AllocationType AllocationType    `json:"allocationType,omitempty"`
+	ENI            ENI               `json:"eni,omitempty"`
+	IPv4           string            `json:"ipv4,omitempty"`
+	IPv6           string            `json:"ipv6,omitempty"`
+	IPv4CIDR       string            `json:"ipv4CIDR,omitempty"`
+	IPv6CIDR       string            `json:"ipv6CIDR,omitempty"`
+	Interface      string            `json:"interface,omitempty"`
+	DefaultRoute   bool              `json:"defaultRoute,omitempty"`
+	ExtraRoutes    []Route           `json:"extraRoutes,omitempty"`
+	ExtraConfig    map[string]string `json:"extraConfig,omitempty"`
 }
 
 type Route struct {

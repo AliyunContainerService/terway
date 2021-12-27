@@ -14,7 +14,7 @@ COPY go.sum go.sum
 COPY go.mod go.mod
 RUN go mod download
 COPY . .
-RUN cd cmd/terway && CGO_ENABLED=0 GOOS=linux go build \
+RUN cd cmd/terway && CGO_ENABLED=0 GOOS=linux go build -tags default_build \
     -ldflags \
     "-X \"k8s.io/client-go/pkg/version.gitCommit=`git rev-parse HEAD`\" \
     -X \"k8s.io/client-go/pkg/version.buildDate=`date -u +'%Y-%m-%dT%H:%M:%SZ'`\" \
