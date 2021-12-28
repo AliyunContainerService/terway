@@ -57,6 +57,8 @@ type Config struct {
 	VSwitchPoolSize int    `json:"vSwitchPoolSize" validate:"gt=0" mod:"default=1000"`
 	VSwitchCacheTTL string `json:"vSwitchCacheTTL" mod:"default=20m0s"`
 
+	CustomStatefulWorkloadKinds []string `json:"customStatefulWorkloadKinds"`
+
 	Credential
 }
 
