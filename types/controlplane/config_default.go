@@ -62,6 +62,7 @@ type Config struct {
 	CustomStatefulWorkloadKinds []string `json:"customStatefulWorkloadKinds"`
 
 	BackoffOverride map[string]wait.Backoff `json:"backoffOverride,omitempty"`
+	IPAMType        string                  `json:"ipamType"`
 
 	Credential
 }

@@ -106,7 +106,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		return webhook.Denied("can not use pod annotation and podNetworking at same time")
 	}
 
-	if types.PodUseENI(pod) {
+	if types.PodUseENI(pod) || controlplane.GetConfig().IPAMType == types.IPAMTypeCRD {
 		networks, err := controlplane.ParsePodNetworksFromAnnotation(pod)
 		if err != nil {
 			return webhook.Denied(fmt.Sprintf("unable parse annotation field %s", types.PodNetworks))
@@ -129,6 +129,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 				return webhook.Errored(1, err)
 			}
 			pod.Annotations[types.PodNetworks] = string(pnaBytes)
+			pod.Annotations[types.PodENI] = "true"
 			memberCount = 1
 		} else {
 			for _, n := range networks.PodNetworks {
