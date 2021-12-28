@@ -5,8 +5,15 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
+
+type Client interface {
+	ECS() *ecs.Client
+	VPC() *vpc.Client
+}
 
 const (
 	eniNamePrefix  = "eni-cni-"
