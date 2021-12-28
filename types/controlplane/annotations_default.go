@@ -19,4 +19,7 @@ limitations under the License.
 
 package controlplane
 
-type PodNetworks struct{}
+type PodNetworks struct {
+	VSwitchIDs       []string `json:"vSwitchIDs"`
+	SecurityGroupIDs []string `json:"securityGroupIDs"`
+}

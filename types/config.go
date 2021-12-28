@@ -5,6 +5,7 @@ import (
 
 	jsonpatch "github.com/evanphx/json-patch"
 	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // Configure configuration of terway daemon
@@ -32,6 +33,11 @@ type Configure struct {
 	AllowEIPRob                 string   `yaml:"allow_eip_rob" json:"allow_eip_rob"`
 	EnableENITrunking           bool     `yaml:"enable_eni_trunking" json:"enable_eni_trunking"`
 	CustomStatefulWorkloadKinds []string `yaml:"custom_stateful_workload_kinds" json:"custom_stateful_workload_kinds"`
+}
+
+func (c *Configure) GetSecurityGroups() []string {
+	sgIDs := sets.NewString(c.SecurityGroup).Insert(c.SecurityGroups...)
+	return sgIDs.List()
 }
 
 // PoolConfig configuration of pool and resource factory

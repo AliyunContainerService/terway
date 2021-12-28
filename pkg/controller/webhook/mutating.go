@@ -112,11 +112,40 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 			return webhook.Denied(fmt.Sprintf("unable parse annotation field %s", types.PodNetworks))
 		}
 		if len(networks.PodNetworks) == 0 {
-			return webhook.Denied("unable pod have no valid network config")
-		}
+			vsws, sgs, err := configFromConfigMap(ctx, client)
+			if err != nil {
+				return webhook.Errored(1, err)
+			}
+			pna := &controlplane.PodNetworksAnnotation{
+				PodNetworks: []controlplane.PodNetworks{
+					{
+						VSwitchIDs:       vsws,
+						SecurityGroupIDs: sgs,
+					},
+				},
+			}
+			pnaBytes, err := json.Marshal(pna)
+			if err != nil {
+				return webhook.Errored(1, err)
+			}
+			pod.Annotations[types.PodNetworks] = string(pnaBytes)
+			memberCount = 1
+		} else {
+			for _, n := range networks.PodNetworks {
+				if len(n.VSwitchIDs) == 0 {
+					return admission.Denied("vSwitchID is not set")
+				}
+				if len(n.SecurityGroupIDs) == 0 {
+					return admission.Denied("security group is not set")
+				}
+				if len(n.SecurityGroupIDs) > 5 {
+					return admission.Denied("security group can not more than 5")
+				}
+			}
 
-		// for now use trunk only
-		memberCount = len(networks.PodNetworks)
+			// for now use trunk only
+			memberCount = len(networks.PodNetworks)
+		}
 	} else {
 		if pod.Annotations[types.PodNetworks] != "" {
 			return webhook.Denied("can not use pod annotation and podNetworking at same time, pod-eni is missing")
@@ -222,30 +251,16 @@ func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, cli
 	if len(podNetworking.Spec.SecurityGroupIDs) > 0 && len(podNetworking.Spec.VSwitchIDs) > 0 {
 		return webhook.Allowed("podNetworking all set")
 	}
-	cm := &corev1.ConfigMap{}
-	err = client.Get(ctx, k8stypes.NamespacedName{
-		Namespace: "kube-system",
-		Name:      "eni-config",
-	}, cm)
-	if err != nil {
-		return webhook.Errored(1, fmt.Errorf("error get terway configmap eni-config, %w", err))
-	}
-	eniConfStr, ok := cm.Data["eni_conf"]
-	if !ok {
-		return webhook.Errored(1, fmt.Errorf("error parse terway configmap eni-config, %w", err))
-	}
 
-	eniConf, err := types.MergeConfigAndUnmarshal(nil, []byte(eniConfStr))
+	vsws, sgs, err := configFromConfigMap(ctx, client)
 	if err != nil {
-		return webhook.Errored(1, fmt.Errorf("error parse terway configmap eni-config, %w", err))
+		return webhook.Errored(1, err)
 	}
 	if len(podNetworking.Spec.SecurityGroupIDs) == 0 {
-		podNetworking.Spec.SecurityGroupIDs = []string{eniConf.SecurityGroup}
+		podNetworking.Spec.SecurityGroupIDs = sgs
 	}
 	if len(podNetworking.Spec.VSwitchIDs) == 0 {
-		for _, ids := range eniConf.VSwitches {
-			podNetworking.Spec.VSwitchIDs = append(podNetworking.Spec.VSwitchIDs, ids...)
-		}
+		podNetworking.Spec.VSwitchIDs = vsws
 	}
 	podNetworkingPatched, err := json.Marshal(podNetworking)
 	if err != nil {
@@ -281,4 +296,34 @@ func getPreviousZone(client client.Client, pod *corev1.Pod) (string, error) {
 		return "", nil
 	}
 	return podENI.Spec.Zone, nil
+}
+
+func configFromConfigMap(ctx context.Context, client client.Client) ([]string, []string, error) {
+	cm := &corev1.ConfigMap{}
+	err := client.Get(ctx, k8stypes.NamespacedName{
+		Namespace: "kube-system",
+		Name:      "eni-config",
+	}, cm)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error get terway configmap eni-config, %w", err)
+	}
+	eniConfStr, ok := cm.Data["eni_conf"]
+	if !ok {
+		return nil, nil, fmt.Errorf("error parse terway configmap eni-config, %w", err)
+	}
+
+	eniConf, err := types.MergeConfigAndUnmarshal(nil, []byte(eniConfStr))
+	if err != nil {
+		return nil, nil, fmt.Errorf("error parse terway configmap eni-config, %w", err)
+	}
+
+	sgs := eniConf.GetSecurityGroups()
+	if len(sgs) > 5 {
+		return nil, nil, fmt.Errorf("security groups should not be more than 5, current %d", len(sgs))
+	}
+	var vsws []string
+	for _, ids := range eniConf.VSwitches {
+		vsws = append(vsws, ids...)
+	}
+	return vsws, sgs, nil
 }
