@@ -41,8 +41,6 @@ type Switch struct {
 type SwitchPool struct {
 	cache *cache.LRUExpireCache
 	ttl   time.Duration
-
-	ignoreZone bool
 }
 
 // NewSwitchPool create pool and set vSwitches to pool
@@ -56,7 +54,7 @@ func NewSwitchPool(size int, ttl string) (*SwitchPool, error) {
 }
 
 // GetOne get one vSwitch by zone and limit in ids
-func (s *SwitchPool) GetOne(ctx context.Context, client aliyun.VPCOps, zone string, ids []string) (*Switch, error) {
+func (s *SwitchPool) GetOne(ctx context.Context, client aliyun.VPCOps, zone string, ids []string, ignoreZone bool) (*Switch, error) {
 	var fallBackSwitches []*Switch
 	// lookup all vsw in cache and get one matched
 	for _, id := range ids {
@@ -67,7 +65,7 @@ func (s *SwitchPool) GetOne(ctx context.Context, client aliyun.VPCOps, zone stri
 		}
 
 		if vsw.Zone != zone {
-			if s.ignoreZone {
+			if ignoreZone {
 				fallBackSwitches = append(fallBackSwitches, vsw)
 			}
 			continue
