@@ -36,7 +36,11 @@ type Configure struct {
 }
 
 func (c *Configure) GetSecurityGroups() []string {
-	sgIDs := sets.NewString(c.SecurityGroup).Insert(c.SecurityGroups...)
+	sgIDs := sets.NewString()
+	if c.SecurityGroup != "" {
+		sgIDs.Insert(c.SecurityGroup)
+	}
+	sgIDs.Insert(c.SecurityGroups...)
 	return sgIDs.List()
 }
 

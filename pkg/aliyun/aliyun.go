@@ -518,6 +518,9 @@ func (e *Impl) CheckEniSecurityGroup(ctx context.Context, sg []string) error {
 
 	var errs []error
 	for _, eni := range eniList {
+		if eni.Type == string(ENITypePrimary) {
+			continue
+		}
 		eniSgSet := sets.NewString(eni.SecurityGroupIds.SecurityGroupId...)
 		if sgSet.Intersection(eniSgSet).Len() > 0 {
 			continue
