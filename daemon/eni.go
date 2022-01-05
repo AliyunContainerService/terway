@@ -38,11 +38,12 @@ const (
 )
 
 type eniResourceManager struct {
-	pool pool.ObjectPool
-	ecs  ipam.API
+	pool     pool.ObjectPool
+	ecs      ipam.API
+	trunkENI *types.ENI
 }
 
-func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocatedResources map[string]resourceManagerInitItem, ipFamily *types.IPFamily) (ResourceManager, error) {
+func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocatedResources map[string]resourceManagerInitItem, ipFamily *types.IPFamily, k8s Kubernetes) (ResourceManager, error) {
 	eniLog.Debugf("new ENI Resource Manager, pool config: %+v, allocated resources: %+v", poolConfig, allocatedResources)
 	factory, err := newENIFactory(poolConfig, ecs)
 	if err != nil {
@@ -70,6 +71,12 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 		poolConfig.MinPoolSize = poolConfig.MinENI
 	}
 
+	memberLimit := limit.MemberAdapterLimit
+	if poolConfig.ENICapPolicy == types.ENICapPolicyPreferTrunk {
+		memberLimit = limit.MaxMemberAdapterLimit
+	}
+	var trunkENI *types.ENI
+
 	poolCfg := pool.Config{
 		Name:     poolNameENI,
 		Type:     typeNameENI,
@@ -84,6 +91,25 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 				return fmt.Errorf("error get attach ENI on pool init, %w", err)
 			}
 
+			if factory.enableTrunk {
+				logger.DefaultLogger.Infof("lookup trunk eni")
+				for _, eni := range enis {
+					if eni.Trunk {
+						trunkENI = eni
+						logger.DefaultLogger.Infof("find trunk eni %s", eni.ID)
+						factory.trunkOnEni = eni.ID
+					}
+				}
+				if factory.trunkOnEni == "" && len(enis) < memberLimit {
+					trunkENIRes, err := factory.CreateWithIPCount(1, true)
+					if err != nil {
+						return errors.Wrapf(err, "error init trunk eni")
+					}
+					trunkENI, _ = trunkENIRes[0].(*types.ENI)
+					factory.trunkOnEni = trunkENI.ID
+					enis = append(enis, trunkENI)
+				}
+			}
 			for _, e := range enis {
 				if ipFamily.IPv6 {
 					_, ipv6, err := ecs.GetENIIPs(ctx, e.MAC)
@@ -102,20 +128,37 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 		},
 	}
 
-	//init deviceplugin for ENI
-	dp := deviceplugin.NewENIDevicePlugin(capacity, deviceplugin.ENITypeENI)
-	err = dp.Serve()
-	if err != nil {
-		return nil, errors.Wrapf(err, "error set deviceplugin on node")
-	}
-
 	p, err := pool.NewSimpleObjectPool(poolCfg)
 	if err != nil {
 		return nil, err
 	}
 	mgr := &eniResourceManager{
-		pool: p,
-		ecs:  ecs,
+		pool:     p,
+		ecs:      ecs,
+		trunkENI: trunkENI,
+	}
+
+	//init deviceplugin for ENI
+	realCap := 0
+	eniType := deviceplugin.ENITypeENI
+	if !poolConfig.EnableENITrunking {
+		realCap = capacity
+	}
+
+	// report only trunk is created
+	if poolConfig.EnableENITrunking && factory.trunkOnEni != "" {
+		eniType = deviceplugin.ENITypeMember
+		realCap = memberLimit
+		err = k8s.PatchTrunkInfo(factory.trunkOnEni)
+		if err != nil {
+			return nil, errors.Wrapf(err, "error patch trunk info on node")
+		}
+	}
+	logger.DefaultLogger.Infof("set deviceplugin cap %d", realCap)
+	dp := deviceplugin.NewENIDevicePlugin(realCap, eniType)
+	err = dp.Serve()
+	if err != nil {
+		return nil, errors.Wrapf(err, "error set deviceplugin on node")
 	}
 
 	return mgr, nil
@@ -181,6 +224,8 @@ func (ms MapSorter) SortInDescendingOrder() {
 
 type eniFactory struct {
 	name                   string
+	enableTrunk            bool
+	trunkOnEni             string
 	switches               []string
 	eniTags                map[string]string
 	securityGroups         []string
@@ -205,6 +250,7 @@ func newENIFactory(poolConfig *types.PoolConfig, ecs ipam.API) (*eniFactory, err
 		switches:               poolConfig.VSwitch,
 		eniTags:                poolConfig.ENITags,
 		securityGroups:         poolConfig.SecurityGroups,
+		enableTrunk:            poolConfig.EnableENITrunking,
 		instanceID:             poolConfig.InstanceID,
 		ecs:                    ecs,
 		vswitchIPCntMap:        make(map[string]int),
@@ -297,6 +343,9 @@ func (f *eniFactory) CreateWithIPCount(count int, trunk bool) ([]types.NetworkRe
 
 func (f *eniFactory) Dispose(resource types.NetworkResource) error {
 	eni := resource.(*types.ENI)
+	if f.enableTrunk && eni.Trunk {
+		return fmt.Errorf("trunk ENI %+v will not dispose", eni.ID)
+	}
 	return f.ecs.FreeENI(context.Background(), eni.ID, f.instanceID)
 }
 

@@ -305,7 +305,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	defer func() {
 		if err != nil {
 			l.Error(err, "error ,will roll back all created eni")
-			innerErr := m.deleteAllENI(podENI)
+			innerErr := m.deleteAllENI(ctx, podENI)
 			if innerErr != nil {
 				l.Error(innerErr, "error delete eni")
 			}
@@ -313,6 +313,8 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	}()
 
 	// 2.2 create eni
+	clusterID := controlplane.GetConfig().ClusterID
+
 	ipv6Count := 0
 	switch controlplane.GetConfig().IPStack {
 	case "ipv6", "dual":
@@ -321,9 +323,13 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	for _, alloc := range allocs {
 		var eni *ecs.CreateNetworkInterfaceResponse
 
-		clusterID := controlplane.GetConfig().ClusterID
+		ctx := common.WithCtx(ctx, alloc)
+		realClient, _, err := common.Became(ctx, m.aliyun)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("get client failed, %w", err)
+		}
 
-		eni, err = m.aliyun.CreateNetworkInterface(ctx, aliyun.ENITypeSecondary, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, 1, ipv6Count, map[string]string{
+		eni, err = realClient.CreateNetworkInterface(ctx, aliyun.ENITypeSecondary, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, 1, ipv6Count, map[string]string{
 			types.TagKeyClusterID:               clusterID,
 			types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
 			types.TagKubernetesPodName:          utils.TrimStr(pod.Name, 120),
@@ -349,6 +355,10 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		alloc.AllocationType = *allocType
 
 		podENI.Spec.Allocations = append(podENI.Spec.Allocations, *alloc)
+		err = m.PostENICreate(ctx, realClient, alloc)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
 	}
 
 	// 2.5 create cr
@@ -404,13 +414,17 @@ func (m *ReconcilePod) podDelete(ctx context.Context, namespacedName client.Obje
 
 }
 
-func (m *ReconcilePod) deleteAllENI(podENI *v1beta1.PodENI) error {
+func (m *ReconcilePod) deleteAllENI(ctx context.Context, podENI *v1beta1.PodENI) error {
 	for _, alloc := range podENI.Spec.Allocations {
 		if alloc.ENI.ID == "" {
 			continue
 		}
-
-		err := m.aliyun.DeleteNetworkInterface(context.Background(), alloc.ENI.ID)
+		ctx := common.WithCtx(context.Background(), &alloc)
+		realClient, _, err := common.Became(ctx, m.aliyun)
+		if err != nil {
+			return err
+		}
+		err = realClient.DeleteNetworkInterface(ctx, alloc.ENI.ID)
 		if err != nil {
 			return err
 		}

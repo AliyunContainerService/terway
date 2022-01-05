@@ -1,15 +1,17 @@
 //go:build privileged
 // +build privileged
 
-package driver
+package datapath
 
 import (
 	"net"
 	"runtime"
 	"testing"
 
+	types2 "github.com/AliyunContainerService/terway/plugin/driver/types"
+	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
-	"github.com/containernetworking/cni/pkg/types"
+
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/stretchr/testify/assert"
@@ -52,12 +54,7 @@ func TestDataPathExclusiveENI(t *testing.T) {
 	eni, err := netlink.LinkByName("eni")
 	assert.NoError(t, err)
 
-	_, svcCIDR, err := net.ParseCIDR(serviceCIDR.String())
-	assert.NoError(t, err)
-	_, svcCIDRV6, err := net.ParseCIDR(serviceCIDRIPv6.String())
-	assert.NoError(t, err)
-
-	cfg := &SetupConfig{
+	cfg := &types2.SetupConfig{
 		HostVETHName:    "hostveth",
 		ContainerIfName: "eth0",
 		ContainerIPNet: &terwayTypes.IPNetSet{
@@ -68,64 +65,57 @@ func TestDataPathExclusiveENI(t *testing.T) {
 			IPv4: ipv4GW,
 			IPv6: ipv6GW,
 		},
-		MTU:      1499,
-		ENIIndex: eni.Attrs().Index,
-		TrunkENI: false,
-		ExtraRoutes: []types.Route{
-			{
-				Dst: *svcCIDR,
-				GW:  LinkIP,
-			},
-			{
-				Dst: *svcCIDRV6,
-				GW:  LinkIPv6,
-			},
+		MTU:       1499,
+		ENIIndex:  eni.Attrs().Index,
+		StripVlan: false,
+		ServiceCIDR: &terwayTypes.IPNetSet{
+			IPv4: serviceCIDR,
+			IPv6: serviceCIDRIPv6,
 		},
 		HostIPSet: &terwayTypes.IPNetSet{
 			IPv4: eth0IPNet,
 			IPv6: eth0IPNetIPv6,
 		},
+		DefaultRoute: true,
 	}
 
-	vethDriver := NewVETHDriver(true, true)
-	vethCfg := *cfg
-	vethCfg.ContainerIfName = "veth1"
-	err = vethDriver.Setup(&vethCfg, containerNS)
-	assert.NoError(t, err)
-
-	d := NewRawNICDriver(true, true)
+	d := NewExclusiveENIDriver()
 	err = d.Setup(cfg, containerNS)
 	assert.NoError(t, err)
 
 	_ = containerNS.Do(func(netNS ns.NetNS) error {
 		// check eth0
 		containerLink, err := netlink.LinkByName(cfg.ContainerIfName)
-		assert.NoError(t, err)
-		assert.Equal(t, cfg.MTU, containerLink.Attrs().MTU)
-		assert.True(t, containerLink.Attrs().Flags&net.FlagUp != 0)
+		if assert.NoError(t, err) {
+			assert.Equal(t, cfg.MTU, containerLink.Attrs().MTU)
+			assert.True(t, containerLink.Attrs().Flags&net.FlagUp != 0)
 
-		ok, err := FindIP(containerLink, cfg.ContainerIPNet)
-		assert.NoError(t, err)
-		assert.True(t, ok)
+			ok, err := FindIP(containerLink, utils.NewIPNet(cfg.ContainerIPNet))
+			if assert.NoError(t, err) {
+				assert.True(t, ok, "expect ip %s", cfg.ContainerIPNet.String())
+			}
+		}
 
 		// check veth1
 		vethLink, err := netlink.LinkByName("veth1")
-		assert.NoError(t, err)
-		assert.Equal(t, cfg.MTU, vethLink.Attrs().MTU)
-		assert.True(t, vethLink.Attrs().Flags&net.FlagUp != 0)
-		assert.Equal(t, "veth", vethLink.Type())
+		if assert.NoError(t, err) {
+			assert.Equal(t, cfg.MTU, vethLink.Attrs().MTU)
+			assert.True(t, vethLink.Attrs().Flags&net.FlagUp != 0)
+			assert.Equal(t, "veth", vethLink.Type())
 
-		ok, err = FindIP(vethLink, cfg.ContainerIPNet)
-		assert.NoError(t, err)
-		assert.True(t, ok)
+			ok, err := FindIP(vethLink, utils.NewIPNet(cfg.ContainerIPNet))
+			assert.NoError(t, err)
+			assert.True(t, ok)
+		}
 
 		// default via gw dev eth0
 		routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{
 			Dst: nil,
 		}, netlink.RT_FILTER_DST)
-		assert.NoError(t, err)
-		assert.Equal(t, len(routes), 1)
-		assert.Equal(t, ipv4GW.String(), routes[0].Gw.String())
+		if assert.NoError(t, err) {
+			assert.Equal(t, len(routes), 1)
+			assert.Equal(t, ipv4GW.String(), routes[0].Gw.String())
+		}
 
 		// extra routes
 		return nil
@@ -145,8 +135,8 @@ func TestDataPathExclusiveENI(t *testing.T) {
 
 	// ip 169.254.1.1/32
 	ok, err = FindIP(hostVETHLink, &terwayTypes.IPNetSet{
-		IPv4: linkIPNet,
-		IPv6: linkIPNetv6,
+		IPv4: LinkIPNet,
+		IPv6: LinkIPNetv6,
 	})
 	assert.NoError(t, err)
 	assert.True(t, ok)
@@ -173,18 +163,7 @@ func TestDataPathExclusiveENI(t *testing.T) {
 	err = netlink.RuleAdd(dummyRule)
 	assert.NoError(t, err)
 	// tear down
-	err = vethDriver.Teardown(&TeardownCfg{
-		HostVETHName:    vethCfg.HostVETHName,
-		ContainerIfName: vethCfg.ContainerIfName,
-		ContainerIPNet:  nil,
-	}, containerNS)
-	assert.NoError(t, err)
-
-	err = d.Teardown(&TeardownCfg{
-		HostVETHName:    cfg.HostVETHName,
-		ContainerIfName: cfg.ContainerIfName,
-		ContainerIPNet:  nil,
-	}, containerNS)
+	err = utils.GenericTearDown(containerNS)
 	assert.NoError(t, err)
 
 	_, err = netlink.LinkByName(cfg.HostVETHName)

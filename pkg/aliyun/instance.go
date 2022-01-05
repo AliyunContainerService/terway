@@ -97,6 +97,9 @@ type Limits struct {
 
 	// MemberAdapterLimit is the number interfaces that type is member
 	MemberAdapterLimit int
+
+	// MaxMemberAdapterLimit is the limit to use member
+	MaxMemberAdapterLimit int
 }
 
 func (l *Limits) SupportIPv6() bool {
@@ -155,23 +158,27 @@ func UpdateFromAPI(client *ecs.Client, instanceType string) error {
 		ipv4PerAdapter := instanceTypeInfo.EniPrivateIpAddressQuantity
 		ipv6PerAdapter := instanceTypeInfo.EniIpv6AddressQuantity
 		memberAdapterLimit := instanceTypeInfo.EniTotalQuantity - instanceTypeInfo.EniQuantity
-
+		// exclude eth0 eth1
+		maxMemberAdapterLimit := instanceTypeInfo.EniTotalQuantity - 2
 		if !instanceTypeInfo.EniTrunkSupported {
 			memberAdapterLimit = 0
+			maxMemberAdapterLimit = 0
 		}
 
 		limits.m[instanceType] = Limits{
-			Adapters:           adapterLimit,
-			IPv4PerAdapter:     utils.Minimal(ipv4PerAdapter),
-			IPv6PerAdapter:     utils.Minimal(ipv6PerAdapter),
-			MemberAdapterLimit: utils.Minimal(memberAdapterLimit),
+			Adapters:              adapterLimit,
+			IPv4PerAdapter:        utils.Minimal(ipv4PerAdapter),
+			IPv6PerAdapter:        utils.Minimal(ipv6PerAdapter),
+			MemberAdapterLimit:    utils.Minimal(memberAdapterLimit),
+			MaxMemberAdapterLimit: utils.Minimal(maxMemberAdapterLimit),
 		}
 		logger.DefaultLogger.WithFields(map[string]interface{}{
-			"instance-type":   instanceType,
-			"adapters":        adapterLimit,
-			"ipv4":            ipv4PerAdapter,
-			"ipv6":            ipv6PerAdapter,
-			"member-adapters": memberAdapterLimit,
+			"instance-type":       instanceType,
+			"adapters":            adapterLimit,
+			"ipv4":                ipv4PerAdapter,
+			"ipv6":                ipv6PerAdapter,
+			"member-adapters":     memberAdapterLimit,
+			"max-member-adapters": maxMemberAdapterLimit,
 		}).Infof("instance limit")
 	}
 

@@ -567,6 +567,7 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI)
 	}()
 
 	for _, alloc := range podENI.Spec.Allocations {
+		ctx := common.WithCtx(ctx, &alloc)
 		err = m.aliyun.AttachNetworkInterface(ctx, alloc.ENI.ID, podENI.Status.InstanceID, podENI.Status.TrunkENIID)
 		if err != nil {
 			return err
@@ -574,8 +575,13 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI)
 
 		time.Sleep(aliyun.ENIOpBackoff.Duration)
 
+		var realClient *aliyun.OpenAPI
+		realClient, _, err = common.Became(ctx, m.aliyun)
+		if err != nil {
+			return err
+		}
 		var eni *ecs.NetworkInterfaceSet
-		eni, err = m.aliyun.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff, false)
+		eni, err = realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff, false)
 		if err != nil {
 			return err
 		}
@@ -603,13 +609,18 @@ func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.P
 		}
 	}()
 	for _, alloc := range podENI.Spec.Allocations {
+		ctx := common.WithCtx(ctx, &alloc)
 		err = m.aliyun.DetachNetworkInterface(ctx, alloc.ENI.ID, podENI.Status.InstanceID, podENI.Status.TrunkENIID)
 		if err != nil {
 			return err
 		}
 		time.Sleep(aliyun.ENIOpBackoff.Duration)
 
-		_, err = m.aliyun.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusAvailable, aliyun.ENIOpBackoff, true)
+		realClient, _, err := common.Became(ctx, m.aliyun)
+		if err != nil {
+			return err
+		}
+		_, err = realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusAvailable, aliyun.ENIOpBackoff, true)
 		if err == nil {
 			continue
 		}
@@ -635,8 +646,12 @@ func (m *ReconcilePodENI) deleteMemberENI(podENI *v1beta1.PodENI) (err error) {
 		if alloc.ENI.ID == "" {
 			continue
 		}
-
-		err = m.aliyun.DeleteNetworkInterface(context.Background(), alloc.ENI.ID)
+		ctx := common.WithCtx(context.Background(), &alloc)
+		realClient, _, err := common.Became(ctx, m.aliyun)
+		if err != nil {
+			return err
+		}
+		err = realClient.DeleteNetworkInterface(context.Background(), alloc.ENI.ID)
 		if err != nil {
 			return err
 		}

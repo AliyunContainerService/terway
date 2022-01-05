@@ -1,26 +1,25 @@
-package driver
+package utils
 
 import (
-	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
-	"syscall"
 	"time"
-
-	"github.com/containernetworking/plugins/pkg/ip"
-	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/pkg/errors"
-	k8sErr "k8s.io/apimachinery/pkg/util/errors"
 
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
+	"github.com/AliyunContainerService/terway/pkg/tc"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 
+	"github.com/containernetworking/plugins/pkg/ip"
+	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
+	k8sErr "k8s.io/apimachinery/pkg/util/errors"
 	k8snet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
@@ -46,6 +45,7 @@ func NewDefaultLogger() *logrus.Logger {
 		DisableQuote:     true,
 	}
 	logger.SetLevel(logrus.InfoLevel)
+
 	logger.AddHook(Hook)
 	return logger
 }
@@ -77,7 +77,12 @@ func (p *PodInfoHook) AddExtraInfos(e map[string]string) {
 
 func SetLogDebug() {
 	DefaultLogger.SetLevel(logrus.DebugLevel)
-	logrus.SetOutput(os.Stderr)
+
+	var file, err = os.OpenFile("/var/log/terway.cni.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		panic(err)
+	}
+	DefaultLogger.SetOutput(io.MultiWriter(file, os.Stderr))
 }
 
 // JSONStr json to str
@@ -122,7 +127,7 @@ func GrabFileLock(lockfilePath string) (*Locker, error) {
 		}
 		return true, nil
 	}); err != nil {
-		return nil, fmt.Errorf("failed to acquire new iptables lock: %v", err)
+		return nil, fmt.Errorf("failed to acquire cni lock: %v", err)
 	}
 	success = true
 	return l, nil
@@ -132,8 +137,8 @@ func grabFileLock(f *os.File) error {
 	return unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 }
 
-// add 1000 to link index to avoid route table conflict
-func getRouteTableID(linkIndex int) int {
+// GetRouteTableID add 1000 to link index to avoid route table conflict
+func GetRouteTableID(linkIndex int) int {
 	return 1000 + linkIndex
 }
 
@@ -291,160 +296,6 @@ func EnsureRoute(expected *netlink.Route) (bool, error) {
 	return true, RouteReplace(expected)
 }
 
-func EnsureDefaultRoute(link netlink.Link, gw *terwayTypes.IPSet, table int) (bool, error) {
-	var changed bool
-	if gw.IPv4 != nil {
-		c, err := EnsureRoute(&netlink.Route{
-			LinkIndex: link.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Dst:       defaultRoute,
-			Gw:        gw.IPv4,
-			Table:     table,
-			Flags:     int(netlink.FLAG_ONLINK),
-		})
-		if err != nil {
-			return changed, err
-		}
-		changed = changed || c
-	}
-	if gw.IPv6 != nil {
-		c, err := EnsureRoute(&netlink.Route{
-			LinkIndex: link.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Dst:       defaultRouteIPv6,
-			Gw:        gw.IPv6,
-			Table:     table,
-			Flags:     int(netlink.FLAG_ONLINK),
-		})
-		if err != nil {
-			return changed, err
-		}
-		changed = changed || c
-	}
-	return changed, nil
-}
-
-// EnsureHostToContainerRoute create host to container route
-func EnsureHostToContainerRoute(link netlink.Link, ipNetSet *terwayTypes.IPNetSet) (bool, error) {
-	var changed bool
-	linkIndex := link.Attrs().Index
-
-	exec := func(expect *netlink.Route) error {
-		routes, err := netlink.RouteListFiltered(NetlinkFamily(expect.Dst.IP), &netlink.Route{
-			Table: unix.RT_TABLE_MAIN,
-			Scope: netlink.SCOPE_LINK,
-		}, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_SCOPE)
-		if err != nil {
-			return fmt.Errorf("error list route: %v", err)
-		}
-
-		found := false
-		for _, r := range routes {
-			if r.Dst == nil {
-				continue
-			}
-			if !r.Dst.IP.Equal(expect.Dst.IP) {
-				continue
-			}
-			if r.LinkIndex != linkIndex || !bytes.Equal(r.Dst.Mask, expect.Dst.Mask) {
-				err := RouteDel(&r)
-				if err != nil {
-					if os.IsNotExist(err) {
-						continue
-					}
-				}
-				changed = true
-			}
-			found = true
-		}
-		if !found {
-			err := RouteReplace(expect)
-			if err != nil {
-				return err
-			}
-			changed = true
-		}
-		return nil
-	}
-	if ipNetSet.IPv4 != nil {
-		err := exec(&netlink.Route{
-			LinkIndex: linkIndex,
-			Scope:     netlink.SCOPE_LINK,
-			Dst:       NewIPNetWithMaxMask(ipNetSet.IPv4),
-		})
-		if err != nil {
-			return changed, err
-		}
-	}
-	if ipNetSet.IPv6 != nil {
-		err := exec(&netlink.Route{
-			LinkIndex: linkIndex,
-			Scope:     netlink.SCOPE_LINK,
-			Dst:       NewIPNetWithMaxMask(ipNetSet.IPv6),
-		})
-		if err != nil {
-			return changed, err
-		}
-	}
-	return changed, nil
-}
-
-func PodInfoKey(namespace, name string) string {
-	return fmt.Sprintf("%s/%s", namespace, name)
-}
-
-// SetupLink is a common setup for all links
-// 1. set link name
-// 2. set link up
-// 3. set link ip address
-func SetupLink(link netlink.Link, cfg *SetupConfig) error {
-	_, err := EnsureLinkName(link, cfg.ContainerIfName)
-	if err != nil {
-		return err
-	}
-	_, err = EnsureLinkUp(link)
-	if err != nil {
-		return fmt.Errorf("error set link %s up , %w", link.Attrs().Name, err)
-	}
-
-	_, err = EnsureAddrWithPrefix(link, cfg.ContainerIPNet, !cfg.TrunkENI)
-	return err
-}
-
-// AddNeigh add arp for link
-func AddNeigh(link netlink.Link, mac net.HardwareAddr, ip *terwayTypes.IPSet) error {
-	exec := func(ip net.IP) error {
-		family := syscall.AF_INET
-		if terwayIP.IPv6(ip) {
-			family = syscall.AF_INET6
-		}
-		err := NeighAdd(&netlink.Neigh{
-			LinkIndex:    link.Attrs().Index,
-			IP:           ip,
-			HardwareAddr: mac,
-			State:        netlink.NUD_PERMANENT,
-			Family:       family,
-		})
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	if ip.IPv4 != nil {
-		err := exec(ip.IPv4)
-		if err != nil {
-			return err
-		}
-	}
-	if ip.IPv6 != nil {
-		err := exec(ip.IPv6)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func NewIPNetWithMaxMask(ipNet *net.IPNet) *net.IPNet {
 	if ipNet.IP.To4() == nil {
 		return &net.IPNet{
@@ -458,20 +309,45 @@ func NewIPNetWithMaxMask(ipNet *net.IPNet) *net.IPNet {
 	}
 }
 
-func IPNetToMaxMask(ipNet *terwayTypes.IPNetSet) {
+func NewIPNet1(ipNet *terwayTypes.IPNetSet) []*netlink.Addr {
+	var addrs []*netlink.Addr
 	if ipNet.IPv4 != nil {
-		ipNet.IPv4 = NewIPNetWithMaxMask(ipNet.IPv4)
+		addrs = append(addrs, &netlink.Addr{IPNet: ipNet.IPv4})
 	}
 	if ipNet.IPv6 != nil {
-		ipNet.IPv6 = NewIPNetWithMaxMask(ipNet.IPv6)
+		addrs = append(addrs, &netlink.Addr{IPNet: ipNet.IPv6})
 	}
+	return addrs
+}
+
+func NewIPNetToMaxMask(ipNet *terwayTypes.IPNetSet) []*netlink.Addr {
+	var addrs []*netlink.Addr
+	if ipNet.IPv4 != nil {
+		addrs = append(addrs, &netlink.Addr{IPNet: NewIPNetWithMaxMask(ipNet.IPv4)})
+	}
+	if ipNet.IPv6 != nil {
+		addrs = append(addrs, &netlink.Addr{IPNet: NewIPNetWithMaxMask(ipNet.IPv6)})
+	}
+	return addrs
+}
+
+func NewIPNet(ipNet *terwayTypes.IPNetSet) *terwayTypes.IPNetSet {
+	ipNetSet := &terwayTypes.IPNetSet{}
+	if ipNet.IPv4 != nil {
+		ipNetSet.IPv4 = NewIPNetWithMaxMask(ipNet.IPv4)
+	}
+	if ipNet.IPv6 != nil {
+		ipNetSet.IPv6 = NewIPNetWithMaxMask(ipNet.IPv6)
+	}
+	return ipNetSet
 }
 
 // FindIPRule look up ip rules in config
 func FindIPRule(rule *netlink.Rule) ([]netlink.Rule, error) {
 	var filterMask uint64
 	family := netlink.FAMILY_V4
-	if rule.Src == nil && rule.Dst == nil {
+
+	if rule.Src == nil && rule.Dst == nil && rule.OifName == "" {
 		return nil, errors.New("both src and dst is nil")
 	}
 
@@ -483,109 +359,70 @@ func FindIPRule(rule *netlink.Rule) ([]netlink.Rule, error) {
 		filterMask = filterMask | netlink.RT_FILTER_DST
 		family = NetlinkFamily(rule.Dst.IP)
 	}
+	if rule.OifName != "" {
+		filterMask = filterMask | netlink.RT_FILTER_OIF
+		family = netlink.FAMILY_V4
+	}
 
+	if rule.Priority >= 0 {
+		filterMask = filterMask | netlink.RT_FILTER_PRIORITY
+	}
 	return netlink.RuleListFiltered(family, rule, filterMask)
 }
 
-func EnsureIPRule(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, tableID int) (bool, error) {
+func EnsureIPRule(expected *netlink.Rule) (bool, error) {
 	changed := false
 
-	exec := func(ipNet *net.IPNet, expected *netlink.Rule) error {
-		// 1. clean exist rules if needed
-		ruleList, err := FindIPRule(expected)
-		if err != nil {
-			return err
-		}
-		found := false
-		for _, rule := range ruleList {
-			del := false
-			if rule.Table != expected.Table {
-				del = true
-			}
-			if rule.Priority != expected.Priority {
-				del = true
-			}
-			if del {
-				changed = true
-				err = RuleDel(&rule)
-				if err != nil {
-					return err
-				}
-			} else {
-				found = true
-			}
-		}
-		if found {
-			return nil
-		}
-		changed = true
-		return RuleAdd(expected)
+	// 1. clean exist rules if needed
+	ruleList, err := FindIPRule(expected)
+	if err != nil {
+		return false, err
 	}
-
-	if ipNetSet.IPv4 != nil {
-		v4 := NewIPNetWithMaxMask(ipNetSet.IPv4)
-		// 2. add host to container rule
-		toContainerRule := netlink.NewRule()
-		toContainerRule.Dst = v4
-		toContainerRule.Table = mainRouteTable
-		toContainerRule.Priority = toContainerPriority
-
-		err := exec(v4, toContainerRule)
-		if err != nil {
-			return changed, err
+	found := false
+	for _, rule := range ruleList {
+		del := false
+		if rule.Table != expected.Table {
+			del = true
 		}
-
-		// 3. add from container rule
-		fromContainerRule := netlink.NewRule()
-		fromContainerRule.IifName = link.Attrs().Name
-		fromContainerRule.Src = v4
-		fromContainerRule.Table = tableID
-		fromContainerRule.Priority = fromContainerPriority
-
-		err = exec(v4, fromContainerRule)
-		if err != nil {
-			return changed, err
+		if rule.Priority != expected.Priority {
+			del = true
+		}
+		if rule.IifName != expected.IifName {
+			del = true
+		}
+		if del {
+			changed = true
+			err = RuleDel(&rule)
+			if err != nil {
+				return changed, err
+			}
+		} else {
+			found = true
 		}
 	}
-	if ipNetSet.IPv6 != nil {
-		v6 := NewIPNetWithMaxMask(ipNetSet.IPv6)
-
-		// 2. add host to container rule
-		toContainerRule := netlink.NewRule()
-		toContainerRule.Dst = v6
-		toContainerRule.Table = mainRouteTable
-		toContainerRule.Priority = toContainerPriority
-
-		err := exec(v6, toContainerRule)
-		if err != nil {
-			return changed, err
-		}
-
-		// 3. add from container rule
-		fromContainerRule := netlink.NewRule()
-		fromContainerRule.IifName = link.Attrs().Name
-		fromContainerRule.Src = v6
-		fromContainerRule.Table = tableID
-		fromContainerRule.Priority = fromContainerPriority
-
-		err = exec(v6, fromContainerRule)
-		if err != nil {
-			return changed, err
-		}
+	if found {
+		return changed, nil
 	}
-	return changed, nil
+	return true, RuleAdd(expected)
 }
 
-func EnableIPv6() error {
-	err := terwaySysctl.EnsureConf("/proc/sys/net/ipv6/conf/all/disable_ipv6", "0")
-	if err != nil {
-		return err
+func GenerateIPv6Sysctl(ifName string, disableRA, enableForward bool) map[string][]string {
+	result := map[string][]string{}
+	for _, name := range []string{"lo", "all", "default"} {
+		result[fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/disable_ipv6", name)] = []string{fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/disable_ipv6", name), "0"}
 	}
-	err = terwaySysctl.EnsureConf("/proc/sys/net/ipv6/conf/default/disable_ipv6", "0")
-	if err != nil {
-		return err
+
+	if ifName != "" {
+		result[fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/disable_ipv6", ifName)] = []string{fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/disable_ipv6", ifName), "0"}
+
+		if disableRA {
+			result[fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", ifName)] = []string{fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", ifName), "0"}
+		}
+		if enableForward {
+			result[fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/forwarding", ifName)] = []string{fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/forwarding", ifName), "1"}
+		}
 	}
-	return nil
+	return result
 }
 
 func GetHostIP(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
@@ -622,6 +459,30 @@ func GetHostIP(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
 		IPv4: nodeIPv4,
 		IPv6: nodeIPv6,
 	}, nil
+}
+
+func EnsureNeigh(neigh *netlink.Neigh) (bool, error) {
+	var neighs []netlink.Neigh
+	var err error
+	if terwayIP.IPv6(neigh.IP) {
+		neighs, err = netlink.NeighList(neigh.LinkIndex, netlink.FAMILY_V6)
+	} else {
+		neighs, err = netlink.NeighList(neigh.LinkIndex, netlink.FAMILY_V4)
+	}
+	if err != nil {
+		return false, err
+	}
+	found := false
+	for _, n := range neighs {
+		if n.IP.Equal(neigh.IP) && n.HardwareAddr.String() == neigh.HardwareAddr.String() {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return true, NeighSet(neigh)
+	}
+	return false, err
 }
 
 var ipv4NetConfig = [][]string{
@@ -662,48 +523,13 @@ func EnsureNetConfSet(ipv4, ipv6 bool) error {
 	return err
 }
 
-func EnsureNeighbor(link netlink.Link, hostIPSet *terwayTypes.IPNetSet) (bool, error) {
-	var changed bool
-	var err error
-
-	if hostIPSet.IPv4 != nil {
-		err = NeighSet(&netlink.Neigh{
-			IP:           hostIPSet.IPv4.IP,
-			Family:       netlink.FAMILY_V4,
-			LinkIndex:    link.Attrs().Index,
-			HardwareAddr: link.Attrs().HardwareAddr,
-			Type:         netlink.NDA_DST,
-			State:        netlink.NUD_PERMANENT,
-		})
-		if err != nil {
-			return false, fmt.Errorf("add host ipvlan interface %s mac %s to ARP table error, %w", hostIPSet.IPv4, link.Attrs().HardwareAddr, err)
-		}
-		changed = true
-	}
-	if hostIPSet.IPv6 != nil {
-		err = NeighSet(&netlink.Neigh{
-			IP:           hostIPSet.IPv6.IP,
-			Family:       netlink.FAMILY_V6,
-			LinkIndex:    link.Attrs().Index,
-			HardwareAddr: link.Attrs().HardwareAddr,
-			Type:         netlink.NDA_DST,
-			State:        netlink.NUD_PERMANENT,
-		})
-		if err != nil {
-			return false, fmt.Errorf("add host ipvlan interface %s mac %s to ARP table error, %w", hostIPSet.IPv4, link.Attrs().HardwareAddr, err)
-		}
-		changed = true
-	}
-	return changed, nil
-}
-
 func EnsureVlanUntagger(link netlink.Link) error {
 	if err := EnsureClsActQdsic(link); err != nil {
-		return errors.Wrapf(err, "error ensure cls act qdisc for %s vlan untag", link.Attrs().Name)
+		return fmt.Errorf("error ensure cls act qdisc for %s vlan untag, %w", link.Attrs().Name, err)
 	}
 	filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_INGRESS)
 	if err != nil {
-		return errors.Wrapf(err, "list ingress filter for %s error", link.Attrs().Name)
+		return fmt.Errorf("list ingress filter for %s error, %w", link.Attrs().Name, err)
 	}
 	for _, filter := range filters {
 		if u32, ok := filter.(*netlink.U32); ok {
@@ -743,7 +569,7 @@ func EnsureVlanUntagger(link netlink.Link) error {
 	}
 	err = netlink.FilterAdd(u32)
 	if err != nil {
-		return errors.Wrapf(err, "error add filter for vlan untag")
+		return fmt.Errorf("error add filter for vlan untag, %w", err)
 	}
 	return nil
 }
@@ -751,7 +577,7 @@ func EnsureVlanUntagger(link netlink.Link) error {
 func EnsureClsActQdsic(link netlink.Link) error {
 	qds, err := netlink.QdiscList(link)
 	if err != nil {
-		return errors.Wrapf(err, "list qdisc for dev %s error", link.Attrs().Name)
+		return fmt.Errorf("list qdisc for dev %s error, %w", link.Attrs().Name, err)
 	}
 	for _, q := range qds {
 		if q.Type() == "clsact" {
@@ -767,10 +593,17 @@ func EnsureClsActQdsic(link netlink.Link) error {
 		},
 		QdiscType: "clsact",
 	}
-	if err := netlink.QdiscReplace(qdisc); err != nil {
-		return errors.Wrapf(err, "replace clsact qdisc for dev %s error", link.Attrs().Name)
+	if err := QdiscReplace(qdisc); err != nil {
+		return fmt.Errorf("replace clsact qdisc for dev %s error, %w", link.Attrs().Name, err)
 	}
 	return nil
+}
+
+func SetupTC(link netlink.Link, bandwidthInBytes uint64) error {
+	rule := &tc.TrafficShapingRule{
+		Rate: bandwidthInBytes,
+	}
+	return tc.SetRule(link, rule)
 }
 
 // GenericTearDown target to clean all related resource as much as possible
@@ -786,6 +619,9 @@ func GenericTearDown(netNS ns.NetNS) error {
 			return fmt.Errorf("error get link list from netlink, %w", err)
 		}
 		for _, l := range linkList {
+			if l.Attrs().Name == "lo" {
+				continue
+			}
 			_ = LinkSetDown(l)
 			switch l.(type) {
 			case *netlink.IPVlan, *netlink.Vlan, *netlink.Veth, *netlink.Ifb, *netlink.Dummy:

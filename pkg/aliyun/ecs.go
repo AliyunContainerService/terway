@@ -19,10 +19,29 @@ import (
 const maxSinglePageSize = 100
 
 type OpenAPI struct {
-	ClientSet *ClientMgr
+	ClientSet Client
 
 	ReadOnlyRateLimiter flowcontrol.RateLimiter
 	MutatingRateLimiter flowcontrol.RateLimiter
+}
+
+func New(c Client, readOnly, mutating flowcontrol.RateLimiter) (*OpenAPI, error) {
+	return &OpenAPI{
+		ClientSet:           c,
+		ReadOnlyRateLimiter: readOnly,
+		MutatingRateLimiter: mutating,
+	}, nil
+}
+
+func NewClientSet(ak, sk, regionID, credentialPath, secretNamespace, secretName string) (Client, error) {
+	if regionID == "" {
+		return nil, fmt.Errorf("regionID unset")
+	}
+	clientSet, err := NewClientMgr(ak, sk, credentialPath, regionID, secretNamespace, secretName)
+	if err != nil {
+		return nil, fmt.Errorf("error get clientset, %w", err)
+	}
+	return clientSet, nil
 }
 
 func NewAliyun(ak, sk, regionID, credentialPath, secretNamespace, secretName string) (*OpenAPI, error) {

@@ -49,10 +49,10 @@ type Config struct {
 	EnableTrunk *bool  `json:"enableTrunk,omitempty"`
 	IPStack     string `json:"ipStack,omitempty" validate:"oneof=ipv4 ipv6 dual" mod:"default=ipv4"`
 
-	ReadOnlyQPS   int `json:"readOnlyQPS" validate:"gt=0,lte=10000" mod:"default=8"`
-	ReadOnlyBurst int `json:"readOnlyBurst" validate:"gt=0,lte=10000" mod:"default=10"`
-	MutatingQPS   int `json:"mutatingQPS" validate:"gt=0,lte=10000" mod:"default=4"`
-	MutatingBurst int `json:"mutatingBurst" validate:"gt=0,lte=10000" mod:"default=5"`
+	ReadOnlyQPS   float32 `json:"readOnlyQPS" validate:"gt=0,lte=10000" mod:"default=8"`
+	ReadOnlyBurst int     `json:"readOnlyBurst" validate:"gt=0,lte=10000" mod:"default=10"`
+	MutatingQPS   float32 `json:"mutatingQPS" validate:"gt=0,lte=10000" mod:"default=4"`
+	MutatingBurst int     `json:"mutatingBurst" validate:"gt=0,lte=10000" mod:"default=5"`
 
 	VSwitchPoolSize int    `json:"vSwitchPoolSize" validate:"gt=0" mod:"default=1000"`
 	VSwitchCacheTTL string `json:"vSwitchCacheTTL" mod:"default=20m0s"`
