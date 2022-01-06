@@ -16,6 +16,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/ipam"
 	"github.com/AliyunContainerService/terway/pkg/link"
@@ -1292,6 +1293,8 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	if err != nil {
 		return nil, fmt.Errorf("failed parse config: %v", err)
 	}
+
+	backoff.OverrideBackoff(config.BackoffOverride)
 
 	if len(dynamicCfg) == 0 {
 		serviceLog.Infof("got config: %+v from: %+v", config, configFilePath)

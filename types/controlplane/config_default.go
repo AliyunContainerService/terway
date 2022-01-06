@@ -21,6 +21,8 @@ package controlplane
 
 import (
 	"github.com/AliyunContainerService/terway/types/secret"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 type Config struct {
@@ -58,6 +60,8 @@ type Config struct {
 	VSwitchCacheTTL string `json:"vSwitchCacheTTL" mod:"default=20m0s"`
 
 	CustomStatefulWorkloadKinds []string `json:"customStatefulWorkloadKinds"`
+
+	BackoffOverride map[string]wait.Backoff `json:"backoffOverride,omitempty"`
 
 	Credential
 }

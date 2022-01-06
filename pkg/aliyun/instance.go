@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/utils"
@@ -134,7 +135,7 @@ func UpdateFromAPI(client *ecs.Client, instanceType string) error {
 	}
 	var innerErr error
 	var resp *ecs.DescribeInstanceTypesResponse
-	err := wait.ExponentialBackoff(ENIOpBackoff,
+	err := wait.ExponentialBackoff(backoff.Backoff(backoff.DefaultKey),
 		func() (done bool, err error) {
 			start := time.Now()
 			resp, innerErr = client.DescribeInstanceTypes(req)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/ipam"
 	"github.com/AliyunContainerService/terway/pkg/logger"
@@ -87,7 +88,7 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 	}()
 
 	var innerErr error
-	err = wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
+	err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.WaitENIStatus), func() (bool, error) {
 		innerErr = e.AttachNetworkInterface(ctx, resp.NetworkInterfaceId, instanceID, "")
 		if innerErr != nil {
 			return false, nil
@@ -105,8 +106,8 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 
 	start := time.Now()
 	// bind status is async api, sleep for first bind status inspect
-	time.Sleep(eniStateBackoff.Duration)
-	eniStatus, err := e.WaitForNetworkInterface(ctx, resp.NetworkInterfaceId, ENIStatusInUse, eniStateBackoff, false)
+	time.Sleep(backoff.Backoff(backoff.WaitENIStatus).Duration)
+	eniStatus, err := e.WaitForNetworkInterface(ctx, resp.NetworkInterfaceId, ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
 	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceBind/"+string(ENIStatusInUse), fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 	if err != nil {
@@ -115,8 +116,7 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 
 	var eni *types.ENI
 	// backoff get eni config
-	err = wait.ExponentialBackoffWithContext(ctx,
-		eniStateBackoff,
+	err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.WaitENIStatus),
 		func() (done bool, err error) {
 			l, ok := GetLimit(GetInstanceMeta().InstanceType)
 			if !ok {
@@ -147,8 +147,7 @@ func (e *Impl) FreeENI(ctx context.Context, eniID, instanceID string) error {
 
 func (e *Impl) destroyInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error {
 	var innerErr error
-	err := wait.ExponentialBackoffWithContext(ctx,
-		eniReleaseBackoff,
+	err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENIRelease),
 		func() (done bool, err error) {
 			innerErr = e.DetachNetworkInterface(ctx, eniID, instanceID, trunkENIID)
 			if innerErr != nil {
@@ -163,11 +162,10 @@ func (e *Impl) destroyInterface(ctx context.Context, eniID, instanceID, trunkENI
 			tracing.DisposeResourceFailed, fmtErr)
 	}
 
-	time.Sleep(eniStateBackoff.Duration)
+	time.Sleep(backoff.Backoff(backoff.WaitENIStatus).Duration)
 
 	// backoff delete network interface
-	err = wait.ExponentialBackoffWithContext(ctx,
-		eniReleaseBackoff,
+	err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENIOps),
 		func() (done bool, err error) {
 			innerErr = e.DeleteNetworkInterface(context.Background(), eniID)
 			if innerErr != nil {
@@ -272,7 +270,7 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 
 	if e.ipFamily.IPv4 {
 		var innerErr error
-		err = wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
+		err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENIOps), func() (bool, error) {
 			ipv4s, innerErr = e.AssignPrivateIPAddress(ctx, eniID, count)
 			if innerErr != nil {
 				if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
@@ -291,8 +289,7 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			v4Err = wait.ExponentialBackoffWithContext(ctx,
-				MetadataAssignPrivateIPBackoff,
+			v4Err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.MetaAssignPrivateIP),
 				func() (done bool, err error) {
 					remoteIPs, err := e.metadata.GetENIPrivateAddressesByMAC(mac)
 					if err != nil {
@@ -309,7 +306,7 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 
 	if e.ipFamily.IPv6 {
 		var innerErr error
-		err = wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
+		err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENIOps), func() (bool, error) {
 			ipv6s, innerErr = e.AssignIpv6Addresses(ctx, eniID, count)
 			if innerErr != nil {
 				if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
@@ -328,8 +325,7 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			v6Err = wait.ExponentialBackoffWithContext(ctx,
-				MetadataAssignPrivateIPBackoff,
+			v6Err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.MetaAssignPrivateIP),
 				func() (done bool, err error) {
 					remoteIPs, err := e.metadata.GetENIPrivateIPv6AddressesByMAC(mac)
 					if err != nil {
@@ -365,7 +361,7 @@ func (e *Impl) unAssignIPsForENIUnSafe(ctx context.Context, eniID, mac string, i
 	if len(ipv4s) > 0 {
 		var innerErr error
 
-		err := wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
+		err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENIOps), func() (bool, error) {
 			innerErr = e.UnAssignPrivateIPAddresses(ctx, eniID, ipv4s)
 			if innerErr != nil {
 				return false, nil
@@ -380,7 +376,7 @@ func (e *Impl) unAssignIPsForENIUnSafe(ctx context.Context, eniID, mac string, i
 	if len(ipv6s) > 0 {
 		var innerErr error
 
-		err := wait.ExponentialBackoffWithContext(ctx, ENIOpBackoff, func() (bool, error) {
+		err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENIOps), func() (bool, error) {
 			innerErr = e.UnAssignIpv6Addresses(ctx, eniID, ipv6s)
 			if innerErr != nil {
 				return false, nil
@@ -402,12 +398,11 @@ func (e *Impl) unAssignIPsForENIUnSafe(ctx context.Context, eniID, mac string, i
 	start := time.Now()
 
 	// unassignPrivateIpAddresses is async api, sleep for first ip addr inspect
-	time.Sleep(MetadataUnAssignPrivateIPBackoff.Duration)
+	time.Sleep(backoff.Backoff(backoff.MetaUnAssignPrivateIP).Duration)
 	// backoff get interface addresses
 	var innerErr error
 
-	err := wait.ExponentialBackoffWithContext(ctx,
-		MetadataUnAssignPrivateIPBackoff,
+	err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.MetaUnAssignPrivateIP),
 		func() (done bool, err error) {
 			if len(ipv4s) > 0 {
 				remoteIPs, err := e.metadata.GetENIPrivateAddressesByMAC(mac)

@@ -26,6 +26,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
@@ -589,14 +590,14 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI)
 			if err != nil {
 				return err
 			}
-			time.Sleep(aliyun.ENIOpBackoff.Duration)
+			time.Sleep(backoff.Backoff(backoff.WaitENIStatus).Duration)
 
 			realClient, _, err := common.Became(ctx, m.aliyun)
 			if err != nil {
 				return err
 			}
 
-			eni, err := realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff, false)
+			eni, err := realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
 			if err != nil {
 				return err
 			}
@@ -634,13 +635,13 @@ func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.P
 		if err != nil {
 			return err
 		}
-		time.Sleep(aliyun.ENIOpBackoff.Duration)
+		time.Sleep(backoff.Backoff(backoff.WaitENIStatus).Duration)
 
 		realClient, _, err := common.Became(ctx, m.aliyun)
 		if err != nil {
 			return err
 		}
-		_, err = realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusAvailable, aliyun.ENIOpBackoff, true)
+		_, err = realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
 		if err == nil {
 			continue
 		}
