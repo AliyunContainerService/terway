@@ -31,7 +31,7 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -227,7 +227,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 			var ids []string
 			for _, alloc := range podENI.Spec.Allocations {
 				ids = append(ids, alloc.ENI.ID)
-				l.WithValues("eni", alloc.ENI.ID).Info("create")
+				l.WithValues("eni", alloc.ENI.ID).Info("created")
 			}
 			m.record.Eventf(podENI, corev1.EventTypeNormal, types.EventCreateENISucceed, "create enis %s", strings.Join(ids, ","))
 		}
@@ -300,7 +300,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		}
 	}
 	if allocType == nil {
-		return reconcile.Result{}, fmt.Errorf("IPType is nil")
+		return reconcile.Result{}, fmt.Errorf("allocType is nil")
 	}
 	defer func() {
 		if err != nil {
@@ -320,45 +320,61 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	case "ipv6", "dual":
 		ipv6Count = 1
 	}
-	for _, alloc := range allocs {
-		var eni *ecs.CreateNetworkInterfaceResponse
 
-		ctx := common.WithCtx(ctx, alloc)
-		realClient, _, err := common.Became(ctx, m.aliyun)
-		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("get client failed, %w", err)
+	ch := make(chan *v1beta1.Allocation)
+	done := make(chan struct{})
+	go func() {
+		for alloc := range ch {
+			podENI.Spec.Allocations = append(podENI.Spec.Allocations, *alloc)
 		}
+		done <- struct{}{}
+	}()
 
-		eni, err = realClient.CreateNetworkInterface(ctx, aliyun.ENITypeSecondary, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, 1, ipv6Count, map[string]string{
-			types.TagKeyClusterID:               clusterID,
-			types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
-			types.TagKubernetesPodName:          utils.TrimStr(pod.Name, 120),
-			types.TagKubernetesPodNamespace:     utils.TrimStr(pod.Namespace, 120),
+	g, _ := errgroup.WithContext(context.Background())
+	for i := range allocs {
+		ii := i
+		g.Go(func() error {
+			alloc := allocs[ii]
+			ctx := common.WithCtx(ctx, alloc)
+			realClient, _, err := common.Became(ctx, m.aliyun)
+			if err != nil {
+				return fmt.Errorf("get client failed, %w", err)
+			}
+
+			eni, err := realClient.CreateNetworkInterface(ctx, aliyun.ENITypeSecondary, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, 1, ipv6Count, map[string]string{
+				types.TagKeyClusterID:               clusterID,
+				types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
+				types.TagKubernetesPodName:          utils.TrimStr(pod.Name, 120),
+				types.TagKubernetesPodNamespace:     utils.TrimStr(pod.Namespace, 120),
+			})
+			if err != nil {
+				return fmt.Errorf("create eni with openAPI err, %w", err)
+			}
+
+			v6 := ""
+			if len(eni.Ipv6Sets.Ipv6Set) > 0 {
+				v6 = eni.Ipv6Sets.Ipv6Set[0].Ipv6Address
+			}
+			alloc.ENI = v1beta1.ENI{
+				ID:               eni.NetworkInterfaceId,
+				MAC:              eni.MacAddress,
+				Zone:             eni.ZoneId,
+				VSwitchID:        eni.VSwitchId,
+				SecurityGroupIDs: eni.SecurityGroupIds.SecurityGroupId,
+			}
+			alloc.IPv4 = eni.PrivateIpAddress
+			alloc.IPv6 = v6
+			alloc.AllocationType = *allocType
+
+			ch <- alloc
+			return m.PostENICreate(ctx, realClient, alloc)
 		})
-		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("create eni with openAPI err, %w", err)
-		}
-
-		v6 := ""
-		if len(eni.Ipv6Sets.Ipv6Set) > 0 {
-			v6 = eni.Ipv6Sets.Ipv6Set[0].Ipv6Address
-		}
-		alloc.ENI = v1beta1.ENI{
-			ID:               eni.NetworkInterfaceId,
-			MAC:              eni.MacAddress,
-			Zone:             eni.ZoneId,
-			VSwitchID:        eni.VSwitchId,
-			SecurityGroupIDs: eni.SecurityGroupIds.SecurityGroupId,
-		}
-		alloc.IPv4 = eni.PrivateIpAddress
-		alloc.IPv6 = v6
-		alloc.AllocationType = *allocType
-
-		podENI.Spec.Allocations = append(podENI.Spec.Allocations, *alloc)
-		err = m.PostENICreate(ctx, realClient, alloc)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
+	}
+	err = g.Wait()
+	close(ch)
+	<-done
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("error batch create eni,%w", err)
 	}
 
 	// 2.5 create cr
