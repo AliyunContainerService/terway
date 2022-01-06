@@ -26,6 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	apiTypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -237,7 +238,8 @@ func newK8S(master, kubeconfig string, daemonMode string) (Kubernetes, error) {
 		conns:  make(map[*closableConn]struct{}),
 	}
 	k8sRestConfig.Dial = t.DialContext
-
+	k8sRestConfig.AcceptContentTypes = strings.Join([]string{runtime.ContentTypeProtobuf, runtime.ContentTypeJSON}, ",")
+	k8sRestConfig.ContentType = runtime.ContentTypeProtobuf
 	client, err := kubernetes.NewForConfig(k8sRestConfig)
 	if err != nil {
 		return nil, err
