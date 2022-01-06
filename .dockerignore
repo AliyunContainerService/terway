@@ -1,0 +1,35 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.log
+
+# Directories
+## Binaries of build service
+sbin
+.cache
+## Cache of docker build
+.docker
+## Editor and IDE paraphernalia
+.idea
+## Workspace of Terraform
+.terraform
+
+
+# Files
+*.swp
+*.swo
+*~
+.vim*
+.bash*
+## Mac storage information
+.DS_Store
+## Lock file
+*.lock
+## Terraform artifacts
+*.lock.hcl
+*.tfstate
+*.tfplan
+*.auto.tfvars

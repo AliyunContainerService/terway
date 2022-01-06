@@ -35,6 +35,7 @@ const (
 	zoneIDPath             = "zone-id"
 	vswitchIDPath          = "vswitch-id"
 	vpcIDPath              = "vpc-id"
+	vpcCIDRPath            = "vpc-cidr-block"
 )
 
 func getValue(url string) (string, error) {
@@ -135,6 +136,11 @@ func GetLocalVswitch() (string, error) {
 // GetLocalVPC get vpc id of this node
 func GetLocalVPC() (string, error) {
 	return getValue(vpcIDPath)
+}
+
+// GetLocalVPCCIDR get vpc cidr of this node
+func GetLocalVPCCIDR() (string, error) {
+	return getValue(vpcCIDRPath)
 }
 
 // GetENIID by mac
