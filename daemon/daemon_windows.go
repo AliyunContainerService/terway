@@ -39,6 +39,24 @@ func preStartResourceManager(daemonMode string, k8s Kubernetes) error {
 		if err != nil {
 			return errors.Wrapf(err, "error adding network: %s", nw.Format(apis.HNS))
 		}
+	case daemonModeENIOnly:
+		// NB(thxCode): create a fake network to allow service connection
+		var assistantIface, err = iface.GetInterfaceByMAC(primaryMac, true)
+		if err != nil {
+			return errors.Wrap(err, "error getting assistant interface")
+		}
+		var assistantNwSubnet = ip.FromIPNet(k8s.GetServiceCIDR().IPv4).Next().ToIPNet()
+		var assistantNw = &apis.Network{
+			Name:        "cb0",
+			AdapterName: assistantIface.Alias,
+			AdapterMAC:  assistantIface.MacAddress,
+			Subnet:      *assistantNwSubnet,
+			Gateway:     apis.GetDefaultNetworkGateway(assistantNwSubnet),
+		}
+		err = apis.AddBridgeHNSNetwork(ctx, assistantNw)
+		if err != nil {
+			return errors.Wrapf(err, "error adding assistant network: %s", assistantNw.Format(apis.HNS))
+		}
 	}
 
 	return nil

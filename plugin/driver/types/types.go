@@ -106,6 +106,10 @@ type SetupConfig struct {
 	Egress  uint64
 
 	RuntimeConfig cni.RuntimeConfig
+
+	// for windows
+	AssistantContainerIPNet *terwayTypes.IPNetSet
+	AssistantGatewayIP      *terwayTypes.IPSet
 }
 
 type TeardownCfg struct {

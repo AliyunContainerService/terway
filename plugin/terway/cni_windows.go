@@ -219,8 +219,52 @@ func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 			err = fmt.Errorf("not implement in policy route datapath")
 			return
 		case types.ExclusiveENI:
-			err = fmt.Errorf("not implement in exclusive eni datapath")
-			return
+			utils.Hook.AddExtraInfo("dp", "exclusiveENI")
+
+			if setupCfg.ContainerIfName == args.IfName {
+				containerIPNet = setupCfg.ContainerIPNet
+				gatewayIPSet = setupCfg.GatewayIP
+			}
+
+			// NB(thxCode): create a fake network to allow service connection
+			var assistantNwSubnet = ip.FromIPNet(setupCfg.ServiceCIDR.IPv4).Next().ToIPNet()
+			var r cniTypes.Result
+			r, err = ipam.ExecAdd(delegateIpam, []byte(fmt.Sprintf(delegateConf, assistantNwSubnet)))
+			if err != nil {
+				err = fmt.Errorf("error allocate assistant ip from delegate ipam %v: %v", delegateIpam, err)
+				return
+			}
+			var ipamResult *current.Result
+			ipamResult, err = current.NewResultFromResult(r)
+			if err != nil {
+				err = fmt.Errorf("error get result from delegate ipam result %v: %v", delegateIpam, err)
+				return
+			}
+
+			err = func() (berr error) {
+				defer func() {
+					if berr != nil {
+						_ = ipam.ExecDel(delegateIpam, []byte(fmt.Sprintf(delegateConf, assistantNwSubnet)))
+					}
+				}()
+				if len(ipamResult.IPs) != 1 {
+					return fmt.Errorf("error get result from delegate ipam result %v: ipam result is not one ip", delegateIpam)
+				}
+				podIPAddr := ipamResult.IPs[0].Address
+				gateway := ipamResult.IPs[0].Gateway
+
+				setupCfg.AssistantContainerIPNet = &terwayTypes.IPNetSet{
+					IPv4: &podIPAddr,
+				}
+				setupCfg.AssistantGatewayIP = &terwayTypes.IPSet{
+					IPv4: gateway,
+				}
+
+				return datapath.NewExclusiveENIDriver().Setup(ctx, setupCfg, args.ContainerID, args.Netns)
+			}()
+			if err != nil {
+				return
+			}
 		case types.Vlan:
 			err = fmt.Errorf("not implement in vlan datapath")
 		default:
@@ -287,7 +331,18 @@ func doCmdDel(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 		case types.PolicyRoute:
 			return fmt.Errorf("not implement in policy route datapath")
 		case types.ExclusiveENI:
-			return fmt.Errorf("not implement in exclusive eni datapath")
+			utils.Hook.AddExtraInfo("dp", "exclusiveENI")
+
+			err = datapath.NewExclusiveENIDriver().Teardown(ctx, teardownCfg, args.ContainerID, args.Netns)
+			if err != nil {
+				return err
+			}
+
+			var assistantNwSubnet = ip.FromIPNet(teardownCfg.ServiceCIDR.IPv4).Next().ToIPNet()
+			err = ipam.ExecDel(delegateIpam, []byte(fmt.Sprintf(delegateConf, assistantNwSubnet)))
+			if err != nil {
+				return fmt.Errorf("teardown assistant network ipam for pod: %s-%s, %w", string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME), err)
+			}
 		case types.Vlan:
 			return fmt.Errorf("not implement in vlan datapath")
 		default:
@@ -359,7 +414,12 @@ func doCmdCheck(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBack
 		case types.PolicyRoute:
 			return fmt.Errorf("not implement in policy route datapath")
 		case types.ExclusiveENI:
-			return fmt.Errorf("not implement in exclusive eni datapath")
+			utils.Hook.AddExtraInfo("dp", "exclusiveENI")
+
+			err = datapath.NewExclusiveENIDriver().Check(ctx, checkCfg, args.ContainerID, args.Netns)
+			if err != nil {
+				return err
+			}
 		case types.Vlan:
 			return fmt.Errorf("not implement in vlan datapath")
 		default:
