@@ -105,7 +105,7 @@ spec:
     namespaceSelector:
       matchLabels:
         foo: bar
-  vSwitchIDs:
+  vSwitchOptions:
     - vsw-aaa
   securityGroupIDs:
     - sg-aaa
@@ -122,12 +122,12 @@ spec:
 - selector: 用于配置标签选择器，同时配置 podSelector、namespaceSelector 时，将全部生效
   - podSelector: 用来匹配 pod 的 labels
   - namespaceSelector: 用来匹配 namespace 的 labels
-- vSwitchIDs: 用于配置 Pod 使用的 vSwitch。多个vSwitchID 之间为或关系。Pod 仅能使用一个 vSwitch ，terway 将根据配置顺序、vSwitch region 选择一个 vSwitch
+- vSwitchOptions: 用于配置 Pod 使用的 vSwitch。多个vSwitchID 之间为或关系。Pod 仅能使用一个 vSwitch ，terway 将根据配置顺序、vSwitch region 选择一个 vSwitch
 - securityGroupIDs: 可配置多个安全组 ID，配置多个安全组时将同时生效。安全组数量小于等于 5个
 
 > 请确保 Pod 可以被唯一的 PodNetworking 配置匹配，避免歧义
 >
-> 我们强烈建议用户主动配置 vSwitchIDs、securityGroupIDs 字段，如果不配置，则使用 kube-system/eni-config 中的默认值
+> 我们强烈建议用户主动配置 vSwitchOptions、securityGroupIDs 字段，如果不配置，则使用 kube-system/eni-config 中的默认值
 
 创建PodNetworking 后，controller 会对 PodNetworking 进行同步，当同步完成 PodNetworking 中  Status 会标记状态 `Ready`
 
@@ -193,7 +193,7 @@ spec:
       matchLabels:
         kind: front
         app: nginx
-  vSwitchIDs:
+  vSwitchOptions:
     - vsw-bp1s5grzef87ikb5zz1px
     - vsw-bp1sx0zhxd6bw6vpt0hbl
   securityGroupIDs:

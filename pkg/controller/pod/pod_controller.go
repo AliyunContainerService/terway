@@ -261,7 +261,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("error get podNetworking %s, %w", podNetwokingName, err)
 		}
-		vsw, err := m.swPool.GetOne(ctx, m.aliyun, nodeInfo.Zone, podNetworking.Spec.VSwitchIDs, false)
+		vsw, err := m.swPool.GetOne(ctx, m.aliyun, nodeInfo.Zone, podNetworking.Spec.VSwitchOptions, false)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.Zone, err)
 		}

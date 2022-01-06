@@ -157,7 +157,7 @@ spec:
                         type: object
                     type: object
                 type: object
-              vSwitchIDs:
+              vSwitchOptions:
                 items:
                   type: string
                 type: array

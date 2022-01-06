@@ -248,7 +248,7 @@ func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, cli
 	l := log.WithName(podNetworking.Name)
 	l.Info("checking podNetworking")
 
-	if len(podNetworking.Spec.SecurityGroupIDs) > 0 && len(podNetworking.Spec.VSwitchIDs) > 0 {
+	if len(podNetworking.Spec.SecurityGroupIDs) > 0 && len(podNetworking.Spec.VSwitchOptions) > 0 {
 		return webhook.Allowed("podNetworking all set")
 	}
 
@@ -259,8 +259,8 @@ func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, cli
 	if len(podNetworking.Spec.SecurityGroupIDs) == 0 {
 		podNetworking.Spec.SecurityGroupIDs = sgs
 	}
-	if len(podNetworking.Spec.VSwitchIDs) == 0 {
-		podNetworking.Spec.VSwitchIDs = vsws
+	if len(podNetworking.Spec.VSwitchOptions) == 0 {
+		podNetworking.Spec.VSwitchOptions = vsws
 	}
 	podNetworkingPatched, err := json.Marshal(podNetworking)
 	if err != nil {
