@@ -5,10 +5,9 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-	_ "net/http/pprof" //import pprof for diagnose
+	_ "net/http/pprof" // import pprof for diagnose
 	"os"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -45,7 +44,7 @@ func stackTriger() {
 		}
 	}(sigchain)
 
-	signal.Notify(sigchain, syscall.SIGUSR1)
+	signal.Notify(sigchain, stackTriggerSignals...)
 }
 
 // Run terway daemon
@@ -61,8 +60,8 @@ func Run(pidFilePath, socketFilePath, debugSocketListen, configFilePath, kubecon
 			return fmt.Errorf("error writing pidfile %q: path not absolute", pidFilePath)
 		}
 
-		if _, err := os.Stat(path.Dir(pidFilePath)); err != nil && os.IsNotExist(err) {
-			if err = os.MkdirAll(path.Dir(pidFilePath), 0666); err != nil {
+		if _, err := os.Stat(filepath.Dir(pidFilePath)); err != nil && os.IsNotExist(err) {
+			if err = os.MkdirAll(filepath.Dir(pidFilePath), 0666); err != nil {
 				return fmt.Errorf("error create pid file: %+v", err)
 			}
 		}
@@ -78,8 +77,8 @@ func Run(pidFilePath, socketFilePath, debugSocketListen, configFilePath, kubecon
 	if err := syscall.Unlink(socketFilePath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	mask := syscall.Umask(0777)
-	defer syscall.Umask(mask)
+	mask := syscallUmask(0777)
+	defer syscallUmask(mask)
 
 	l, err := net.Listen("unix", socketFilePath)
 	if err != nil {

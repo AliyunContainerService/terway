@@ -16,6 +16,8 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+
+	"github.com/AliyunContainerService/terway/pkg/utils"
 )
 
 // define resource name
@@ -220,8 +222,15 @@ func (m *ENIDevicePlugin) cleanup() error {
 
 	for _, preSock := range preSocks {
 		log.Infof("device plugin file info: %+v", preSock)
-		if m.eniRes.re.Match([]byte(preSock.Name())) && preSock.Mode()&os.ModeSocket != 0 {
-			if err = syscall.Unlink(path.Join(pluginapi.DevicePluginPath, preSock.Name())); err != nil {
+		if m.eniRes.re.Match([]byte(preSock.Name())) {
+			if utils.IsWindowsOS() {
+				// NB(thxCode): treat the socket file as normal file
+				// and remove them directly.
+				err = os.Remove(path.Join(pluginapi.DevicePluginPath, preSock.Name()))
+			} else {
+				err = syscall.Unlink(path.Join(pluginapi.DevicePluginPath, preSock.Name()))
+			}
+			if err != nil {
 				log.Errorf("error on clean up previous device plugin listens, %+v", err)
 			}
 		}
@@ -231,7 +240,15 @@ func (m *ENIDevicePlugin) cleanup() error {
 
 func (m *ENIDevicePlugin) watchKubeletRestart() {
 	wait.Until(func() {
-		_, err := os.Stat(m.socket)
+		var err error
+		if utils.IsWindowsOS() {
+			// NB(thxCode): since os.Stat has not worked as expected,
+			// we use os.Lstat instead of os.Stat here,
+			// ref to https://github.com/microsoft/Windows-Containers/issues/97#issuecomment-887713195.
+			_, err = os.Lstat(m.socket)
+		} else {
+			_, err = os.Stat(m.socket)
+		}
 		if err == nil {
 			return
 		}

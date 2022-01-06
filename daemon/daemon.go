@@ -26,6 +26,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
 
@@ -427,7 +428,7 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 				PodIP:       nil,
 				PodCIDR:     n.k8s.GetNodeCidr().ToRPC(),
 				GatewayIP:   nil,
-				ServiceCIDR: nil,
+				ServiceCIDR: n.k8s.GetServiceCIDR().ToRPC(),
 			},
 			ENIInfo: nil,
 			Pod: &rpc.Pod{
@@ -632,7 +633,7 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 				PodIP:       nil,
 				PodCIDR:     n.k8s.GetNodeCidr().ToRPC(),
 				GatewayIP:   nil,
-				ServiceCIDR: nil,
+				ServiceCIDR: n.k8s.GetServiceCIDR().ToRPC(),
 			},
 			Pod: &rpc.Pod{
 				Ingress: podinfo.TcIngress,
@@ -889,7 +890,7 @@ func (n *networkService) startPeriodCheck() {
 			serviceLog.Error(err)
 			return
 		}
-		ff, err := ioutil.ReadFile(terwayCNIConf)
+		ff, err := ioutil.ReadFile(utils.NormalizePath(terwayCNIConf))
 		if err != nil {
 			serviceLog.Error(err)
 			return
@@ -901,6 +902,10 @@ func (n *networkService) startPeriodCheck() {
 			}
 			serviceLog.Debugf("checking pod name %s", res.PodInfo.Name)
 			cniCfg := libcni.NewCNIConfig([]string{n.cniBinPath}, nil)
+			netNs := filepath.Join("/proc/1/root/", *res.NetNs)
+			if utils.IsWindowsOS() {
+				netNs = *res.NetNs
+			}
 			func() {
 				ctx, cancel := context.WithTimeout(context.Background(), cniExecTimeout)
 				defer cancel()
@@ -913,7 +918,7 @@ func (n *networkService) startPeriodCheck() {
 					Bytes: ff,
 				}, &libcni.RuntimeConf{
 					ContainerID: "fake", // must provide
-					NetNS:       filepath.Join("/proc/1/root/", *res.NetNs),
+					NetNS:       netNs,
 					IfName:      "eth0",
 					Args: [][2]string{
 						{"K8S_POD_NAME", res.PodInfo.Name},
@@ -1271,7 +1276,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		kubeConfig:     kubeconfig,
 		master:         master,
 		pendingPods:    sync.Map{},
-		cniBinPath:     cniBinPath,
+		cniBinPath:     utils.NormalizePath(cniBinPath),
 	}
 	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC || daemonMode == daemonModeENIOnly {
 		netSrv.daemonMode = daemonMode
@@ -1321,7 +1326,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	ipFamily := types.NewIPFamilyFromIPStack(types.IPStack(config.IPStack))
 	netSrv.ipFamily = ipFamily
 
-	aliyunClient, err := client.NewAliyun(config.AccessID, config.AccessSecret, ins.RegionID, config.CredentialPath, "", "")
+	aliyunClient, err := client.NewAliyun(config.AccessID, config.AccessSecret, ins.RegionID, utils.NormalizePath(config.CredentialPath), "", "")
 	if err != nil {
 		return nil, errors.Wrapf(err, "error create aliyun client")
 	}
@@ -1358,7 +1363,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	_ = netSrv.k8s.SetCustomStatefulWorkloadKinds(config.CustomStatefulWorkloadKinds)
 
 	netSrv.resourceDB, err = storage.NewDiskStorage(
-		resDBName, resDBPath, json.Marshal, func(bytes []byte) (interface{}, error) {
+		resDBName, utils.NormalizePath(resDBPath), json.Marshal, func(bytes []byte) (interface{}, error) {
 			resourceRel := &types.PodResources{}
 			err = json.Unmarshal(bytes, resourceRel)
 			if err != nil {
@@ -1401,6 +1406,11 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, err
 	}
 	serviceLog.Debugf("local resources to restore: %s", resStr)
+
+	err = preStartResourceManager(daemonMode, netSrv.k8s)
+	if err != nil {
+		return nil, err
+	}
 
 	switch daemonMode {
 	case daemonModeVPC:

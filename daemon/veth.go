@@ -13,13 +13,14 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 
-	"github.com/AliyunContainerService/terway/pkg/link"
-	"github.com/AliyunContainerService/terway/types"
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk"
 	dockerTypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/AliyunContainerService/terway/pkg/link"
+	"github.com/AliyunContainerService/terway/types"
 )
 
 const (
@@ -139,8 +140,11 @@ type dockerRuntime struct{}
 
 func (dockerRuntime) GetRunningSandbox() ([]string, error) {
 	var containerList []string
+	// use env DOCKER_API_VERSION=v1.21 to specify the version to v1.21,
+	// otherwise, client can negotiate an appropriate version with server.
 	dockerCli, err := client.NewClientWithOpts(
-		client.WithVersion("v1.21"),
+		client.FromEnv,
+		client.WithAPIVersionNegotiation(),
 	)
 	if err != nil {
 		return containerList, fmt.Errorf("error init docker client to restore local lease: %+v", err)

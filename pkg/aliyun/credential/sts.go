@@ -11,10 +11,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth/credentials"
 	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/AliyunContainerService/terway/pkg/utils"
 )
 
 type EncryptedCredentialInfo struct {
@@ -46,7 +47,14 @@ func (e *EncryptedCredentialProvider) Resolve() (*Credential, error) {
 
 	if e.credentialPath != "" {
 		log.Infof("resolve encrypted credential %s", e.credentialPath)
-		_, err := os.Stat(e.credentialPath)
+		if utils.IsWindowsOS() {
+			// NB(thxCode): since os.Stat has not worked as expected,
+			// we use os.Lstat instead of os.Stat here,
+			// ref to https://github.com/microsoft/Windows-Containers/issues/97#issuecomment-887713195.
+			_, err = os.Lstat(e.credentialPath)
+		} else {
+			_, err = os.Stat(e.credentialPath)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to read config %s, err: %w", e.credentialPath, err)
 		}
