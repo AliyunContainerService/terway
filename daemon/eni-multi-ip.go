@@ -18,6 +18,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/pool"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 
 	"github.com/pkg/errors"
@@ -328,6 +329,9 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 		eniIPLog.Debugf("dispose result: %v, error: %v", res.GetResourceID(), err != nil)
 	}()
 	ip := res.(*types.ENIIP)
+	if ip.ENI == nil {
+		return nil
+	}
 	var (
 		eni   *ENI
 		eniip *ENIIP
@@ -376,6 +380,11 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 		}
 		f.metricENICount.Dec()
 		f.Unlock()
+
+		err = f.destroyENICompartment(ip.ENI)
+		if err != nil {
+			return fmt.Errorf("error destroy eni compartment before disposing: %v", err)
+		}
 
 		f.eniOperChan <- struct{}{}
 		// only remain ENI main ip address, release the ENI interface
@@ -429,6 +438,10 @@ func (f *eniIPFactory) Check(res types.NetworkResource) error {
 	ipv4, ipv6, err := f.eniFactory.ecs.GetENIIPs(context.Background(), eniIP.ENI.MAC)
 	if err != nil {
 		return err
+	}
+	if utils.IsWindowsOS() {
+		// NB(thxCode): don't assign the primary IP of the assistant eni.
+		ipv4, ipv6 = dropPrimaryIP(eniIP.ENI, ipv4, ipv6)
 	}
 
 	if eniIP.IPSet.IPv4 != nil {
@@ -484,6 +497,7 @@ func (f *eniIPFactory) ListResource() (map[string]types.NetworkResource, error) 
 			if eniIP.ENI.MAC != mac {
 				continue
 			}
+
 			var v4, v6 net.IP
 			if eniIP.IPSet.IPv4 != nil {
 				_, ok := ipv4Set[eniIP.IPSet.IPv4.String()]
@@ -524,6 +538,10 @@ func (f *eniIPFactory) Reconcile() {
 }
 
 func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
+	if utils.IsWindowsOS() {
+		// NB(thxCode): create eni with one more IP in windows at initialization.
+		ipCount++
+	}
 	rawEni, err := f.eniFactory.CreateWithIPCount(ipCount, false)
 	var ipv4s []net.IP
 	var ipv6s []net.IP
@@ -563,6 +581,15 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 					<-f.maxENI
 				}
 			}
+			err = f.setupENICompartment(eni.ENI)
+			if err != nil {
+				eniIPLog.Errorf("error setup eni compartment after initialization: %v", err)
+				errDispose := f.eniFactory.Dispose(rawEni[0])
+				if errDispose != nil {
+					eniIPLog.Errorf("rollback %+v failed", rawEni)
+				}
+				<-f.maxENI
+			}
 		}
 	}
 
@@ -599,6 +626,11 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 	}
 
 	eni.lock.Lock()
+	if utils.IsWindowsOS() {
+		// NB(thxCode): don't assign the primary IP of the assistant eni.
+		eni.ENI.MaxIPs--
+		ipv4s, ipv6s = dropPrimaryIP(eni.ENI, ipv4s, ipv6s)
+	}
 	eniIPLog.Infof("allocate status on async eni: %+v, pending: %v, ips: %v, backlog: %v",
 		eni, eni.pending, ipv4s, len(eni.ipBacklog))
 
@@ -748,6 +780,10 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 			message <- fmt.Sprintf("error while fetching ips: %s", err.Error())
 			return
 		}
+		if utils.IsWindowsOS() {
+			// NB(thxCode): don't assign the primary IP of the assistant eni.
+			remoteIPs, _ = dropPrimaryIP(v, remoteIPs, nil)
+		}
 
 		diffIPMap := make(map[string]struct{})
 
@@ -794,6 +830,10 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 	maxEni := limit.Adapters - 1
 
 	ipPerENI := limit.IPv4PerAdapter
+	if utils.IsWindowsOS() {
+		// NB(thxCode): don't assign the primary IP of one assistant eni.
+		ipPerENI--
+	}
 	factory.eniMaxIP = ipPerENI
 
 	if poolConfig.MaxENI != 0 && poolConfig.MaxENI < maxEni {
@@ -870,6 +910,19 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 				ipv4s, ipv6s, err := ecs.GetENIIPs(ctx, eni.MAC)
 				if err != nil {
 					return fmt.Errorf("error get ENI's ip on pool init, %w", err)
+				}
+				err = factory.setupENICompartment(eni)
+				if err != nil {
+					// NB(thxCode): an unbinding eni stuck and then block starting,
+					// we just ignore this kind of error.
+					if strings.Contains(err.Error(), "no interface with given MAC") {
+						continue
+					}
+					return errors.Wrap(err, "error setup eni compartment")
+				}
+				if utils.IsWindowsOS() {
+					// NB(thxCode): don't assign the primary IP of one assistant eni.
+					ipv4s, ipv6s = dropPrimaryIP(eni, ipv4s, ipv6s)
 				}
 				poolENI := &ENI{
 					ENI:       eni,
@@ -1017,4 +1070,50 @@ func (m *eniIPResourceManager) Stat(context *networkContext, resID string) (type
 
 func (m *eniIPResourceManager) GetResourceMapping() (tracing.ResourcePoolStats, error) {
 	return m.pool.GetResourceMapping()
+}
+
+func dropPrimaryIP(eni *types.ENI, ipv4s, ipv6s []net.IP) ([]net.IP, []net.IP) {
+	if eni == nil {
+		return ipv4s, ipv6s
+	}
+
+	var ipv4sLen = len(ipv4s)
+	if ipv4Primary := eni.PrimaryIP.IPv4; len(ipv4Primary) != 0 && ipv4sLen != 0 {
+		var ipv4sNew []net.IP
+		for idx, ipv4 := range ipv4s {
+			if ipv4.Equal(ipv4Primary) {
+				switch idx {
+				case 0:
+					ipv4sNew = ipv4s[1:]
+				case ipv4sLen - 1:
+					ipv4sNew = ipv4s[:ipv4sLen-1]
+				default:
+					ipv4sNew = append(ipv4s[0:idx], ipv4s[idx+1:]...)
+				}
+				break
+			}
+		}
+		ipv4s = ipv4sNew
+	}
+
+	var ipv6sLen = len(ipv6s)
+	if ipv6Primary := eni.PrimaryIP.IPv6; len(ipv6Primary) != 0 && ipv6sLen != 0 {
+		var ipv6sNew []net.IP
+		for idx, ipv6 := range ipv6s {
+			if ipv6.Equal(ipv6Primary) {
+				switch idx {
+				case 0:
+					ipv6sNew = ipv6s[1:]
+				case ipv6sLen - 1:
+					ipv6sNew = ipv6s[:ipv6sLen-1]
+				default:
+					ipv6sNew = append(ipv6s[0:idx], ipv6s[idx+1:]...)
+				}
+				break
+			}
+		}
+		ipv6s = ipv6sNew
+	}
+
+	return ipv4s, ipv6s
 }

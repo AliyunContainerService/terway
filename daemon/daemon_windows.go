@@ -39,7 +39,7 @@ func preStartResourceManager(daemonMode string, k8s Kubernetes) error {
 		if err != nil {
 			return errors.Wrapf(err, "error adding network: %s", nw.Format(apis.HNS))
 		}
-	case daemonModeENIOnly:
+	case daemonModeENIOnly, daemonModeENIMultiIP:
 		// NB(thxCode): create a fake network to allow service connection
 		var assistantIface, err = iface.GetInterfaceByMAC(primaryMac, true)
 		if err != nil {
