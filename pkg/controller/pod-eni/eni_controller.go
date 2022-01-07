@@ -26,15 +26,16 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,6 +46,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -195,7 +197,7 @@ func (m *ReconcilePodENI) gc(stopCh <-chan struct{}) {
 
 func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName client.ObjectKey, podENI *v1beta1.PodENI) (result reconcile.Result, err error) {
 	l := log.FromContext(ctx)
-	l.Info("podENI create")
+	l.Info("podENI created")
 
 	switch podENI.Status.Phase {
 	case v1beta1.ENIPhaseBind:
@@ -271,7 +273,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("attach eni failed, %w", err)
 		}
-		ll.Info("attach")
+		ll.Info("attached")
 
 		podENICopy.Status.Phase = v1beta1.ENIPhaseBind
 		podENICopy.Status.PodLastSeen = metav1.Now()
@@ -566,34 +568,53 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI)
 		}
 	}()
 
-	for _, alloc := range podENI.Spec.Allocations {
-		ctx := common.WithCtx(ctx, &alloc)
-		err = m.aliyun.AttachNetworkInterface(ctx, alloc.ENI.ID, podENI.Status.InstanceID, podENI.Status.TrunkENIID)
-		if err != nil {
-			return err
+	ch := make(chan *v1beta1.ENIInfo)
+	done := make(chan struct{})
+	go func() {
+		if podENI.Status.ENIInfos == nil {
+			podENI.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
 		}
+		for info := range ch {
+			podENI.Status.ENIInfos[info.ID] = *info
+		}
+		done <- struct{}{}
+	}()
 
-		time.Sleep(aliyun.ENIOpBackoff.Duration)
+	g, _ := errgroup.WithContext(context.Background())
+	for i := range podENI.Spec.Allocations {
+		ii := i
+		g.Go(func() error {
+			alloc := podENI.Spec.Allocations[ii]
+			ctx := common.WithCtx(ctx, &alloc)
+			err := m.aliyun.AttachNetworkInterface(ctx, alloc.ENI.ID, podENI.Status.InstanceID, podENI.Status.TrunkENIID)
+			if err != nil {
+				return err
+			}
+			time.Sleep(backoff.Backoff(backoff.WaitENIStatus).Duration)
 
-		var realClient *aliyun.OpenAPI
-		realClient, _, err = common.Became(ctx, m.aliyun)
-		if err != nil {
-			return err
-		}
-		var eni *ecs.NetworkInterfaceSet
-		eni, err = realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusInUse, aliyun.ENIOpBackoff, false)
-		if err != nil {
-			return err
-		}
+			realClient, _, err := common.Became(ctx, m.aliyun)
+			if err != nil {
+				return err
+			}
 
-		podENI.Status.ENIInfos[eni.NetworkInterfaceId] = v1beta1.ENIInfo{
-			ID:     eni.NetworkInterfaceId,
-			Type:   v1beta1.ENIType(eni.Type),
-			Vid:    eni.Attachment.DeviceIndex,
-			Status: v1beta1.ENIStatusBind,
-		}
+			eni, err := realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
+			if err != nil {
+				return err
+			}
+
+			ch <- &v1beta1.ENIInfo{
+				ID:     eni.NetworkInterfaceId,
+				Type:   v1beta1.ENIType(eni.Type),
+				Vid:    eni.Attachment.DeviceIndex,
+				Status: v1beta1.ENIStatusBind,
+			}
+			return nil
+		})
 	}
-	return nil
+	err = g.Wait()
+	close(ch)
+	<-done
+	return err
 }
 
 func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.PodENI) error {
@@ -614,13 +635,13 @@ func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.P
 		if err != nil {
 			return err
 		}
-		time.Sleep(aliyun.ENIOpBackoff.Duration)
+		time.Sleep(backoff.Backoff(backoff.WaitENIStatus).Duration)
 
 		realClient, _, err := common.Became(ctx, m.aliyun)
 		if err != nil {
 			return err
 		}
-		_, err = realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusAvailable, aliyun.ENIOpBackoff, true)
+		_, err = realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
 		if err == nil {
 			continue
 		}

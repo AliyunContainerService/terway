@@ -14,6 +14,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned/typed/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
@@ -179,12 +180,7 @@ func (k *k8s) PatchEipInfo(info *types.PodInfo) error {
 }
 
 func (k *k8s) WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error) {
-	err = wait.ExponentialBackoff(wait.Backoff{
-		Duration: time.Second * 5,
-		Factor:   2,
-		Jitter:   0.3,
-		Steps:    3,
-	}, func() (bool, error) {
+	err = wait.ExponentialBackoff(backoff.Backoff(backoff.WaitPodENIStatus), func() (bool, error) {
 		podEni, err = k.podEniClient.PodENIs(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
 			ResourceVersion: "0",
 		})
@@ -205,12 +201,7 @@ func (k *k8s) WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, e
 }
 
 func (k *k8s) GetPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error) {
-	err = wait.ExponentialBackoff(wait.Backoff{
-		Duration: time.Second * 1,
-		Factor:   2,
-		Jitter:   0.3,
-		Steps:    3,
-	}, func() (bool, error) {
+	err = wait.ExponentialBackoff(backoff.Backoff(backoff.WaitPodENIStatus), func() (bool, error) {
 		podEni, err = k.podEniClient.PodENIs(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
 			ResourceVersion: "0",
 		})

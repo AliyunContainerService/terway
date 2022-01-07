@@ -106,7 +106,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		return webhook.Denied("can not use pod annotation and podNetworking at same time")
 	}
 
-	if types.PodUseENI(pod) {
+	if types.PodUseENI(pod) || controlplane.GetConfig().IPAMType == types.IPAMTypeCRD {
 		networks, err := controlplane.ParsePodNetworksFromAnnotation(pod)
 		if err != nil {
 			return webhook.Denied(fmt.Sprintf("unable parse annotation field %s", types.PodNetworks))
@@ -129,6 +129,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 				return webhook.Errored(1, err)
 			}
 			pod.Annotations[types.PodNetworks] = string(pnaBytes)
+			pod.Annotations[types.PodENI] = "true"
 			memberCount = 1
 		} else {
 			for _, n := range networks.PodNetworks {
@@ -248,7 +249,7 @@ func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, cli
 	l := log.WithName(podNetworking.Name)
 	l.Info("checking podNetworking")
 
-	if len(podNetworking.Spec.SecurityGroupIDs) > 0 && len(podNetworking.Spec.VSwitchIDs) > 0 {
+	if len(podNetworking.Spec.SecurityGroupIDs) > 0 && len(podNetworking.Spec.VSwitchOptions) > 0 {
 		return webhook.Allowed("podNetworking all set")
 	}
 
@@ -259,8 +260,8 @@ func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, cli
 	if len(podNetworking.Spec.SecurityGroupIDs) == 0 {
 		podNetworking.Spec.SecurityGroupIDs = sgs
 	}
-	if len(podNetworking.Spec.VSwitchIDs) == 0 {
-		podNetworking.Spec.VSwitchIDs = vsws
+	if len(podNetworking.Spec.VSwitchOptions) == 0 {
+		podNetworking.Spec.VSwitchOptions = vsws
 	}
 	podNetworkingPatched, err := json.Marshal(podNetworking)
 	if err != nil {

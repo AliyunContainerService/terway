@@ -8,6 +8,7 @@ import (
 	"time"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/types"
@@ -25,7 +26,7 @@ func (e *Impl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType
 		err     error
 	)
 	var eni *ecs.NetworkInterfaceSet
-	eni, err = e.WaitForNetworkInterface(ctx, eniID, "", ENIOpBackoff, false)
+	eni, err = e.WaitForNetworkInterface(ctx, eniID, "", backoff.Backoff(backoff.ENIOps), false)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +129,7 @@ func (e *Impl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType
 			time.Sleep(3 * time.Second)
 
 			start := time.Now()
-			_, err = e.WaitForEIP(eipID, eipStatusAvailable, eniStateBackoff)
+			_, err = e.WaitForEIP(eipID, eipStatusAvailable, backoff.Backoff(backoff.WaitENIStatus))
 			metric.OpenAPILatency.WithLabelValues("UnassociateEipAddress/Async", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 			if err != nil {
 				return nil, fmt.Errorf("error wait for eip to status Available: %v", err)
@@ -149,7 +150,7 @@ func (e *Impl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType
 	time.Sleep(3 * time.Second)
 
 	start := time.Now()
-	_, err = e.WaitForEIP(eipInfo.ID, "InUse", eniStateBackoff)
+	_, err = e.WaitForEIP(eipInfo.ID, "InUse", backoff.Backoff(backoff.WaitENIStatus))
 	metric.OpenAPILatency.WithLabelValues("AssociateEipAddress/Async", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		return nil, fmt.Errorf("wait for eip error: %v", err)
@@ -163,7 +164,7 @@ func (e *Impl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType
 // 3. if eip is not bind ,return code is IncorrectEipStatus
 func (e *Impl) UnassociateEipAddress(ctx context.Context, eipID, eniID, eniIP string) error {
 	var innerErr error
-	err := wait.ExponentialBackoff(ENIOpBackoff,
+	err := wait.ExponentialBackoff(backoff.Backoff(backoff.ENIOps),
 		func() (done bool, err error) {
 			// we check eip binding is not changed
 			var eips []vpc.EipAddress
@@ -200,7 +201,7 @@ func (e *Impl) UnassociateEipAddress(ctx context.Context, eipID, eniID, eniIP st
 }
 
 func (e *Impl) ReleaseEipAddress(ctx context.Context, eipID, eniID string, eniIP net.IP) error {
-	eip, err := e.WaitForEIP(eipID, "", eniStateBackoff)
+	eip, err := e.WaitForEIP(eipID, "", backoff.Backoff(backoff.WaitENIStatus))
 	if err != nil {
 		return fmt.Errorf("error release eip: %w", err)
 	}
@@ -215,7 +216,7 @@ func (e *Impl) ReleaseEipAddress(ctx context.Context, eipID, eniID string, eniIP
 		if err == nil {
 			time.Sleep(3 * time.Second)
 			start := time.Now()
-			eip, err = e.WaitForEIP(eipID, eipStatusAvailable, eniStateBackoff)
+			eip, err = e.WaitForEIP(eipID, eipStatusAvailable, backoff.Backoff(backoff.WaitENIStatus))
 			metric.OpenAPILatency.WithLabelValues("UnassociateEipAddress/Async", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 			if err != nil {
 				logrus.Errorf("wait timeout UnassociateEipAddress for eni: %v, %v, %v", eniID, eniIP, err)
@@ -226,7 +227,7 @@ func (e *Impl) ReleaseEipAddress(ctx context.Context, eipID, eniID string, eniIP
 	}
 	var innerErr error
 	if eip.Status == eipStatusAvailable {
-		err = wait.ExponentialBackoff(eniReleaseBackoff, func() (done bool, err error) {
+		err = wait.ExponentialBackoff(backoff.Backoff(backoff.ENIRelease), func() (done bool, err error) {
 			innerErr = e.releaseEIPAddress(eip.AllocationId)
 			if innerErr != nil {
 				return false, nil

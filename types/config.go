@@ -6,6 +6,7 @@ import (
 	jsonpatch "github.com/evanphx/json-patch"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // Configure configuration of terway daemon
@@ -30,11 +31,12 @@ type Configure struct {
 	EnableEIPPool          string              `yaml:"enable_eip_pool" json:"enable_eip_pool"`
 	IPStack                string              `yaml:"ip_stack" json:"ip_stack"` // default ipv4 , support ipv4 dual
 	// rob the eip instance even the eip already bound to other resource
-	AllowEIPRob                 string       `yaml:"allow_eip_rob" json:"allow_eip_rob"`
-	EnableENITrunking           bool         `yaml:"enable_eni_trunking" json:"enable_eni_trunking"`
-	CustomStatefulWorkloadKinds []string     `yaml:"custom_stateful_workload_kinds" json:"custom_stateful_workload_kinds"`
-	IPAMType                    IPAMType     `yaml:"ipam_type" json:"ipam_type"`           // crd or default
-	ENICapPolicy                ENICapPolicy `yaml:"eni_cap_policy" json:"eni_cap_policy"` // prefer trunk or secondary
+	AllowEIPRob                 string                  `yaml:"allow_eip_rob" json:"allow_eip_rob"`
+	EnableENITrunking           bool                    `yaml:"enable_eni_trunking" json:"enable_eni_trunking"`
+	CustomStatefulWorkloadKinds []string                `yaml:"custom_stateful_workload_kinds" json:"custom_stateful_workload_kinds"`
+	IPAMType                    IPAMType                `yaml:"ipam_type" json:"ipam_type"`           // crd or default
+	ENICapPolicy                ENICapPolicy            `yaml:"eni_cap_policy" json:"eni_cap_policy"` // prefer trunk or secondary
+	BackoffOverride             map[string]wait.Backoff `json:"backoff_override,omitempty"`
 }
 
 func (c *Configure) GetSecurityGroups() []string {

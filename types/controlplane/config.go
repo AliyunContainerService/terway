@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 
 	"github.com/go-playground/mold/v4/modifiers"
 	"github.com/go-playground/validator/v10"
@@ -110,6 +111,8 @@ func ParseAndValidate() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	backoff.OverrideBackoff(c.BackoffOverride)
 
 	cfg = &c
 

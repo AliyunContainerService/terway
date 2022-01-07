@@ -222,7 +222,7 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 	}
 	err := wait.ExponentialBackoff(backoff,
 		func() (done bool, err error) {
-			eni, err := a.DescribeNetworkInterface(ctx, "", []string{eniID}, "", "", status)
+			eni, err := a.DescribeNetworkInterface(ctx, "", []string{eniID}, "", "", "")
 			if err != nil {
 				return false, nil
 			}
@@ -230,6 +230,10 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 				return true, apiErr.ErrNotFound
 			}
 			if len(eni) == 1 {
+				if string(status) != eni[0].Status {
+					return false, nil
+				}
+
 				eniInfo = &eni[0]
 				return true, nil
 			}

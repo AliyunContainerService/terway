@@ -287,8 +287,8 @@ func (in *PodNetworkingSpec) DeepCopyInto(out *PodNetworkingSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
-	if in.VSwitchIDs != nil {
-		in, out := &in.VSwitchIDs, &out.VSwitchIDs
+	if in.VSwitchOptions != nil {
+		in, out := &in.VSwitchOptions, &out.VSwitchOptions
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}

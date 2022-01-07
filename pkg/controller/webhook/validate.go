@@ -36,7 +36,7 @@ func ValidateHook() *webhook.Admission {
 			if podNetworking.Spec.Selector.PodSelector == nil && podNetworking.Spec.Selector.NamespaceSelector == nil {
 				return admission.Denied("neither the PodSelector nor the NamespaceSelector is set")
 			}
-			if len(podNetworking.Spec.VSwitchIDs) == 0 {
+			if len(podNetworking.Spec.VSwitchOptions) == 0 {
 				return admission.Denied("vSwitchID is not set")
 			}
 			if len(podNetworking.Spec.SecurityGroupIDs) == 0 {

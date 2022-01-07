@@ -224,7 +224,7 @@ type PodNetworkingSpec struct {
 	Selector Selector `json:"selector,omitempty"`
 
 	SecurityGroupIDs []string `json:"securityGroupIDs,omitempty"`
-	VSwitchIDs       []string `json:"vSwitchIDs,omitempty"`
+	VSwitchOptions   []string `json:"vSwitchOptions,omitempty"`
 }
 
 // PodNetworkingStatus defines the observed state of PodNetworking
