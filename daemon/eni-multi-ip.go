@@ -827,7 +827,8 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 	if !ok {
 		return nil, fmt.Errorf("error get max eni for eniip factory")
 	}
-	maxEni := limit.Adapters - 1
+	maxEni := limit.Adapters
+	maxEni = int(float64(maxEni)*poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
 
 	ipPerENI := limit.IPv4PerAdapter
 	if utils.IsWindowsOS() {
