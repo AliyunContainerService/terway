@@ -6,6 +6,7 @@ package tests
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"time"
 
@@ -146,6 +147,7 @@ func EnsureDaemonSet(ctx context.Context, cs kubernetes.Interface, cfg PodResCon
 						{
 							Name:            "echo",
 							Image:           "l1b0k/echo",
+							Args:            []string{"--http-bind-address", fmt.Sprintf(":%d", serverPort)},
 							ImagePullPolicy: corev1.PullAlways,
 						},
 					},
@@ -220,6 +222,7 @@ func EnsureDeployment(ctx context.Context, cs kubernetes.Interface, cfg PodResCo
 						{
 							Name:            "echo",
 							Image:           "l1b0k/echo",
+							Args:            []string{"--http-bind-address", fmt.Sprintf(":%d", serverPort)},
 							ImagePullPolicy: corev1.PullAlways,
 						},
 					},
@@ -291,6 +294,7 @@ func EnsureStatefulSet(ctx context.Context, cs kubernetes.Interface, cfg PodResC
 						{
 							Name:            "echo",
 							Image:           "l1b0k/echo",
+							Args:            []string{"--http-bind-address", fmt.Sprintf(":%d", serverPort)},
 							ImagePullPolicy: corev1.PullAlways,
 						},
 					},
@@ -354,9 +358,9 @@ func EnsureService(ctx context.Context, cs kubernetes.Interface, cfg ServiceResC
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
 				{
-					Name:       "80",
-					Port:       80,
-					TargetPort: intstr.FromInt(80),
+					Name:       "http-server",
+					Port:       int32(serverPort),
+					TargetPort: intstr.FromInt(serverPort),
 				},
 			},
 			Selector:              cfg.PodSelectLabels,
