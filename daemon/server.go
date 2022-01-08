@@ -13,8 +13,10 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/rpc"
 
 	"github.com/pkg/errors"
@@ -53,7 +55,11 @@ func Run(pidFilePath, socketFilePath, debugSocketListen, configFilePath, kubecon
 	if err != nil {
 		return errors.Wrapf(err, "error set log level: %s", logLevel)
 	}
-	log.SetLevel(level)
+	logger.DefaultLogger.SetLevel(level)
+	if !utils.IsWindowsOS() {
+		// NB(thxCode): hcsshim lib introduces much noise.
+		log.SetLevel(level)
+	}
 	// Write the pidfile
 	if pidFilePath != "" {
 		if !filepath.IsAbs(pidFilePath) {
