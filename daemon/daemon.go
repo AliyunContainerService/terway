@@ -273,7 +273,8 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 	switch podinfo.PodNetworkType {
 	case podNetworkTypeENIMultiIP:
 		allocIPReply.IPType = rpc.IPType_TypeENIMultiIP
-		netConfs, err := networkService.multiIPFromCRD(podinfo, true)
+		var netConfs []*rpc.NetConf
+		netConfs, err = networkService.multiIPFromCRD(podinfo, true)
 		if err != nil {
 			return nil, err
 		}
@@ -287,7 +288,8 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		}
 		if !defaultIfSet {
 			// alloc eniip
-			eniIP, err := networkService.allocateENIMultiIP(networkContext, &oldRes)
+			var eniIP *types.ENIIP
+			eniIP, err = networkService.allocateENIMultiIP(networkContext, &oldRes)
 			if err != nil {
 				return nil, fmt.Errorf("error get allocated eniip ip for: %+v, result: %+v", podinfo, err)
 			}
@@ -344,7 +346,8 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 	case podNetworkTypeVPCENI:
 		allocIPReply.IPType = rpc.IPType_TypeVPCENI
 		if networkService.ipamType == types.IPAMTypeCRD {
-			netConfs, err := networkService.exclusiveENIFromCRD(podinfo, true)
+			var netConfs []*rpc.NetConf
+			netConfs, err = networkService.exclusiveENIFromCRD(podinfo, true)
 			if err != nil {
 				return nil, err
 			}
@@ -570,9 +573,9 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 	switch podinfo.PodNetworkType {
 	case podNetworkTypeENIMultiIP:
 		getIPInfoResult.IPType = rpc.IPType_TypeENIMultiIP
-		netConfs, err := networkService.multiIPFromCRD(podinfo, false)
+		netConfs, err2 := networkService.multiIPFromCRD(podinfo, false)
 		if err != nil {
-			if k8sErr.IsNotFound(err) {
+			if k8sErr.IsNotFound(err2) {
 				getIPInfoResult.Error = rpc.Error_ErrCRDNotFound
 			}
 			return getIPInfoResult, nil
@@ -639,9 +642,9 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 	case podNetworkTypeVPCENI:
 		getIPInfoResult.IPType = rpc.IPType_TypeVPCENI
 		if networkService.ipamType == types.IPAMTypeCRD {
-			netConfs, err := networkService.exclusiveENIFromCRD(podinfo, false)
-			if err != nil {
-				if k8sErr.IsNotFound(err) {
+			netConfs, err2 := networkService.exclusiveENIFromCRD(podinfo, false)
+			if err2 != nil {
+				if k8sErr.IsNotFound(err2) {
 					getIPInfoResult.Error = rpc.Error_ErrCRDNotFound
 				}
 				return getIPInfoResult, nil
