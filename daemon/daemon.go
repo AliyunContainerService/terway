@@ -94,13 +94,13 @@ var serviceLog = logger.DefaultLogger.WithField("subSys", "network-service")
 
 var _ rpc.TerwayBackendServer = (*networkService)(nil)
 
-func (networkService *networkService) getResourceManagerForRes(resType string) ResourceManager {
-	return networkService.mgrForResource[resType]
+func (n *networkService) getResourceManagerForRes(resType string) ResourceManager {
+	return n.mgrForResource[resType]
 }
 
 //return resource relation in db, or return nil.
-func (networkService *networkService) getPodResource(info *types.PodInfo) (types.PodResources, error) {
-	obj, err := networkService.resourceDB.Get(podInfoKey(info.Namespace, info.Name))
+func (n *networkService) getPodResource(info *types.PodInfo) (types.PodResources, error) {
+	obj, err := n.resourceDB.Get(podInfoKey(info.Namespace, info.Name))
 	if err == nil {
 		return obj.(types.PodResources), nil
 	}
@@ -111,12 +111,12 @@ func (networkService *networkService) getPodResource(info *types.PodInfo) (types
 	return types.PodResources{}, err
 }
 
-func (networkService *networkService) deletePodResource(info *types.PodInfo) error {
+func (n *networkService) deletePodResource(info *types.PodInfo) error {
 	key := podInfoKey(info.Namespace, info.Name)
-	return networkService.resourceDB.Delete(key)
+	return n.resourceDB.Delete(key)
 }
 
-func (networkService *networkService) allocateVeth(ctx *networkContext, old *types.PodResources) (*types.Veth, error) {
+func (n *networkService) allocateVeth(ctx *networkContext, old *types.PodResources) (*types.Veth, error) {
 	oldVethRes := old.GetResourceItemByType(types.ResourceTypeVeth)
 	oldVethID := ""
 	if old.PodInfo != nil {
@@ -129,14 +129,14 @@ func (networkService *networkService) allocateVeth(ctx *networkContext, old *typ
 		}
 	}
 
-	res, err := networkService.vethResMgr.Allocate(ctx, oldVethID)
+	res, err := n.vethResMgr.Allocate(ctx, oldVethID)
 	if err != nil {
 		return nil, err
 	}
 	return res.(*types.Veth), nil
 }
 
-func (networkService *networkService) allocateENI(ctx *networkContext, old *types.PodResources) (*types.ENI, error) {
+func (n *networkService) allocateENI(ctx *networkContext, old *types.PodResources) (*types.ENI, error) {
 	oldENIRes := old.GetResourceItemByType(types.ResourceTypeENI)
 	oldENIID := ""
 	if old.PodInfo != nil {
@@ -149,14 +149,14 @@ func (networkService *networkService) allocateENI(ctx *networkContext, old *type
 		}
 	}
 
-	res, err := networkService.eniResMgr.Allocate(ctx, oldENIID)
+	res, err := n.eniResMgr.Allocate(ctx, oldENIID)
 	if err != nil {
 		return nil, err
 	}
 	return res.(*types.ENI), nil
 }
 
-func (networkService *networkService) allocateENIMultiIP(ctx *networkContext, old *types.PodResources) (*types.ENIIP, error) {
+func (n *networkService) allocateENIMultiIP(ctx *networkContext, old *types.PodResources) (*types.ENIIP, error) {
 	oldENIIPRes := old.GetResourceItemByType(types.ResourceTypeENIIP)
 	oldENIIPID := ""
 	if old.PodInfo != nil {
@@ -169,14 +169,14 @@ func (networkService *networkService) allocateENIMultiIP(ctx *networkContext, ol
 		}
 	}
 
-	res, err := networkService.eniIPResMgr.Allocate(ctx, oldENIIPID)
+	res, err := n.eniIPResMgr.Allocate(ctx, oldENIIPID)
 	if err != nil {
 		return nil, err
 	}
 	return res.(*types.ENIIP), nil
 }
 
-func (networkService *networkService) allocateEIP(ctx *networkContext, old *types.PodResources) (*types.EIP, error) {
+func (n *networkService) allocateEIP(ctx *networkContext, old *types.PodResources) (*types.EIP, error) {
 	oldEIPRes := old.GetResourceItemByType(types.ResourceTypeEIP)
 	oldEIPID := ""
 	if old.PodInfo != nil {
@@ -189,14 +189,14 @@ func (networkService *networkService) allocateEIP(ctx *networkContext, old *type
 		}
 	}
 
-	res, err := networkService.eipResMgr.Allocate(ctx, oldEIPID)
+	res, err := n.eipResMgr.Allocate(ctx, oldEIPID)
 	if err != nil {
 		return nil, err
 	}
 	return res.(*types.EIP), nil
 }
 
-func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*rpc.AllocIPReply, error) {
+func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*rpc.AllocIPReply, error) {
 	serviceLog.WithFields(map[string]interface{}{
 		"pod":         podInfoKey(r.K8SPodNamespace, r.K8SPodName),
 		"containerID": r.K8SPodInfraContainerId,
@@ -204,16 +204,16 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		"ifName":      r.IfName,
 	}).Info("alloc ip req")
 
-	_, exist := networkService.pendingPods.LoadOrStore(podInfoKey(r.K8SPodNamespace, r.K8SPodName), struct{}{})
+	_, exist := n.pendingPods.LoadOrStore(podInfoKey(r.K8SPodNamespace, r.K8SPodName), struct{}{})
 	if exist {
 		return nil, fmt.Errorf("pod %s resource processing", podInfoKey(r.K8SPodNamespace, r.K8SPodName))
 	}
 	defer func() {
-		networkService.pendingPods.Delete(podInfoKey(r.K8SPodNamespace, r.K8SPodName))
+		n.pendingPods.Delete(podInfoKey(r.K8SPodNamespace, r.K8SPodName))
 	}()
 
-	networkService.RLock()
-	defer networkService.RUnlock()
+	n.RLock()
+	defer n.RUnlock()
 	var (
 		start = time.Now()
 		err   error
@@ -223,7 +223,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 	}()
 
 	// 0. Get pod Info
-	podinfo, err := networkService.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName)
+	podinfo, err := n.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get pod info for: %+v", r)
 	}
@@ -233,18 +233,18 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		Context:    ctx,
 		resources:  []types.ResourceItem{},
 		pod:        podinfo,
-		k8sService: networkService.k8s,
+		k8sService: n.k8s,
 	}
-	allocIPReply := &rpc.AllocIPReply{IPv4: networkService.ipFamily.IPv4, IPv6: networkService.ipFamily.IPv6}
+	allocIPReply := &rpc.AllocIPReply{IPv4: n.ipFamily.IPv4, IPv6: n.ipFamily.IPv6}
 
 	defer func() {
 		// roll back allocated resource when error
 		if err != nil {
 			networkContext.Log().Errorf("alloc result with error, %+v", err)
 			for _, res := range networkContext.resources {
-				err = networkService.deletePodResource(podinfo)
+				err = n.deletePodResource(podinfo)
 				networkContext.Log().Errorf("rollback res[%v] with error, %+v", res, err)
-				mgr := networkService.getResourceManagerForRes(res.Type)
+				mgr := n.getResourceManagerForRes(res.Type)
 				if mgr == nil {
 					networkContext.Log().Warnf("error cleanup allocated network resource %s, %s: %v", res.ID, res.Type, err)
 					continue
@@ -260,12 +260,12 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 	}()
 
 	// 2. Find old resource info
-	oldRes, err := networkService.getPodResource(podinfo)
+	oldRes, err := n.getPodResource(podinfo)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get pod resources from db for pod %+v", podinfo)
 	}
 
-	if !networkService.verifyPodNetworkType(podinfo.PodNetworkType) {
+	if !n.verifyPodNetworkType(podinfo.PodNetworkType) {
 		return nil, fmt.Errorf("unexpect pod network type allocate, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
 	}
 	var netConf []*rpc.NetConf
@@ -273,7 +273,8 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 	switch podinfo.PodNetworkType {
 	case podNetworkTypeENIMultiIP:
 		allocIPReply.IPType = rpc.IPType_TypeENIMultiIP
-		netConfs, err := networkService.multiIPFromCRD(podinfo, true)
+		var netConfs []*rpc.NetConf
+		netConfs, err = n.multiIPFromCRD(podinfo, true)
 		if err != nil {
 			return nil, err
 		}
@@ -287,7 +288,8 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		}
 		if !defaultIfSet {
 			// alloc eniip
-			eniIP, err := networkService.allocateENIMultiIP(networkContext, &oldRes)
+			var eniIP *types.ENIIP
+			eniIP, err = n.allocateENIMultiIP(networkContext, &oldRes)
 			if err != nil {
 				return nil, fmt.Errorf("error get allocated eniip ip for: %+v, result: %+v", podinfo, err)
 			}
@@ -299,10 +301,10 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 				}(r.Netns),
 			}
 			networkContext.resources = append(networkContext.resources, newRes.Resources...)
-			if networkService.eipResMgr != nil && podinfo.EipInfo.PodEip {
+			if n.eipResMgr != nil && podinfo.EipInfo.PodEip {
 				podinfo.PodIPs = eniIP.IPSet
 				var eipRes *types.EIP
-				eipRes, err = networkService.allocateEIP(networkContext, &oldRes)
+				eipRes, err = n.allocateEIP(networkContext, &oldRes)
 				if err != nil {
 					return nil, fmt.Errorf("error get allocated eip for: %+v, result: %+v", podinfo, err)
 				}
@@ -310,7 +312,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 				newRes.Resources = append(newRes.Resources, eipResItem...)
 				networkContext.resources = append(networkContext.resources, eipResItem...)
 			}
-			err = networkService.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
+			err = n.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
 			if err != nil {
 				return nil, errors.Wrapf(err, "error put resource into store")
 			}
@@ -320,7 +322,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 					PodIP:       eniIP.IPSet.ToRPC(),
 					PodCIDR:     eniIP.ENI.VSwitchCIDR.ToRPC(),
 					GatewayIP:   eniIP.ENI.GatewayIP.ToRPC(),
-					ServiceCIDR: networkService.k8s.GetServiceCIDR().ToRPC(),
+					ServiceCIDR: n.k8s.GetServiceCIDR().ToRPC(),
 				},
 				ENIInfo: &rpc.ENIInfo{
 					MAC:   eniIP.ENI.MAC,
@@ -343,15 +345,16 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 		allocIPReply.Success = true
 	case podNetworkTypeVPCENI:
 		allocIPReply.IPType = rpc.IPType_TypeVPCENI
-		if networkService.ipamType == types.IPAMTypeCRD {
-			netConfs, err := networkService.exclusiveENIFromCRD(podinfo, true)
+		if n.ipamType == types.IPAMTypeCRD {
+			var netConfs []*rpc.NetConf
+			netConfs, err = n.exclusiveENIFromCRD(podinfo, true)
 			if err != nil {
 				return nil, err
 			}
 			netConf = append(netConf, netConfs...)
 		} else {
 			var eni *types.ENI
-			eni, err = networkService.allocateENI(networkContext, &oldRes)
+			eni, err = n.allocateENI(networkContext, &oldRes)
 			if err != nil {
 				return nil, fmt.Errorf("error get allocated vpc ENI ip for: %+v, result: %+v", podinfo, err)
 			}
@@ -363,10 +366,10 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 				}(r.Netns),
 			}
 			networkContext.resources = append(networkContext.resources, newRes.Resources...)
-			if networkService.eipResMgr != nil && podinfo.EipInfo.PodEip {
+			if n.eipResMgr != nil && podinfo.EipInfo.PodEip {
 				podinfo.PodIPs = eni.PrimaryIP
 				var eipRes *types.EIP
-				eipRes, err = networkService.allocateEIP(networkContext, &oldRes)
+				eipRes, err = n.allocateEIP(networkContext, &oldRes)
 				if err != nil {
 					return nil, fmt.Errorf("error get allocated eip for: %+v, result: %+v", podinfo, err)
 				}
@@ -374,7 +377,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 				newRes.Resources = append(newRes.Resources, eipResItem...)
 				networkContext.resources = append(networkContext.resources, eipResItem...)
 			}
-			err = networkService.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
+			err = n.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
 			if err != nil {
 				return nil, errors.Wrapf(err, "error put resource into store")
 			}
@@ -383,7 +386,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 					PodIP:       eni.PrimaryIP.ToRPC(),
 					PodCIDR:     eni.VSwitchCIDR.ToRPC(),
 					GatewayIP:   eni.GatewayIP.ToRPC(),
-					ServiceCIDR: networkService.k8s.GetServiceCIDR().ToRPC(),
+					ServiceCIDR: n.k8s.GetServiceCIDR().ToRPC(),
 				},
 				ENIInfo: &rpc.ENIInfo{
 					MAC:   eni.MAC,
@@ -402,7 +405,7 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 	case podNetworkTypeVPCIP:
 		allocIPReply.IPType = rpc.IPType_TypeVPCIP
 		var vpcVeth *types.Veth
-		vpcVeth, err = networkService.allocateVeth(networkContext, &oldRes)
+		vpcVeth, err = n.allocateVeth(networkContext, &oldRes)
 		if err != nil {
 			return nil, fmt.Errorf("error get allocated vpc ip for: %+v, result: %+v", podinfo, err)
 		}
@@ -414,14 +417,14 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 			}(r.Netns),
 		}
 		networkContext.resources = append(networkContext.resources, newRes.Resources...)
-		err = networkService.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
+		err = n.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error put resource into store")
 		}
 		netConf = append(netConf, &rpc.NetConf{
 			BasicInfo: &rpc.BasicInfo{
 				PodIP:       nil,
-				PodCIDR:     networkService.k8s.GetNodeCidr().ToRPC(),
+				PodCIDR:     n.k8s.GetNodeCidr().ToRPC(),
 				GatewayIP:   nil,
 				ServiceCIDR: nil,
 			},
@@ -446,20 +449,20 @@ func (networkService *networkService) AllocIP(ctx context.Context, r *rpc.AllocI
 	}
 
 	allocIPReply.NetConfs = netConf
-	allocIPReply.EnableTrunking = networkService.enableTrunk
+	allocIPReply.EnableTrunking = n.enableTrunk
 
 	// 5. return allocate result
 	return allocIPReply, err
 }
 
-func (networkService *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest) (*rpc.ReleaseIPReply, error) {
+func (n *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest) (*rpc.ReleaseIPReply, error) {
 	serviceLog.WithFields(map[string]interface{}{
 		"pod":         podInfoKey(r.K8SPodNamespace, r.K8SPodName),
 		"containerID": r.K8SPodInfraContainerId,
 	}).Info("release ip req")
 
-	networkService.RLock()
-	defer networkService.RUnlock()
+	n.RLock()
+	defer n.RUnlock()
 	var (
 		start = time.Now()
 		err   error
@@ -469,61 +472,61 @@ func (networkService *networkService) ReleaseIP(ctx context.Context, r *rpc.Rele
 	}()
 
 	// 0. Get pod Info
-	podinfo, err := networkService.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName)
+	podinfo, err := n.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get pod info for: %+v", r)
 	}
 
 	// 1. Init Context
-	networkContext := &networkContext{
+	netCtx := &networkContext{
 		Context:    ctx,
 		resources:  []types.ResourceItem{},
 		pod:        podinfo,
-		k8sService: networkService.k8s,
+		k8sService: n.k8s,
 	}
 	releaseReply := &rpc.ReleaseIPReply{
 		Success: true,
-		IPv4:    networkService.ipFamily.IPv4,
-		IPv6:    networkService.ipFamily.IPv6,
+		IPv4:    n.ipFamily.IPv4,
+		IPv6:    n.ipFamily.IPv6,
 	}
 
 	defer func() {
 		if err != nil {
-			networkContext.Log().Errorf("release result with error, %+v", err)
+			netCtx.Log().Errorf("release result with error, %+v", err)
 		} else {
-			networkContext.Log().Infof("release result: %+v", releaseReply)
+			netCtx.Log().Infof("release result: %+v", releaseReply)
 		}
 	}()
 
-	oldRes, err := networkService.getPodResource(podinfo)
+	oldRes, err := n.getPodResource(podinfo)
 	if err != nil {
 		return nil, err
 	}
 
-	if !networkService.verifyPodNetworkType(podinfo.PodNetworkType) {
-		networkContext.Log().Warnf("unexpect pod network type release, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
+	if !n.verifyPodNetworkType(podinfo.PodNetworkType) {
+		netCtx.Log().Warnf("unexpect pod network type release, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
 		return releaseReply, nil
 	}
 
 	for _, res := range oldRes.Resources {
 		//record old resource for pod
-		networkContext.resources = append(networkContext.resources, res)
-		mgr := networkService.getResourceManagerForRes(res.Type)
+		netCtx.resources = append(netCtx.resources, res)
+		mgr := n.getResourceManagerForRes(res.Type)
 		if mgr == nil {
-			networkContext.Log().Warnf("error cleanup allocated network resource %s, %s: %v", res.ID, res.Type, err)
+			netCtx.Log().Warnf("error cleanup allocated network resource %s, %s: %v", res.ID, res.Type, err)
 			continue
 		}
 		if podinfo.IPStickTime == 0 {
-			if err = mgr.Release(networkContext, res); err != nil && err != pool.ErrInvalidState {
+			if err = mgr.Release(netCtx, res); err != nil && err != pool.ErrInvalidState {
 				return nil, errors.Wrapf(err, "error release request network resource for: %+v", r)
 			}
-			if err = networkService.deletePodResource(podinfo); err != nil {
+			if err = n.deletePodResource(podinfo); err != nil {
 				return nil, errors.Wrapf(err, "error delete resource from db: %+v", r)
 			}
 		}
 	}
 
-	if networkContext.Err() != nil {
+	if netCtx.Err() != nil {
 		err = ctx.Err()
 		return nil, fmt.Errorf("error on grpc connection, %w", err)
 	}
@@ -531,15 +534,15 @@ func (networkService *networkService) ReleaseIP(ctx context.Context, r *rpc.Rele
 	return releaseReply, nil
 }
 
-func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (*rpc.GetInfoReply, error) {
+func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (*rpc.GetInfoReply, error) {
 	serviceLog.Debugf("GetIPInfo request: %+v", r)
 	// 0. Get pod Info
-	podinfo, err := networkService.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName)
+	podinfo, err := n.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get pod info for: %+v", r)
 	}
 
-	if !networkService.verifyPodNetworkType(podinfo.PodNetworkType) {
+	if !n.verifyPodNetworkType(podinfo.PodNetworkType) {
 		return nil, fmt.Errorf("unexpect pod network type get info, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
 	}
 
@@ -548,18 +551,18 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 		Context:    ctx,
 		resources:  []types.ResourceItem{},
 		pod:        podinfo,
-		k8sService: networkService.k8s,
+		k8sService: n.k8s,
 	}
 
-	getIPInfoResult := &rpc.GetInfoReply{IPv4: networkService.ipFamily.IPv4, IPv6: networkService.ipFamily.IPv6}
+	getIPInfoResult := &rpc.GetInfoReply{IPv4: n.ipFamily.IPv4, IPv6: n.ipFamily.IPv6}
 
 	defer func() {
 		networkContext.Log().Debugf("getIpInfo result: %+v", getIPInfoResult)
 	}()
 
-	networkService.RLock()
-	podRes, err := networkService.getPodResource(podinfo)
-	networkService.RUnlock()
+	n.RLock()
+	podRes, err := n.getPodResource(podinfo)
+	n.RUnlock()
 	if err != nil {
 		networkContext.Log().Errorf("failed to get pod info : %+v", err)
 		return getIPInfoResult, err
@@ -570,9 +573,9 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 	switch podinfo.PodNetworkType {
 	case podNetworkTypeENIMultiIP:
 		getIPInfoResult.IPType = rpc.IPType_TypeENIMultiIP
-		netConfs, err := networkService.multiIPFromCRD(podinfo, false)
+		netConfs, err2 := n.multiIPFromCRD(podinfo, false)
 		if err != nil {
-			if k8sErr.IsNotFound(err) {
+			if k8sErr.IsNotFound(err2) {
 				getIPInfoResult.Error = rpc.Error_ErrCRDNotFound
 			}
 			return getIPInfoResult, nil
@@ -589,7 +592,7 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 			resItems := podRes.GetResourceItemByType(types.ResourceTypeENIIP)
 			if len(resItems) > 0 {
 				// only have one
-				res, err := networkService.eniIPResMgr.Stat(networkContext, resItems[0].ID)
+				res, err := n.eniIPResMgr.Stat(networkContext, resItems[0].ID)
 				if err == nil {
 					eniIP := res.(*types.ENIIP)
 
@@ -598,7 +601,7 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 							PodIP:       eniIP.IPSet.ToRPC(),
 							PodCIDR:     eniIP.ENI.VSwitchCIDR.ToRPC(),
 							GatewayIP:   eniIP.ENI.GatewayIP.ToRPC(),
-							ServiceCIDR: networkService.k8s.GetServiceCIDR().ToRPC(),
+							ServiceCIDR: n.k8s.GetServiceCIDR().ToRPC(),
 						},
 						ENIInfo: &rpc.ENIInfo{
 							MAC:   eniIP.ENI.MAC,
@@ -626,7 +629,7 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 		netConf = append(netConf, &rpc.NetConf{
 			BasicInfo: &rpc.BasicInfo{
 				PodIP:       nil,
-				PodCIDR:     networkService.k8s.GetNodeCidr().ToRPC(),
+				PodCIDR:     n.k8s.GetNodeCidr().ToRPC(),
 				GatewayIP:   nil,
 				ServiceCIDR: nil,
 			},
@@ -638,10 +641,10 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 		})
 	case podNetworkTypeVPCENI:
 		getIPInfoResult.IPType = rpc.IPType_TypeVPCENI
-		if networkService.ipamType == types.IPAMTypeCRD {
-			netConfs, err := networkService.exclusiveENIFromCRD(podinfo, false)
-			if err != nil {
-				if k8sErr.IsNotFound(err) {
+		if n.ipamType == types.IPAMTypeCRD {
+			netConfs, err2 := n.exclusiveENIFromCRD(podinfo, false)
+			if err2 != nil {
+				if k8sErr.IsNotFound(err2) {
 					getIPInfoResult.Error = rpc.Error_ErrCRDNotFound
 				}
 				return getIPInfoResult, nil
@@ -651,7 +654,7 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 			resItems := podRes.GetResourceItemByType(types.ResourceTypeENI)
 			if len(resItems) > 0 {
 				// only have one
-				res, err := networkService.eniResMgr.Stat(networkContext, resItems[0].ID)
+				res, err := n.eniResMgr.Stat(networkContext, resItems[0].ID)
 				if err == nil {
 					eni := res.(*types.ENI)
 
@@ -660,11 +663,11 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 							PodIP:       eni.PrimaryIP.ToRPC(),
 							PodCIDR:     eni.VSwitchCIDR.ToRPC(),
 							GatewayIP:   eni.GatewayIP.ToRPC(),
-							ServiceCIDR: networkService.k8s.GetServiceCIDR().ToRPC(),
+							ServiceCIDR: n.k8s.GetServiceCIDR().ToRPC(),
 						},
 						ENIInfo: &rpc.ENIInfo{
 							MAC:   eni.MAC,
-							Trunk: podinfo.PodENI && networkService.enableTrunk && eni.Trunk,
+							Trunk: podinfo.PodENI && n.enableTrunk && eni.Trunk,
 						},
 						Pod: &rpc.Pod{
 							Ingress: podinfo.TcIngress,
@@ -684,12 +687,12 @@ func (networkService *networkService) GetIPInfo(ctx context.Context, r *rpc.GetI
 	}
 
 	getIPInfoResult.NetConfs = netConf
-	getIPInfoResult.EnableTrunking = networkService.enableTrunk
+	getIPInfoResult.EnableTrunking = n.enableTrunk
 
 	return getIPInfoResult, nil
 }
 
-func (networkService *networkService) RecordEvent(_ context.Context, r *rpc.EventRequest) (*rpc.EventReply, error) {
+func (n *networkService) RecordEvent(_ context.Context, r *rpc.EventRequest) (*rpc.EventReply, error) {
 	eventType := eventTypeNormal
 	if r.EventType == rpc.EventType_EventTypeWarning {
 		eventType = eventTypeWarning
@@ -701,12 +704,12 @@ func (networkService *networkService) RecordEvent(_ context.Context, r *rpc.Even
 	}
 
 	if r.EventTarget == rpc.EventTarget_EventTargetNode { // Node
-		networkService.k8s.RecordNodeEvent(eventType, r.Reason, r.Message)
+		n.k8s.RecordNodeEvent(eventType, r.Reason, r.Message)
 		return reply, nil
 	}
 
 	// Pod
-	err := networkService.k8s.RecordPodEvent(r.K8SPodName, r.K8SPodNamespace, eventType, r.Reason, r.Message)
+	err := n.k8s.RecordPodEvent(r.K8SPodName, r.K8SPodNamespace, eventType, r.Reason, r.Message)
 	if err != nil {
 		reply.Succeed = false
 		reply.Error = err.Error()
@@ -717,26 +720,26 @@ func (networkService *networkService) RecordEvent(_ context.Context, r *rpc.Even
 	return reply, nil
 }
 
-func (networkService *networkService) verifyPodNetworkType(podNetworkMode string) bool {
-	return (networkService.daemonMode == daemonModeVPC && //vpc
+func (n *networkService) verifyPodNetworkType(podNetworkMode string) bool {
+	return (n.daemonMode == daemonModeVPC && //vpc
 		(podNetworkMode == podNetworkTypeVPCENI || podNetworkMode == podNetworkTypeVPCIP)) ||
 		// eni-multi-ip
-		(networkService.daemonMode == daemonModeENIMultiIP && podNetworkMode == podNetworkTypeENIMultiIP) ||
+		(n.daemonMode == daemonModeENIMultiIP && podNetworkMode == podNetworkTypeENIMultiIP) ||
 		// eni-only
-		(networkService.daemonMode == daemonModeENIOnly && podNetworkMode == podNetworkTypeVPCENI)
+		(n.daemonMode == daemonModeENIOnly && podNetworkMode == podNetworkTypeVPCENI)
 }
 
-func (networkService *networkService) startGarbageCollectionLoop() {
+func (n *networkService) startGarbageCollectionLoop() {
 	// period do network resource gc
 	gcTicker := time.NewTicker(gcPeriod)
 	go func() {
 		for range gcTicker.C {
 			serviceLog.Debugf("do resource gc on node")
-			networkService.Lock()
-			pods, err := networkService.k8s.GetLocalPods()
+			n.Lock()
+			pods, err := n.k8s.GetLocalPods()
 			if err != nil {
 				serviceLog.Warnf("error get local pods for gc")
-				networkService.Unlock()
+				n.Unlock()
 				continue
 			}
 			podKeyMap := make(map[string]bool)
@@ -753,10 +756,10 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 				relateExpireList = make([]string, 0)
 			)
 
-			resRelateList, err := networkService.resourceDB.List()
+			resRelateList, err := n.resourceDB.List()
 			if err != nil {
 				serviceLog.Warnf("error list resource db for gc")
-				networkService.Unlock()
+				n.Unlock()
 				continue
 			}
 
@@ -767,7 +770,7 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 					if resRelate.PodInfo.IPStickTime != 0 {
 						// delay resource garbage collection for sticky ip
 						resRelate.PodInfo.IPStickTime = 0
-						if err = networkService.resourceDB.Put(podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name),
+						if err = n.resourceDB.Put(podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name),
 							resRelate); err != nil {
 							serviceLog.Warnf("error store pod info to resource db")
 						}
@@ -798,7 +801,7 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 			}
 			gcDone := true
 			for mgrType := range inUseSet {
-				mgr, ok := networkService.mgrForResource[mgrType]
+				mgr, ok := n.mgrForResource[mgrType]
 				if ok {
 					serviceLog.Debugf("start garbage collection for %v, list: %+v， %+v", mgrType, inUseSet[mgrType], expireSet[mgrType])
 					err = mgr.GarbageCollection(inUseSet[mgrType], expireSet[mgrType])
@@ -840,22 +843,22 @@ func (networkService *networkService) startGarbageCollectionLoop() {
 				}()
 
 				for _, relate := range relateExpireList {
-					err = networkService.resourceDB.Delete(relate)
+					err = n.resourceDB.Delete(relate)
 					if err != nil {
 						serviceLog.Warnf("error delete resource db relation: %v", err)
 					}
 				}
 			}
-			networkService.Unlock()
+			n.Unlock()
 		}
 	}()
 }
 
-func (networkService *networkService) startPeriodCheck() {
+func (n *networkService) startPeriodCheck() {
 	// check pool
 	func() {
 		serviceLog.Debugf("compare poll with metadata")
-		podMapping, err := networkService.GetResourceMapping()
+		podMapping, err := n.GetResourceMapping()
 		if err != nil {
 			serviceLog.Error(err)
 			return
@@ -878,9 +881,9 @@ func (networkService *networkService) startPeriodCheck() {
 		defer func() {
 			serviceLog.Debugf("call CNI CHECK end")
 		}()
-		networkService.RLock()
-		podResList, err := networkService.resourceDB.List()
-		networkService.RUnlock()
+		n.RLock()
+		podResList, err := n.resourceDB.List()
+		n.RUnlock()
 		if err != nil {
 			serviceLog.Error(err)
 			return
@@ -896,7 +899,7 @@ func (networkService *networkService) startPeriodCheck() {
 				continue
 			}
 			serviceLog.Debugf("checking pod name %s", res.PodInfo.Name)
-			cniCfg := libcni.NewCNIConfig([]string{networkService.cniBinPath}, nil)
+			cniCfg := libcni.NewCNIConfig([]string{n.cniBinPath}, nil)
 			func() {
 				ctx, cancel := context.WithTimeout(context.Background(), cniExecTimeout)
 				defer cancel()
@@ -927,14 +930,14 @@ func (networkService *networkService) startPeriodCheck() {
 
 // requestCRD get crd from api
 // note: need tolerate crd is not exist, so contained can del pod normally
-func (networkService *networkService) requestCRD(podInfo *types.PodInfo, waitReady bool) (*podENITypes.PodENI, error) {
-	if networkService.ipamType == types.IPAMTypeCRD || podInfo.PodENI && networkService.enableTrunk {
+func (n *networkService) requestCRD(podInfo *types.PodInfo, waitReady bool) (*podENITypes.PodENI, error) {
+	if n.ipamType == types.IPAMTypeCRD || podInfo.PodENI && n.enableTrunk {
 		var podENI *podENITypes.PodENI
 		var err error
 		if waitReady {
-			podENI, err = networkService.k8s.WaitPodENIInfo(podInfo)
+			podENI, err = n.k8s.WaitPodENIInfo(podInfo)
 		} else {
-			podENI, err = networkService.k8s.GetPodENIInfo(podInfo)
+			podENI, err = n.k8s.GetPodENIInfo(podInfo)
 		}
 		if err != nil {
 			return nil, err
@@ -948,18 +951,18 @@ func (networkService *networkService) requestCRD(podInfo *types.PodInfo, waitRea
 	return nil, nil
 }
 
-func (networkService *networkService) multiIPFromCRD(podInfo *types.PodInfo, waitReady bool) ([]*rpc.NetConf, error) {
+func (n *networkService) multiIPFromCRD(podInfo *types.PodInfo, waitReady bool) ([]*rpc.NetConf, error) {
 	var netConf []*rpc.NetConf
 
 	var nodeTrunkENI *types.ENI
-	podEni, err := networkService.requestCRD(podInfo, waitReady)
+	podEni, err := n.requestCRD(podInfo, waitReady)
 	if err != nil {
 		return nil, fmt.Errorf("error wait pod eni info, %w", err)
 	}
 	if podEni == nil {
 		return nil, nil
 	}
-	nodeTrunkENI = networkService.eniIPResMgr.(*eniIPResourceManager).trunkENI
+	nodeTrunkENI = n.eniIPResMgr.(*eniIPResourceManager).trunkENI
 	if nodeTrunkENI == nil || nodeTrunkENI.ID != podEni.Status.TrunkENIID {
 		return nil, fmt.Errorf("pod status eni parent not match instance trunk eni")
 	}
@@ -1006,7 +1009,7 @@ func (networkService *networkService) multiIPFromCRD(podInfo *types.PodInfo, wai
 				PodIP:       podIP,
 				PodCIDR:     cidr,
 				GatewayIP:   gw,
-				ServiceCIDR: networkService.k8s.GetServiceCIDR().ToRPC(),
+				ServiceCIDR: n.k8s.GetServiceCIDR().ToRPC(),
 			},
 			ENIInfo: eniInfo,
 			Pod: &rpc.Pod{
@@ -1022,17 +1025,17 @@ func (networkService *networkService) multiIPFromCRD(podInfo *types.PodInfo, wai
 	return netConf, nil
 }
 
-func (networkService *networkService) exclusiveENIFromCRD(podInfo *types.PodInfo, waitReady bool) ([]*rpc.NetConf, error) {
+func (n *networkService) exclusiveENIFromCRD(podInfo *types.PodInfo, waitReady bool) ([]*rpc.NetConf, error) {
 	var netConf []*rpc.NetConf
 
 	var nodeTrunkENI *types.ENI
-	podEni, err := networkService.requestCRD(podInfo, waitReady)
+	podEni, err := n.requestCRD(podInfo, waitReady)
 	if err != nil {
 		return nil, fmt.Errorf("error wait pod eni info, %w", err)
 	}
 
-	if networkService.enableTrunk {
-		nodeTrunkENI = networkService.eniResMgr.(*eniResourceManager).trunkENI
+	if n.enableTrunk {
+		nodeTrunkENI = n.eniResMgr.(*eniResourceManager).trunkENI
 		if nodeTrunkENI == nil || nodeTrunkENI.ID != podEni.Status.TrunkENIID {
 			return nil, fmt.Errorf("pod status eni parent not match instance trunk eni")
 		}
@@ -1065,7 +1068,7 @@ func (networkService *networkService) exclusiveENIFromCRD(podInfo *types.PodInfo
 			MAC:   alloc.ENI.MAC,
 			Trunk: false,
 		}
-		if networkService.enableTrunk {
+		if n.enableTrunk {
 			eniInfo.MAC = nodeTrunkENI.MAC // set trunk eni mac
 			eniInfo.Trunk = true
 			info, ok := podEni.Status.ENIInfos[alloc.ENI.ID]
@@ -1080,7 +1083,7 @@ func (networkService *networkService) exclusiveENIFromCRD(podInfo *types.PodInfo
 				PodIP:       podIP,
 				PodCIDR:     cidr,
 				GatewayIP:   gw,
-				ServiceCIDR: networkService.k8s.GetServiceCIDR().ToRPC(),
+				ServiceCIDR: n.k8s.GetServiceCIDR().ToRPC(),
 			},
 			ENIInfo: eniInfo,
 			Pod: &rpc.Pod{
@@ -1100,22 +1103,22 @@ func (networkService *networkService) exclusiveENIFromCRD(podInfo *types.PodInfo
 }
 
 // tracing
-func (networkService *networkService) Config() []tracing.MapKeyValueEntry {
+func (n *networkService) Config() []tracing.MapKeyValueEntry {
 	// name, daemon_mode, configFilePath, kubeconfig, master
 	config := []tracing.MapKeyValueEntry{
 		{Key: tracingKeyName, Value: networkServiceName}, // use a unique name?
-		{Key: tracingKeyDaemonMode, Value: networkService.daemonMode},
-		{Key: tracingKeyConfigFilePath, Value: networkService.configFilePath},
-		{Key: tracingKeyKubeConfig, Value: networkService.kubeConfig},
-		{Key: tracingKeyMaster, Value: networkService.master},
+		{Key: tracingKeyDaemonMode, Value: n.daemonMode},
+		{Key: tracingKeyConfigFilePath, Value: n.configFilePath},
+		{Key: tracingKeyKubeConfig, Value: n.kubeConfig},
+		{Key: tracingKeyMaster, Value: n.master},
 	}
 
 	return config
 }
 
-func (networkService *networkService) Trace() []tracing.MapKeyValueEntry {
+func (n *networkService) Trace() []tracing.MapKeyValueEntry {
 	count := 0
-	networkService.pendingPods.Range(func(key, value interface{}) bool {
+	n.pendingPods.Range(func(key, value interface{}) bool {
 		count++
 		return true
 	})
@@ -1123,7 +1126,7 @@ func (networkService *networkService) Trace() []tracing.MapKeyValueEntry {
 	trace := []tracing.MapKeyValueEntry{
 		{Key: tracingKeyPendingPodsCount, Value: fmt.Sprint(count)},
 	}
-	resList, err := networkService.resourceDB.List()
+	resList, err := n.resourceDB.List()
 	if err != nil {
 		trace = append(trace, tracing.MapKeyValueEntry{Key: "error", Value: err.Error()})
 		return trace
@@ -1145,10 +1148,10 @@ func (networkService *networkService) Trace() []tracing.MapKeyValueEntry {
 	return trace
 }
 
-func (networkService *networkService) Execute(cmd string, _ []string, message chan<- string) {
+func (n *networkService) Execute(cmd string, _ []string, message chan<- string) {
 	switch cmd {
 	case commandMapping:
-		mapping, err := networkService.GetResourceMapping()
+		mapping, err := n.GetResourceMapping()
 		message <- fmt.Sprintf("mapping: %v, err: %s\n", mapping, err)
 	default:
 		message <- "can't recognize command\n"
@@ -1157,28 +1160,28 @@ func (networkService *networkService) Execute(cmd string, _ []string, message ch
 	close(message)
 }
 
-func (networkService *networkService) GetResourceMapping() ([]*tracing.PodMapping, error) {
+func (n *networkService) GetResourceMapping() ([]*tracing.PodMapping, error) {
 	var poolStats tracing.ResourcePoolStats
 	var err error
 
-	networkService.RLock()
+	n.RLock()
 	// get []ResourceMapping
-	switch networkService.daemonMode {
+	switch n.daemonMode {
 	case daemonModeENIMultiIP:
-		poolStats, err = networkService.eniIPResMgr.GetResourceMapping()
+		poolStats, err = n.eniIPResMgr.GetResourceMapping()
 	case daemonModeVPC:
-		networkService.RUnlock()
+		n.RUnlock()
 		return nil, nil
 	case daemonModeENIOnly:
-		poolStats, err = networkService.eniResMgr.GetResourceMapping()
+		poolStats, err = n.eniResMgr.GetResourceMapping()
 	}
 	if err != nil {
-		networkService.RUnlock()
+		n.RUnlock()
 		return nil, err
 	}
 	// pod related res
-	pods, err := networkService.resourceDB.List()
-	networkService.RUnlock()
+	pods, err := n.resourceDB.List()
+	n.RUnlock()
 	if err != nil {
 		return nil, err
 	}
