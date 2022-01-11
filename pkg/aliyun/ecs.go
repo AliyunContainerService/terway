@@ -230,7 +230,7 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 				return true, apiErr.ErrNotFound
 			}
 			if len(eni) == 1 {
-				if string(status) != eni[0].Status {
+				if string(status) != "" && string(status) != eni[0].Status {
 					return false, nil
 				}
 
