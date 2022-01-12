@@ -60,6 +60,7 @@ func init() {
 			},
 			&handler.EnqueueRequestForObject{},
 			&predicate.ResourceVersionChangedPredicate{},
+			&predicateForPodnetwokringEvent{},
 		)
 	})
 }
@@ -96,7 +97,7 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 	l.Info("Reconcile")
 
 	old := &v1beta1.PodNetworking{}
-	err := m.client.Get(context.TODO(), request.NamespacedName, old)
+	err := m.client.Get(ctx, request.NamespacedName, old)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			l.Info("not found")
@@ -133,7 +134,11 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 		m.record.Eventf(update, corev1.EventTypeWarning, types.EventSyncPodNetworkingFailed, "Sync failed %s", err.Error())
 	}
 
-	return reconcile.Result{}, m.updateStatus(ctx, update, old)
+	err2 := m.updateStatus(ctx, update, old)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	return reconcile.Result{}, err2
 }
 
 // NeedLeaderElection need election
