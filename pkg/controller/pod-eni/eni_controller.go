@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
-	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
@@ -60,7 +60,7 @@ var ctrlLog = ctrl.Log.WithName(controllerName)
 const controllerName = "pod-eni"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, aliyunClient *aliyun.OpenAPI, swPool *vswitch.SwitchPool) error {
+	register.Add(controllerName, func(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool) error {
 		r := NewReconcilePod(mgr, aliyunClient)
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
 			Reconciler:              r,
@@ -102,7 +102,7 @@ var _ reconcile.Reconciler = &ReconcilePodENI{}
 type ReconcilePodENI struct {
 	client client.Client
 	scheme *runtime.Scheme
-	aliyun *aliyun.OpenAPI
+	aliyun register.Interface
 
 	//record event recorder
 	record record.EventRecorder
@@ -139,7 +139,7 @@ func (w *Wrapper) NeedLeaderElection() bool {
 }
 
 // NewReconcilePod watch pod lifecycle events and sync to podENI resource
-func NewReconcilePod(mgr manager.Manager, aliyunClient *aliyun.OpenAPI) *ReconcilePodENI {
+func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface) *ReconcilePodENI {
 	r := &ReconcilePodENI{
 		client:    mgr.GetClient(),
 		scheme:    mgr.GetScheme(),
@@ -333,7 +333,7 @@ func (m *ReconcilePodENI) podENIDelete(ctx context.Context, podENI *v1beta1.PodE
 
 func (m *ReconcilePodENI) gcSecondaryENI(force bool) {
 	// 1. list all available enis ( which type is secondary)
-	enis, err := m.aliyun.DescribeNetworkInterface(context.Background(), controlplane.GetConfig().VPCID, nil, "", aliyun.ENITypeSecondary, aliyun.ENIStatusAvailable)
+	enis, err := m.aliyun.DescribeNetworkInterface(context.Background(), controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusAvailable)
 	if err != nil {
 		ctrlLog.Error(err, "error list all member enis")
 		return
@@ -351,7 +351,7 @@ func (m *ReconcilePodENI) gcSecondaryENI(force bool) {
 
 func (m *ReconcilePodENI) gcMemberENI(force bool) {
 	// 1. list all attached member eni
-	enis, err := m.aliyun.DescribeNetworkInterface(context.Background(), controlplane.GetConfig().VPCID, nil, "", aliyun.ENITypeMember, aliyun.ENIStatusInUse)
+	enis, err := m.aliyun.DescribeNetworkInterface(context.Background(), controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeMember, aliyunClient.ENIStatusInUse)
 	if err != nil {
 		ctrlLog.Error(err, "error list all member enis")
 		return
@@ -422,7 +422,7 @@ func (m *ReconcilePodENI) gcENIs(enis []ecs.NetworkInterfaceSet, force bool) err
 
 	// 4. the left eni is going to be deleted
 	for _, eni := range eniMap {
-		if eni.Type == string(aliyun.ENITypeMember) && eni.Status == string(aliyun.ENIStatusInUse) {
+		if eni.Type == string(aliyunClient.ENITypeMember) && eni.Status == string(aliyunClient.ENIStatusInUse) {
 			l.Info("detach eni", "eni", eni.NetworkInterfaceId, "trunk-eni", eni.Attachment.TrunkNetworkInterfaceId)
 			err = m.aliyun.DetachNetworkInterface(context.Background(), eni.NetworkInterfaceId, eni.Attachment.InstanceId, eni.Attachment.TrunkNetworkInterfaceId)
 			if err != nil {
@@ -431,7 +431,7 @@ func (m *ReconcilePodENI) gcENIs(enis []ecs.NetworkInterfaceSet, force bool) err
 			// we continue here because we can delete eni in next check
 			continue
 		}
-		if eni.Status == string(aliyun.ENIStatusAvailable) {
+		if eni.Status == string(aliyunClient.ENIStatusAvailable) {
 			l.Info("delete eni", "eni", eni.NetworkInterfaceId)
 			err = m.aliyun.DeleteNetworkInterface(context.Background(), eni.NetworkInterfaceId)
 			if err != nil {
@@ -618,7 +618,7 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI)
 				return err
 			}
 
-			eni, err := realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
+			eni, err := realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyunClient.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
 			if err != nil {
 				return err
 			}
@@ -680,7 +680,7 @@ func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.P
 		}
 		time.Sleep(backoff.Backoff(backoff.WaitENIStatus).Duration)
 
-		_, err = realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
+		_, err = realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyunClient.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
 		if err == nil {
 			continue
 		}

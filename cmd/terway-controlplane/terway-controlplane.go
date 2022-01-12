@@ -23,7 +23,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	"github.com/AliyunContainerService/terway/pkg/apis/crds"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/cert"
@@ -84,12 +85,12 @@ func main() {
 		panic(err)
 	}
 
-	clientSet, err := aliyun.NewClientSet(string(cfg.Credential.AccessKey), string(cfg.Credential.AccessSecret), cfg.RegionID, cfg.CredentialPath, cfg.SecretNamespace, cfg.SecretName)
+	clientSet, err := credential.NewClientSet(string(cfg.Credential.AccessKey), string(cfg.Credential.AccessSecret), cfg.RegionID, cfg.CredentialPath, cfg.SecretNamespace, cfg.SecretName)
 	if err != nil {
 		panic(err)
 	}
 
-	aliyunClient, err := aliyun.New(clientSet, flowcontrol.NewTokenBucketRateLimiter(cfg.ReadOnlyQPS, cfg.ReadOnlyBurst), flowcontrol.NewTokenBucketRateLimiter(cfg.MutatingQPS, cfg.MutatingBurst))
+	aliyunClient, err := client.New(clientSet, flowcontrol.NewTokenBucketRateLimiter(cfg.ReadOnlyQPS, cfg.ReadOnlyBurst), flowcontrol.NewTokenBucketRateLimiter(cfg.MutatingQPS, cfg.MutatingBurst))
 	if err != nil {
 		panic(err)
 	}

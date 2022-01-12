@@ -17,13 +17,19 @@ limitations under the License.
 package register
 
 import (
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
-type Creator func(mgr manager.Manager, aliyunClient *aliyun.OpenAPI, swPool *vswitch.SwitchPool) error
+// Interface aliyun client for terway-controlplane
+type Interface interface {
+	client.VSwitch
+	client.ENI
+}
+
+type Creator func(mgr manager.Manager, aliyunClient Interface, swPool *vswitch.SwitchPool) error
 
 // Controllers collect for all controller
 var Controllers = map[string]Creator{}

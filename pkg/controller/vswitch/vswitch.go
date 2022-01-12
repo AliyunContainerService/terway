@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 
 	"k8s.io/apimachinery/pkg/util/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -54,7 +54,7 @@ func NewSwitchPool(size int, ttl string) (*SwitchPool, error) {
 }
 
 // GetOne get one vSwitch by zone and limit in ids
-func (s *SwitchPool) GetOne(ctx context.Context, client aliyun.VPCOps, zone string, ids []string, ignoreZone bool) (*Switch, error) {
+func (s *SwitchPool) GetOne(ctx context.Context, client client.VSwitch, zone string, ids []string, ignoreZone bool) (*Switch, error) {
 	var fallBackSwitches []*Switch
 	// lookup all vsw in cache and get one matched
 	for _, id := range ids {
@@ -87,7 +87,7 @@ func (s *SwitchPool) GetOne(ctx context.Context, client aliyun.VPCOps, zone stri
 }
 
 // GetByID will get vSwitch info from local store or openAPI
-func (s *SwitchPool) GetByID(ctx context.Context, client aliyun.VPCOps, id string) (*Switch, error) {
+func (s *SwitchPool) GetByID(ctx context.Context, client client.VSwitch, id string) (*Switch, error) {
 	v, ok := s.cache.Get(id)
 	if !ok {
 		resp, err := client.DescribeVSwitchByID(ctx, id)
@@ -106,4 +106,14 @@ func (s *SwitchPool) GetByID(ctx context.Context, client aliyun.VPCOps, id strin
 	}
 	sw := v.(*Switch)
 	return sw, nil
+}
+
+// Add Switch to cache. Test purpose.
+func (s *SwitchPool) Add(sw *Switch) {
+	s.cache.Add(sw.ID, sw, s.ttl)
+}
+
+// Del Switch from cache. Test purpose.
+func (s *SwitchPool) Del(key string) {
+	s.cache.Remove(key)
 }

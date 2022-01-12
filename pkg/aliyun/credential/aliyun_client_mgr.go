@@ -1,18 +1,23 @@
-package aliyun
+package credential
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	"github.com/AliyunContainerService/terway/pkg/logger"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 )
+
+type Client interface {
+	ECS() *ecs.Client
+	VPC() *vpc.Client
+}
 
 var (
 	mgrLog                     = logger.DefaultLogger.WithField("subSys", "clientMgr")
@@ -30,11 +35,22 @@ func clientCfg() *sdk.Config {
 	}
 }
 
+func NewClientSet(ak, sk, regionID, credentialPath, secretNamespace, secretName string) (Client, error) {
+	if regionID == "" {
+		return nil, fmt.Errorf("regionID unset")
+	}
+	clientSet, err := NewClientMgr(ak, sk, credentialPath, regionID, secretNamespace, secretName)
+	if err != nil {
+		return nil, fmt.Errorf("error get clientset, %w", err)
+	}
+	return clientSet, nil
+}
+
 // ClientMgr manager of aliyun openapi clientset
 type ClientMgr struct {
 	regionID string
 
-	auth credential.Interface
+	auth Interface
 
 	// protect things below
 	sync.RWMutex
@@ -51,10 +67,10 @@ func NewClientMgr(key, secret, credentialPath, regionID, secretNamespace, secret
 	mgr := &ClientMgr{
 		regionID: regionID,
 	}
-	providers := []credential.Interface{
-		credential.NewAKPairProvider(key, secret),
-		credential.NewEncryptedCredentialProvider(credentialPath, secretNamespace, secretName),
-		credential.NewMetadataProvider(),
+	providers := []Interface{
+		NewAKPairProvider(key, secret),
+		NewEncryptedCredentialProvider(credentialPath, secretNamespace, secretName),
+		NewMetadataProvider(),
 	}
 	for _, p := range providers {
 		c, err := p.Resolve()
