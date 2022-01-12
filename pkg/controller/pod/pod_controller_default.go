@@ -6,8 +6,8 @@ package pod
 import (
 	"context"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 )
 
@@ -16,6 +16,6 @@ func (m *ReconcilePod) ParsePodNetworksFromAnnotation(ctx context.Context, zoneI
 	return nil, nil
 }
 
-func (m *ReconcilePod) PostENICreate(ctx context.Context, client *aliyun.OpenAPI, alloc *v1beta1.Allocation) error {
+func (m *ReconcilePod) PostENICreate(ctx context.Context, client register.Interface, alloc *v1beta1.Allocation) error {
 	return nil
 }

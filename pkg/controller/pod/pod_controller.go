@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
@@ -51,7 +51,7 @@ import (
 const controllerName = "pod"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, aliyunClient *aliyun.OpenAPI, swPool *vswitch.SwitchPool) error {
+	register.Add(controllerName, func(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool) error {
 		r := NewReconcilePod(mgr, aliyunClient, swPool)
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
 			Reconciler:              r,
@@ -88,7 +88,7 @@ var _ reconcile.Reconciler = &ReconcilePod{}
 type ReconcilePod struct {
 	client client.Client
 	scheme *runtime.Scheme
-	aliyun *aliyun.OpenAPI
+	aliyun register.Interface
 
 	swPool *vswitch.SwitchPool
 
@@ -118,7 +118,7 @@ func (w *Wrapper) NeedLeaderElection() bool {
 }
 
 // NewReconcilePod watch pod lifecycle events and sync to podENI resource
-func NewReconcilePod(mgr manager.Manager, aliyunClient *aliyun.OpenAPI, swPool *vswitch.SwitchPool) *ReconcilePod {
+func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool) *ReconcilePod {
 	r := &ReconcilePod{
 		client: mgr.GetClient(),
 		scheme: mgr.GetScheme(),
@@ -527,7 +527,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 				return fmt.Errorf("get client failed, %w", err)
 			}
 
-			eni, err := realClient.CreateNetworkInterface(ctx, aliyun.ENITypeSecondary, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, 1, ipv6Count, map[string]string{
+			eni, err := realClient.CreateNetworkInterface(ctx, aliyunClient.ENITypeSecondary, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, 1, ipv6Count, map[string]string{
 				types.TagKeyClusterID:               clusterID,
 				types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
 				types.TagKubernetesPodName:          utils.TrimStr(pod.Name, 120),

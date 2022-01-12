@@ -8,7 +8,8 @@ import (
 	"sync"
 	"time"
 
-	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/ipam"
@@ -38,11 +39,11 @@ type Impl struct {
 
 	ipFamily *types.IPFamily
 
-	*OpenAPI
+	*client.OpenAPI
 }
 
 // NewAliyunImpl return new API implement object
-func NewAliyunImpl(openAPI *OpenAPI, needENITypeAttr bool, ipFamily *types.IPFamily) ipam.API {
+func NewAliyunImpl(openAPI *client.OpenAPI, needENITypeAttr bool, ipFamily *types.IPFamily) ipam.API {
 	return &Impl{
 		metadata:    NewENIMetadata(ipFamily),
 		ipFamily:    ipFamily,
@@ -57,9 +58,9 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 		return nil, fmt.Errorf("invalid eni args for allocate")
 	}
 
-	var instanceType ENIType
+	var instanceType client.ENIType
 	if trunk {
-		instanceType = ENITypeTrunk
+		instanceType = client.ENITypeTrunk
 	}
 	ipv4Count, ipv6Count := 0, 0
 	if e.ipFamily.IPv4 {
@@ -107,8 +108,8 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 	start := time.Now()
 	// bind status is async api, sleep for first bind status inspect
 	time.Sleep(backoff.Backoff(backoff.WaitENIStatus).Duration)
-	eniStatus, err := e.WaitForNetworkInterface(ctx, resp.NetworkInterfaceId, ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
-	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceBind/"+string(ENIStatusInUse), fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	eniStatus, err := e.WaitForNetworkInterface(ctx, resp.NetworkInterfaceId, client.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
+	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceBind/"+string(client.ENIStatusInUse), fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 	if err != nil {
 		return nil, err
@@ -130,7 +131,7 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 			}
 
 			eni.MaxIPs = l.IPv4PerAdapter
-			eni.Trunk = ENIType(eniStatus.Type) == ENITypeTrunk
+			eni.Trunk = client.ENIType(eniStatus.Type) == client.ENITypeTrunk
 			return true, nil
 		},
 	)
@@ -207,7 +208,7 @@ func (e *Impl) GetAttachedENIs(ctx context.Context, containsMainENI bool) ([]*ty
 			return nil, err
 		}
 		for _, eni := range eniSet {
-			enisMap[eni.NetworkInterfaceId].Trunk = ENIType(eni.Type) == ENITypeTrunk
+			enisMap[eni.NetworkInterfaceId].Trunk = client.ENIType(eni.Type) == client.ENITypeTrunk
 		}
 	}
 	return enis, nil
@@ -506,14 +507,14 @@ func (e *Impl) CheckEniSecurityGroup(ctx context.Context, sg []string) error {
 	// get all attached eni
 	eniList, err := e.DescribeNetworkInterface(ctx, "", nil, instanceID, "", "")
 	if err != nil {
-		logrus.WithField(LogFieldInstanceID, instanceID).Warn(err)
+		logrus.WithField(client.LogFieldInstanceID, instanceID).Warn(err)
 		return nil
 	}
 	sgSet := sets.NewString(sg...)
 
 	var errs []error
 	for _, eni := range eniList {
-		if eni.Type == string(ENITypePrimary) {
+		if eni.Type == string(client.ENITypePrimary) {
 			continue
 		}
 		eniSgSet := sets.NewString(eni.SecurityGroupIds.SecurityGroupId...)

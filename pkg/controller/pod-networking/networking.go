@@ -19,7 +19,7 @@ package podnetworking
 import (
 	"context"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
@@ -45,7 +45,7 @@ import (
 const controllerName = "pod-networking"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, aliyunClient *aliyun.OpenAPI, swPool *vswitch.SwitchPool) error {
+	register.Add(controllerName, func(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool) error {
 		c, err := controller.New(controllerName, mgr, controller.Options{
 			Reconciler:              NewReconcilePodNetworking(mgr, aliyunClient, swPool),
 			MaxConcurrentReconciles: 1,
@@ -72,7 +72,7 @@ var _ reconcile.Reconciler = &ReconcilePodNetworking{}
 type ReconcilePodNetworking struct {
 	client       client.Client
 	scheme       *runtime.Scheme
-	aliyunClient *aliyun.OpenAPI
+	aliyunClient aliyunClient.VSwitch
 	swPool       *vswitch.SwitchPool
 
 	//record event recorder
@@ -80,7 +80,7 @@ type ReconcilePodNetworking struct {
 }
 
 // NewReconcilePodNetworking watch pod lifecycle events and sync to podENI resource
-func NewReconcilePodNetworking(mgr manager.Manager, aliyunClient *aliyun.OpenAPI, swPool *vswitch.SwitchPool) *ReconcilePodNetworking {
+func NewReconcilePodNetworking(mgr manager.Manager, aliyunClient aliyunClient.VSwitch, swPool *vswitch.SwitchPool) *ReconcilePodNetworking {
 	r := &ReconcilePodNetworking{
 		client:       mgr.GetClient(),
 		scheme:       mgr.GetScheme(),
