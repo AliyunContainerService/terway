@@ -134,7 +134,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		} else {
 			for _, n := range networks.PodNetworks {
 				if len(n.VSwitchOptions) == 0 {
-					return admission.Denied("vSwitchID is not set")
+					return admission.Denied("vSwitchOptions is not set")
 				}
 				if len(n.SecurityGroupIDs) == 0 {
 					return admission.Denied("security group is not set")

@@ -234,7 +234,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	}()
 
 	// 2.1 fill config
-	allocType := &v1beta1.AllocationType{Type: v1beta1.IPAllocTypeElastic}
+	var allocType *v1beta1.AllocationType
 
 	anno, err := controlplane.ParsePodNetworksFromAnnotation(pod)
 	if err != nil {
@@ -261,7 +261,8 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("error get podNetworking %s, %w", podNetwokingName, err)
 		}
-		vsw, err := m.swPool.GetOne(ctx, m.aliyun, nodeInfo.Zone, podNetworking.Spec.VSwitchOptions, false)
+		var vsw *vswitch.Switch
+		vsw, err = m.swPool.GetOne(ctx, m.aliyun, nodeInfo.Zone, podNetworking.Spec.VSwitchOptions, false)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.Zone, err)
 		}
@@ -275,22 +276,9 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 			IPv6CIDR: vsw.IPv6CIDR,
 		})
 
-		if podNetworking.Spec.AllocationType.Type == v1beta1.IPAllocTypeFixed {
-			allocType.Type = v1beta1.IPAllocTypeFixed
-		}
-
-		allocType.ReleaseStrategy = v1beta1.ReleaseStrategyTTL
-		if podNetworking.Spec.AllocationType.ReleaseStrategy != "" {
-			allocType.ReleaseStrategy = podNetworking.Spec.AllocationType.ReleaseStrategy
-		}
-
-		allocType.ReleaseAfter = "10m"
-		if podNetworking.Spec.AllocationType.ReleaseAfter != "" {
-			_, err := time.ParseDuration(podNetworking.Spec.AllocationType.ReleaseAfter)
-			if err != nil {
-				return reconcile.Result{}, fmt.Errorf("error parse ReleaseAfter, %w", err)
-			}
-			allocType.ReleaseAfter = podNetworking.Spec.AllocationType.ReleaseAfter
+		allocType, err = controlplane.ParseAllocationType(&podNetworking.Spec.AllocationType)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("error parse ReleaseAfter, %w", err)
 		}
 	} else {
 		// try get v1beta1.PodAllocType from annotation

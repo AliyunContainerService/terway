@@ -50,9 +50,7 @@ func ParsePodNetworksFromAnnotation(pod *corev1.Pod) (*PodNetworksAnnotation, er
 func ParsePodIPTypeFromAnnotation(pod *corev1.Pod) (*v1beta1.AllocationType, error) {
 	v, ok := pod.GetAnnotations()[terwayTypes.PodAllocType]
 	if !ok {
-		return &v1beta1.AllocationType{
-			Type: v1beta1.IPAllocTypeElastic,
-		}, nil
+		return defaultAllocType(), nil
 	}
 	// will not be nil
 	var annoConf v1beta1.AllocationType
@@ -63,11 +61,15 @@ func ParsePodIPTypeFromAnnotation(pod *corev1.Pod) (*v1beta1.AllocationType, err
 	return ParseAllocationType(&annoConf)
 }
 
-// ParseAllocationType parse and set default val
-func ParseAllocationType(old *v1beta1.AllocationType) (*v1beta1.AllocationType, error) {
-	res := &v1beta1.AllocationType{
+func defaultAllocType() *v1beta1.AllocationType {
+	return &v1beta1.AllocationType{
 		Type: v1beta1.IPAllocTypeElastic,
 	}
+}
+
+// ParseAllocationType parse and set default val
+func ParseAllocationType(old *v1beta1.AllocationType) (*v1beta1.AllocationType, error) {
+	res := defaultAllocType()
 	if old == nil {
 		return res, nil
 	}
