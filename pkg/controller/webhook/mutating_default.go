@@ -17,15 +17,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controlplane
+package webhook
 
 import (
-	"github.com/AliyunContainerService/terway/types/route"
+	"github.com/AliyunContainerService/terway/types/controlplane"
 )
 
-type PodNetworks struct {
-	VSwitchOptions   []string      `json:"vSwitchOptions"`
-	SecurityGroupIDs []string      `json:"securityGroupIDs"`
-	Interface        string        `json:"interface"`
-	ExtraRoutes      []route.Route `json:"extraRoutes"`
+func needPreviousZoneForAnnotation(zone string, _ controlplane.PodNetworks) bool {
+	if zone == "" {
+		return false
+	}
+	return true
 }

@@ -3,6 +3,7 @@ package types
 import (
 	"os"
 
+	"github.com/AliyunContainerService/terway/types/route"
 	jsonpatch "github.com/evanphx/json-patch"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -37,6 +38,7 @@ type Configure struct {
 	IPAMType                    IPAMType                `yaml:"ipam_type" json:"ipam_type"`           // crd or default
 	ENICapPolicy                ENICapPolicy            `yaml:"eni_cap_policy" json:"eni_cap_policy"` // prefer trunk or secondary
 	BackoffOverride             map[string]wait.Backoff `json:"backoff_override,omitempty"`
+	ExtraRoutes                 []route.Route           `json:"extra_routes,omitempty"`
 }
 
 func (c *Configure) GetSecurityGroups() []string {
@@ -46,6 +48,22 @@ func (c *Configure) GetSecurityGroups() []string {
 	}
 	sgIDs.Insert(c.SecurityGroups...)
 	return sgIDs.List()
+}
+
+func (c *Configure) GetVSwitchIDs() []string {
+	var vsws []string
+	for _, ids := range c.VSwitches {
+		vsws = append(vsws, ids...)
+	}
+	return vsws
+}
+
+func (c *Configure) GetExtraRoutes() []string {
+	var vsws []string
+	for _, ids := range c.VSwitches {
+		vsws = append(vsws, ids...)
+	}
+	return vsws
 }
 
 // PoolConfig configuration of pool and resource factory

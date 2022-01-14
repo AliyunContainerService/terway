@@ -82,8 +82,34 @@ func PodMatchSelector(labelSelector *metav1.LabelSelector, l labels.Set) (bool, 
 	return selector.Matches(l), nil
 }
 
-// SetPodENIStatus set cr status
-func SetPodENIStatus(ctx context.Context, c client.Client, update, old *v1beta1.PodENI) (*v1beta1.PodENI, error) {
+// UpdatePodENI update cr
+func UpdatePodENI(ctx context.Context, c client.Client, update *v1beta1.PodENI) (*v1beta1.PodENI, error) {
+	var err error
+	for i := 0; i < 2; i++ {
+		err = c.Update(ctx, update)
+		if err != nil {
+			continue
+		}
+		return update, nil
+	}
+	return nil, err
+}
+
+// UpdatePodENIStatus set cr status
+func UpdatePodENIStatus(ctx context.Context, c client.Client, update *v1beta1.PodENI) (*v1beta1.PodENI, error) {
+	var err error
+	for i := 0; i < 2; i++ {
+		err = c.Status().Update(ctx, update)
+		if err != nil {
+			continue
+		}
+		return update, nil
+	}
+	return nil, err
+}
+
+// PatchPodENIStatus set cr status
+func PatchPodENIStatus(ctx context.Context, c client.Client, update, old *v1beta1.PodENI) (*v1beta1.PodENI, error) {
 	var err error
 	for i := 0; i < 2; i++ {
 		err = c.Status().Patch(ctx, update, client.MergeFrom(old))

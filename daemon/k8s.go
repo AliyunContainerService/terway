@@ -195,6 +195,12 @@ func (k *k8s) WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, e
 			// wait pod eni bind
 			return false, nil
 		}
+		if info.PodUID != "" {
+			if podEni.Annotations[types.PodUID] != info.PodUID {
+				return false, nil
+			}
+		}
+
 		if !podEni.DeletionTimestamp.IsZero() {
 			return false, nil
 		}
@@ -446,6 +452,7 @@ func convertPod(daemonMode string, statefulWorkloadKindSet sets.String, pod *cor
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
 		PodIPs:    types.IPSet{},
+		PodUID:    string(pod.UID),
 	}
 
 	pi.PodNetworkType = podNetworkType(daemonMode, pod)
