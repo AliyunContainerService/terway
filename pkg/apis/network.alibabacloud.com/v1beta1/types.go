@@ -117,13 +117,16 @@ type Phase string
 //                |                               |
 //                |                               |
 //                |                               |              gc reserved resource for sts pods
-//                |                         ENIPhaseUnbind    ---------
-//                |                               |                     |
-//                |   sts pod delete              |                     |
-//                |-----------------------> ENIPhaseDeleting           |
-//                |                                                     |
-//                |   stateless pod delete                              |
-//                |        <---------------------------------------------
+//                |                         ENIPhaseUnbind    ---------------
+//                |                               |                     |    |
+//                |   sts pod delete              |                     |    |
+//                |-----------------------> ENIPhaseDetaching           |    |
+//                |                                                     |    |
+//                |   stateless pod delete                              |    |
+//                |        <---------------------------------------------    |
+//                |                                                          |
+//         ENIPhaseDeleting <------------------------------------------------|
+//                |
 //          del podENI
 const (
 	// ENIPhaseInitial the status when pod first created
@@ -134,6 +137,8 @@ const (
 	ENIPhaseBinding = "Binding"
 	// ENIPhaseUnbind the status ENI is not bind to ECS
 	ENIPhaseUnbind = "Unbind"
+	// ENIPhaseDetaching the status when need to detach ENI from ECS
+	ENIPhaseDetaching = "Detaching"
 	// ENIPhaseDeleting the status when CR is removing
 	ENIPhaseDeleting = "Deleting"
 )

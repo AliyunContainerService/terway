@@ -206,7 +206,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 	case v1beta1.ENIPhaseUnbind:
 		l.V(5).Info("already unbind")
 		return reconcile.Result{}, nil
-	case v1beta1.ENIPhaseDeleting:
+	case v1beta1.ENIPhaseDetaching:
 		// for pod require to unbind eni
 		defer func() {
 			if err != nil {
@@ -214,6 +214,16 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 			}
 		}()
 		return m.detach(ctx, podENI)
+	case v1beta1.ENIPhaseDeleting:
+		err = m.client.Delete(ctx, podENI)
+		if err != nil {
+			if k8sErr.IsNotFound(err) {
+				l.Info("cr resource not found")
+				return reconcile.Result{}, nil
+			}
+			return reconcile.Result{}, err
+		}
+		return reconcile.Result{}, nil
 	case v1beta1.ENIPhaseInitial, v1beta1.ENIPhaseBinding: // pod first create or rebind
 		// for pod require to unbind eni
 		defer func() {
@@ -221,7 +231,10 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 				m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventAttachENIFailed, "%s", err.Error())
 			}
 		}()
-
+		if len(podENI.Spec.Allocations) == 0 {
+			err = fmt.Errorf("alloction is empty")
+			return reconcile.Result{}, err
+		}
 		pod := &corev1.Pod{}
 		err = m.client.Get(ctx, namespacedName, pod)
 		if err != nil {
@@ -267,6 +280,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		if podENICopy.Status.ENIInfos == nil {
 			podENICopy.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
 		}
+
 		ll := l.WithValues("eni", podENICopy.Spec.Allocations[0].ENI.ID, "trunk", podENICopy.Status.TrunkENIID, "instance", podENICopy.Status.InstanceID)
 
 		err = m.attachENI(ctx, podENICopy)
@@ -278,7 +292,9 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		podENICopy.Status.Phase = v1beta1.ENIPhaseBind
 		podENICopy.Status.PodLastSeen = metav1.Now()
 
-		_, err = common.SetPodENIStatus(ctx, m.client, podENICopy, podENI)
+		// if attach succeed and update status failed , we can not store instance id
+		// so in later detach , we are unable to detach the eni
+		_, err = common.UpdatePodENIStatus(ctx, m.client, podENICopy)
 		if err != nil {
 			ll.Error(err, "update podENI")
 			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventUpdatePodENIFailed, "%s", err.Error())
@@ -442,95 +458,98 @@ func (m *ReconcilePodENI) gcCRPodENIs() {
 	// 2. release res if pod is not present and not use fixed ip
 	// 3. clean fixed ip cr
 	for _, podENI := range podENIs.Items {
-		msg := fmt.Sprintf("cr %s/%s", podENI.Namespace, podENI.Name)
+		func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+			defer cancel()
 
-		p := &corev1.Pod{}
-		err = m.client.Get(context.Background(), k8stypes.NamespacedName{
-			Namespace: podENI.Namespace,
-			Name:      podENI.Name,
-		}, p)
-		if err != nil && !k8sErr.IsNotFound(err) {
-			l.Error(err, "error get pod, %s")
-			continue
-		}
-		ll := l.WithValues("pod", k8stypes.NamespacedName{
-			Namespace: podENI.Namespace,
-			Name:      podENI.Name,
-		}.String())
-
-		// pod exist just update timestamp
-		if err == nil {
-			if !types.PodUseENI(p) {
-				// for pod not using pod ENI will delete it
-				err = m.client.Delete(context.Background(), &podENI)
-				ll.WithValues("eni", podENI.Spec.Allocations[0].ENI.ID).Info("prune eni pod is not using trunk")
-				if err != nil {
-					ll.Error(err, "error prune eni, %s")
-				}
-				continue
+			p := &corev1.Pod{}
+			err = m.client.Get(ctx, k8stypes.NamespacedName{
+				Namespace: podENI.Namespace,
+				Name:      podENI.Name,
+			}, p)
+			if err != nil && !k8sErr.IsNotFound(err) {
+				l.Error(err, "error get pod")
+				return
 			}
-			if utils.IsJobPod(p) && utils.PodSandboxExited(p) {
-				// for Job kind pod remove after job is done
-				err = m.client.Delete(context.Background(), &podENI)
-				ll.WithValues("eni", strings.Join(allocIDs(&podENI), ",")).Info("prune eni pod is exited")
-				if err != nil {
-					ll.Error(err, "error prune eni, %s")
-				}
-				continue
-			}
+			ll := l.WithValues("pod", k8stypes.NamespacedName{
+				Namespace: podENI.Namespace,
+				Name:      podENI.Name,
+			}.String())
 
-			ll.V(5).Info("update pod lastSeen to now")
-			update := podENI.DeepCopy()
-			update.Status.PodLastSeen = metav1.Now()
-			_, err = common.SetPodENIStatus(context.Background(), m.client, update, &podENI)
-			if err != nil {
-				ll.Error(err, "error update timestamp, %s", msg)
-			}
-			continue
-		}
-
-		// fixme need clean up eni other than delete podENI
-		keep := true
-		// pod not exist
-		for _, alloc := range podENI.Spec.Allocations {
-			if alloc.AllocationType.Type == v1beta1.IPAllocTypeFixed {
-				switch alloc.AllocationType.ReleaseStrategy {
-				case v1beta1.ReleaseStrategyNever:
-					keep = true
-					continue
-				case v1beta1.ReleaseStrategyTTL:
-					duration, err := time.ParseDuration(alloc.AllocationType.ReleaseAfter)
+			// pod exist just update timestamp
+			if err == nil {
+				if !podRequirePodENI(p) {
+					err = m.deletePodENI(ctx, &podENI)
 					if err != nil {
+						ll.Error(err, "error set podENI to ENIPhaseDeleting")
+					}
+					return
+				}
+				ll.V(5).Info("update pod lastSeen to now")
+				update := podENI.DeepCopy()
+				update.Status.PodLastSeen = metav1.Now()
+				_, err = common.PatchPodENIStatus(ctx, m.client, update, &podENI)
+				if err != nil {
+					ll.Error(err, "error update timestamp")
+				}
+				return
+			}
+
+			switch podENI.Status.Phase {
+			case v1beta1.ENIPhaseDetaching, v1beta1.ENIPhaseDeleting, v1beta1.ENIPhaseBinding:
+				ll.V(5).Info("resource is processing, wait next time", "phase", podENI.Status.Phase)
+				return
+			}
+			// pod not exist so check all alloc
+			keep := false
+			for _, alloc := range podENI.Spec.Allocations {
+				if alloc.AllocationType.Type == v1beta1.IPAllocTypeFixed {
+					switch alloc.AllocationType.ReleaseStrategy {
+					case v1beta1.ReleaseStrategyNever:
 						keep = true
-						ll.Error(err, "error parse ReleaseAfter, %s", msg)
+						continue
+					case v1beta1.ReleaseStrategyTTL:
+						duration, err := time.ParseDuration(alloc.AllocationType.ReleaseAfter)
+						if err != nil {
+							keep = true
+							ll.Error(err, "error parse ReleaseAfter")
+							continue
+						}
+						if duration < 0 {
+							keep = true
+							ll.Error(err, "error parse ReleaseAfter", "ReleaseAfter", duration.String())
+							continue
+						}
+						now := time.Now()
+						if podENI.Status.PodLastSeen.Add(duration).After(now) {
+							keep = true
+							continue
+						}
+						// some require to keep
+						if keep {
+							continue
+						}
+						ll.Info("fixed ip recycle", "lastSeen", podENI.Status.PodLastSeen.String(), "now", now.String())
+
+						keep = false
+					default:
+						keep = true
+						ll.Error(err, "unsupported ReleaseStrategy %s", alloc.AllocationType.ReleaseStrategy)
 						continue
 					}
-					if duration < 0 {
-						keep = true
-						ll.Error(err, "error parse ReleaseAfter %s, %s", duration.String(), msg)
-						continue
-					}
-					now := time.Now()
-					if podENI.Status.PodLastSeen.Add(duration).After(now) {
-						keep = true
-						continue
-					}
-					l.Info("fixed ip recycle", "lastSeen", podENI.Status.PodLastSeen.String(), "now", now.String())
-				default:
-					keep = true
-					ll.Error(err, "unsupported ReleaseStrategy %s", alloc.AllocationType.ReleaseStrategy)
-					continue
 				}
 			}
-		}
-		if keep {
-			continue
-		}
-		err = m.client.Delete(context.Background(), &podENI)
-		ll.WithValues("eni", strings.Join(allocIDs(&podENI), ",")).Info("prune eni")
-		if err != nil {
-			ll.Error(err, "error prune eni, %s")
-		}
+			if keep {
+				return
+			}
+
+			update := podENI.DeepCopy()
+			update.Status.Phase = v1beta1.ENIPhaseDeleting
+			_, err = common.UpdatePodENIStatus(ctx, m.client, update)
+			if err != nil {
+				ll.Error(err, "error prune eni, %s")
+			}
+		}()
 	}
 }
 
@@ -551,29 +570,31 @@ func (m *ReconcilePodENI) detach(ctx context.Context, podENI *v1beta1.PodENI) (r
 			podENICopy.Status.ENIInfos[k] = *cp
 		}
 	}
-	_, err = common.SetPodENIStatus(ctx, m.client, podENICopy, podENI)
+	_, err = common.UpdatePodENIStatus(ctx, m.client, podENICopy)
 	return reconcile.Result{}, err
 }
 
 func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI) error {
 	var err error
-	if podENI.Status.InstanceID == "" || podENI.Status.Phase == v1beta1.ENIPhaseBind {
+	if podENI.Status.InstanceID == "" {
+		return fmt.Errorf("instanceID missing")
+	}
+	if podENI.Status.Phase == v1beta1.ENIPhaseBind {
 		return nil
 	}
 	defer func() {
 		if err != nil {
 			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventAttachENIFailed, err.Error())
 		} else {
-			m.record.Eventf(podENI, corev1.EventTypeNormal, types.EventAttachENISucceed, fmt.Sprintf("attach eni %s", strings.Join(allocIDs(podENI), ",")))
+			m.record.Eventf(podENI, corev1.EventTypeNormal, types.EventAttachENISucceed, fmt.Sprintf("attached eni %s", strings.Join(allocIDs(podENI), ",")))
 		}
 	}()
 
 	ch := make(chan *v1beta1.ENIInfo)
 	done := make(chan struct{})
 	go func() {
-		if podENI.Status.ENIInfos == nil {
-			podENI.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
-		}
+		// override the config
+		podENI.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
 		for info := range ch {
 			podENI.Status.ENIInfos[info.ID] = *info
 		}
@@ -619,9 +640,10 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI)
 
 func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.PodENI) error {
 	var err error
-	if podENI.Status.InstanceID == "" || podENI.Status.Phase == v1beta1.ENIPhaseUnbind {
+	if podENI.Status.Phase == v1beta1.ENIPhaseUnbind {
 		return nil
 	}
+
 	defer func() {
 		if err != nil {
 			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventDetachENIFailed, err.Error())
@@ -631,16 +653,33 @@ func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.P
 	}()
 	for _, alloc := range podENI.Spec.Allocations {
 		ctx := common.WithCtx(ctx, &alloc)
-		err = m.aliyun.DetachNetworkInterface(ctx, alloc.ENI.ID, podENI.Status.InstanceID, podENI.Status.TrunkENIID)
+		instanceID := podENI.Status.InstanceID
+		trunkENIID := podENI.Status.TrunkENIID
+		realClient, _, err := common.Became(ctx, m.aliyun)
+		if err != nil {
+			return err
+		}
+		if podENI.Status.InstanceID == "" {
+			enis, err := realClient.DescribeNetworkInterface(ctx, "", []string{alloc.ENI.ID}, "", "", "")
+			if err != nil {
+				return err
+			}
+			if len(enis) == 0 {
+				continue
+			}
+			if enis[0].Attachment.InstanceId == "" {
+				continue
+			}
+			instanceID = enis[0].Attachment.InstanceId
+			trunkENIID = enis[0].Attachment.TrunkNetworkInterfaceId
+		}
+
+		err = m.aliyun.DetachNetworkInterface(ctx, alloc.ENI.ID, instanceID, trunkENIID)
 		if err != nil {
 			return err
 		}
 		time.Sleep(backoff.Backoff(backoff.WaitENIStatus).Duration)
 
-		realClient, _, err := common.Became(ctx, m.aliyun)
-		if err != nil {
-			return err
-		}
 		_, err = realClient.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyun.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
 		if err == nil {
 			continue
@@ -710,10 +749,28 @@ func (m *ReconcilePodENI) getNode(ctx context.Context, name string) (*corev1.Nod
 	return node, err
 }
 
+func (m *ReconcilePodENI) deletePodENI(ctx context.Context, podENI *v1beta1.PodENI) error {
+	update := podENI.DeepCopy()
+	update.Status.Phase = v1beta1.ENIPhaseDeleting
+
+	_, err := common.UpdatePodENIStatus(ctx, m.client, update)
+	return err
+}
+
 func allocIDs(podENI *v1beta1.PodENI) []string {
 	var ids []string
 	for _, alloc := range podENI.Spec.Allocations {
 		ids = append(ids, alloc.ENI.ID)
 	}
 	return ids
+}
+
+func podRequirePodENI(pod *corev1.Pod) bool {
+	if !types.PodUseENI(pod) {
+		return false
+	}
+	if utils.IsJobPod(pod) && utils.PodSandboxExited(pod) {
+		return false
+	}
+	return true
 }

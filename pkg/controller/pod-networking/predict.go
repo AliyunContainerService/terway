@@ -38,7 +38,7 @@ func (p *predicateForPodnetwokringEvent) Update(e event.UpdateEvent) bool {
 	if newPodNetworking.Status.Status != v1beta1.NetworkingStatusReady {
 		return true
 	}
-	
+
 	oldPodNetworking, ok := e.ObjectOld.(*v1beta1.PodNetworking)
 	if !ok {
 		return false

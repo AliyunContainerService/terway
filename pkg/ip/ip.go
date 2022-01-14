@@ -5,8 +5,6 @@ import (
 	"net"
 
 	"k8s.io/apimachinery/pkg/util/sets"
-
-	ciliumIP "github.com/cilium/cilium/pkg/ip"
 )
 
 // ToIP parse str to net.IP and return error is parse failed
@@ -83,7 +81,7 @@ func DeriveGatewayIP(cidr string) string {
 	if err != nil {
 		return ""
 	}
-	gw := ciliumIP.GetIPAtIndex(*ipNet, int64(-3))
+	gw := GetIPAtIndex(*ipNet, int64(-3))
 	if gw == nil {
 		return ""
 	}

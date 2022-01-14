@@ -44,6 +44,8 @@ import (
 
 var log = ctrl.Log.WithName("mutating-webhook")
 
+const eth0 = "eth0"
+
 // MutatingHook MutatingHook
 func MutatingHook(client client.Client) *webhook.Admission {
 	return &webhook.Admission{
@@ -70,13 +72,11 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		Namespace: req.Namespace,
 		Name:      req.Name, // for non sts pod the name is empty
 	}.String())
-	l.Info("checking pod")
+	l.V(5).Info("checking pod")
 
 	if pod.Spec.HostNetwork {
 		return webhook.Allowed("host network")
 	}
-
-	ds := utils.IsDaemonSetPod(pod)
 
 	if len(pod.Spec.Containers) == 0 {
 		return webhook.Allowed("pod do not have containers")
@@ -87,7 +87,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 	}
 
 	// 2. get pod previous zone
-	previousZone, err := getPreviousZone(client, pod)
+	previousZone, err := getPreviousZone(ctx, client, pod)
 	if err != nil {
 		msg := fmt.Sprintf("error get previous podENI conf, %s", err)
 		l.Error(err, msg)
@@ -95,9 +95,6 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 	}
 
 	zones := sets.NewString()
-	if previousZone != "" {
-		zones.Insert(previousZone)
-	}
 
 	memberCount := 0
 
@@ -111,45 +108,68 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		if err != nil {
 			return webhook.Denied(fmt.Sprintf("unable parse annotation field %s", types.PodNetworks))
 		}
+
 		if len(networks.PodNetworks) == 0 {
-			vsws, sgs, err := configFromConfigMap(ctx, client)
+			networks.PodNetworks = append(networks.PodNetworks, controlplane.PodNetworks{Interface: eth0})
+		}
+		// validate and set default
+		require := false
+		iF := sets.NewString()
+		for _, n := range networks.PodNetworks {
+			if len(n.VSwitchOptions) == 0 || len(n.SecurityGroupIDs) == 0 {
+				require = true
+			}
+			if len(n.SecurityGroupIDs) > 5 {
+				return admission.Denied("security group can not more than 5")
+			}
+			if len(n.Interface) <= 0 || len(n.Interface) >= 6 {
+				return admission.Denied("interface name should >0 and <6 ")
+			}
+			if iF.Has(n.Interface) {
+				return admission.Denied("duplicated interface")
+			}
+			iF.Insert(n.Interface)
+
+			if needPreviousZoneForAnnotation(previousZone, n) {
+				zones.Insert(previousZone)
+			}
+		}
+
+		if require {
+			cfg, err := configFromConfigMap(ctx, client)
 			if err != nil {
 				return webhook.Errored(1, err)
 			}
-			pna := &controlplane.PodNetworksAnnotation{
-				PodNetworks: []controlplane.PodNetworks{
-					{
-						VSwitchOptions:   vsws,
-						SecurityGroupIDs: sgs,
-					},
-				},
+			for i := range networks.PodNetworks {
+				// for now only fill eth0
+				if networks.PodNetworks[i].Interface != eth0 {
+					continue
+				}
+				if len(networks.PodNetworks[i].VSwitchOptions) == 0 {
+					networks.PodNetworks[i].VSwitchOptions = cfg.GetVSwitchIDs()
+				}
+				if len(networks.PodNetworks[i].SecurityGroupIDs) == 0 {
+					networks.PodNetworks[i].SecurityGroupIDs = cfg.GetSecurityGroups()
+				}
+				if len(networks.PodNetworks[i].ExtraRoutes) == 0 {
+					networks.PodNetworks[i].ExtraRoutes = cfg.ExtraRoutes
+				}
 			}
-			pnaBytes, err := json.Marshal(pna)
+			pnaBytes, err := json.Marshal(networks)
 			if err != nil {
 				return webhook.Errored(1, err)
 			}
 			pod.Annotations[types.PodNetworks] = string(pnaBytes)
 			pod.Annotations[types.PodENI] = "true"
-			memberCount = 1
-		} else {
-			for _, n := range networks.PodNetworks {
-				if len(n.VSwitchOptions) == 0 {
-					return admission.Denied("vSwitchOptions is not set")
-				}
-				if len(n.SecurityGroupIDs) == 0 {
-					return admission.Denied("security group is not set")
-				}
-				if len(n.SecurityGroupIDs) > 5 {
-					return admission.Denied("security group can not more than 5")
-				}
-			}
-
-			// for now use trunk only
-			memberCount = len(networks.PodNetworks)
 		}
+		memberCount = len(networks.PodNetworks)
 	} else {
 		if pod.Annotations[types.PodNetworks] != "" {
 			return webhook.Denied("can not use pod annotation and podNetworking at same time, pod-eni is missing")
+		}
+
+		if previousZone != "" {
+			zones.Insert(previousZone)
 		}
 
 		memberCount = 1
@@ -175,7 +195,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 			return webhook.Errored(1, err)
 		}
 		if podNetworking == nil {
-			l.V(4).Info("no selector is matched or CRD is not ready")
+			l.V(5).Info("no selector is matched or CRD is not ready")
 			return webhook.Allowed("not match")
 		}
 		pod.Annotations[types.PodENI] = "true"
@@ -188,43 +208,14 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 			}
 		}
 	}
-
-	// we only patch one container for res request
-	if pod.Spec.Containers[0].Resources.Requests == nil {
-		pod.Spec.Containers[0].Resources.Requests = make(corev1.ResourceList)
-	}
-	if pod.Spec.Containers[0].Resources.Limits == nil {
-		pod.Spec.Containers[0].Resources.Limits = make(corev1.ResourceList)
-	}
 	resName := deviceplugin.MemberENIResName
 	if !*controlplane.GetConfig().EnableTrunk {
 		resName = deviceplugin.ENIResName
 	}
-	pod.Spec.Containers[0].Resources.Requests[corev1.ResourceName(resName)] = resource.MustParse(strconv.Itoa(memberCount))
-	pod.Spec.Containers[0].Resources.Limits[corev1.ResourceName(resName)] = resource.MustParse(strconv.Itoa(memberCount))
+	setResourceRequest(pod, resName, memberCount)
 
-	if !ds && len(zones) > 0 {
-		if pod.Spec.Affinity == nil {
-			pod.Spec.Affinity = &corev1.Affinity{}
-		}
-		if pod.Spec.Affinity.NodeAffinity == nil {
-			pod.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
-		}
-		if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
-		}
+	setNodeAffinityByZones(pod, zones.List())
 
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
-			corev1.NodeSelectorTerm{
-				MatchExpressions: []corev1.NodeSelectorRequirement{
-					{
-						Key:      corev1.LabelZoneFailureDomainStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   zones.List(),
-					},
-				},
-			})
-	}
 	podPatched, err := json.Marshal(pod)
 	if err != nil {
 		l.Error(err, "error marshal pod")
@@ -253,15 +244,15 @@ func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, cli
 		return webhook.Allowed("podNetworking all set")
 	}
 
-	vsws, sgs, err := configFromConfigMap(ctx, client)
+	cfg, err := configFromConfigMap(ctx, client)
 	if err != nil {
 		return webhook.Errored(1, err)
 	}
 	if len(podNetworking.Spec.SecurityGroupIDs) == 0 {
-		podNetworking.Spec.SecurityGroupIDs = sgs
+		podNetworking.Spec.SecurityGroupIDs = cfg.GetSecurityGroups()
 	}
 	if len(podNetworking.Spec.VSwitchOptions) == 0 {
-		podNetworking.Spec.VSwitchOptions = vsws
+		podNetworking.Spec.VSwitchOptions = cfg.GetVSwitchIDs()
 	}
 	podNetworkingPatched, err := json.Marshal(podNetworking)
 	if err != nil {
@@ -277,13 +268,13 @@ func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, cli
 	return webhook.Patched("ok", patches...)
 }
 
-func getPreviousZone(client client.Client, pod *corev1.Pod) (string, error) {
+func getPreviousZone(ctx context.Context, client client.Client, pod *corev1.Pod) (string, error) {
 	if !utils.IsStsPod(pod) {
 		return "", nil
 	}
 
 	podENI := &v1beta1.PodENI{}
-	err := client.Get(context.TODO(), k8stypes.NamespacedName{
+	err := client.Get(ctx, k8stypes.NamespacedName{
 		Namespace: pod.Namespace,
 		Name:      pod.Name,
 	}, podENI)
@@ -299,32 +290,71 @@ func getPreviousZone(client client.Client, pod *corev1.Pod) (string, error) {
 	return podENI.Spec.Zone, nil
 }
 
-func configFromConfigMap(ctx context.Context, client client.Client) ([]string, []string, error) {
+func configFromConfigMap(ctx context.Context, client client.Client) (*types.Configure, error) {
 	cm := &corev1.ConfigMap{}
 	err := client.Get(ctx, k8stypes.NamespacedName{
 		Namespace: "kube-system",
 		Name:      "eni-config",
 	}, cm)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error get terway configmap eni-config, %w", err)
+		return nil, fmt.Errorf("error get terway configmap eni-config, %w", err)
 	}
 	eniConfStr, ok := cm.Data["eni_conf"]
 	if !ok {
-		return nil, nil, fmt.Errorf("error parse terway configmap eni-config, %w", err)
+		return nil, fmt.Errorf("error parse terway configmap eni-config, %w", err)
 	}
 
 	eniConf, err := types.MergeConfigAndUnmarshal(nil, []byte(eniConfStr))
 	if err != nil {
-		return nil, nil, fmt.Errorf("error parse terway configmap eni-config, %w", err)
+		return nil, fmt.Errorf("error parse terway configmap eni-config, %w", err)
 	}
 
 	sgs := eniConf.GetSecurityGroups()
 	if len(sgs) > 5 {
-		return nil, nil, fmt.Errorf("security groups should not be more than 5, current %d", len(sgs))
+		return nil, fmt.Errorf("security groups should not be more than 5, current %d", len(sgs))
 	}
-	var vsws []string
-	for _, ids := range eniConf.VSwitches {
-		vsws = append(vsws, ids...)
+
+	return eniConf, nil
+}
+
+func setResourceRequest(pod *corev1.Pod, resName string, count int) {
+	if count == 0 {
+		return
 	}
-	return vsws, sgs, nil
+	// we only patch one container for res request
+	if pod.Spec.Containers[0].Resources.Requests == nil {
+		pod.Spec.Containers[0].Resources.Requests = make(corev1.ResourceList)
+	}
+	if pod.Spec.Containers[0].Resources.Limits == nil {
+		pod.Spec.Containers[0].Resources.Limits = make(corev1.ResourceList)
+	}
+
+	pod.Spec.Containers[0].Resources.Requests[corev1.ResourceName(resName)] = resource.MustParse(strconv.Itoa(count))
+	pod.Spec.Containers[0].Resources.Limits[corev1.ResourceName(resName)] = resource.MustParse(strconv.Itoa(count))
+}
+
+func setNodeAffinityByZones(pod *corev1.Pod, zones []string) {
+	if utils.IsDaemonSetPod(pod) || len(zones) == 0 {
+		return
+	}
+	if pod.Spec.Affinity == nil {
+		pod.Spec.Affinity = &corev1.Affinity{}
+	}
+	if pod.Spec.Affinity.NodeAffinity == nil {
+		pod.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
+	}
+	if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
+	}
+
+	if len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms, corev1.NodeSelectorTerm{})
+	}
+	for i := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions = append(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions, corev1.NodeSelectorRequirement{
+			Key:      corev1.LabelTopologyZone,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   zones,
+		})
+	}
 }

@@ -42,7 +42,7 @@ func NewNodeInfo(node *corev1.Node) (*NodeInfo, error) {
 
 	res.TrunkENIID = node.GetAnnotations()[types.TrunkOn]
 
-	zone, ok := node.GetLabels()[corev1.LabelZoneFailureDomainStable]
+	zone, ok := node.GetLabels()[corev1.LabelTopologyZone]
 	if ok {
 		res.Zone = zone
 		return res, nil
