@@ -195,6 +195,9 @@ func (k *k8s) WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, e
 			// wait pod eni bind
 			return false, nil
 		}
+		if !podEni.DeletionTimestamp.IsZero() {
+			return false, nil
+		}
 		return true, nil
 	})
 	return podEni, err
