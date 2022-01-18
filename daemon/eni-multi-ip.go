@@ -227,6 +227,10 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 		defer f.Unlock()
 		if result.ENIIP != nil && result.ENI != nil {
 			for _, eni := range f.enis {
+				// eni is not ready
+				if eni == nil {
+					continue
+				}
 				if eni.MAC == result.ENI.MAC {
 					eni.pending--
 					// if an error message with InvalidVSwitchIDIPNotEnough returned, then mark the ENI as IP allocation inhibited.
