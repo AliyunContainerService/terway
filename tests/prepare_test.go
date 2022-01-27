@@ -366,7 +366,7 @@ func EnsureService(ctx context.Context, cs kubernetes.Interface, cfg ServiceResC
 			Selector:              cfg.PodSelectLabels,
 			SessionAffinity:       corev1.ServiceAffinityNone,
 			ExternalTrafficPolicy: "",
-			IPFamily:              nil,
+			IPFamilies:            nil,
 			Type:                  cfg.Type,
 		},
 	}

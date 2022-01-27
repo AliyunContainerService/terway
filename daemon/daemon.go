@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
@@ -1320,7 +1321,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	ipFamily := types.NewIPFamilyFromIPStack(types.IPStack(config.IPStack))
 	netSrv.ipFamily = ipFamily
 
-	aliyunClient, err := aliyun.NewAliyun(config.AccessID, config.AccessSecret, ins.RegionID, config.CredentialPath, "", "")
+	aliyunClient, err := client.NewAliyun(config.AccessID, config.AccessSecret, ins.RegionID, config.CredentialPath, "", "")
 	if err != nil {
 		return nil, errors.Wrapf(err, "error create aliyun client")
 	}

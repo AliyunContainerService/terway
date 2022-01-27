@@ -30,6 +30,7 @@ type PodInfo struct {
 	EipInfo        PodEipInfo
 	IPStickTime    time.Duration
 	PodENI         bool
+	PodUID         string
 }
 
 // ExtraEipInfo store extra eip info

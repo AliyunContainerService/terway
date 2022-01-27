@@ -1,4 +1,4 @@
-package aliyun
+package client
 
 import (
 	"context"
@@ -6,7 +6,8 @@ import (
 	"net"
 	"time"
 
-	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/errors"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 
@@ -16,16 +17,17 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 )
 
-const maxSinglePageSize = 100
+var _ VSwitch = &OpenAPI{}
+var _ ENI = &OpenAPI{}
 
 type OpenAPI struct {
-	ClientSet Client
+	ClientSet credential.Client
 
 	ReadOnlyRateLimiter flowcontrol.RateLimiter
 	MutatingRateLimiter flowcontrol.RateLimiter
 }
 
-func New(c Client, readOnly, mutating flowcontrol.RateLimiter) (*OpenAPI, error) {
+func New(c credential.Client, readOnly, mutating flowcontrol.RateLimiter) (*OpenAPI, error) {
 	return &OpenAPI{
 		ClientSet:           c,
 		ReadOnlyRateLimiter: readOnly,
@@ -33,22 +35,11 @@ func New(c Client, readOnly, mutating flowcontrol.RateLimiter) (*OpenAPI, error)
 	}, nil
 }
 
-func NewClientSet(ak, sk, regionID, credentialPath, secretNamespace, secretName string) (Client, error) {
-	if regionID == "" {
-		return nil, fmt.Errorf("regionID unset")
-	}
-	clientSet, err := NewClientMgr(ak, sk, credentialPath, regionID, secretNamespace, secretName)
-	if err != nil {
-		return nil, fmt.Errorf("error get clientset, %w", err)
-	}
-	return clientSet, nil
-}
-
 func NewAliyun(ak, sk, regionID, credentialPath, secretNamespace, secretName string) (*OpenAPI, error) {
 	if regionID == "" {
 		return nil, fmt.Errorf("regionID unset")
 	}
-	clientSet, err := NewClientMgr(ak, sk, credentialPath, regionID, secretNamespace, secretName)
+	clientSet, err := credential.NewClientMgr(ak, sk, credentialPath, regionID, secretNamespace, secretName)
 	if err != nil {
 		return nil, fmt.Errorf("error get clientset, %w", err)
 	}

@@ -42,6 +42,9 @@ const (
 
 	// PodAllocType for additional net config
 	PodAllocType = AnnotationPrefix + "pod-alloc-type"
+
+	// PodUID store pod uid
+	PodUID = AnnotationPrefix + "pod-uid"
 )
 
 // FinalizerPodENI finalizer for podENI resource
