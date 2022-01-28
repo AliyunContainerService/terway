@@ -230,32 +230,6 @@ func (m *ENIDevicePlugin) cleanup() error {
 }
 
 func (m *ENIDevicePlugin) watchKubeletRestart() {
-	//fsWatcher, err := fsnotify.NewWatcher()
-	//if err != nil {
-	//	log.Fatalf("error create fs watcher, %+v", err)
-	//}
-	//defer fsWatcher.Close()
-	//err = fsWatcher.Add(m.socket)
-	//if err != nil {
-	//	fsWatcher.Close()
-	//	log.Fatalf("error watch socket file: %+v", err)
-	//}
-	//log.Infof("watching %s fs event", m.socket)
-	//for {
-	//	select {
-	//	case event := <-fsWatcher.Events:
-	//		log.Infof("watch fs event: %+v", event)
-	//		if event.Name == m.socket && event.Op&fsnotify.Remove == fsnotify.Remove {
-	//			log.Printf("inotify: %s removed, restarting.", m.socket)
-	//			m.Stop()
-	//			err := m.Start()
-	//			if err != nil {
-	//				log.Fatalf("error restart device plugin after kubelet restart %+v", err)
-	//			}
-	//		}
-	//	}
-	//}
-
 	wait.Until(func() {
 		_, err := os.Stat(m.socket)
 		if err == nil {
@@ -275,7 +249,7 @@ func (m *ENIDevicePlugin) watchKubeletRestart() {
 				pluginapi.RegisterRequest{
 					Version:      pluginapi.Version,
 					Endpoint:     path.Base(m.socket),
-					ResourceName: ENIResName,
+					ResourceName: m.eniRes.resName,
 				},
 			)
 			if err != nil {
