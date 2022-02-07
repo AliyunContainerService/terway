@@ -5,7 +5,7 @@ go 1.17
 require (
 	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1383
 	github.com/boltdb/bolt v1.3.1
-	github.com/containernetworking/cni v0.8.1
+	github.com/containernetworking/cni v1.0.1
 	github.com/containernetworking/plugins v0.9.0
 	github.com/denverdino/aliyungo v0.0.0-20201215054313-f635de23c5e0
 	github.com/docker/docker v20.10.6+incompatible
