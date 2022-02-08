@@ -34,6 +34,7 @@ type ResConfig struct {
 type PodResConfig struct {
 	*ResConfig
 	HostNetwork bool
+	Replicas    int32
 }
 
 type ServiceResConfig struct {
@@ -82,31 +83,33 @@ const (
 var podConnA = PodResConfig{
 	ResConfig: &ResConfig{
 		Description: "",
-		Name:        "container-network-ds-src",
+		Name:        "container-network-deploy-src",
 		Namespace:   testNamespace,
 		Labels: map[string]string{
 			"app":    "container-network-pod-src",
 			"e2e":    "true",
-			"ref":    "daemon-set",
+			"ref":    "deployment",
 			"access": "true", // when enable policy, src pod can access dst pod
 		},
 	},
 	HostNetwork: false,
+	Replicas:    3,
 }
 
 var podConnB = PodResConfig{
 	ResConfig: &ResConfig{
 		Description: "",
-		Name:        "host-network-ds-src",
+		Name:        "host-network-deploy-src",
 		Namespace:   testNamespace,
 		Labels: map[string]string{
 			"app":    "host-network-pod-src",
 			"e2e":    "true",
-			"ref":    "daemon-set",
+			"ref":    "deployment",
 			"access": "false", // when enable policy, src pod can't access dst pod
 		},
 	},
 	HostNetwork: true,
+	Replicas:    3,
 }
 
 var podConnC = PodResConfig{
@@ -121,6 +124,7 @@ var podConnC = PodResConfig{
 		},
 	},
 	HostNetwork: false,
+	Replicas:    2,
 }
 
 var podConnD = PodResConfig{
@@ -135,21 +139,23 @@ var podConnD = PodResConfig{
 		},
 	},
 	HostNetwork: false,
+	Replicas:    2,
 }
 
 var podConnPolicy = PodResConfig{
 	ResConfig: &ResConfig{
 		Description: "",
-		Name:        "container-network-policy-ds-src",
+		Name:        "container-network-policy-deploy-src",
 		Namespace:   testNamespace,
 		Labels: map[string]string{
 			"app":    "container-network-policy-pod-src",
 			"e2e":    "true",
-			"ref":    "daemon-set",
+			"ref":    "deployment",
 			"access": "false", // when enable policy, src pod can't access dst pod
 		},
 	},
 	HostNetwork: false,
+	Replicas:    3,
 }
 
 var clusterIPService = ServiceResConfig{

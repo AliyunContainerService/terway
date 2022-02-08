@@ -126,16 +126,17 @@ func EnsureNetworkPolicy(ctx context.Context, cs kubernetes.Interface, cfg Netwo
 	return np, err
 }
 
-func EnsureDaemonSet(ctx context.Context, cs kubernetes.Interface, cfg PodResConfig) ([]corev1.Pod, error) {
-	dsTpl := &appsv1.DaemonSet{
+func EnsureDeployment(ctx context.Context, cs kubernetes.Interface, cfg PodResConfig) ([]corev1.Pod, error) {
+	deplTml := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cfg.Name,
 			Namespace: cfg.Namespace,
 		},
-		Spec: appsv1.DaemonSetSpec{
+		Spec: appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
 				MatchLabels: cfg.Labels,
 			},
+			Replicas: func(a int32) *int32 { return &a }(cfg.Replicas),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: cfg.Labels,
@@ -170,78 +171,13 @@ func EnsureDaemonSet(ctx context.Context, cs kubernetes.Interface, cfg PodResCon
 							},
 						},
 					},
-				},
-			},
-		},
-	}
-	_, err := cs.AppsV1().DaemonSets(cfg.Namespace).Create(ctx, dsTpl, metav1.CreateOptions{})
-	if err != nil && !errors.IsAlreadyExists(err) {
-		return nil, err
-	}
-	uid := ""
-	err = wait.ExponentialBackoff(backoff, func() (bool, error) {
-		ds, err := cs.AppsV1().DaemonSets(cfg.Namespace).Get(ctx, cfg.Name, metav1.GetOptions{})
-		if err != nil {
-			return false, nil
-		}
-		uid = string(ds.UID)
-		if ds.Status.DesiredNumberScheduled == 0 {
-			return false, nil
-		}
-		return ds.Status.DesiredNumberScheduled == ds.Status.NumberReady && ds.Status.NumberAvailable == ds.Status.CurrentNumberScheduled, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	pods, err := GetPodsByRef(ctx, cs, uid)
-	if err != nil {
-		return nil, err
-	}
-	return pods, nil
-}
-
-func EnsureDeployment(ctx context.Context, cs kubernetes.Interface, cfg PodResConfig) ([]corev1.Pod, error) {
-	deplTml := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cfg.Name,
-			Namespace: cfg.Namespace,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Selector: &metav1.LabelSelector{
-				MatchLabels: cfg.Labels,
-			},
-			Replicas: func(a int32) *int32 { return &a }(2),
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: cfg.Labels,
-				},
-				Spec: corev1.PodSpec{
-					HostNetwork:                   cfg.HostNetwork,
-					TerminationGracePeriodSeconds: func(a int64) *int64 { return &a }(0),
-					Containers: []corev1.Container{
+					TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
 						{
-							Name:            "echo",
-							Image:           "l1b0k/echo",
-							Args:            []string{"--http-bind-address", fmt.Sprintf(":%d", serverPort)},
-							ImagePullPolicy: corev1.PullAlways,
-						},
-					},
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      "type",
-												Operator: corev1.NodeSelectorOpNotIn,
-												Values: []string{
-													"virtual-kubelet",
-												},
-											},
-										},
-									},
-								},
+							MaxSkew:           1,
+							TopologyKey:       corev1.LabelHostname,
+							WhenUnsatisfiable: corev1.ScheduleAnyway,
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: cfg.Labels,
 							},
 						},
 					},
@@ -282,7 +218,7 @@ func EnsureStatefulSet(ctx context.Context, cs kubernetes.Interface, cfg PodResC
 			Selector: &metav1.LabelSelector{
 				MatchLabels: cfg.Labels,
 			},
-			Replicas: func(a int32) *int32 { return &a }(2),
+			Replicas: func(a int32) *int32 { return &a }(cfg.Replicas),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: cfg.Labels,
@@ -314,6 +250,16 @@ func EnsureStatefulSet(ctx context.Context, cs kubernetes.Interface, cfg PodResC
 										},
 									},
 								},
+							},
+						},
+					},
+					TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+						{
+							MaxSkew:           1,
+							TopologyKey:       corev1.LabelHostname,
+							WhenUnsatisfiable: corev1.ScheduleAnyway,
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: cfg.Labels,
 							},
 						},
 					},
@@ -417,21 +363,6 @@ func DeleteNetworkPolicy(ctx context.Context, cs kubernetes.Interface, namespace
 	}
 	err = wait.ExponentialBackoff(backoff, func() (bool, error) {
 		_, err := cs.NetworkingV1().NetworkPolicies(namespace).Get(ctx, name, metav1.GetOptions{})
-		if errors.IsNotFound(err) {
-			return true, nil
-		}
-		return false, nil
-	})
-	return err
-}
-
-func DeleteDaemonSet(ctx context.Context, cs kubernetes.Interface, namespace, name string) error {
-	err := cs.AppsV1().DaemonSets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
-	if errors.IsNotFound(err) {
-		return nil
-	}
-	err = wait.ExponentialBackoff(backoff, func() (bool, error) {
-		_, err := cs.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			return true, nil
 		}
