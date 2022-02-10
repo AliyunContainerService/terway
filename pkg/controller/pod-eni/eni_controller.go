@@ -290,7 +290,9 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		ll.Info("attached")
 
 		podENICopy.Status.Phase = v1beta1.ENIPhaseBind
-		podENICopy.Status.PodLastSeen = metav1.Now()
+		if podENICopy.Spec.HaveFixedIP() {
+			podENICopy.Status.PodLastSeen = metav1.Now()
+		}
 
 		// if attach succeed and update status failed , we can not store instance id
 		// so in later detach , we are unable to detach the eni
@@ -485,6 +487,11 @@ func (m *ReconcilePodENI) gcCRPodENIs() {
 					}
 					return
 				}
+				// for non fixed-ip pod no need to update timeStamp
+				if !podENI.Spec.HaveFixedIP() {
+					return
+				}
+
 				ll.V(5).Info("update pod lastSeen to now")
 				update := podENI.DeepCopy()
 				update.Status.PodLastSeen = metav1.Now()

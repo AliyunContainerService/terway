@@ -12,6 +12,7 @@ require (
 	github.com/evanphx/json-patch v4.11.0+incompatible
 	github.com/go-playground/mold/v4 v4.2.0
 	github.com/go-playground/validator/v10 v10.9.0
+	github.com/google/uuid v1.2.0
 	github.com/onsi/ginkgo v1.16.4
 	github.com/onsi/gomega v1.15.0
 	github.com/pkg/errors v0.9.1
@@ -69,7 +70,6 @@ require (
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/go-cmp v0.5.5 // indirect
 	github.com/google/gofuzz v1.1.0 // indirect
-	github.com/google/uuid v1.2.0 // indirect
 	github.com/googleapis/gnostic v0.5.5 // indirect
 	github.com/gookit/color v1.4.2 // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
