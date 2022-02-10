@@ -69,13 +69,13 @@ func (s *ConnectionTestSuite) SetupSuite() {
 	}
 
 	s.T().Logf("creating %s", podConnA.Name)
-	if _, err := EnsureDaemonSet(ctx, s.ClientSet, podConnA); err != nil {
+	if _, err := EnsureDeployment(ctx, s.ClientSet, podConnA); err != nil {
 		s.err = err
 		s.T().Error(errors.Wrapf(err, "fail to create pod %s", podConnA.Name))
 	}
 
 	s.T().Logf("creating %s", podConnB.Name)
-	if _, err := EnsureDaemonSet(ctx, s.ClientSet, podConnB); err != nil {
+	if _, err := EnsureDeployment(ctx, s.ClientSet, podConnB); err != nil {
 		s.err = err
 		s.T().Error(errors.Wrapf(err, "fail to create pod %s", podConnB.Name))
 	}
@@ -93,7 +93,7 @@ func (s *ConnectionTestSuite) SetupSuite() {
 	}
 
 	s.T().Logf("creating %s", podConnPolicy.Name)
-	if _, err := EnsureDaemonSet(ctx, s.ClientSet, podConnPolicy); err != nil {
+	if _, err := EnsureDeployment(ctx, s.ClientSet, podConnPolicy); err != nil {
 		s.err = err
 		s.T().Error(errors.Wrapf(err, "fail to create network policy %s", podConnPolicy.Name))
 	}
@@ -325,12 +325,12 @@ func (s *ConnectionTestSuite) TearDownSuite() {
 	}
 
 	s.T().Logf("delete %s", podConnA.Name)
-	if err := DeleteDaemonSet(ctx, s.ClientSet, testNamespace, podConnA.Name); err != nil {
+	if err := DeleteDeployment(ctx, s.ClientSet, testNamespace, podConnA.Name); err != nil {
 		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnA.Name))
 	}
 
 	s.T().Logf("delete %s", podConnB.Name)
-	if err := DeleteDaemonSet(ctx, s.ClientSet, testNamespace, podConnB.Name); err != nil {
+	if err := DeleteDeployment(ctx, s.ClientSet, testNamespace, podConnB.Name); err != nil {
 		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnB.Name))
 	}
 
@@ -345,7 +345,7 @@ func (s *ConnectionTestSuite) TearDownSuite() {
 	}
 
 	s.T().Logf("delete %s", podConnPolicy.Name)
-	if err := DeleteDaemonSet(ctx, s.ClientSet, testNamespace, podConnPolicy.Name); err != nil {
+	if err := DeleteDeployment(ctx, s.ClientSet, testNamespace, podConnPolicy.Name); err != nil {
 		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnPolicy.Name))
 	}
 
