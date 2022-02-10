@@ -17,8 +17,6 @@ limitations under the License.
 package podnetworking
 
 import (
-	"reflect"
-
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -34,23 +32,9 @@ func (p *predicateForPodnetwokringEvent) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	// if current status is not ready sync anyway
-	if newPodNetworking.Status.Status != v1beta1.NetworkingStatusReady {
+	if newPodNetworking.Status.Status == "" {
 		return true
 	}
 
-	oldPodNetworking, ok := e.ObjectOld.(*v1beta1.PodNetworking)
-	if !ok {
-		return false
-	}
-
-	oldCopy := oldPodNetworking.DeepCopy()
-	newCopy := newPodNetworking.DeepCopy()
-
-	oldCopy.ResourceVersion = ""
-	newCopy.ResourceVersion = ""
-	oldCopy.Status = v1beta1.PodNetworkingStatus{}
-	newCopy.Status = v1beta1.PodNetworkingStatus{}
-
-	return !reflect.DeepEqual(&oldCopy, &newCopy)
+	return false
 }
