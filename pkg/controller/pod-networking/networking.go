@@ -18,6 +18,7 @@ package podnetworking
 
 import (
 	"context"
+	"time"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
@@ -136,7 +137,7 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 
 	err2 := m.updateStatus(ctx, update, old)
 	if err != nil {
-		return reconcile.Result{}, err
+		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 	return reconcile.Result{}, err2
 }
