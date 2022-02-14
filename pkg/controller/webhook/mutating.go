@@ -116,7 +116,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		require := false
 		iF := sets.NewString()
 		for _, n := range networks.PodNetworks {
-			if len(n.VSwitchOptions) == 0 || len(n.SecurityGroupIDs) == 0 {
+			if len(n.VSwitchOptions) == 0 || len(n.SecurityGroupIDs) == 0 || len(n.ExtraRoutes) == 0 {
 				require = true
 			}
 			if len(n.SecurityGroupIDs) > 5 {
