@@ -25,6 +25,22 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+type AllocCtx struct {
+	Trace []Trace
+}
+
+func (a *AllocCtx) String() string {
+	var s []string
+	for _, t := range a.Trace {
+		s = append(s, t.Msg)
+	}
+	return strings.Join(s, "\n")
+}
+
+type Trace struct {
+	Msg string
+}
+
 var eniIPLog = logger.DefaultLogger
 
 const (
@@ -138,7 +154,7 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 	}
 }
 
-func (f *eniIPFactory) getEnis() ([]*ENI, error) {
+func (f *eniIPFactory) getEnis(ctx *AllocCtx) ([]*ENI, error) {
 	var (
 		enis        []*ENI
 		pendingEnis []*ENI
@@ -156,7 +172,16 @@ func (f *eniIPFactory) getEnis() ([]*ENI, error) {
 	// If VSwitchSelectionPolicy is ordered, then call f.eniFactory.GetVSwitches() API to get a switch slice
 	// in descending order per each switch's available IP count.
 	vSwitches, err := f.eniFactory.GetVSwitches()
-	eniIPLog.Infof("adjusted vswitch slice: %+v, original eni slice: %+v", vSwitches, f.enis)
+	eniIPLog.Infof("adjusted vswitch slice: %+v, original eni slice: %s", vSwitches, func(enis []*ENI) string {
+		var vsw []string
+		for i := 0; i < len(enis); i++ {
+			if enis[i] == nil {
+				continue
+			}
+			vsw = append(vsw, enis[i].VSwitchID)
+		}
+		return strings.Join(vsw, ",")
+	}(f.enis))
 	if err != nil {
 		eniIPLog.Errorf("error to get vswitch slice: %v, instead use original eni slice in eniIPFactory: %v", err, f.enis)
 		return f.enis, err
@@ -173,15 +198,21 @@ func (f *eniIPFactory) getEnis() ([]*ENI, error) {
 		}
 	}
 	enis = append(enis, pendingEnis...)
+	if len(enis) == 0 && len(f.enis) != 0 {
+		ctx.Trace = append(ctx.Trace, Trace{
+			Msg: "current eni have vSwitch not as expected, please check eni-config",
+		})
+	}
+
 	return enis, nil
 
 }
 
-func (f *eniIPFactory) submit() error {
+func (f *eniIPFactory) submit(ctx *AllocCtx) error {
 	f.Lock()
 	defer f.Unlock()
 	var enis []*ENI
-	enis, _ = f.getEnis()
+	enis, _ = f.getEnis(ctx)
 	for _, eni := range enis {
 		eniIPLog.Infof("check existing eni: %+v", eni)
 		eni.lock.Lock()
@@ -193,6 +224,10 @@ func (f *eniIPFactory) submit() error {
 		// if the current eni has been inhibited for Pod IP allocation, then skip current eni.
 		if now.Before(eni.ipAllocInhibitExpireAt) && eni.ENI != nil {
 			eni.lock.Unlock()
+
+			// vsw have insufficient ip
+			ctx.Trace = append(ctx.Trace, Trace{Msg: fmt.Sprintf("eni %s vSwitch %s have insufficient IP, next check %s", eni.ID, eni.VSwitchID, eni.ipAllocInhibitExpireAt)})
+
 			eniIPLog.Debugf("skip IP allocation: eni = %+v, vsw = %s", eni, eni.VSwitchID)
 			continue
 		}
@@ -260,6 +295,7 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 }
 
 func (f *eniIPFactory) Create(count int) ([]types.NetworkResource, error) {
+	ctx := &AllocCtx{}
 	var (
 		ipResult []types.NetworkResource
 		err      error
@@ -277,7 +313,7 @@ func (f *eniIPFactory) Create(count int) ([]types.NetworkResource, error) {
 
 	// find for available ENIs and submit for ip allocation
 	for ; waiting < count; waiting++ {
-		err = f.submit()
+		err = f.submit(ctx)
 		if err != nil {
 			break
 		}
@@ -304,7 +340,7 @@ func (f *eniIPFactory) Create(count int) ([]types.NetworkResource, error) {
 
 	// no ip has been created
 	if waiting == 0 {
-		return ipResult, errors.Errorf("error submit ip create request: %v", err)
+		return ipResult, errors.Errorf("error submit ip create request: %v,%s", err, ctx.String())
 	}
 
 	var ip *types.ENIIP
