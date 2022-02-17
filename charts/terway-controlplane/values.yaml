@@ -27,7 +27,24 @@ nodeSelector: {}
 
 tolerations: []
 
-affinity: {}
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: k8s-app
+          operator: In
+          values: ["terway-controlplane"]
+      topologyKey: "kubernetes.io/hostname"
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: k8s-app
+            operator: In
+            values: ["terway-controlplane"]
+        topologyKey: "topology.kubernetes.io/zone"
 
 webhookFailurePolicy: Ignore
 webhookTimeoutSeconds: 10
@@ -36,7 +53,10 @@ webhookTimeoutSeconds: 10
 regionID: ch-hangzhou
 clusterID: ""
 vpcID: ""
-
+healthzBindAddress: "0.0.0.0:8080"
+clusterDomain: "cluster.local"
+webhookPort: 4443
+enableTrunk: true
 ipStack: ipv4
 
 # secrets

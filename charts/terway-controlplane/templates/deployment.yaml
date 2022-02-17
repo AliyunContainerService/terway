@@ -16,8 +16,10 @@ spec:
       {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
+        k8s-app: {{ .Release.Name }}
     {{- include "terway-controlplane.selectorLabels" . | nindent 8 }}
     spec:
+      hostNetwork: true
       serviceAccountName: {{ .Release.Name }}
       containers:
         - name: terway-controlplane

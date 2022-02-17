@@ -137,7 +137,7 @@ func main() {
 			panic("podIP is not found")
 		}
 		// if enable Service name should equal cfg.ControllerName
-		ep := &endpoint.Endpoint{PodIP: ipStr, Namespace: cfg.ControllerNamespace, Name: cfg.ControllerName}
+		ep := endpoint.New(cfg.ControllerName, cfg.ControllerNamespace, ipStr, int32(cfg.WebhookPort))
 		err = mgr.Add(ep)
 		if err != nil {
 			panic(err)

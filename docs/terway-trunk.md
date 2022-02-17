@@ -111,7 +111,7 @@ spec:
     - sg-aaa
 ```
 
-- ipType: 描述 Pod IP 分配的策略
+- allocationType: 描述 Pod IP 分配的策略
   - type
     - Elastic: 弹性IP 策略。Pod 删除后 IP 资源释放。
     - Fixed: 固定IP 策略。如果配置为固定IP，这个 PodNetworking 仅对有状态pod 生效。
