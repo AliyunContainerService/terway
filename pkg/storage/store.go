@@ -2,6 +2,8 @@ package storage
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/AliyunContainerService/terway/pkg/logger"
@@ -65,7 +67,7 @@ func (m *MemoryStorage) List() ([]interface{}, error) {
 	return ret, nil
 }
 
-//Delete key in memory storage
+// Delete key in memory storage
 func (m *MemoryStorage) Delete(key string) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -90,6 +92,10 @@ type DiskStorage struct {
 
 // NewDiskStorage return new disk storage
 func NewDiskStorage(name string, path string, serializer Serializer, deserializer Deserializer) (Storage, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return nil, err
+	}
+
 	db, err := bolt.Open(path, 0600, nil)
 	if err != nil {
 		return nil, err
@@ -129,7 +135,7 @@ func (d *DiskStorage) Put(key string, value interface{}) error {
 	return d.memory.Put(key, value)
 }
 
-//load all data from disk db
+// load all data from disk db
 func (d *DiskStorage) load() error {
 	err := d.db.Update(func(tx *bolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists([]byte(d.name))

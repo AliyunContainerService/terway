@@ -18,6 +18,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned/typed/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 
 	"github.com/pkg/errors"
@@ -272,7 +273,7 @@ func newK8S(master, kubeconfig string, daemonMode string) (Kubernetes, error) {
 		}
 	}
 
-	storage, err := storage.NewDiskStorage(dbName, dbPath, serialize, deserialize)
+	storage, err := storage.NewDiskStorage(dbName, utils.NormalizePath(dbPath), serialize, deserialize)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed init db storage with path %s and bucket %s", dbPath, dbName)
 	}

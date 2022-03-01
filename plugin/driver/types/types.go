@@ -4,8 +4,8 @@ import (
 	"net"
 	"strings"
 
+	"github.com/AliyunContainerService/terway/plugin/terway/cni"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
-	"github.com/containernetworking/plugins/pkg/ns"
 
 	"github.com/containernetworking/cni/pkg/types"
 	cniTypes "github.com/containernetworking/cni/pkg/types"
@@ -30,6 +30,9 @@ type CNIConf struct {
 
 	// MTU is container and ENI network interface MTU
 	MTU int `json:"mtu"`
+
+	// RuntimeConfig represents the options to be passed in by the runtime.
+	RuntimeConfig cni.RuntimeConfig `json:"runtimeConfig"`
 
 	// Debug
 	Debug bool `json:"debug"`
@@ -101,6 +104,12 @@ type SetupConfig struct {
 
 	Ingress uint64
 	Egress  uint64
+
+	RuntimeConfig cni.RuntimeConfig
+
+	// for windows
+	AssistantContainerIPNet *terwayTypes.IPNetSet
+	AssistantGatewayIP      *terwayTypes.IPSet
 }
 
 type TeardownCfg struct {
@@ -110,26 +119,6 @@ type TeardownCfg struct {
 
 	ContainerIfName string
 	ContainerIPNet  *terwayTypes.IPNetSet
-}
 
-type CheckConfig struct {
-	DP DataPath
-
-	RecordPodEvent
-
-	NetNS ns.NetNS
-
-	HostVETHName    string
-	ContainerIfName string
-
-	ContainerIPNet *terwayTypes.IPNetSet
-	HostIPSet      *terwayTypes.IPNetSet
-	GatewayIP      *terwayTypes.IPSet
-
-	ENIIndex int32 // phy device
-	TrunkENI bool
-	MTU      int
-
-	DefaultRoute bool
-	MultiNetwork bool
+	ServiceCIDR *terwayTypes.IPNetSet
 }

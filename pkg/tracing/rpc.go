@@ -2,7 +2,6 @@ package tracing
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/AliyunContainerService/terway/rpc"
 )
@@ -85,7 +84,6 @@ func (t *tracingRPC) ResourceExecute(request *rpc.ResourceExecuteRequest, server
 }
 
 func (t *tracingRPC) GetResourceMapping(_ context.Context, _ *rpc.Placeholder) (*rpc.PodResourceMappingReply, error) {
-	fmt.Println("get resource mapping from rpc")
 	mapping, err := t.tracer.GetResourceMapping()
 	if err != nil {
 		return nil, err

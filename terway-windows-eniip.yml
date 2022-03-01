@@ -1,0 +1,503 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: terway
+  namespace: kube-system
+
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: terway-pod-reader
+  namespace: kube-system
+rules:
+  - apiGroups: [ "" ]
+    resources: [ "pods", "nodes", "namespaces", "configmaps", "serviceaccounts" ]
+    verbs: [ "get", "watch", "list", "update" ]
+  - apiGroups: [ "" ]
+    resources:
+      - events
+    verbs:
+      - create
+  - apiGroups: [ "networking.k8s.io" ]
+    resources:
+      - networkpolicies
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups: [ "extensions" ]
+    resources:
+      - networkpolicies
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups: [ "" ]
+    resources:
+      - pods/status
+    verbs:
+      - update
+  - apiGroups: [ "crd.projectcalico.org" ]
+    resources: [ "*" ]
+    verbs: [ "*" ]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: terway-binding
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: terway-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: terway
+    namespace: kube-system
+
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: eni-config
+  namespace: kube-system
+data:
+  eni_conf: |
+    {
+      "version": "1",
+      "access_key": "ak",
+      "access_secret": "sk",
+      "service_cidr": "172.16.0.0/16",
+      "security_group": "sg-xxxxxxxxxxx",
+      "max_pool_size": 5,
+      "min_pool_size": 0
+    }
+  10-terway.conf: |
+    {
+      "cniVersion": "0.3.1",
+      "name": "terway",
+      "type": "terway"
+    }
+  disable_network_policy: "false"
+  # NB(thxCode): The static rule is a supplement of Calico-Felix and is used to solve some problems that cannot handle at present.
+  #
+  # For example, the Host VSWs are [192.168.0.0/24,192.168.1.0/24,192.168.2.0/24],
+  # the Pod VSWs are [192.168.30.0/24,192.168.31.0/24,192.168.32.0/24],
+  # the following NetworkPolicy is going to block the Pod-to-Pod connectivity and the Pod-to-Host accessing,
+  # but still allow Host-to-Pod accessing. Hence, it is not workable as Calico-Felix doesn't support negative matches.
+  #   ---
+  #   apiVersion: networking.k8s.io/v1
+  #   kind: NetworkPolicy
+  #   metadata:
+  #    name: ...
+  #   spec:
+  #    podSelector:
+  #      matchLabels: {}
+  #    policyTypes:
+  #      - Ingress
+  #      - Egress
+  #    ingress:
+  #    - from:
+  #      - ipBlock:
+  #            cidr: 0.0.0.0/0
+  #            except:
+  #              - 192.168.32.0/24
+  #              - 192.168.31.0/24
+  #              - 192.168.30.0/24
+  #    egress:
+  #    - to:
+  #        - ipBlock:
+  #            cidr: 0.0.0.0/0
+  #            except:
+  #              - 100.100.100.200/32
+  #              - 192.168.0.0/24
+  #              - 192.168.1.0/24
+  #              - 192.168.2.0/24
+  #   ---
+  # As a workaround, we can use the static rule collection to address this.
+  #
+  # Notice: the Priority of ACL rule.
+  #   1. Lower numbers take higher precedence.
+  #   2. The priority of Switch rules must be greater than 100, but the Host rules can start from 0.
+  #   3. Two default Host allowing In/Out rules append in priority 0, for outbound.
+  #   4. A default Switch allowing In rules append in priority 900, for self-host to pod accessing.
+  #   4. The available NetworkPolicies translate to Switch rules and count from 1000.
+  #   5. Two default Switch blocking In/Out blocking rules append in the last order.
+  #
+  #   so, please set the priority of the static rules as below.
+  #   - Switch rule should be within numeric range (900, 1000].
+  #   - Host rule should be within numeric range [0,).
+  #
+  static-rules.json: |
+    {
+      "Provider": "terway",
+      "Version": "1.0",
+      "Rules": [
+        {
+          "Name": "block-ingress-from",
+          "Rule": {
+            "ID": "block-ingress-from",
+            "Type": "ACL",
+            "Action": "Block",
+            "RemoteAddresses": "192.168.30.0/24,192.168.31.0/24,192.168.32.0/24",
+            "Direction": "In",
+            "RuleType": "Switch",
+            "Priority": 901,
+            "Protocol": 256
+          }
+        },
+        {
+          "Name": "allow-ingress-all",
+          "Rule": {
+            "ID": "allow-ingress-all",
+            "Type": "ACL",
+            "Action": "Allow",
+            "Direction": "In",
+            "RuleType": "Switch",
+            "Priority": 902,
+            "Protocol": 256
+          }
+        },
+        {
+          "Name": "block-egress-to",
+          "Rule": {
+            "ID": "block-egress-to",
+            "Type": "ACL",
+            "Action": "Block",
+            "RemoteAddresses": "100.100.100.200/32,192.168.0.0/24,192.168.1.0/24,192.168.2.0/24",
+            "Direction": "Out",
+            "RuleType": "Host",
+            "Priority": 0,
+            "Protocol": 256
+          }
+        },
+        {
+          "Name": "allow-egress-all",
+          "Rule": {
+            "ID": "allow-egress-all",
+            "Type": "ACL",
+            "Action": "Allow",
+            "Direction": "Out",
+            "RuleType": "Switch",
+            "Priority": 901,
+            "Protocol": 256
+          }
+        }
+      ]
+    }
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: terway-eniip-windows
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: terway-eniip-windows
+  updateStrategy:
+    type: OnDelete
+  template:
+    metadata:
+      labels:
+        app: terway-eniip-windows
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ""
+    spec:
+      terminationGracePeriodSeconds: 0
+      tolerations:
+        - operator: "Exists"
+      serviceAccountName: terway
+      hostNetwork: true
+      priorityClassName: system-node-critical
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: type
+                    operator: NotIn
+                    values:
+                      - virtual-kubelet
+                  - key: beta.kubernetes.io/os
+                    operator: In
+                    values:
+                      - windows
+                  - key: windows.alibabacloud.com/deployment-topology
+                    operator: In
+                    values:
+                      - "2.0"
+              - matchExpressions:
+                  - key: type
+                    operator: NotIn
+                    values:
+                      - virtual-kubelet
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - windows
+                  - key: windows.alibabacloud.com/deployment-topology
+                    operator: In
+                    values:
+                      - "2.0"
+      containers:
+        - name: terway
+          command:
+            - pwsh.exe
+            - -NoLogo
+            - -NonInteractive
+            - -File
+            - entrypoint.ps1
+          env:
+            - name: CLUSTER_SERVER
+              value: 'https://192.168.0.155:6443'
+            - name: BACKEND_TYPE
+              value: "ENIMultiIP"
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CONTAINER_NAME
+              value: "terway"
+          image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "100Mi"
+            limits:
+              cpu: "100m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: addon-token
+              mountPath: 'c:/var/addon'
+            - name: config
+              mountPath: 'c:/etc/eni'
+            - name: host-config
+              mountPath: 'c:/host/etc/eni/'
+            - name: host-binary
+              mountPath: 'c:/host/opt/bin/'
+            - name: host-cni-binary
+              mountPath: 'c:/host/opt/cni/bin/'
+            - name: host-cni-config
+              mountPath: 'c:/host/etc/cni/net.d/'
+            - name: project-run-eni
+              mountPath: 'c:/var/run/eni/'
+            - name: project-wins-pipe
+              mountPath: \\.\pipe\rancher_wins
+        - name: policy
+          command:
+            - pwsh.exe
+            - -NoLogo
+            - -NonInteractive
+            - -File
+            - policy.ps1
+          env:
+            - name: DISABLE_POLICY
+              valueFrom:
+                configMapKeyRef:
+                  name: eni-config
+                  key: disable_network_policy
+                  optional: true
+            - name: NETWORK_NAME_REGEX
+              value: "^ethernet_.*"
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: FELIX_KUBECLIENTQPS
+              value: '1'
+            - name: FELIX_KUBECLIENTBURST
+              value: '3'
+            - name: FELIX_KUBECLIENTTIMEOUT
+              value: '30'
+            - name: FELIX_KUBECLIENTCONTENTTYPE
+              value: 'application/vnd.kubernetes.protobuf'
+            - name: FELIX_KUBECLIENTACCEPTCONTENTTYPES
+              value: 'application/vnd.kubernetes.protobuf,application/json'
+          image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "100Mi"
+            limits:
+              cpu: "100m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: static-rules
+              mountPath: 'c:/etc/rules/'
+            - name: host-binary
+              mountPath: 'c:/host/opt/bin/'
+            - name: project-wins-pipe
+              mountPath: \\.\pipe\rancher_wins
+      volumes:
+        - name: addon-token
+          secret:
+            secretName: addon.network.token
+            items:
+              - key: addon.token.config
+                path: token-config
+        - name: config
+          configMap:
+            name: eni-config
+            items:
+              - key: eni_conf
+                path: eni.json
+              - key: 10-terway.conf
+                path: 10-terway.conf
+        - name: static-rules
+          configMap:
+            name: eni-config
+            items:
+              - key: static-rules.json
+                path: static-rules.json
+            optional: true # must be optional
+        - name: host-config
+          hostPath:
+            path: 'c:/etc/eni'
+            type: DirectoryOrCreate
+        - name: host-binary
+          hostPath:
+            path: 'c:/opt/bin'
+            type: DirectoryOrCreate
+        - name: host-cni-binary
+          hostPath:
+            path: 'c:/opt/cni/bin'
+            type: DirectoryOrCreate
+        - name: host-cni-config
+          hostPath:
+            path: 'c:/etc/cni/net.d'
+            type: DirectoryOrCreate
+        - name: project-run-eni
+          hostPath:
+            path: 'c:/var/run/eni'
+            type: DirectoryOrCreate
+        - name: project-wins-pipe
+          hostPath:
+            path: \\.\pipe\rancher_wins
+            type: ''
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: felixconfigurations.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: FelixConfiguration
+    plural: felixconfigurations
+    singular: felixconfiguration
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: bgpconfigurations.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: BGPConfiguration
+    plural: bgpconfigurations
+    singular: bgpconfiguration
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: ippools.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: IPPool
+    plural: ippools
+    singular: ippool
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: hostendpoints.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: HostEndpoint
+    plural: hostendpoints
+    singular: hostendpoint
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: clusterinformations.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: ClusterInformation
+    plural: clusterinformations
+    singular: clusterinformation
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: globalnetworkpolicies.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: GlobalNetworkPolicy
+    plural: globalnetworkpolicies
+    singular: globalnetworkpolicy
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: globalnetworksets.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: GlobalNetworkSet
+    plural: globalnetworksets
+    singular: globalnetworkset
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: networkpolicies.crd.projectcalico.org
+spec:
+  scope: Namespaced
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: NetworkPolicy
+    plural: networkpolicies
+    singular: networkpolicy

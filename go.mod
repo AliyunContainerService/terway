@@ -3,6 +3,9 @@ module github.com/AliyunContainerService/terway
 go 1.17
 
 require (
+	github.com/Microsoft/go-winio v0.4.17
+	github.com/Microsoft/hcsshim v0.8.23
+	github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
 	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1383
 	github.com/boltdb/bolt v1.3.1
 	github.com/containernetworking/cni v0.8.1
@@ -36,19 +39,19 @@ require (
 	k8s.io/code-generator v0.21.4
 	k8s.io/klog/v2 v2.8.0
 	k8s.io/kubelet v0.21.4
+	k8s.io/utils v0.0.0-20210802155522-efc7438f0176
 	sigs.k8s.io/controller-runtime v0.9.7
 	sigs.k8s.io/e2e-framework v0.0.5
 	sigs.k8s.io/yaml v1.2.0
 )
 
 require (
-	github.com/Microsoft/go-winio v0.4.11 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
-	github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae // indirect
 	github.com/atomicgo/cursor v0.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.1 // indirect
+	github.com/containerd/cgroups v1.0.1 // indirect
 	github.com/containerd/containerd v1.4.11 // indirect
 	github.com/coreos/go-iptables v0.4.5 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -102,6 +105,7 @@ require (
 	github.com/vishvananda/netns v0.0.0-20201230012202-c4f3ca719c73 // indirect
 	github.com/vladimirvivien/gexe v0.1.1 // indirect
 	github.com/xo/terminfo v0.0.0-20210125001918-ca9a967f8778 // indirect
+	go.opencensus.io v0.22.4 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.19.0 // indirect
@@ -122,7 +126,6 @@ require (
 	k8s.io/component-base v0.21.4 // indirect
 	k8s.io/gengo v0.0.0-20201214224949-b6c5ce23f027 // indirect
 	k8s.io/kube-openapi v0.0.0-20210305001622-591a79e4bda7 // indirect
-	k8s.io/utils v0.0.0-20210802155522-efc7438f0176 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.1.2 // indirect
 )
 
