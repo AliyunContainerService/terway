@@ -300,70 +300,70 @@ func (s *ConnectionTestSuite) TearDownSuite() {
 	if enablePolicy {
 		s.T().Logf("delete %s", networkPolicy.Name)
 		if err := DeleteNetworkPolicy(ctx, s.ClientSet, testNamespace, networkPolicy.Name); err != nil {
-			s.T().Error(errors.Wrapf(err, "fail to delete network policy %s", networkPolicy.Name))
+			s.T().Logf("fail to delete network policy %s: %v", networkPolicy.Name, err)
 		}
 	}
 
 	s.T().Logf("delete %s", clusterIPService.Name)
 	if err := DeleteService(ctx, s.ClientSet, testNamespace, clusterIPService.Name); err != nil {
-		s.T().Error(errors.Wrapf(err, "fail to delete service %s", clusterIPService.Name))
+		s.T().Logf("fail to delete service %s: %v", clusterIPService.Name, err)
 	}
 
 	s.T().Logf("delete %s", nodePortService.Name)
 	if err := DeleteService(ctx, s.ClientSet, testNamespace, nodePortService.Name); err != nil {
-		s.T().Error(errors.Wrapf(err, "fail to delete service %s", nodePortService.Name))
+		s.T().Logf("fail to delete service %s: %v", nodePortService.Name, err)
 	}
 
 	s.T().Logf("delete %s", loadBalancerService.Name)
 	if err := DeleteService(ctx, s.ClientSet, testNamespace, loadBalancerService.Name); err != nil {
-		s.T().Error(errors.Wrapf(err, "fail to delete service %s", loadBalancerService.Name))
+		s.T().Logf("fail to delete service %s: %v", loadBalancerService.Name, err)
 	}
 
 	s.T().Logf("delete %s", headlessService.Name)
 	if err := DeleteService(ctx, s.ClientSet, testNamespace, headlessService.Name); err != nil {
-		s.T().Error(errors.Wrapf(err, "fail to delete service %s", headlessService.Name))
+		s.T().Logf("fail to delete service %s: %v", headlessService.Name, err)
 	}
 
 	s.T().Logf("delete %s", podConnA.Name)
 	if err := DeleteDeployment(ctx, s.ClientSet, testNamespace, podConnA.Name); err != nil {
-		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnA.Name))
+		s.T().Logf("fail to delete pod %s: %v", podConnA.Name, err)
 	}
 
 	s.T().Logf("delete %s", podConnB.Name)
 	if err := DeleteDeployment(ctx, s.ClientSet, testNamespace, podConnB.Name); err != nil {
-		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnB.Name))
+		s.T().Logf("fail to delete pod %s: %v", podConnB.Name, err)
 	}
 
 	s.T().Logf("delete %s", podConnC.Name)
 	if err := DeleteDeployment(ctx, s.ClientSet, testNamespace, podConnC.Name); err != nil {
-		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnC.Name))
+		s.T().Logf("fail to delete pod %s: %v", podConnC.Name, err)
 	}
 
 	s.T().Logf("delete %s", podConnD.Name)
 	if err := DeleteStatefulSet(ctx, s.ClientSet, testNamespace, podConnD.Name); err != nil {
-		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnD.Name))
+		s.T().Logf("fail to delete pod %s: %v", podConnD.Name, err)
 	}
 
 	s.T().Logf("delete %s", podConnPolicy.Name)
 	if err := DeleteDeployment(ctx, s.ClientSet, testNamespace, podConnPolicy.Name); err != nil {
-		s.T().Error(errors.Wrapf(err, "fail to delete pod %s", podConnPolicy.Name))
+		s.T().Logf("fail to delete pod %s: %v", podConnPolicy.Name, err)
 	}
 
 	if enableTrunk {
 		s.T().Logf("delete %s pod networking", elasticPodNetWorking.Name)
 		if err := DeletePodNetworking(ctx, s.PodNetworkingClientSet, elasticPodNetWorking.Name); err != nil {
-			s.T().Error(errors.Wrapf(err, "fail to delete pod networking %s", elasticPodNetWorking.Name))
+			s.T().Logf("fail to delete pod networking %s: %v", elasticPodNetWorking.Name, err)
 		}
 
 		s.T().Logf("delete %s pod networking", fixedPodNetWorking.Name)
 		if err := DeletePodNetworking(ctx, s.PodNetworkingClientSet, fixedPodNetWorking.Name); err != nil {
-			s.T().Error(errors.Wrapf(err, "fail to delete pod networking %s", fixedPodNetWorking.Name))
+			s.T().Logf("fail to delete pod networking %s: %v", fixedPodNetWorking.Name, err)
 		}
 	}
 
 	s.T().Logf("delete ns")
 	if err := DeleteNamespace(ctx, s.ClientSet, testNamespace); err != nil {
-		s.T().Error(errors.Wrapf(err, "fail to delete namespace %s", testNamespace))
+		s.T().Logf("fail to delete namespace %s: %v", testNamespace, err)
 	}
 }
 
