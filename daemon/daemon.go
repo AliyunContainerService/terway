@@ -1592,6 +1592,10 @@ func parseExtraRoute(routes []podENITypes.Route) []*rpc.Route {
 
 // set default val for netConf
 func defaultForNetConf(netConf []*rpc.NetConf) error {
+	// ignore netConf check
+	if len(netConf) == 0 {
+		return nil
+	}
 	defaultRouteSet := false
 	defaultIfSet := false
 	for i := 0; i < len(netConf); i++ {
