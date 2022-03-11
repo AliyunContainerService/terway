@@ -112,12 +112,19 @@ EOF
 if [ "${need_timeout:-0}" = 0 ]; then
     # Write out the simpler version of legacy-vs-nft detection
     cat >> "${sbin}/iptables-wrapper" <<EOF
-num_legacy_lines=\$( (iptables-legacy-save || true; ip6tables-legacy-save || true) 2>/dev/null | grep '^-' | wc -l)
-num_nft_lines=\$( (iptables-nft-save || true; ip6tables-nft-save || true) 2>/dev/null | grep '^-' | wc -l)
-if [ "\${num_legacy_lines}" -ge "\${num_nft_lines}" ]; then
-    mode=legacy
+KERNEL_MAJOR_VERSION=\$(uname -r | awk -F . '{print \$1}')
+if ( uname -r | grep -E "el7|an7" && [ "\${KERNEL_MAJOR_VERSION}" -eq 3 ] ) || ( uname -r | grep -E "al7" && [ "\${KERNEL_MAJOR_VERSION}" -eq 4 ] ); then
+  mode=legacy
+elif ( uname -r | grep -E "el8|an8" && [ "\${KERNEL_MAJOR_VERSION}" -ge 4 ] ) || ( uname -r | grep -E "al8|lifsea8" && [ "\${KERNEL_MAJOR_VERSION}" -ge 5 ] ); then
+  mode=nft
 else
-    mode=nft
+  num_legacy_lines=\$( (iptables-legacy-save || true; ip6tables-legacy-save || true) 2>/dev/null | grep '^-' | wc -l)
+  num_nft_lines=\$( (iptables-nft-save || true; ip6tables-nft-save || true) 2>/dev/null | grep '^-' | wc -l)
+  if [ "\${num_legacy_lines}" -ge "\${num_nft_lines}" ]; then
+      mode=legacy
+  else
+      mode=nft
+  fi
 fi
 EOF
 else
@@ -127,16 +134,23 @@ else
 # loop if nft is not available so we need to wrap a timeout around it
 # (and to avoid that, we don't even bother calling iptables-nft if it
 # looks like iptables-legacy is going to win).
-num_legacy_lines=\$( (iptables-legacy-save || true; ip6tables-legacy-save || true) 2>/dev/null | grep '^-' | wc -l)
-if [ "\${num_legacy_lines}" -ge 10 ]; then
-    mode=legacy
+KERNEL_MAJOR_VERSION=\$(uname -r | awk -F . '{print \$1}')
+if ( uname -r | grep -E "el7|an7" && [ "\${KERNEL_MAJOR_VERSION}" -eq 3 ] ) || ( uname -r | grep -E "al7" && [ "\${KERNEL_MAJOR_VERSION}" -eq 4 ] ); then
+  mode=legacy
+elif ( uname -r | grep -E "el8|an8" && [ "\${KERNEL_MAJOR_VERSION}" -ge 4 ] ) || ( uname -r | grep -E "al8|lifsea8" && [ "\${KERNEL_MAJOR_VERSION}" -ge 5 ] ); then
+  mode=nft
 else
+  num_legacy_lines=\$( (iptables-legacy-save || true; ip6tables-legacy-save || true) 2>/dev/null | grep '^-' | wc -l)
+  if [ "\${num_legacy_lines}" -ge 10 ]; then
+    mode=legacy
+  else
     num_nft_lines=\$( (timeout 5 sh -c "iptables-nft-save; ip6tables-nft-save" || true) 2>/dev/null | grep '^-' | wc -l)
     if [ "\${num_legacy_lines}" -ge "\${num_nft_lines}" ]; then
         mode=legacy
     else
         mode=nft
     fi
+  fi
 fi
 EOF
 fi

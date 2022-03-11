@@ -60,6 +60,16 @@ if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = 
   fi
 fi
 
+  # check kernel version
+  KERNEL_MAJOR_VERSION=$(uname -r | awk -F . '{print $1}')
+
+  export FELIX_IPTABLESBACKEND=Auto
+  if ( uname -r | grep -E "el7|an7" && [ "${KERNEL_MAJOR_VERSION}" -eq 3 ] ) || ( uname -r | grep -E "al7" && [ "${KERNEL_MAJOR_VERSION}" -eq 4 ] ); then
+    export FELIX_IPTABLESBACKEND=Legacy
+  elif ( uname -r | grep -E "el8|an8" && [ "${KERNEL_MAJOR_VERSION}" -ge 4 ] ) || ( uname -r | grep -E "al8|lifsea8" && [ "${KERNEL_MAJOR_VERSION}" -ge 5 ] ); then
+    export FELIX_IPTABLESBACKEND=NFT
+  fi
+
   # default for veth
   export FELIX_LOGSEVERITYSYS=none
   export FELIX_LOGSEVERITYSCREEN=info
