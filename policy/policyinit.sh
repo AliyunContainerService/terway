@@ -40,7 +40,7 @@ if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = 
       cilium_hubble_listen_address=${cilium_hubble_listen_address:=":4244"}
       cilium_hubble_metrics_server=$(terway_config_val 'cilium_hubble_metrics_server')
       cilium_hubble_metrics_server=${cilium_hubble_metrics_server:=":9091"}
-      extra_args="${extra_args} --enable-hubble=true --hubble-metrics=${cilium_hubble_metrics}"
+      extra_args="${extra_args} --enable-hubble=true --hubble-disable-tls=true --hubble-metrics=${cilium_hubble_metrics}"
       extra_args="${extra_args} --hubble-listen-address=${cilium_hubble_listen_address} --hubble-metrics-server=${cilium_hubble_metrics_server}"
       echo "turning up hubble, passing args \"${extra_args}\""
     fi
