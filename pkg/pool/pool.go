@@ -506,6 +506,10 @@ func (p *simpleObjectPool) ReleaseWithReservation(resID string, reservation time
 			return nil
 		}
 		log.Warnf("release %s, err %v", resID, err)
+
+		// put resource to invalid
+		p.invalid[resID] = res
+		return nil
 	}
 
 	reserveTo := time.Now()
@@ -571,7 +575,7 @@ func (p *simpleObjectPool) checkResSync() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	for _, invalid := range p.invalid {
+	for key, invalid := range p.invalid {
 		l := log.WithFields(map[string]interface{}{
 			"id":     invalid.res.GetResourceID(),
 			"reason": "invalid",
@@ -582,6 +586,8 @@ func (p *simpleObjectPool) checkResSync() {
 			continue
 		}
 		l.Infof("dispose succeed")
+		delete(p.invalid, key)
+
 		p.tokenCh <- struct{}{}
 		p.metricTotal.Dec()
 		p.metricDisposed.Inc()
