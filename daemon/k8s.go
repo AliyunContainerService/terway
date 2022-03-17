@@ -515,6 +515,16 @@ func convertPod(daemonMode string, statefulWorkloadKindSet sets.String, pod *cor
 		pi.EipInfo.PodEipID = eipAnnotation
 	}
 
+	if prio, ok := podAnnotation[types.NetworkPriority]; ok {
+		switch types.NetworkPrio(prio) {
+		case types.NetworkPrioBestEffort, types.NetworkPrioBurstable, types.NetworkPrioGuaranteed:
+			pi.NetworkPriority = types.NetworkPrio(prio)
+		default:
+			_ = tracing.RecordPodEvent(pod.Name, pod.Namespace, eventTypeWarning,
+				"ParseFailed", fmt.Sprintf("Parse pod annotation %s failed.", types.NetworkPriority))
+		}
+	}
+
 	pi.SandboxExited = pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
 
 	if podENI, ok := podAnnotation[types.PodENI]; ok {

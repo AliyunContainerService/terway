@@ -92,7 +92,7 @@ func TestDataPathPolicyRoute(t *testing.T) {
 		assert.Equal(t, cfg.MTU, containerLink.Attrs().MTU)
 		assert.True(t, containerLink.Attrs().Flags&net.FlagUp != 0)
 
-		ok, err := FindIP(containerLink, utils.NewIPNet(cfg.ContainerIPNet))
+		ok, err := FindIP(containerLink, cfg.ContainerIPNet.WithMaxMask())
 		assert.NoError(t, err)
 		assert.True(t, ok)
 

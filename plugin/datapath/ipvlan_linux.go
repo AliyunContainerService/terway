@@ -248,10 +248,18 @@ func (d *IPvlanDriver) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	if err != nil {
 		return fmt.Errorf("error get eni by index %d, %w", cfg.ENIIndex, err)
 	}
+
 	eniCfg := generateENICfgForIPVlan(cfg, parentLink)
 	err = nic.Setup(parentLink, eniCfg)
 	if err != nil {
 		return err
+	}
+
+	if cfg.EgressPriority != "" {
+		err = utils.SetEgressPriority(parentLink, prioMap[terwayTypes.NetworkPrio(cfg.EgressPriority)], cfg.ContainerIPNet.WithMaxMask())
+		if err != nil {
+			return err
+		}
 	}
 
 	err = ipvlan.Setup(&ipvlan.IPVlan{
@@ -288,6 +296,12 @@ func (d *IPvlanDriver) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
 	err := utils.DelLinkByName(cfg.HostVETHName)
 	if err != nil {
 		return err
+	}
+	if cfg.EgressPriority != "" {
+		err = utils.DelFilter(cfg.ContainerIPNet, cfg.ENIIndex)
+		if err != nil {
+			return err
+		}
 	}
 
 	// del route to container

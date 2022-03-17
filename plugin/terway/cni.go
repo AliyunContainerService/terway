@@ -239,8 +239,9 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 		trunkENI       bool
 		vid            uint32
 
-		ingress uint64
-		egress  uint64
+		ingress        uint64
+		egress         uint64
+		egressPriority string
 
 		routes []cniTypes.Route
 
@@ -298,6 +299,7 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 	if alloc.GetPod() != nil {
 		ingress = alloc.GetPod().GetIngress()
 		egress = alloc.GetPod().GetEgress()
+		egressPriority = alloc.GetPod().GetEgressPriority()
 	}
 
 	hostStackCIDRs := make([]*net.IPNet, 0)
@@ -341,6 +343,7 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 		HostStackCIDRs:    hostStackCIDRs,
 		Ingress:           ingress,
 		Egress:            egress,
+		EgressPriority:    egressPriority,
 		StripVlan:         trunkENI,
 		Vid:               int(vid),
 		DefaultRoute:      alloc.GetDefaultRoute(),
@@ -359,11 +362,21 @@ func parseTearDownConf(alloc *rpc.NetConf, conf *types.CNIConf, ipType rpc.IPTyp
 		err            error
 		containerIPNet *terwayTypes.IPNetSet
 		serviceCIDR    *terwayTypes.IPNetSet
+		eniIndex       int32
+
+		egressPriority string
 	)
 
 	serviceCIDR, err = terwayTypes.ToIPNetSet(alloc.GetBasicInfo().GetServiceCIDR())
 	if err != nil {
 		return nil, err
+	}
+
+	if alloc.GetENIInfo() != nil {
+		mac := alloc.GetENIInfo().GetMAC()
+		if mac != "" {
+			eniIndex, _ = link.GetDeviceNumber(mac)
+		}
 	}
 
 	if ipType == rpc.IPType_TypeVPCIP {
@@ -385,11 +398,16 @@ func parseTearDownConf(alloc *rpc.NetConf, conf *types.CNIConf, ipType rpc.IPTyp
 			return nil, err
 		}
 	}
+	if alloc.GetPod() != nil {
+		egressPriority = alloc.GetPod().GetEgressPriority()
+	}
 
 	dp := getDatePath(ipType, conf.VlanStripType, false)
 	return &types.TeardownCfg{
 		DP:             dp,
 		ContainerIPNet: containerIPNet,
+		ENIIndex:       eniIndex,
+		EgressPriority: egressPriority,
 		ServiceCIDR:    serviceCIDR,
 	}, nil
 }
