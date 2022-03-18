@@ -176,7 +176,7 @@ func (f *eniIPFactory) getEnis(ctx *AllocCtx) ([]*ENI, error) {
 	eniIPLog.Infof("adjusted vswitch slice: %+v, original eni slice: %s", vSwitches, func(enis []*ENI) string {
 		var vsw []string
 		for i := 0; i < len(enis); i++ {
-			if enis[i] == nil {
+			if enis[i] == nil || enis[i].ENI == nil {
 				continue
 			}
 			vsw = append(vsw, enis[i].VSwitchID)
