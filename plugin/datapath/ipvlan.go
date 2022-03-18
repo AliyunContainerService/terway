@@ -28,6 +28,8 @@ const (
 
 var (
 	regexKernelVersion = regexp.MustCompile(`^(\d+)\.(\d+)`)
+
+	defaultMAC, _ = net.ParseMAC("ee:ff:ff:ff:ff:ff")
 )
 
 type IPvlanDriver struct{}
@@ -81,6 +83,15 @@ func generateContCfgForIPVlan(cfg *types.SetupConfig, link netlink.Link) *nic.Co
 			State:        netlink.NUD_PERMANENT,
 		})
 
+		if cfg.StripVlan {
+			neighs = append(neighs, &netlink.Neigh{
+				LinkIndex:    link.Attrs().Index,
+				IP:           cfg.GatewayIP.IPv4,
+				HardwareAddr: defaultMAC,
+				State:        netlink.NUD_PERMANENT,
+			})
+		}
+
 		if cfg.MultiNetwork {
 			table := utils.GetRouteTableID(link.Attrs().Index)
 
@@ -128,6 +139,14 @@ func generateContCfgForIPVlan(cfg *types.SetupConfig, link netlink.Link) *nic.Co
 			HardwareAddr: link.Attrs().HardwareAddr,
 			State:        netlink.NUD_PERMANENT,
 		})
+		if cfg.StripVlan {
+			neighs = append(neighs, &netlink.Neigh{
+				LinkIndex:    link.Attrs().Index,
+				IP:           cfg.GatewayIP.IPv6,
+				HardwareAddr: defaultMAC,
+				State:        netlink.NUD_PERMANENT,
+			})
+		}
 
 		if cfg.MultiNetwork {
 			table := utils.GetRouteTableID(link.Attrs().Index)
