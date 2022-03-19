@@ -55,7 +55,8 @@ message BasicInfo {
 message ENIInfo {
   string MAC = 1;
   bool Trunk = 2; // eni is trunk
-  uint32 Vid = 3;
+  uint32 Vid = 3; // vlan ID
+  IPSet GatewayIP = 4;
 }
 
 message Route {
