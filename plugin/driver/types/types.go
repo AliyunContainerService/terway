@@ -83,6 +83,7 @@ type SetupConfig struct {
 	GatewayIP       *terwayTypes.IPSet
 	MTU             int
 	ENIIndex        int
+	ENIGatewayIP    *terwayTypes.IPSet
 
 	// disable create peer for exclusiveENI
 	DisableCreatePeer bool
