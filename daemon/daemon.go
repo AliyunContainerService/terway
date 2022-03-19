@@ -993,11 +993,10 @@ func (n *networkService) multiIPFromCRD(podInfo *types.PodInfo, waitReady bool) 
 			}
 		}
 		eniInfo := &rpc.ENIInfo{
-			MAC:   alloc.ENI.MAC,
-			Trunk: true,
+			MAC:       nodeTrunkENI.MAC, // set trunk eni mac
+			Trunk:     true,
+			GatewayIP: nodeTrunkENI.GatewayIP.ToRPC(),
 		}
-		eniInfo.MAC = nodeTrunkENI.MAC // set trunk eni mac
-
 		info, ok := podEni.Status.ENIInfos[alloc.ENI.ID]
 		if !ok {
 			return nil, fmt.Errorf("error get podENI status")
@@ -1076,8 +1075,8 @@ func (n *networkService) exclusiveENIFromCRD(podInfo *types.PodInfo, waitReady b
 			if !ok {
 				return nil, fmt.Errorf("error get podENI status")
 			}
-			vid := uint32(info.Vid)
-			eniInfo.Vid = vid
+			eniInfo.Vid = uint32(info.Vid)
+			eniInfo.GatewayIP = nodeTrunkENI.GatewayIP.ToRPC()
 		}
 		netConf = append(netConf, &rpc.NetConf{
 			BasicInfo: &rpc.BasicInfo{

@@ -253,21 +253,29 @@ func generateENICfgForPolicy(cfg *types.SetupConfig, link netlink.Link, table in
 
 	if cfg.ContainerIPNet.IPv4 != nil {
 		// add default route
+		gw := cfg.GatewayIP.IPv4
+		if cfg.StripVlan {
+			gw = cfg.ENIGatewayIP.IPv4
+		}
 		routes = append(routes, &netlink.Route{
 			LinkIndex: link.Attrs().Index,
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Table:     table,
 			Dst:       defaultRoute,
-			Gw:        cfg.GatewayIP.IPv4,
+			Gw:        gw,
 			Flags:     int(netlink.FLAG_ONLINK),
 		})
 	}
 	if cfg.ContainerIPNet.IPv6 != nil {
+		gw := cfg.GatewayIP.IPv6
+		if cfg.StripVlan {
+			gw = cfg.ENIGatewayIP.IPv6
+		}
 		routes = append(routes, &netlink.Route{
 			LinkIndex: link.Attrs().Index,
 			Scope:     netlink.SCOPE_LINK,
 			Dst: &net.IPNet{
-				IP:   cfg.GatewayIP.IPv6,
+				IP:   gw,
 				Mask: net.CIDRMask(128, 128),
 			},
 		}, &netlink.Route{
@@ -275,7 +283,7 @@ func generateENICfgForPolicy(cfg *types.SetupConfig, link netlink.Link, table in
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Table:     table,
 			Dst:       defaultRouteIPv6,
-			Gw:        cfg.GatewayIP.IPv6,
+			Gw:        gw,
 			Flags:     int(netlink.FLAG_ONLINK),
 		})
 
