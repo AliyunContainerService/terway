@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 
 	corev1 "k8s.io/api/core/v1"
@@ -23,6 +24,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
+
+var log = logger.DefaultLogger.WithField("subSys", "webhook-cert")
 
 const (
 	serverCertKey = "tls.crt"
@@ -74,6 +77,9 @@ func SyncCert(ns, name, domain, certDir string) error {
 		serverKeyBytes = existSecret.Data[serverKeyKey]
 		caCertBytes = existSecret.Data[caCertKey]
 	}
+	if len(serverCertBytes) == 0 || len(serverKeyBytes) == 0 || len(caCertBytes) == 0 {
+		return fmt.Errorf("invalid cert")
+	}
 
 	err = os.MkdirAll(certDir, os.ModeDir)
 	if err != nil {
@@ -103,26 +109,32 @@ func SyncCert(ns, name, domain, certDir string) error {
 		return fmt.Errorf("no webhook config found")
 	}
 	mutatingCfg := mutatingWebhook.DeepCopy()
+	changed := false
 	for i, hook := range mutatingWebhook.Webhooks {
 		if len(hook.ClientConfig.CABundle) != 0 {
 			continue
 		}
+		changed = true
 		// patch ca
 		mutatingCfg.Webhooks[i].ClientConfig.CABundle = caCertBytes
 	}
-	mutatPatchBytes, err := json.Marshal(mutatingCfg)
-	if err != nil {
-		return err
-	}
-	err = wait.ExponentialBackoff(utils.DefaultPatchBackoff, func() (done bool, err error) {
-		_, innerErr := cs.AdmissionregistrationV1().MutatingWebhookConfigurations().Patch(context.Background(), mutatingWebhook.Name, types.StrategicMergePatchType, mutatPatchBytes, metav1.PatchOptions{})
-		if innerErr != nil {
-			return false, err
+	if changed {
+		mutatPatchBytes, err := json.Marshal(mutatingCfg)
+		if err != nil {
+			return err
 		}
-		return true, nil
-	})
-	if err != nil {
-		return err
+		err = wait.ExponentialBackoff(utils.DefaultPatchBackoff, func() (bool, error) {
+			_, innerErr := cs.AdmissionregistrationV1().MutatingWebhookConfigurations().Patch(context.Background(), mutatingWebhook.Name, types.StrategicMergePatchType, mutatPatchBytes, metav1.PatchOptions{})
+			if innerErr != nil {
+				log.Error(innerErr)
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			return err
+		}
+		log.Info("update MutatingWebhook ca bundle success")
 	}
 
 	validateWebhook, err := cs.AdmissionregistrationV1().ValidatingWebhookConfigurations().Get(context.Background(), name, metav1.GetOptions{})
@@ -132,6 +144,7 @@ func SyncCert(ns, name, domain, certDir string) error {
 	if len(validateWebhook.Webhooks) == 0 {
 		return fmt.Errorf("no webhook config found")
 	}
+	changed = false
 	validateCfg := validateWebhook.DeepCopy()
 	for i, hook := range validateWebhook.Webhooks {
 		if len(hook.ClientConfig.CABundle) != 0 {
@@ -139,20 +152,28 @@ func SyncCert(ns, name, domain, certDir string) error {
 		}
 		// patch ca
 		validateCfg.Webhooks[i].ClientConfig.CABundle = caCertBytes
+		changed = true
 	}
-	validatePatchBytes, err := json.Marshal(validateCfg)
-	if err != nil {
-		return err
-	}
-	err = wait.ExponentialBackoff(utils.DefaultPatchBackoff, func() (done bool, err error) {
-		_, innerErr := cs.AdmissionregistrationV1().ValidatingWebhookConfigurations().Patch(context.Background(), validateWebhook.Name, types.StrategicMergePatchType, validatePatchBytes, metav1.PatchOptions{})
-		if innerErr != nil {
-			return false, err
+	if changed {
+		validatePatchBytes, err := json.Marshal(validateCfg)
+		if err != nil {
+			return err
 		}
-		return true, nil
-	})
+		err = wait.ExponentialBackoff(utils.DefaultPatchBackoff, func() (bool, error) {
+			_, innerErr := cs.AdmissionregistrationV1().ValidatingWebhookConfigurations().Patch(context.Background(), validateWebhook.Name, types.StrategicMergePatchType, validatePatchBytes, metav1.PatchOptions{})
+			if innerErr != nil {
+				log.Error(innerErr)
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			return err
+		}
+		log.Info("update ValidatingWebhook ca bundle success")
+	}
 
-	return err
+	return nil
 }
 
 func GenerateCerts(serviceNamespace, serviceName, clusterDomain string) (*corev1.Secret, error) {
