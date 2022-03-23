@@ -89,7 +89,6 @@ message ReleaseIPRequest {
 message ReleaseIPReply {
   bool Success = 1;
   IPSet IPv4Addr = 2;
-  int32 DeviceNumber = 3;
   bool IPv4 = 4;
   bool IPv6 = 5;
 }
