@@ -58,7 +58,11 @@ func generateContCfgForIPVlan(cfg *types.SetupConfig, link netlink.Link) *nic.Co
 	}
 
 	if cfg.ContainerIPNet.IPv4 != nil {
-		addrs = append(addrs, &netlink.Addr{IPNet: cfg.ContainerIPNet.IPv4})
+		if cfg.StripVlan {
+			addrs = append(addrs, &netlink.Addr{IPNet: utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv4)})
+		} else {
+			addrs = append(addrs, &netlink.Addr{IPNet: cfg.ContainerIPNet.IPv4})
+		}
 
 		// add default route
 		if cfg.DefaultRoute {
@@ -115,7 +119,11 @@ func generateContCfgForIPVlan(cfg *types.SetupConfig, link netlink.Link) *nic.Co
 		}
 	}
 	if cfg.ContainerIPNet.IPv6 != nil {
-		addrs = append(addrs, &netlink.Addr{IPNet: cfg.ContainerIPNet.IPv6})
+		if cfg.StripVlan {
+			addrs = append(addrs, &netlink.Addr{IPNet: utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv6)})
+		} else {
+			addrs = append(addrs, &netlink.Addr{IPNet: cfg.ContainerIPNet.IPv4})
+		}
 
 		// add default route
 		if cfg.DefaultRoute {
