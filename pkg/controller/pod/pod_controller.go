@@ -394,10 +394,10 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 	}
 	update.Annotations[types.PodUID] = string(pod.UID)
 
-	if prePodENI.Annotations[types.PodNetworking] != "" {
-		l.V(5).Info("using podNetworking will not re-config", types.PodNetworking, prePodENI.Annotations[types.PodNetworking])
+	if pod.Annotations[types.PodNetworking] != "" {
+		l.V(5).Info("using podNetworking will not re-config", types.PodNetworking, pod.Annotations[types.PodNetworking])
 		_, err := common.UpdatePodENI(ctx, m.client, update)
-		return reconcile.Result{}, err
+		return reconcile.Result{Requeue: true}, err
 	}
 
 	// TODO check and update podENI spec
