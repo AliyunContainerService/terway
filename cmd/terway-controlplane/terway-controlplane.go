@@ -73,7 +73,10 @@ func main() {
 
 	utils.SetStsKinds(cfg.CustomStatefulWorkloadKinds)
 
-	utils.RegisterClients(ctrl.GetConfigOrDie())
+	restConfig := ctrl.GetConfigOrDie()
+	restConfig.QPS = cfg.KubeClientQPS
+	restConfig.Burst = cfg.KubeClientBurst
+	utils.RegisterClients(restConfig)
 
 	err := crds.RegisterCRDs()
 	if err != nil {
@@ -96,7 +99,6 @@ func main() {
 	}
 
 	ctx := ctrl.SetupSignalHandler()
-	restConfig := ctrl.GetConfigOrDie()
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                     scheme,
