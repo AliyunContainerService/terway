@@ -180,10 +180,30 @@ func LinkSetNsFd(link netlink.Link, netNS ns.NetNS) error {
 	return nil
 }
 
-func QdiscReplace(qdisc *netlink.GenericQdisc) error {
-	cmd := fmt.Sprintf("tc qdisc replace  %s", qdisc.String())
+func QdiscReplace(qdisc netlink.Qdisc) error {
+	cmd := fmt.Sprintf("tc qdisc replace %s", qdisc.Attrs().String())
 	Log.Infof(cmd)
 	err := netlink.QdiscReplace(qdisc)
+	if err != nil {
+		return fmt.Errorf("error %s, %w", cmd, err)
+	}
+	return nil
+}
+
+func FilterAdd(filter *netlink.U32) error {
+	cmd := fmt.Sprintf("tc filter add %s", filter.String())
+	Log.Info(cmd)
+	err := netlink.FilterAdd(filter)
+	if err != nil {
+		return fmt.Errorf("error %s, %w", cmd, err)
+	}
+	return nil
+}
+
+func FilterDel(filter *netlink.U32) error {
+	cmd := fmt.Sprintf("tc filter del %s", filter.String())
+	Log.Info(cmd)
+	err := netlink.FilterDel(filter)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
 	}

@@ -90,7 +90,7 @@ func TestDataPathExclusiveENI(t *testing.T) {
 			assert.Equal(t, cfg.MTU, containerLink.Attrs().MTU)
 			assert.True(t, containerLink.Attrs().Flags&net.FlagUp != 0)
 
-			ok, err := FindIP(containerLink, utils.NewIPNet(cfg.ContainerIPNet))
+			ok, err := FindIP(containerLink, cfg.ContainerIPNet.WithMaxMask())
 			if assert.NoError(t, err) {
 				assert.True(t, ok, "expect ip %s", cfg.ContainerIPNet.String())
 			}
@@ -103,7 +103,7 @@ func TestDataPathExclusiveENI(t *testing.T) {
 			assert.True(t, vethLink.Attrs().Flags&net.FlagUp != 0)
 			assert.Equal(t, "veth", vethLink.Type())
 
-			ok, err := FindIP(vethLink, utils.NewIPNet(cfg.ContainerIPNet))
+			ok, err := FindIP(vethLink, cfg.ContainerIPNet.WithMaxMask())
 			assert.NoError(t, err)
 			assert.True(t, ok)
 		}

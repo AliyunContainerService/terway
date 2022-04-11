@@ -331,8 +331,9 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 					Trunk: false,
 				},
 				Pod: &rpc.Pod{
-					Ingress: podinfo.TcIngress,
-					Egress:  podinfo.TcEgress,
+					Ingress:        podinfo.TcIngress,
+					Egress:         podinfo.TcEgress,
+					EgressPriority: string(podinfo.NetworkPriority),
 				},
 				IfName:       "",
 				ExtraRoutes:  nil,
@@ -610,8 +611,9 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 							Trunk: false,
 						},
 						Pod: &rpc.Pod{
-							Ingress: podinfo.TcIngress,
-							Egress:  podinfo.TcEgress,
+							Ingress:        podinfo.TcIngress,
+							Egress:         podinfo.TcEgress,
+							EgressPriority: string(podinfo.NetworkPriority),
 						},
 						IfName:      "",
 						ExtraRoutes: nil,

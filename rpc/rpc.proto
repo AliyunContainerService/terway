@@ -73,6 +73,7 @@ enum IPType {
 message Pod {
   uint64 Ingress = 1;
   uint64 Egress = 2;
+  string EgressPriority = 3;
 }
 
 message ReleaseIPRequest {
@@ -88,7 +89,6 @@ message ReleaseIPRequest {
 message ReleaseIPReply {
   bool Success = 1;
   IPSet IPv4Addr = 2;
-  int32 DeviceNumber = 3;
   bool IPv4 = 4;
   bool IPv6 = 5;
 }

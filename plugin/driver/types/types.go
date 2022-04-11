@@ -104,6 +104,8 @@ type SetupConfig struct {
 
 	Ingress uint64
 	Egress  uint64
+	// QoS prio
+	EgressPriority string
 
 	RuntimeConfig cni.RuntimeConfig
 
@@ -119,6 +121,10 @@ type TeardownCfg struct {
 
 	ContainerIfName string
 	ContainerIPNet  *terwayTypes.IPNetSet
+	ENIIndex        int32
+
+	// QoS prio
+	EgressPriority string
 
 	ServiceCIDR *terwayTypes.IPNetSet
 }

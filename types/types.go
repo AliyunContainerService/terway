@@ -137,7 +137,7 @@ func (i *IPSet) SetIP(str string) *IPSet {
 	if ip == nil {
 		return i
 	}
-	if terwayIP.IPv6(ip) {
+	if ip.To4() == nil {
 		i.IPv6 = ip
 		return i
 	}
@@ -210,12 +210,24 @@ func (i *IPNetSet) SetIPNet(str string) *IPNetSet {
 	if ip == nil {
 		return i
 	}
-	if terwayIP.IPv6(ip) {
+	if ip.To4() == nil {
 		i.IPv6 = ipNet
 		return i
 	}
 	i.IPv4 = ipNet
 	return i
+}
+
+// WithMaxMask return a copy with max size of mask
+func (i *IPNetSet) WithMaxMask() *IPNetSet {
+	ipNetSet := &IPNetSet{}
+	if i.IPv4 != nil {
+		ipNetSet.IPv4 = terwayIP.NewIPNetWithMaxMask(i.IPv4)
+	}
+	if i.IPv6 != nil {
+		ipNetSet.IPv6 = terwayIP.NewIPNetWithMaxMask(i.IPv6)
+	}
+	return ipNetSet
 }
 
 // ENI aliyun ENI resource

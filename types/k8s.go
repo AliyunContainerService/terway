@@ -45,6 +45,9 @@ const (
 
 	// PodUID store pod uid
 	PodUID = AnnotationPrefix + "pod-uid"
+
+	// NetworkPriority set pod network priority
+	NetworkPriority = AnnotationPrefix + "network-priority"
 )
 
 // FinalizerPodENI finalizer for podENI resource
@@ -80,3 +83,13 @@ func PodUseENI(pod *corev1.Pod) bool {
 	}
 	return v
 }
+
+// NetworkPrio network priority for pod
+type NetworkPrio string
+
+// NetworkPrio val
+const (
+	NetworkPrioBestEffort NetworkPrio = "best-effort"
+	NetworkPrioBurstable  NetworkPrio = "burstable"
+	NetworkPrioGuaranteed NetworkPrio = "guaranteed"
+)

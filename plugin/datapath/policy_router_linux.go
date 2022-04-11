@@ -8,6 +8,7 @@ import (
 	"github.com/AliyunContainerService/terway/plugin/driver/types"
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 	"github.com/AliyunContainerService/terway/plugin/driver/veth"
+	terwayTypes "github.com/AliyunContainerService/terway/types"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
@@ -352,6 +353,13 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 		return fmt.Errorf("setup eni config, %w", err)
 	}
 
+	if cfg.EgressPriority != "" {
+		err = utils.SetEgressPriority(eni, prioMap[terwayTypes.NetworkPrio(cfg.EgressPriority)], cfg.ContainerIPNet.WithMaxMask())
+		if err != nil {
+			return err
+		}
+	}
+
 	hostVETHCfg := generateHostPeerCfgForPolicy(cfg, hostVETH, table)
 	err = nic.Setup(hostVETH, hostVETHCfg)
 	if err != nil {
@@ -360,6 +368,13 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 
 	if cfg.Ingress > 0 {
 		return utils.SetupTC(hostVETH, cfg.Ingress)
+	}
+	return nil
+}
+
+func (d *PolicyRoute) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
+	if cfg.EgressPriority != "" {
+		return utils.DelFilter(cfg.ContainerIPNet, cfg.ENIIndex)
 	}
 	return nil
 }

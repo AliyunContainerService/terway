@@ -374,8 +374,15 @@ func doCmdDel(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 						if err != nil {
 							return err
 						}
-						break
+						continue
 					}
+				}
+				fallthrough
+			case types.PolicyRoute:
+				utils.Hook.AddExtraInfo("dp", "policyRoute")
+				err = datapath.NewPolicyRoute().Teardown(teardownCfg, cniNetns)
+				if err != nil {
+					return err
 				}
 			}
 		}

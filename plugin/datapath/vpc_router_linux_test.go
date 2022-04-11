@@ -76,9 +76,9 @@ func TestDataPathVPCRoute(t *testing.T) {
 		assert.Equal(t, cfg.MTU, containerLink.Attrs().MTU)
 		assert.True(t, containerLink.Attrs().Flags&net.FlagUp != 0)
 
-		ok, err := FindIP(containerLink, utils.NewIPNet(cfg.ContainerIPNet))
+		ok, err := FindIP(containerLink, cfg.ContainerIPNet.WithMaxMask())
 		assert.NoError(t, err)
-		assert.True(t, ok, "container ip should be %s", utils.NewIPNet(cfg.ContainerIPNet).IPv4.String())
+		assert.True(t, ok, "container ip should be %s", cfg.ContainerIPNet.WithMaxMask().IPv4.String())
 
 		// default via 169.254.1.1 dev eth0
 		routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{
