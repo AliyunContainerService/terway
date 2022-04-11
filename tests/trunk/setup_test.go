@@ -1,11 +1,11 @@
 //go:build e2e
-// +build e2e
 
 package trunk
 
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,9 +27,19 @@ var (
 )
 
 const (
-	pnName  = "default-config"
-	podName = "pod-use-trunking"
+	defaultPodNetworkingName = "default-config"
+	podName                  = "pod-use-trunking"
 )
+
+var (
+	vSwitchIDs       string
+	securityGroupIDs string
+)
+
+func init() {
+	flag.StringVar(&vSwitchIDs, "vswitch-ids", "", "extra vSwitchIDs")
+	flag.StringVar(&securityGroupIDs, "security-group-ids", "", "extra securityGroupIDs")
+}
 
 func TestMain(m *testing.M) {
 	home, err := os.UserHomeDir()
@@ -64,7 +74,7 @@ func TestMain(m *testing.M) {
 			return ctx, err
 		},
 		func(ctx context.Context, config *envconf.Config) (context.Context, error) {
-			_ = config.Client().Resources().Delete(ctx, newPodNetworking(pnName, nil, nil, nil, nil))
+			_ = config.Client().Resources().Delete(ctx, newPodNetworking(defaultPodNetworkingName, nil, nil, nil, nil))
 			return ctx, nil
 		},
 	)

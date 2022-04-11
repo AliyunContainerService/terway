@@ -13,59 +13,57 @@ jobs:
   go-mod:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Go
-        uses: actions/setup-go@v2.1.3
-        with:
-          go-version: 1.17.2
-      - uses: actions/cache@v2
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-      - name: Check module vendoring
-        run: |
-          go mod tidy
-          go mod vendor
-          git diff --exit-code || (echo "please run 'go mod tidy && go mod vendor', and submit your changes"; exit 1)
+    - uses: actions/checkout@v3
+    - uses: actions/setup-go@v3
+      with:
+        go-version: 1.18.0
+    - uses: actions/cache@v2
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    - name: Check module vendoring
+      run: |
+        go mod tidy
+        go mod vendor
+        git diff --exit-code || (echo "please run 'go mod tidy && go mod vendor', and submit your changes"; exit 1)
 
   go-lint:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Go
-        uses: actions/setup-go@v2.1.3
-        with:
-          go-version: 1.17.2
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v2.5.2
-        with:
-          version: v1.40.1
-          args: --build-tags default_build --timeout 300s --skip-dirs-use-default -v -E goconst -E gofmt -E ineffassign -E goimports -E revive -E misspell -E vet -E deadcode
+    - uses: actions/checkout@v3
+    - uses: actions/setup-go@v3
+      with:
+        go-version: 1.18.0
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v3.1.0
+      with:
+        version: v1.45.2
+        args: --build-tags default_build,privileged --timeout 5m --skip-dirs-use-default -v -E deadcode -E errcheck -E gosimple -E govet -E ineffassign -E staticcheck -E structcheck -E typecheck -E varcheck -E goconst -E gofmt -E goimports -E revive -E misspell -E vet -E asciicheck -E stylecheck -E misspell
 
   shellcheck:
     name: Shellcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Run ShellCheck
-        uses: ludeeus/action-shellcheck@1.1.0
-        env:
-          SHELLCHECK_OPTS: -e SC2236,SC2162,SC2268
-        with:
-          ignore: tests hack
+    - uses: actions/checkout@v2
+    - name: Run ShellCheck
+      uses: ludeeus/action-shellcheck@1.1.0
+      env:
+        SHELLCHECK_OPTS: -e SC2236,SC2162,SC2268
+      with:
+        ignore: tests hack
 
   super-linter:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Lint Code Base
-        uses: github/super-linter@v4.8.5
-        env:
-          VALIDATE_ALL_CODEBASE: true
-          VALIDATE_MARKDOWN: true
-          VALIDATE_MD: true
-          DEFAULT_BRANCH: main
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - uses: actions/checkout@v2
+    - name: Lint Code Base
+      uses: github/super-linter@v4.9.2
+      env:
+        VALIDATE_ALL_CODEBASE: true
+        VALIDATE_MARKDOWN: true
+        VALIDATE_MD: true
+        DEFAULT_BRANCH: main
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
