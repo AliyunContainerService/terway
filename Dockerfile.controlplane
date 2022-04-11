@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.17.2 as builder
+FROM --platform=$TARGETPLATFORM golang:1.18.0 as builder
 ARG GOPROXY
 ENV GOPROXY $GOPROXY
 WORKDIR /go/src/github.com/AliyunContainerService/terway/
@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -tags default_build \
     -X \"k8s.io/client-go/pkg/version.buildDate=`date -u +'%Y-%m-%dT%H:%M:%SZ'`\"" \
     -o terway-controlplane  cmd/terway-controlplane/terway-controlplane.go
 
-FROM --platform=$BUILDPLATFORM ubuntu:20.04
+FROM --platform=$TARGETPLATFORM ubuntu:20.04
 RUN apt-get update && apt-get install -y curl jq && \
     apt-get purge --auto-remove && apt-get clean && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terway-controlplane /usr/bin/terway-controlplane
