@@ -9,6 +9,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  go-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-go@v3
+      with:
+        go-version: 1.18.0
+    - uses: actions/cache@v2
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    - name: Test
+      run: |
+        go test -tags default_build -v ./...
+        go test -tags default_build -race -v ./...
+        go test -tags default_build -coverpkg=./... -race -coverprofile=coverage.txt -covermode=atomic ./...
+    - uses: codecov/codecov-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage.txt
+        flags: unittests
+        name: codecov-terway
+        fail_ci_if_error: true
+        verbose: true
 
   go-mod:
     runs-on: ubuntu-latest
