@@ -7,7 +7,6 @@ import (
 	"github.com/AliyunContainerService/terway/plugin/terway/cni"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 
-	"github.com/containernetworking/cni/pkg/types"
 	cniTypes "github.com/containernetworking/cni/pkg/types"
 )
 
@@ -96,7 +95,7 @@ type SetupConfig struct {
 	MultiNetwork bool
 
 	// add extra route in container
-	ExtraRoutes []types.Route
+	ExtraRoutes []cniTypes.Route
 
 	ServiceCIDR *terwayTypes.IPNetSet
 	HostIPSet   *terwayTypes.IPNetSet
