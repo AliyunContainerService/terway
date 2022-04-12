@@ -8,39 +8,15 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  REGISTRY: ghcr.io
+  OWNER: AliyunContainerService
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.after }}
   cancel-in-progress: true
 
 jobs:
-
-  go-test:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-go@v3
-      with:
-        go-version: 1.18.0
-    - uses: actions/cache@v2
-      with:
-        path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
-    - name: Test
-      run: |
-        go test -tags default_build -v ./...
-        go test -tags default_build -race -v ./...
-        go test -tags default_build -coverpkg=./... -race -coverprofile=coverage.txt -covermode=atomic ./...
-    - uses: codecov/codecov-action@v1
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ./coverage.txt
-        flags: unittests
-        name: codecov-terway
-        fail_ci_if_error: true
-        verbose: true
-
   build-terway:
     runs-on: ubuntu-latest
     steps:
@@ -63,19 +39,18 @@ jobs:
       id: meta
       uses: docker/metadata-action@v3
       with:
-        images: l1b0k/terway
+        images: ${{ env.REGISTRY }}/${{ env.OWNER }}/terway
         tags: |
-          type=sha
-          type=ref,event=branch
-          type=ref,event=pr
+          type=raw,value={{date 'YYYYMMDD'}}-{{sha}}
           type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{raw}}
 
     - name: Login to DockerHub
       uses: docker/login-action@v1
       with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
       if: ${{ github.event_name != 'pull_request' && github.event.action != 'unassigned' }}
 
     - name: Build and push
@@ -83,7 +58,7 @@ jobs:
       with:
         context: .
         file: ./Dockerfile
-        platforms: linux/amd64
+        platforms: linux/amd64,linux/arm64
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
@@ -110,19 +85,18 @@ jobs:
       id: meta
       uses: docker/metadata-action@v3
       with:
-        images: l1b0k/terway-controlplane
+        images: ${{ env.REGISTRY }}/${{ env.OWNER }}/terway-controlplane
         tags: |
-          type=sha
-          type=ref,event=branch
-          type=ref,event=pr
+          type=raw,value={{date 'YYYYMMDD'}}-{{sha}}
           type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{raw}}
 
     - name: Login to DockerHub
       uses: docker/login-action@v1
       with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
       if: ${{ github.event_name != 'pull_request' && github.event.action != 'unassigned' }}
 
     - name: Build and push
