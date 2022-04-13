@@ -4,7 +4,6 @@
 package datapath
 
 import (
-	"fmt"
 	"net"
 
 	terwayTypes "github.com/AliyunContainerService/terway/types"
@@ -90,14 +89,4 @@ func FindNeigh(link netlink.Link, ip net.IP, lladdr net.HardwareAddr) (bool, err
 		}
 	}
 	return false, nil
-}
-
-func debug() {
-	routes, err := netlink.RouteList(nil, netlink.FAMILY_ALL)
-	if err != nil {
-		return
-	}
-	for _, r := range routes {
-		fmt.Printf("%s %#v", r.String(), r)
-	}
 }
