@@ -122,7 +122,7 @@ func generateContCfgForIPVlan(cfg *types.SetupConfig, link netlink.Link) *nic.Co
 		if cfg.StripVlan {
 			addrs = append(addrs, &netlink.Addr{IPNet: utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv6)})
 		} else {
-			addrs = append(addrs, &netlink.Addr{IPNet: cfg.ContainerIPNet.IPv4})
+			addrs = append(addrs, &netlink.Addr{IPNet: cfg.ContainerIPNet.IPv6})
 		}
 
 		// add default route
