@@ -62,7 +62,7 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 		eipID = prefer
 	}
 	eipInfo, err := e.ecs.AllocateEipAddress(ctx, context.pod.EipInfo.PodEipBandWidth, context.pod.EipInfo.PodEipChargeType,
-		eipID, eniID, eniIP, e.allowEipRob)
+		eipID, eniID, eniIP, e.allowEipRob, context.pod.EipInfo.PodEipISP, context.pod.EipInfo.PodEipBandwidthPackageID, context.pod.EipInfo.PodEipPoolID)
 	if err != nil {
 		return nil, errors.Errorf("error allocate eip info: %v", err)
 	}

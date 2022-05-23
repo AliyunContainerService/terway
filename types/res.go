@@ -8,11 +8,14 @@ import (
 // PodEipInfo store pod eip info
 // NOTE: this is the type store in db
 type PodEipInfo struct {
-	PodEip           bool
-	PodEipID         string
-	PodEipIP         string
-	PodEipBandWidth  int
-	PodEipChargeType InternetChargeType
+	PodEip                   bool
+	PodEipID                 string
+	PodEipIP                 string
+	PodEipBandWidth          int
+	PodEipChargeType         InternetChargeType
+	PodEipISP                string
+	PodEipPoolID             string
+	PodEipBandwidthPackageID string
 }
 
 // PodInfo store the pod info

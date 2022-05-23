@@ -33,6 +33,9 @@ const (
 	// ErrAssociationDuplicated ..
 	// for API AssociateEipAddress
 	ErrAssociationDuplicated = "InvalidAssociation.Duplicated"
+
+	// ErrIPNotInCbwp for eip
+	ErrIPNotInCbwp = "OperationUnsupported.IpNotInCbwp"
 )
 
 // define well known err
