@@ -407,9 +407,13 @@ const podWithEip = "k8s.aliyun.com/pod-with-eip"
 const eciWithEip = "k8s.aliyun.com/eci-with-eip" // to adopt ask annotation
 const podEipBandwidth = "k8s.aliyun.com/eip-bandwidth"
 const podEipChargeType = "k8s.aliyun.com/eip-charge-type"
-const podEciEipInstanceID = "k8s.aliyun.com/eci-eip-instanceid" // to adopt ask annotation
+const podEipInternetChargeType = "k8s.aliyun.com/eip-internet-charge-type" // to adopt ask annotation
+const podEciEipInstanceID = "k8s.aliyun.com/eci-eip-instanceid"            // to adopt ask annotation
 const podPodEipInstanceID = "k8s.aliyun.com/pod-eip-instanceid"
 const podEipAddress = "k8s.aliyun.com/allocated-eipAddress"
+const eipBandwidthPackageID = "k8s.aliyun.com/eip-common-bandwidth-package-id"
+const eipISP = "k8s.aliyun.com/eip-isp"
+const eipPublicIPAddressPoolID = "k8s.aliyun.com/eip-public-ip-address-pool-id"
 
 const defaultStickTimeForSts = 5 * time.Minute
 
@@ -503,6 +507,9 @@ func convertPod(daemonMode string, statefulWorkloadKindSet sets.String, pod *cor
 	if eipAnnotation, ok := podAnnotation[podEipChargeType]; ok {
 		pi.EipInfo.PodEipChargeType = types.InternetChargeType(eipAnnotation)
 	}
+	if eipAnnotation, ok := podAnnotation[podEipInternetChargeType]; ok {
+		pi.EipInfo.PodEipChargeType = types.InternetChargeType(eipAnnotation)
+	}
 
 	if eipAnnotation, ok := podAnnotation[podEciEipInstanceID]; ok && eipAnnotation != "" {
 		pi.EipInfo.PodEip = true
@@ -512,6 +519,17 @@ func convertPod(daemonMode string, statefulWorkloadKindSet sets.String, pod *cor
 	if eipAnnotation, ok := podAnnotation[podPodEipInstanceID]; ok && eipAnnotation != "" {
 		pi.EipInfo.PodEip = true
 		pi.EipInfo.PodEipID = eipAnnotation
+	}
+
+	if eipAnnotation, ok := podAnnotation[eipISP]; ok && eipAnnotation != "" {
+		pi.EipInfo.PodEipISP = eipAnnotation
+	}
+
+	if eipAnnotation, ok := podAnnotation[eipBandwidthPackageID]; ok && eipAnnotation != "" {
+		pi.EipInfo.PodEipBandwidthPackageID = eipAnnotation
+	}
+	if eipAnnotation, ok := podAnnotation[eipPublicIPAddressPoolID]; ok && eipAnnotation != "" {
+		pi.EipInfo.PodEipPoolID = eipAnnotation
 	}
 
 	pi.SandboxExited = pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded

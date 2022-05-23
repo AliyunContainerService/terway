@@ -21,7 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-func (e *Impl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType types.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error) {
+func (e *Impl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType types.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool, isp, bandwidthPackageID, eipPoolID string) (*types.EIP, error) {
 	var (
 		eipInfo *types.EIP
 		err     error
@@ -68,7 +68,7 @@ func (e *Impl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType
 		}
 		// 2. create eip and bind to eni
 		var resp *vpc.AllocateEipAddressResponse
-		resp, err = e.AllocateEIPAddress(strconv.Itoa(bandwidth), string(chargeType))
+		resp, err = e.AllocateEIPAddress(strconv.Itoa(bandwidth), string(chargeType), isp)
 		if err != nil {
 			return nil, err
 		}
@@ -92,6 +92,15 @@ func (e *Impl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType
 				}
 			}
 		}()
+
+		// add eip to bandwidth package
+		if bandwidthPackageID != "" {
+			err = e.AddCommonBandwidthPackageIP(eipInfo.ID, bandwidthPackageID)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 	} else {
 		var eips []vpc.EipAddress
 		eips, err = e.describeEipAddresses(eipID, "")
@@ -228,6 +237,14 @@ func (e *Impl) ReleaseEipAddress(ctx context.Context, eipID, eniID string, eniIP
 	}
 	var innerErr error
 	if eip.Status == eipStatusAvailable {
+		if eip.BandwidthPackageId != "" {
+			err = e.RemoveCommonBandwidthPackageIP(eip.AllocationId, eip.BandwidthPackageId)
+			if err != nil {
+				if !apiErr.ErrAssert(apiErr.ErrIPNotInCbwp, err) {
+					return err
+				}
+			}
+		}
 		err = wait.ExponentialBackoff(backoff.Backoff(backoff.ENIRelease), func() (done bool, err error) {
 			innerErr = e.ReleaseEIPAddress(eip.AllocationId)
 			if innerErr != nil {

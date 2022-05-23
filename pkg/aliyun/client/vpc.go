@@ -40,10 +40,11 @@ func (a *OpenAPI) DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*v
 }
 
 // AllocateEIPAddress create EIP
-func (a *OpenAPI) AllocateEIPAddress(bandwidth, chargeType string) (*vpc.AllocateEipAddressResponse, error) {
+func (a *OpenAPI) AllocateEIPAddress(bandwidth, chargeType, isp string) (*vpc.AllocateEipAddressResponse, error) {
 	req := vpc.CreateAllocateEipAddressRequest()
 	req.Bandwidth = bandwidth
 	req.InternetChargeType = chargeType
+	req.ISP = isp
 
 	l := log.WithFields(map[string]interface{}{
 		LogFieldAPI: "AllocateEipAddress",
@@ -138,5 +139,53 @@ func (a *OpenAPI) ReleaseEIPAddress(eipID string) error {
 	}
 	l.WithFields(map[string]interface{}{
 		LogFieldRequestID: resp.RequestId}).Info("release EIP")
+	return nil
+}
+
+// AddCommonBandwidthPackageIP add EIP to bandwidth package
+func (a *OpenAPI) AddCommonBandwidthPackageIP(eipID, packageID string) error {
+	req := vpc.CreateAddCommonBandwidthPackageIpRequest()
+	req.BandwidthPackageId = packageID
+	req.IpInstanceId = eipID
+
+	l := log.WithFields(map[string]interface{}{
+		LogFieldAPI:   "AddCommonBandwidthPackageIp",
+		LogFieldEIPID: eipID,
+	})
+
+	start := time.Now()
+	resp, err := a.ClientSet.VPC().AddCommonBandwidthPackageIp(req)
+	metric.OpenAPILatency.WithLabelValues("AddCommonBandwidthPackageIp", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	if err != nil {
+		l.WithFields(map[string]interface{}{
+			LogFieldRequestID: apiErr.ErrRequestID(err)}).Warnf("add eip failed, %s", err.Error())
+		return fmt.Errorf("error release EIP %s, %w", eipID, err)
+	}
+	l.WithFields(map[string]interface{}{
+		LogFieldRequestID: resp.RequestId}).Info("add eip success")
+	return nil
+}
+
+// RemoveCommonBandwidthPackageIP remove EIP from bandwidth package
+func (a *OpenAPI) RemoveCommonBandwidthPackageIP(eipID, packageID string) error {
+	req := vpc.CreateRemoveCommonBandwidthPackageIpRequest()
+	req.BandwidthPackageId = packageID
+	req.IpInstanceId = eipID
+
+	l := log.WithFields(map[string]interface{}{
+		LogFieldAPI:   "RemoveCommonBandwidthPackageIp",
+		LogFieldEIPID: eipID,
+	})
+
+	start := time.Now()
+	resp, err := a.ClientSet.VPC().RemoveCommonBandwidthPackageIp(req)
+	metric.OpenAPILatency.WithLabelValues("RemoveCommonBandwidthPackageIp", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	if err != nil {
+		l.WithFields(map[string]interface{}{
+			LogFieldRequestID: apiErr.ErrRequestID(err)}).Warnf("remove eip failed, %s", err.Error())
+		return fmt.Errorf("error release EIP %s, %w", eipID, err)
+	}
+	l.WithFields(map[string]interface{}{
+		LogFieldRequestID: resp.RequestId}).Info("remove eip success")
 	return nil
 }
