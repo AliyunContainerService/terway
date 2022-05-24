@@ -3,7 +3,7 @@ module github.com/AliyunContainerService/terway
 go 1.18
 
 require (
-	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1383
+	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1603
 	github.com/boltdb/bolt v1.3.1
 	github.com/containernetworking/cni v0.8.1
 	github.com/containernetworking/plugins v0.9.0
@@ -116,7 +116,7 @@ require (
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20210602131652-f16073e35f0c // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	gopkg.in/ini.v1 v1.62.0 // indirect
+	gopkg.in/ini.v1 v1.66.2 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 	k8s.io/component-base v0.21.4 // indirect
