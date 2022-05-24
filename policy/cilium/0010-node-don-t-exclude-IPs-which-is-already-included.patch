@@ -1,0 +1,67 @@
+From 10e9e56f274e072dfac53f90f0ecaa4608896526 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Mon, 23 May 2022 16:35:52 +0800
+Subject: [PATCH 2/2] node: don't exclude IPs which is already included
+
+if we use node ip for service externalIP, this will cause node ip be excluded
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ pkg/node/ip_linux.go | 20 +++++++++++++++++++-
+ 1 file changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/pkg/node/ip_linux.go b/pkg/node/ip_linux.go
+index 732f62babe..e1df3344b2 100644
+--- a/pkg/node/ip_linux.go
++++ b/pkg/node/ip_linux.go
+@@ -15,6 +15,7 @@
+ package node
+ 
+ import (
++	"net"
+ 	"strings"
+ 
+ 	"github.com/vishvananda/netlink"
+@@ -33,6 +34,9 @@ func initExcludedIPs() {
+ 	if err != nil {
+ 		return
+ 	}
++
++	includedIPs := make(map[string]struct{})
++	var toExcludeIPs []net.IP
+ 	for _, l := range links {
+ 		// ... also all down devices since they won't be reachable.
+ 		if l.Attrs().OperState == netlink.OperUp {
+@@ -44,6 +48,13 @@ func initExcludedIPs() {
+ 				}
+ 			}
+ 			if skip {
++				addr, err := netlink.AddrList(l, netlink.FAMILY_ALL)
++				if err != nil {
++					continue
++				}
++				for _, a := range addr {
++					includedIPs[a.IP.String()] = struct{}{}
++				}
+ 				continue
+ 			}
+ 		}
+@@ -52,7 +63,14 @@ func initExcludedIPs() {
+ 			continue
+ 		}
+ 		for _, a := range addr {
+-			excludedIPs = append(excludedIPs, a.IP)
++			toExcludeIPs = append(toExcludeIPs, a.IP)
++		}
++	}
++
++	for _, value := range toExcludeIPs {
++		_, ok := includedIPs[value.String()]
++		if !ok {
++			excludedIPs = append(excludedIPs, value)
+ 		}
+ 	}
+ }
+-- 
+2.36.1
+
