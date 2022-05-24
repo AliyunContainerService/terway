@@ -1,0 +1,39 @@
+From b59d5981140af48f9c8bf2c284d6f78acb3855f4 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Mon, 23 May 2022 17:43:50 +0800
+Subject: [PATCH 1/2] terway: support kubelet health check
+
+when package travel cross netns fw mark will lost ,this will cause bpf unable to identify host network.
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ bpf/bpf_lxc.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index bca0dab5b4..bad751ecc8 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -1238,8 +1238,7 @@ int tail_ipv6_to_endpoint(struct __ctx_buff *ctx)
+ 				 * as the host. So we can ignore the ipcache
+ 				 * if it reports the source as HOST_ID.
+ 				 */
+-				if (sec_label != HOST_ID)
+-					src_identity = sec_label;
++				src_identity = sec_label;
+ 			}
+ 		}
+ 		cilium_dbg(ctx, info ? DBG_IP_ID_MAP_SUCCEED6 : DBG_IP_ID_MAP_FAILED6,
+@@ -1546,8 +1545,7 @@ int tail_ipv4_to_endpoint(struct __ctx_buff *ctx)
+ 				 * as the host. So we can ignore the ipcache
+ 				 * if it reports the source as HOST_ID.
+ 				 */
+-				if (sec_label != HOST_ID)
+-					src_identity = sec_label;
++				src_identity = sec_label;
+ 			}
+ 		}
+ 		cilium_dbg(ctx, info ? DBG_IP_ID_MAP_SUCCEED4 : DBG_IP_ID_MAP_FAILED4,
+-- 
+2.36.1
+
