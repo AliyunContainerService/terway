@@ -36,6 +36,9 @@ const (
 
 	// ErrIPNotInCbwp for eip
 	ErrIPNotInCbwp = "OperationUnsupported.IpNotInCbwp"
+
+	// ErrTaskConflict for eip
+	ErrTaskConflict = "TaskConflict"
 )
 
 // define well known err
