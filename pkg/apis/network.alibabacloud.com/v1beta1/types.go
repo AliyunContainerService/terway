@@ -93,6 +93,7 @@ type ENI struct {
 	MAC              string   `json:"mac,omitempty"`
 	Zone             string   `json:"zone,omitempty"`
 	VSwitchID        string   `json:"vSwitchID,omitempty"`
+	ResourceGroupID  string   `json:"resourceGroupID,omitempty"`
 	SecurityGroupIDs []string `json:"securityGroupIDs,omitempty"`
 }
 

@@ -34,7 +34,7 @@ func NewDelegate(aliyun register.Interface, client client.Client) *Delegate {
 	return &Delegate{defaultClient: aliyun, client: client}
 }
 
-func (d *Delegate) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitchID string, securityGroups []string, ipCount, ipv6Count int, eniTags map[string]string) (*aliyunClient.NetworkInterface, error) {
+func (d *Delegate) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitchID string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*aliyunClient.NetworkInterface, error) {
 	nodeName := common.NodeNameFromCtx(ctx)
 	l := log.FromContext(ctx)
 	l.Info("CreateNetworkInterface", "nodeName", nodeName)
@@ -43,13 +43,13 @@ func (d *Delegate) CreateNetworkInterface(ctx context.Context, trunk bool, vSwit
 		if err != nil {
 			return nil, err
 		}
-		return realClient.CreateNetworkInterface(ctx, trunk, vSwitchID, securityGroups, ipCount, ipv6Count, eniTags)
+		return realClient.CreateNetworkInterface(ctx, trunk, vSwitchID, securityGroups, resourceGroupID, ipCount, ipv6Count, eniTags)
 	}
 	nodeClient, err := node.GetPoolManager(nodeName)
 	if err != nil {
 		return nil, err
 	}
-	return nodeClient.GetClient().CreateNetworkInterface(ctx, trunk, vSwitchID, securityGroups, ipCount, ipv6Count, eniTags)
+	return nodeClient.GetClient().CreateNetworkInterface(ctx, trunk, vSwitchID, securityGroups, resourceGroupID, ipCount, ipv6Count, eniTags)
 }
 
 func (d *Delegate) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*aliyunClient.NetworkInterface, error) {

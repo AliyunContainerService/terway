@@ -62,6 +62,7 @@ type NetworkInterface struct {
 	PrivateIPSets      []ecs.PrivateIpSet `json:"private_ip_sets"`
 	ZoneID             string             `json:"zone_id,omitempty"`
 	SecurityGroupIDs   []string           `json:"security_group_ids,omitempty"`
+	ResourceGroupID    string             `json:"resource_group_id,omitempty"`
 	IPv6Set            []ecs.Ipv6Set      `json:"ipv6_set,omitempty"`
 	Tags               []ecs.Tag          `json:"tags,omitempty"`
 

@@ -66,7 +66,7 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 		ipv6Count = ipCount
 	}
 
-	resp, err := e.CreateNetworkInterface(ctx, trunk, vSwitch, securityGroups, ipv4Count, ipv6Count, eniTags)
+	resp, err := e.CreateNetworkInterface(ctx, trunk, vSwitch, securityGroups, "", ipv4Count, ipv6Count, eniTags)
 	if err != nil {
 		return nil, err
 	}

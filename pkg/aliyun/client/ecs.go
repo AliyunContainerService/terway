@@ -51,7 +51,7 @@ func NewAliyun(ak, sk, regionID, credentialPath, secretNamespace, secretName str
 }
 
 // CreateNetworkInterface instanceType Secondary Trunk
-func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitch string, securityGroups []string, ipCount, ipv6Count int, eniTags map[string]string) (*NetworkInterface, error) {
+func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitch string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*NetworkInterface, error) {
 	req := ecs.CreateCreateNetworkInterfaceRequest()
 	req.VSwitchId = vSwitch
 	req.InstanceType = string(ENITypeSecondary)
@@ -60,6 +60,7 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitc
 	}
 	req.SecurityGroupIds = &securityGroups
 	req.NetworkInterfaceName = generateEniName()
+	req.ResourceGroupId = resourceGroupID
 	req.Description = eniDescription
 	if ipCount > 1 {
 		req.SecondaryPrivateIpAddressCount = requests.NewInteger(ipCount - 1)
