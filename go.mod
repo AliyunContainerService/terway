@@ -20,14 +20,14 @@ require (
 	github.com/onsi/gomega v1.17.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
-	github.com/pterm/pterm v0.12.33
+	github.com/pterm/pterm v0.12.41
 	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/cobra v1.2.1
 	github.com/stretchr/testify v1.7.0
 	github.com/vishvananda/netlink v1.1.1-0.20210510164352-d17758a128bf
 	golang.org/x/net v0.0.0-20211112202133-69e39bad7dc2
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20211029165221-6e7872819dc8
+	golang.org/x/sys v0.0.0-20220319134239-a9b59b0215f8
 	gomodules.xyz/jsonpatch/v2 v2.2.0
 	google.golang.org/grpc v1.40.0
 	google.golang.org/protobuf v1.27.1
@@ -73,7 +73,7 @@ require (
 	github.com/google/go-cmp v0.5.5 // indirect
 	github.com/google/gofuzz v1.1.0 // indirect
 	github.com/googleapis/gnostic v0.5.5 // indirect
-	github.com/gookit/color v1.4.2 // indirect
+	github.com/gookit/color v1.5.0 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
