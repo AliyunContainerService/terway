@@ -316,7 +316,8 @@ func cmdAdd(args *skel.CmdArgs) error {
 	result := &current.Result{}
 
 	result.Interfaces = append(result.Interfaces, &current.Interface{
-		Name: args.IfName,
+		Name:    args.IfName,
+		Sandbox: string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID),
 	})
 	if containerIPNet.IPv4 != nil && gatewayIPSet.IPv4 != nil {
 		result.IPs = append(result.IPs, &current.IPConfig{
