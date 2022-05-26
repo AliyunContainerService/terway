@@ -24,7 +24,7 @@ type API interface {
 	// FIXME remove vendor for vpc
 	DescribeVSwitchByID(ctx context.Context, vSwitch string) (*vpc.VSwitch, error)
 	// EIP
-	AllocateEipAddress(ctx context.Context, bandwidth int, chargeType types.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool) (*types.EIP, error)
+	AllocateEipAddress(ctx context.Context, bandwidth int, chargeType types.InternetChargeType, eipID, eniID string, eniIP net.IP, allowRob bool, isp, bandwidthPackageID, poolID string) (*types.EIP, error)
 	UnassociateEipAddress(ctx context.Context, eipID, eniID, eniIP string) error
 	ReleaseEipAddress(ctx context.Context, eipID, eniID string, eniIP net.IP) error
 	QueryEniIDByIP(ctx context.Context, vpcID string, address net.IP) (string, error)
