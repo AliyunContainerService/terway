@@ -522,7 +522,7 @@ func (s *ConnectionTestSuite) Expected(status bool, stdErrOut []byte, err error,
 }
 
 func (s *ConnectionTestSuite) ExecHTTPGet(namespace, name string, dst string) ([]byte, []byte, error) {
-	cmd := fmt.Sprintf("curl -o /dev/null -s -w %%{http_code} %%{time_connect} %%{time_total} --connect-timeout 3 --retry 2 %s", dst)
+	cmd := fmt.Sprintf("curl -o /dev/null -s -w %%{http_code} %%{time_connect} %%{time_total} --connect-timeout 6 --retry 2 %s", dst)
 	return Exec(s.ClientSet, s.RestConf, namespace, name, []string{
 		"/usr/bin/bash",
 		"-c",

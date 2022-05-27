@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"net"
 	"time"
 
@@ -461,6 +462,20 @@ func ListNodeIPs(ctx context.Context, cs kubernetes.Interface) ([]net.IP, error)
 	}
 	var result []net.IP
 	for _, node := range nodes.Items {
+		if _, ok := node.Labels["type"] ; ok {
+			if node.Labels["type"] == "virtual-kubelet" {
+				logrus.Infof("skip virtual node %s", node.Name)
+				continue
+			}
+		}
+		for _, v := range node.Status.Conditions {
+			if v.Type == corev1.NodeReady {
+				if v.Status == corev1.ConditionFalse {
+					logrus.Infof("skip notready node %s", node.Name)
+					continue
+				}
+			}
+		}
 		for _, addr := range node.Status.Addresses {
 			if addr.Type != corev1.NodeInternalIP {
 				continue
