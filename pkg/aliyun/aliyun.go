@@ -119,9 +119,9 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 	// backoff get eni config
 	err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.WaitENIStatus),
 		func() (done bool, err error) {
-			l, ok := GetLimit(GetInstanceMeta().InstanceType)
-			if !ok {
-				return true, fmt.Errorf("failed to get instance type")
+			l, err := GetLimit(e, GetInstanceMeta().InstanceType)
+			if err != nil {
+				return true, fmt.Errorf("failed to get instance type, %w", err)
 			}
 
 			eni, innerErr = e.metadata.GetENIByMac(eniStatus.MacAddress)
@@ -191,9 +191,9 @@ func (e *Impl) GetAttachedENIs(ctx context.Context, containsMainENI bool) ([]*ty
 	if err != nil {
 		return nil, fmt.Errorf("error get eni config by mac, %w", err)
 	}
-	l, ok := GetLimit(GetInstanceMeta().InstanceType)
-	if !ok {
-		return nil, fmt.Errorf("failed to get instance type")
+	l, err := GetLimit(e, GetInstanceMeta().InstanceType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get instance type, %w", err)
 	}
 	var eniIDs []string
 	enisMap := map[string]*types.ENI{}
@@ -441,9 +441,9 @@ func (e *Impl) GetENIByMac(ctx context.Context, mac string) (*types.ENI, error) 
 	if err != nil {
 		return nil, fmt.Errorf("error get eni config by mac, %w", err)
 	}
-	l, ok := GetLimit(GetInstanceMeta().InstanceType)
-	if !ok {
-		return nil, fmt.Errorf("failed to get instance type")
+	l, err := GetLimit(e, GetInstanceMeta().InstanceType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get instance type, %w", err)
 	}
 	eni.MaxIPs = l.IPv4PerAdapter
 	return eni, nil

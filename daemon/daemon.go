@@ -1329,13 +1329,10 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	if err != nil {
 		return nil, errors.Wrapf(err, "error create aliyun client")
 	}
-	err = aliyun.UpdateFromAPI(aliyunClient.ClientSet.ECS(), ins.InstanceType)
+
+	limit, err := aliyun.GetLimit(aliyunClient, ins.InstanceType)
 	if err != nil {
-		return nil, err
-	}
-	limit, ok := aliyun.GetLimit(ins.InstanceType)
-	if !ok {
-		return nil, fmt.Errorf("upable get instance limit")
+		return nil, fmt.Errorf("upable get instance limit, %w", err)
 	}
 	if !limit.SupportIPv6() {
 		ipFamily.IPv6 = false

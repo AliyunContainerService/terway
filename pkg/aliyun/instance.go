@@ -1,18 +1,14 @@
 package aliyun
 
 import (
+	"context"
 	"fmt"
 	"sync"
-	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
-	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/logger"
-	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/utils"
-
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 var defaultIns *Instance
@@ -101,59 +97,55 @@ type Limits struct {
 
 	// MaxMemberAdapterLimit is the limit to use member
 	MaxMemberAdapterLimit int
+
+	InstanceBandwidthRx int
+
+	InstanceBandwidthTx int
+}
+
+func (l *Limits) SupportMultiIPIPv6() bool {
+	return l.IPv6PerAdapter == l.IPv4PerAdapter
 }
 
 func (l *Limits) SupportIPv6() bool {
-	return l.IPv4PerAdapter <= l.IPv6PerAdapter
+	return l.IPv6PerAdapter > 0
 }
 
 func (l *Limits) TrunkPod() int {
 	return l.MemberAdapterLimit
 }
 
-func (l *Limits) MIPPod() int {
+func (l *Limits) MaximumTrunkPod() int {
+	return l.MaxMemberAdapterLimit
+}
+
+func (l *Limits) MultiIPPod() int {
 	return (l.Adapters - 1) * l.IPv4PerAdapter
 }
 
-func (l *Limits) ENIOnlyPod() int {
+func (l *Limits) ExclusiveENIPod() int {
 	return l.Adapters - 1
 }
 
-var limits = struct {
-	sync.RWMutex
-	m map[string]Limits
-}{
-	m: map[string]Limits{},
-}
+var limits sync.Map
 
-// UpdateFromAPI updates limits for instance
-// https://www.alibabacloud.com/help/doc-detail/25620.htm
-func UpdateFromAPI(client *ecs.Client, instanceType string) error {
-	req := ecs.CreateDescribeInstanceTypesRequest()
+// GetLimit returns the instance limits of a particular instance type. // https://www.alibabacloud.com/help/doc-detail/25620.htm
+// if instanceType is empty will list all instanceType and warm the cache, no error and Limits will return
+func GetLimit(client client.ECS, instanceType string) (*Limits, error) {
+	v, ok := limits.Load(instanceType)
+	if ok {
+		return v.(*Limits), nil
+	}
+	var req []string
 	if instanceType != "" {
-		req.InstanceTypes = &[]string{instanceType}
+		req = append(req, instanceType)
 	}
-	var innerErr error
-	var resp *ecs.DescribeInstanceTypesResponse
-	err := wait.ExponentialBackoff(backoff.Backoff(backoff.DefaultKey),
-		func() (done bool, err error) {
-			start := time.Now()
-			resp, innerErr = client.DescribeInstanceTypes(req)
-			metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypes", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
-			if innerErr != nil {
-				return false, nil
-			}
-			return true, nil
-		},
-	)
+	ins, err := client.DescribeInstanceTypes(context.Background(), req)
 	if err != nil {
-		return fmt.Errorf("error get instance type %v,%w", innerErr, err)
+		return nil, err
 	}
 
-	limits.Lock()
-	defer limits.Unlock()
-
-	for _, instanceTypeInfo := range resp.InstanceTypes.InstanceType {
+	for _, instanceTypeInfo := range ins {
 		instanceType := instanceTypeInfo.InstanceTypeId
 		adapterLimit := instanceTypeInfo.EniQuantity
 		ipv4PerAdapter := instanceTypeInfo.EniPrivateIpAddressQuantity
@@ -165,14 +157,16 @@ func UpdateFromAPI(client *ecs.Client, instanceType string) error {
 			memberAdapterLimit = 0
 			maxMemberAdapterLimit = 0
 		}
-
-		limits.m[instanceType] = Limits{
+		limits.Store(instanceType, &Limits{
 			Adapters:              adapterLimit,
 			IPv4PerAdapter:        utils.Minimal(ipv4PerAdapter),
 			IPv6PerAdapter:        utils.Minimal(ipv6PerAdapter),
 			MemberAdapterLimit:    utils.Minimal(memberAdapterLimit),
 			MaxMemberAdapterLimit: utils.Minimal(maxMemberAdapterLimit),
-		}
+			InstanceBandwidthRx:   instanceTypeInfo.InstanceBandwidthRx,
+			InstanceBandwidthTx:   instanceTypeInfo.InstanceBandwidthTx,
+		})
+
 		logger.DefaultLogger.WithFields(map[string]interface{}{
 			"instance-type":       instanceType,
 			"adapters":            adapterLimit,
@@ -180,16 +174,17 @@ func UpdateFromAPI(client *ecs.Client, instanceType string) error {
 			"ipv6":                ipv6PerAdapter,
 			"member-adapters":     memberAdapterLimit,
 			"max-member-adapters": maxMemberAdapterLimit,
+			"bandwidth-rx":        instanceTypeInfo.InstanceBandwidthRx,
+			"bandwidth-tx":        instanceTypeInfo.InstanceBandwidthTx,
 		}).Infof("instance limit")
 	}
+	if instanceType == "" {
+		return nil, nil
+	}
+	v, ok = limits.Load(instanceType)
+	if !ok {
+		return nil, fmt.Errorf("unexpected error")
+	}
 
-	return nil
-}
-
-// GetLimit returns the instance limits of a particular instance type.
-func GetLimit(instanceType string) (limit Limits, ok bool) {
-	limits.RLock()
-	limit, ok = limits.m[instanceType]
-	limits.RUnlock()
-	return
+	return v.(*Limits), nil
 }

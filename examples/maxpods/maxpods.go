@@ -49,19 +49,15 @@ func main() {
 		f.IPv6 = true
 	}
 
-	err = aliyun.UpdateFromAPI(api.ClientSet.ECS(), aliyun.GetInstanceMeta().InstanceType)
-	if err != nil {
-		panic(err)
-	}
 	if mode == "terway-eniip" {
-		limit, ok := aliyun.GetLimit(aliyun.GetInstanceMeta().InstanceType)
-		if !ok {
+		limit, err := aliyun.GetLimit(api, aliyun.GetInstanceMeta().InstanceType)
+		if err != nil {
 			panic(err)
 		}
 		fmt.Println(limit.IPv4PerAdapter * (limit.Adapters - 1))
 	} else if mode == "terway-eni" {
-		limit, ok := aliyun.GetLimit(aliyun.GetInstanceMeta().InstanceType)
-		if !ok {
+		limit, err := aliyun.GetLimit(api, aliyun.GetInstanceMeta().InstanceType)
+		if err != nil {
 			panic(err)
 		}
 		fmt.Println(limit.Adapters - 1)

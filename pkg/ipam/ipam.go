@@ -5,6 +5,7 @@ import (
 	"net"
 
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 )
 
@@ -20,6 +21,7 @@ type API interface {
 	UnAssignIPsForENI(ctx context.Context, eniID, mac string, ipv4s []net.IP, ipv6s []net.IP) error
 	GetAttachedSecurityGroups(ctx context.Context, instanceID string) ([]string, error)
 	CheckEniSecurityGroup(ctx context.Context, sgIDs []string) error
+	DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error)
 
 	// FIXME remove vendor for vpc
 	DescribeVSwitchByID(ctx context.Context, vSwitch string) (*vpc.VSwitch, error)

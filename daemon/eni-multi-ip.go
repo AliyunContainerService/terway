@@ -859,9 +859,9 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 		ipResultChan: make(chan *ENIIP, maxIPBacklog),
 		ipFamily:     ipFamily,
 	}
-	limit, ok := aliyun.GetLimit(aliyun.GetInstanceMeta().InstanceType)
-	if !ok {
-		return nil, fmt.Errorf("error get max eni for eniip factory")
+	limit, err := aliyun.GetLimit(ecs, aliyun.GetInstanceMeta().InstanceType)
+	if err != nil {
+		return nil, fmt.Errorf("error get max eni for eniip factory, %w", err)
 	}
 	maxEni := limit.Adapters
 	maxEni = int(float64(maxEni)*poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
