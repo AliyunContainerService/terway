@@ -1,5 +1,4 @@
 //go:build default_build
-// +build default_build
 
 package common
 
