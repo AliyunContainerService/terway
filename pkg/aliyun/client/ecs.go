@@ -356,3 +356,22 @@ func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips [
 	l.WithField(LogFieldRequestID, resp.RequestId).Infof("unassign ipv6 ip ,%s", str)
 	return nil
 }
+
+func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error) {
+	req := ecs.CreateDescribeInstanceTypesRequest()
+	if types != nil {
+		req.InstanceTypes = &types
+	}
+	start := time.Now()
+	resp, err := a.ClientSet.ECS().DescribeInstanceTypes(req)
+	metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypes", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+
+	l := log.WithFields(map[string]interface{}{
+		LogFieldAPI: "DescribeInstanceTypes",
+	})
+	if err != nil {
+		l.WithField(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err)
+		return nil, err
+	}
+	return resp.InstanceTypes.InstanceType, nil
+}

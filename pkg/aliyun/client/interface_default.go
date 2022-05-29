@@ -1,5 +1,4 @@
 //go:build default_build
-// +build default_build
 
 package client
 
@@ -22,4 +21,8 @@ type ENI interface {
 	UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []net.IP) error
 	AssignIpv6Addresses(ctx context.Context, eniID string, count int) ([]net.IP, error)
 	UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []net.IP) error
+}
+
+type ECS interface {
+	DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error)
 }
