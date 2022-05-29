@@ -1,5 +1,5 @@
 /*
-Copyright 2021 Terway Authors.
+Copyright 2021-2022 Terway Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -90,6 +90,68 @@ func TestParseAndValidateCredential(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseAndValidateCredential() error = %v, wantErr %v", err, tt.wantErr)
 				return
+			}
+		})
+	}
+}
+
+func TestIsControllerEnabled(t *testing.T) {
+	type args struct {
+		name        string
+		enable      bool
+		controllers []string
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "enable all",
+			args: args{
+				name:        "foo",
+				enable:      false,
+				controllers: []string{"aa", "bb", "*"},
+			},
+			want: true,
+		}, {
+			name: "default disable",
+			args: args{
+				name:        "foo",
+				enable:      false,
+				controllers: []string{"aa", "bb"},
+			},
+			want: false,
+		}, {
+			name: "default enable",
+			args: args{
+				name:        "foo",
+				enable:      true,
+				controllers: []string{"aa", "bb"},
+			},
+			want: true,
+		}, {
+			name: "disabled",
+			args: args{
+				name:        "foo",
+				enable:      true,
+				controllers: []string{"aa", "-foo"},
+			},
+			want: false,
+		}, {
+			name: "enabled",
+			args: args{
+				name:        "foo",
+				enable:      false,
+				controllers: []string{"aa", "foo"},
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsControllerEnabled(tt.args.name, tt.args.enable, tt.args.controllers); got != tt.want {
+				t.Errorf("IsControllerEnabled() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -51,8 +51,8 @@ import (
 const controllerName = "pod"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool) error {
-		r := NewReconcilePod(mgr, aliyunClient, swPool)
+	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+		r := NewReconcilePod(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool)
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
 			Reconciler:              r,
 			MaxConcurrentReconciles: controlplane.GetConfig().PodMaxConcurrent,
@@ -78,7 +78,7 @@ func init() {
 			&predicate.ResourceVersionChangedPredicate{},
 			&predicateForPodEvent{},
 		)
-	})
+	}, true)
 }
 
 // ReconcilePod implements reconcile.Reconciler
