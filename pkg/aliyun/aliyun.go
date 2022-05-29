@@ -203,7 +203,7 @@ func (e *Impl) GetAttachedENIs(ctx context.Context, containsMainENI bool) ([]*ty
 		enisMap[eni.ID] = eni
 	}
 	if e.eniTypeAttr && len(eniIDs) > 0 {
-		eniSet, err := e.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "")
+		eniSet, err := e.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -505,7 +505,7 @@ func (e *Impl) CheckEniSecurityGroup(ctx context.Context, sg []string) error {
 	instanceID := GetInstanceMeta().InstanceID
 
 	// get all attached eni
-	eniList, err := e.DescribeNetworkInterface(ctx, "", nil, instanceID, "", "")
+	eniList, err := e.DescribeNetworkInterface(ctx, "", nil, instanceID, "", "", nil)
 	if err != nil {
 		logrus.WithField(client.LogFieldInstanceID, instanceID).Warn(err)
 		return nil

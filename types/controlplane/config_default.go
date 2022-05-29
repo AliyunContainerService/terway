@@ -38,6 +38,7 @@ type Config struct {
 	CertDir            string `json:"certDir" validate:"required" mod:"default=/var/run/webhook-cert"`
 	LeaderElection     bool   `json:"leaderElection"`
 
+	NodeMaxConcurrent   int `json:"nodeMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
 	PodMaxConcurrent    int `json:"podMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
 	PodENIMaxConcurrent int `json:"podENIMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
 

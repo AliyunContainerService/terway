@@ -28,6 +28,7 @@ import (
 type Interface interface {
 	client.VSwitch
 	client.ENI
+	client.ECS
 }
 
 type ControllerCtx struct {

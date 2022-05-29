@@ -25,7 +25,7 @@ const (
 const (
 	eniNamePrefix     = "eni-cni-"
 	eniDescription    = "interface create by terway"
-	maxSinglePageSize = 100
+	maxSinglePageSize = 500
 )
 
 func generateEniName() string {

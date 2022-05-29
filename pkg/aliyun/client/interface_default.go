@@ -12,7 +12,7 @@ import (
 
 type ENI interface {
 	CreateNetworkInterface(ctx context.Context, instanceType ENIType, vSwitch string, securityGroups []string, ipCount, ipv6Count int, eniTags map[string]string) (*ecs.CreateNetworkInterfaceResponse, error)
-	DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType ENIType, status ENIStatus) ([]ecs.NetworkInterfaceSet, error)
+	DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType ENIType, status ENIStatus, tags map[string]string) ([]ecs.NetworkInterfaceSet, error)
 	AttachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
 	DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
 	DeleteNetworkInterface(ctx context.Context, eniID string) error
