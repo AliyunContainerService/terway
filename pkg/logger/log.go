@@ -1,20 +1,55 @@
 package logger
 
 import (
+	"bytes"
+	"fmt"
+	"path"
+	"strings"
+
 	"github.com/sirupsen/logrus"
 )
+
+type Format struct{}
+
+func (mf *Format) Format(entry *logrus.Entry) ([]byte, error) {
+	var b *bytes.Buffer
+	if entry.Buffer != nil {
+		b = entry.Buffer
+	} else {
+		b = &bytes.Buffer{}
+	}
+	var fileName = ""
+	if entry.HasCaller() {
+		fileName = fmt.Sprintf("%s:%d", path.Base(entry.Caller.File), entry.Caller.Line)
+	}
+
+	b.WriteString(fmt.Sprintf("%s%s %s %s]", strings.ToUpper(entry.Level.String()[:1]), entry.Time.Format("0102"), entry.Time.Format("15:04:05.999999"), fileName))
+	if r := kv(entry.Data); len(r) > 0 {
+		b.WriteString(" ")
+		b.WriteString(r)
+	}
+	b.WriteString(" ")
+	b.WriteString(entry.Message)
+	b.WriteString("\n")
+	return b.Bytes(), nil
+}
+
+func kv(data logrus.Fields) string {
+	result := make([]string, 0, len(data))
+	for k, v := range data {
+		result = append(result, fmt.Sprintf("%s=%v", k, v))
+	}
+	return strings.Join(result, " ")
+}
 
 // DefaultLogger default log
 var DefaultLogger = NewDefaultLogger()
 
 func NewDefaultLogger() *logrus.Logger {
 	l := logrus.New()
-	l.Formatter = &logrus.TextFormatter{
-		DisableTimestamp: true,
-		DisableColors:    true,
-		DisableQuote:     true,
-	}
+	l.SetReportCaller(true)
 	l.SetLevel(logrus.InfoLevel)
+	l.SetFormatter(&Format{})
 	return l
 }
 
