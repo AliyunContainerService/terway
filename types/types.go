@@ -222,7 +222,6 @@ func (i *IPNetSet) SetIPNet(str string) *IPNetSet {
 type ENI struct {
 	ID               string
 	MAC              string
-	MaxIPs           int
 	SecurityGroupIDs []string
 
 	Trunk bool

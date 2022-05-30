@@ -1330,14 +1330,17 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, errors.Wrapf(err, "error create aliyun client")
 	}
 
-	limit, err := aliyun.GetLimit(aliyunClient, ins.InstanceType)
-	if err != nil {
-		return nil, fmt.Errorf("upable get instance limit, %w", err)
+	if !config.DisableDevicePlugin {
+		limit, err := aliyun.GetLimit(aliyunClient, ins.InstanceType)
+		if err != nil {
+			return nil, fmt.Errorf("upable get instance limit, %w", err)
+		}
+		if !limit.SupportIPv6() {
+			ipFamily.IPv6 = false
+			serviceLog.Warnf("instance %s is not support ipv6", aliyun.GetInstanceMeta().InstanceType)
+		}
 	}
-	if !limit.SupportIPv6() {
-		ipFamily.IPv6 = false
-		serviceLog.Warnf("instance %s is not support ipv6", aliyun.GetInstanceMeta().InstanceType)
-	}
+
 	ecs := aliyun.NewAliyunImpl(aliyunClient, config.EnableENITrunking && !config.WaitTrunkENI, ipFamily)
 
 	netSrv.enableTrunk = config.EnableENITrunking
@@ -1550,20 +1553,21 @@ func validateConfig(cfg *types.Configure) error {
 
 func getPoolConfig(cfg *types.Configure) (*types.PoolConfig, error) {
 	poolConfig := &types.PoolConfig{
-		MaxPoolSize:            cfg.MaxPoolSize,
-		MinPoolSize:            cfg.MinPoolSize,
-		MaxENI:                 cfg.MaxENI,
-		MinENI:                 cfg.MinENI,
-		AccessID:               cfg.AccessID,
-		AccessSecret:           cfg.AccessSecret,
-		EniCapRatio:            cfg.EniCapRatio,
-		EniCapShift:            cfg.EniCapShift,
-		SecurityGroups:         cfg.GetSecurityGroups(),
-		VSwitchSelectionPolicy: cfg.VSwitchSelectionPolicy,
-		EnableENITrunking:      cfg.EnableENITrunking,
-		ENICapPolicy:           cfg.ENICapPolicy,
-		DisableDevicePlugin:    cfg.DisableDevicePlugin,
-		WaitTrunkENI:           cfg.WaitTrunkENI,
+		MaxPoolSize:               cfg.MaxPoolSize,
+		MinPoolSize:               cfg.MinPoolSize,
+		MaxENI:                    cfg.MaxENI,
+		MinENI:                    cfg.MinENI,
+		AccessID:                  cfg.AccessID,
+		AccessSecret:              cfg.AccessSecret,
+		EniCapRatio:               cfg.EniCapRatio,
+		EniCapShift:               cfg.EniCapShift,
+		SecurityGroups:            cfg.GetSecurityGroups(),
+		VSwitchSelectionPolicy:    cfg.VSwitchSelectionPolicy,
+		EnableENITrunking:         cfg.EnableENITrunking,
+		ENICapPolicy:              cfg.ENICapPolicy,
+		DisableDevicePlugin:       cfg.DisableDevicePlugin,
+		WaitTrunkENI:              cfg.WaitTrunkENI,
+		DisableSecurityGroupCheck: cfg.DisableSecurityGroupCheck,
 	}
 	if len(poolConfig.SecurityGroups) > 5 {
 		return nil, fmt.Errorf("security groups should not be more than 5, current %d", len(poolConfig.SecurityGroups))

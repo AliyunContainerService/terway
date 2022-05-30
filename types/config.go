@@ -41,6 +41,7 @@ type Configure struct {
 	ExtraRoutes                 []route.Route           `json:"extra_routes,omitempty"`
 	DisableDevicePlugin         bool                    `json:"disable_device_plugin"`
 	WaitTrunkENI                bool                    `json:"wait_trunk_eni"` // true for don't create trunk eni
+	DisableSecurityGroupCheck   bool                    `json:"disable_security_group_check"`
 }
 
 func (c *Configure) GetSecurityGroups() []string {
@@ -70,25 +71,26 @@ func (c *Configure) GetExtraRoutes() []string {
 
 // PoolConfig configuration of pool and resource factory
 type PoolConfig struct {
-	MaxPoolSize            int
-	MinPoolSize            int
-	MinENI                 int
-	MaxENI                 int
-	VPC                    string
-	Zone                   string
-	VSwitch                []string
-	ENITags                map[string]string
-	SecurityGroups         []string
-	InstanceID             string
-	AccessID               string
-	AccessSecret           string
-	EniCapRatio            float64
-	EniCapShift            int
-	VSwitchSelectionPolicy string
-	EnableENITrunking      bool
-	ENICapPolicy           ENICapPolicy
-	DisableDevicePlugin    bool
-	WaitTrunkENI           bool
+	MaxPoolSize               int
+	MinPoolSize               int
+	MinENI                    int
+	MaxENI                    int
+	VPC                       string
+	Zone                      string
+	VSwitch                   []string
+	ENITags                   map[string]string
+	SecurityGroups            []string
+	InstanceID                string
+	AccessID                  string
+	AccessSecret              string
+	EniCapRatio               float64
+	EniCapShift               int
+	VSwitchSelectionPolicy    string
+	EnableENITrunking         bool
+	ENICapPolicy              ENICapPolicy
+	DisableDevicePlugin       bool
+	WaitTrunkENI              bool
+	DisableSecurityGroupCheck bool
 }
 
 // GetConfigFromFileWithMerge parse Configure from file

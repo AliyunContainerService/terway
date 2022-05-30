@@ -52,29 +52,37 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 
 	_ = tracing.Register(tracing.ResourceTypeFactory, factoryNameENI, factory)
 
-	limit, err := aliyun.GetLimit(ecs, aliyun.GetInstanceMeta().InstanceType)
-	if err != nil {
-		return nil, fmt.Errorf("error get max eni for eni factory, %w", err)
-	}
-	capacity := limit.Adapters
-	capacity = int(float64(capacity)*poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
+	var capacity, memberLimit int
 
-	if poolConfig.MaxENI != 0 && poolConfig.MaxENI < capacity {
-		capacity = poolConfig.MaxENI
+	if !poolConfig.DisableDevicePlugin {
+		limit, err := aliyun.GetLimit(ecs, aliyun.GetInstanceMeta().InstanceType)
+		if err != nil {
+			return nil, fmt.Errorf("error get max eni for eni factory, %w", err)
+		}
+		capacity = limit.Adapters
+		capacity = int(float64(capacity)*poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
+
+		if poolConfig.MaxENI != 0 && poolConfig.MaxENI < capacity {
+			capacity = poolConfig.MaxENI
+		}
+
+		if poolConfig.MaxPoolSize > capacity {
+			poolConfig.MaxPoolSize = capacity
+		}
+
+		if poolConfig.MinENI != 0 {
+			poolConfig.MinPoolSize = poolConfig.MinENI
+		}
+
+		memberLimit = limit.MemberAdapterLimit
+		if poolConfig.ENICapPolicy == types.ENICapPolicyPreferTrunk {
+			memberLimit = limit.MaxMemberAdapterLimit
+		}
+	} else {
+		capacity = 1
+		memberLimit = 0
 	}
 
-	if poolConfig.MaxPoolSize > capacity {
-		poolConfig.MaxPoolSize = capacity
-	}
-
-	if poolConfig.MinENI != 0 {
-		poolConfig.MinPoolSize = poolConfig.MinENI
-	}
-
-	memberLimit := limit.MemberAdapterLimit
-	if poolConfig.ENICapPolicy == types.ENICapPolicyPreferTrunk {
-		memberLimit = limit.MaxMemberAdapterLimit
-	}
 	var trunkENI *types.ENI
 
 	if poolConfig.WaitTrunkENI {
@@ -149,6 +157,9 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 		trunkENI: trunkENI,
 	}
 
+	if poolConfig.DisableDevicePlugin {
+		return mgr, nil
+	}
 	//init deviceplugin for ENI
 	realCap := 0
 	eniType := deviceplugin.ENITypeENI
@@ -234,17 +245,18 @@ func (ms MapSorter) SortInDescendingOrder() {
 }
 
 type eniFactory struct {
-	name                   string
-	enableTrunk            bool
-	trunkOnEni             string
-	switches               []string
-	eniTags                map[string]string
-	securityGroups         []string
-	instanceID             string
-	ecs                    ipam.API
-	vswitchIPCntMap        map[string]int
-	tsExpireAt             time.Time
-	vswitchSelectionPolicy string
+	name                      string
+	enableTrunk               bool
+	trunkOnEni                string
+	switches                  []string
+	eniTags                   map[string]string
+	securityGroups            []string
+	instanceID                string
+	ecs                       ipam.API
+	vswitchIPCntMap           map[string]int
+	tsExpireAt                time.Time
+	vswitchSelectionPolicy    string
+	disableSecurityGroupCheck bool
 	sync.RWMutex
 }
 
@@ -257,15 +269,16 @@ func newENIFactory(poolConfig *types.PoolConfig, ecs ipam.API) (*eniFactory, err
 		poolConfig.SecurityGroups = securityGroups
 	}
 	return &eniFactory{
-		name:                   factoryNameENI,
-		switches:               poolConfig.VSwitch,
-		eniTags:                poolConfig.ENITags,
-		securityGroups:         poolConfig.SecurityGroups,
-		enableTrunk:            poolConfig.EnableENITrunking,
-		instanceID:             poolConfig.InstanceID,
-		ecs:                    ecs,
-		vswitchIPCntMap:        make(map[string]int),
-		vswitchSelectionPolicy: poolConfig.VSwitchSelectionPolicy,
+		name:                      factoryNameENI,
+		switches:                  poolConfig.VSwitch,
+		eniTags:                   poolConfig.ENITags,
+		securityGroups:            poolConfig.SecurityGroups,
+		enableTrunk:               poolConfig.EnableENITrunking,
+		instanceID:                poolConfig.InstanceID,
+		ecs:                       ecs,
+		vswitchIPCntMap:           make(map[string]int),
+		vswitchSelectionPolicy:    poolConfig.VSwitchSelectionPolicy,
+		disableSecurityGroupCheck: poolConfig.DisableSecurityGroupCheck,
 	}, nil
 }
 
@@ -423,6 +436,9 @@ func (f *eniFactory) ListResource() (map[string]types.NetworkResource, error) {
 
 func (f *eniFactory) Reconcile() {
 	// check security group
+	if f.disableSecurityGroupCheck {
+		return
+	}
 	err := f.ecs.CheckEniSecurityGroup(context.Background(), f.securityGroups)
 	if err != nil {
 		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, "ResourceInvalid", fmt.Sprintf("eni has misconfiged security group. %s", err.Error()))
