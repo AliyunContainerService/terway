@@ -907,6 +907,15 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 		poolConfig.MaxPoolSize = poolConfig.MinPoolSize
 	}
 
+	if poolConfig.WaitTrunkENI {
+		logger.DefaultLogger.Infof("waitting trunk eni ready")
+		factory.trunkOnEni, err = k8s.WaitTrunkReady()
+		if err != nil {
+			return nil, err
+		}
+		logger.DefaultLogger.Infof("trunk eni found %s", factory.trunkOnEni)
+	}
+
 	// eniip factory metrics
 	factory.metricENICount = metric.ENIIPFactoryENICount.WithLabelValues(factory.name, fmt.Sprint(maxEni))
 	var trunkENI *types.ENI
@@ -928,8 +937,10 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 			if factory.enableTrunk {
 				for _, eni := range enis {
 					if eni.Trunk {
-						trunkENI = eni
 						factory.trunkOnEni = eni.ID
+					}
+					if eni.ID == factory.trunkOnEni {
+						trunkENI = eni
 					}
 				}
 				if factory.trunkOnEni == "" && len(enis) < limit.MemberAdapterLimit {
@@ -1062,7 +1073,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 	}
 
 	//init device plugin for ENI
-	if poolConfig.EnableENITrunking && factory.trunkOnEni != "" {
+	if poolConfig.EnableENITrunking && factory.trunkOnEni != "" && !poolConfig.DisableDevicePlugin {
 		dp := deviceplugin.NewENIDevicePlugin(memberENIPod, deviceplugin.ENITypeMember)
 		err = dp.Serve()
 		if err != nil {

@@ -39,6 +39,8 @@ type Configure struct {
 	ENICapPolicy                ENICapPolicy            `yaml:"eni_cap_policy" json:"eni_cap_policy"` // prefer trunk or secondary
 	BackoffOverride             map[string]wait.Backoff `json:"backoff_override,omitempty"`
 	ExtraRoutes                 []route.Route           `json:"extra_routes,omitempty"`
+	DisableDevicePlugin         bool                    `json:"disable_device_plugin"`
+	WaitTrunkENI                bool                    `json:"wait_trunk_eni"` // true for don't create trunk eni
 }
 
 func (c *Configure) GetSecurityGroups() []string {
@@ -85,6 +87,8 @@ type PoolConfig struct {
 	VSwitchSelectionPolicy string
 	EnableENITrunking      bool
 	ENICapPolicy           ENICapPolicy
+	DisableDevicePlugin    bool
+	WaitTrunkENI           bool
 }
 
 // GetConfigFromFileWithMerge parse Configure from file

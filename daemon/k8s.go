@@ -72,6 +72,7 @@ type Kubernetes interface {
 	GetDynamicConfigWithName(name string) (string, error)
 	SetSvcCidr(svcCidr *types.IPNetSet) error
 	SetCustomStatefulWorkloadKinds(kinds []string) error
+	WaitTrunkReady() (string, error)
 }
 
 type k8s struct {
@@ -224,6 +225,24 @@ func (k *k8s) GetPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, er
 		return true, nil
 	})
 	return podEni, err
+}
+
+func (k *k8s) WaitTrunkReady() (string, error) {
+	id := ""
+	err := wait.ExponentialBackoff(backoff.Backoff(backoff.DefaultKey), func() (bool, error) {
+		node, err := k.client.CoreV1().Nodes().Get(context.TODO(), k.nodeName, metav1.GetOptions{
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			return false, err
+		}
+		if node.GetAnnotations()[types.TrunkOn] != "" {
+			id = node.GetAnnotations()[types.TrunkOn]
+			return true, nil
+		}
+		return false, nil
+	})
+	return id, err
 }
 
 // newK8S return Kubernetes service by pod spec and daemon mode

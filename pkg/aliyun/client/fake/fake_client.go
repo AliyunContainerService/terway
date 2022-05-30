@@ -57,7 +57,7 @@ func (v *OpenAPI) CreateNetworkInterface(ctx context.Context, instanceType clien
 	return eni, nil
 }
 
-func (v *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType client.ENIType, status client.ENIStatus) ([]ecs.NetworkInterfaceSet, error) {
+func (v *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType client.ENIType, status client.ENIStatus, tags map[string]string) ([]ecs.NetworkInterfaceSet, error) {
 	v.Lock()
 	defer v.Unlock()
 
@@ -107,7 +107,7 @@ func (v *OpenAPI) DeleteNetworkInterface(ctx context.Context, eniID string) erro
 }
 
 func (v *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, status client.ENIStatus, backoff wait.Backoff, ignoreNotExist bool) (*ecs.NetworkInterfaceSet, error) {
-	eni, err := v.DescribeNetworkInterface(ctx, "", []string{eniID}, "", "", "")
+	eni, err := v.DescribeNetworkInterface(ctx, "", []string{eniID}, "", "", "", nil)
 	if errors.Is(err, apiErr.ErrNotFound) && ignoreNotExist {
 		return nil, nil
 	}

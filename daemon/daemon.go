@@ -1338,7 +1338,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		ipFamily.IPv6 = false
 		serviceLog.Warnf("instance %s is not support ipv6", aliyun.GetInstanceMeta().InstanceType)
 	}
-	ecs := aliyun.NewAliyunImpl(aliyunClient, config.EnableENITrunking, ipFamily)
+	ecs := aliyun.NewAliyunImpl(aliyunClient, config.EnableENITrunking && !config.WaitTrunkENI, ipFamily)
 
 	netSrv.enableTrunk = config.EnableENITrunking
 
@@ -1562,6 +1562,8 @@ func getPoolConfig(cfg *types.Configure) (*types.PoolConfig, error) {
 		VSwitchSelectionPolicy: cfg.VSwitchSelectionPolicy,
 		EnableENITrunking:      cfg.EnableENITrunking,
 		ENICapPolicy:           cfg.ENICapPolicy,
+		DisableDevicePlugin:    cfg.DisableDevicePlugin,
+		WaitTrunkENI:           cfg.WaitTrunkENI,
 	}
 	if len(poolConfig.SecurityGroups) > 5 {
 		return nil, fmt.Errorf("security groups should not be more than 5, current %d", len(poolConfig.SecurityGroups))

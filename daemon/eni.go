@@ -77,6 +77,15 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 	}
 	var trunkENI *types.ENI
 
+	if poolConfig.WaitTrunkENI {
+		logger.DefaultLogger.Infof("waitting trunk eni ready")
+		factory.trunkOnEni, err = k8s.WaitTrunkReady()
+		if err != nil {
+			return nil, err
+		}
+		logger.DefaultLogger.Infof("trunk eni found %s", factory.trunkOnEni)
+	}
+
 	poolCfg := pool.Config{
 		Name:     poolNameENI,
 		Type:     typeNameENI,
@@ -95,9 +104,11 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 				logger.DefaultLogger.Infof("lookup trunk eni")
 				for _, eni := range enis {
 					if eni.Trunk {
-						trunkENI = eni
 						logger.DefaultLogger.Infof("find trunk eni %s", eni.ID)
 						factory.trunkOnEni = eni.ID
+					}
+					if eni.ID == factory.trunkOnEni {
+						trunkENI = eni
 					}
 				}
 				if factory.trunkOnEni == "" && len(enis) < memberLimit {
