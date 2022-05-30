@@ -669,10 +669,10 @@ func TestFixedIP(t *testing.T) {
 			})
 			for _, arg := range []string{"sts-1", "sts-2"} {
 				_ = config.Client().Resources().Delete(ctx, &appsv1.StatefulSet{
-					ObjectMeta: metav1.ObjectMeta{Name: arg},
+					ObjectMeta: metav1.ObjectMeta{Name: arg, Namespace: config.Namespace()},
 				})
 				_ = config.Client().Resources().Delete(ctx, &corev1.Service{
-					ObjectMeta: metav1.ObjectMeta{Name: arg},
+					ObjectMeta: metav1.ObjectMeta{Name: arg, Namespace: config.Namespace()},
 				})
 			}
 			return ctx
