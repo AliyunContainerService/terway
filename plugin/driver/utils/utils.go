@@ -11,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
 
+	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 )
 
@@ -21,24 +22,13 @@ const (
 // Log for default log
 var Log = DefaultLogger.WithField("subSys", "terway-cni")
 
-// DefaultLogger default log
-var DefaultLogger = NewDefaultLogger()
-
 // Hook for log
 var Hook = &PodInfoHook{ExtraInfo: make(map[string]string)}
-
-func NewDefaultLogger() *logrus.Logger {
-	logger := logrus.New()
-	logger.Formatter = &logrus.TextFormatter{
-		DisableTimestamp: true,
-		DisableColors:    true,
-		DisableQuote:     true,
-	}
-	logger.SetLevel(logrus.InfoLevel)
-
-	logger.AddHook(Hook)
-	return logger
-}
+var DefaultLogger = func() *logrus.Logger {
+	l := logger.NewDefaultLogger()
+	l.AddHook(Hook)
+	return l
+}()
 
 type PodInfoHook struct {
 	ExtraInfo map[string]string

@@ -19,6 +19,7 @@ package register
 import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
+	"github.com/AliyunContainerService/terway/types/controlplane"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -27,14 +28,30 @@ import (
 type Interface interface {
 	client.VSwitch
 	client.ENI
+	client.ECS
 }
 
-type Creator func(mgr manager.Manager, aliyunClient Interface, swPool *vswitch.SwitchPool) error
+type ControllerCtx struct {
+	Config       *controlplane.Config
+	VSwitchPool  *vswitch.SwitchPool
+	AliyunClient Interface
+}
+
+type Creator func(mgr manager.Manager, ctrlCtx *ControllerCtx) error
 
 // Controllers collect for all controller
-var Controllers = map[string]Creator{}
+var Controllers = map[string]struct {
+	Creator Creator
+	Enable  bool
+}{}
 
-// Add add controller buy name
-func Add(name string, creator Creator) {
-	Controllers[name] = creator
+// Add add controller by name
+func Add(name string, creator Creator, enable bool) {
+	Controllers[name] = struct {
+		Creator Creator
+		Enable  bool
+	}{
+		Creator: creator,
+		Enable:  enable,
+	}
 }

@@ -46,9 +46,9 @@ import (
 const controllerName = "pod-networking"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool) error {
+	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		c, err := controller.New(controllerName, mgr, controller.Options{
-			Reconciler:              NewReconcilePodNetworking(mgr, aliyunClient, swPool),
+			Reconciler:              NewReconcilePodNetworking(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool),
 			MaxConcurrentReconciles: 1,
 		})
 		if err != nil {
@@ -63,7 +63,7 @@ func init() {
 			&predicate.ResourceVersionChangedPredicate{},
 			&predicateForPodnetwokringEvent{},
 		)
-	})
+	}, true)
 }
 
 // ReconcilePodNetworking implements reconcile.Reconciler

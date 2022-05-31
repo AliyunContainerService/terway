@@ -119,18 +119,11 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 	// backoff get eni config
 	err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.WaitENIStatus),
 		func() (done bool, err error) {
-			l, ok := GetLimit(GetInstanceMeta().InstanceType)
-			if !ok {
-				return true, fmt.Errorf("failed to get instance type")
-			}
-
 			eni, innerErr = e.metadata.GetENIByMac(eniStatus.MacAddress)
 			if innerErr != nil || eni.ID != resp.NetworkInterfaceId {
 				logrus.Warnf("error get eni config by mac: %v, retrying...", innerErr)
 				return false, nil
 			}
-
-			eni.MaxIPs = l.IPv4PerAdapter
 			eni.Trunk = client.ENIType(eniStatus.Type) == client.ENITypeTrunk
 			return true, nil
 		},
@@ -191,19 +184,15 @@ func (e *Impl) GetAttachedENIs(ctx context.Context, containsMainENI bool) ([]*ty
 	if err != nil {
 		return nil, fmt.Errorf("error get eni config by mac, %w", err)
 	}
-	l, ok := GetLimit(GetInstanceMeta().InstanceType)
-	if !ok {
-		return nil, fmt.Errorf("failed to get instance type")
-	}
+
 	var eniIDs []string
 	enisMap := map[string]*types.ENI{}
 	for _, eni := range enis {
-		eni.MaxIPs = l.IPv4PerAdapter
 		eniIDs = append(eniIDs, eni.ID)
 		enisMap[eni.ID] = eni
 	}
 	if e.eniTypeAttr && len(eniIDs) > 0 {
-		eniSet, err := e.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "")
+		eniSet, err := e.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -441,11 +430,6 @@ func (e *Impl) GetENIByMac(ctx context.Context, mac string) (*types.ENI, error) 
 	if err != nil {
 		return nil, fmt.Errorf("error get eni config by mac, %w", err)
 	}
-	l, ok := GetLimit(GetInstanceMeta().InstanceType)
-	if !ok {
-		return nil, fmt.Errorf("failed to get instance type")
-	}
-	eni.MaxIPs = l.IPv4PerAdapter
 	return eni, nil
 }
 
@@ -505,7 +489,7 @@ func (e *Impl) CheckEniSecurityGroup(ctx context.Context, sg []string) error {
 	instanceID := GetInstanceMeta().InstanceID
 
 	// get all attached eni
-	eniList, err := e.DescribeNetworkInterface(ctx, "", nil, instanceID, "", "")
+	eniList, err := e.DescribeNetworkInterface(ctx, "", nil, instanceID, "", "", nil)
 	if err != nil {
 		logrus.WithField(client.LogFieldInstanceID, instanceID).Warn(err)
 		return nil

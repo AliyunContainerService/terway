@@ -136,7 +136,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		}
 
 		if require {
-			cfg, err := configFromConfigMap(ctx, client)
+			cfg, err := common.ConfigFromConfigMConfigFromConfigMap(ctx, client, "")
 			if err != nil {
 				return webhook.Errored(1, err)
 			}
@@ -244,7 +244,7 @@ func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, cli
 		return webhook.Allowed("podNetworking all set")
 	}
 
-	cfg, err := configFromConfigMap(ctx, client)
+	cfg, err := common.ConfigFromConfigMConfigFromConfigMap(ctx, client, "")
 	if err != nil {
 		return webhook.Errored(1, err)
 	}
@@ -288,33 +288,6 @@ func getPreviousZone(ctx context.Context, client client.Client, pod *corev1.Pod)
 		return "", nil
 	}
 	return podENI.Spec.Zone, nil
-}
-
-func configFromConfigMap(ctx context.Context, client client.Client) (*types.Configure, error) {
-	cm := &corev1.ConfigMap{}
-	err := client.Get(ctx, k8stypes.NamespacedName{
-		Namespace: "kube-system",
-		Name:      "eni-config",
-	}, cm)
-	if err != nil {
-		return nil, fmt.Errorf("error get terway configmap eni-config, %w", err)
-	}
-	eniConfStr, ok := cm.Data["eni_conf"]
-	if !ok {
-		return nil, fmt.Errorf("error parse terway configmap eni-config, %w", err)
-	}
-
-	eniConf, err := types.MergeConfigAndUnmarshal(nil, []byte(eniConfStr))
-	if err != nil {
-		return nil, fmt.Errorf("error parse terway configmap eni-config, %w", err)
-	}
-
-	sgs := eniConf.GetSecurityGroups()
-	if len(sgs) > 5 {
-		return nil, fmt.Errorf("security groups should not be more than 5, current %d", len(sgs))
-	}
-
-	return eniConf, nil
 }
 
 func setResourceRequest(pod *corev1.Pod, resName string, count int) {

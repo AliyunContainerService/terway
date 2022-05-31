@@ -1,5 +1,5 @@
 /*
-Copyright 2021 Terway Authors.
+Copyright 2021-2022 Terway Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
-	"os"
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
@@ -30,18 +29,17 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/cert"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/all"
-	"github.com/AliyunContainerService/terway/pkg/controller/endpoint"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
 	terwayMetric "github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types/controlplane"
-	"k8s.io/client-go/util/flowcontrol"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/pkg/version"
+	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/klog/v2/klogr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -133,25 +131,20 @@ func main() {
 		panic(err)
 	}
 
-	if cfg.RegisterEndpoint {
-		ipStr := os.Getenv("MY_POD_IP")
-		if ipStr == "" {
-			panic("podIP is not found")
-		}
-		// if enable Service name should equal cfg.ControllerName
-		ep := endpoint.New(cfg.ControllerName, cfg.ControllerNamespace, ipStr, int32(cfg.WebhookPort))
-		err = mgr.Add(ep)
-		if err != nil {
-			panic(err)
-		}
+	ctrlCtx := &register.ControllerCtx{
+		Config:       cfg,
+		VSwitchPool:  vSwitchCtrl,
+		AliyunClient: aliyunClient,
 	}
 
 	for name := range register.Controllers {
-		err = register.Controllers[name](mgr, aliyunClient, vSwitchCtrl)
-		if err != nil {
-			panic(err)
+		if controlplane.IsControllerEnabled(name, register.Controllers[name].Enable, cfg.Controllers) {
+			err = register.Controllers[name].Creator(mgr, ctrlCtx)
+			if err != nil {
+				panic(err)
+			}
+			log.Info("register controller", "controller", name)
 		}
-		log.Info("register controller", "controller", name)
 	}
 
 	log.Info("controller started")

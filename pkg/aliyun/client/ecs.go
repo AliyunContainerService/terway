@@ -95,20 +95,31 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, instanceType ENITy
 }
 
 // DescribeNetworkInterface list eni
-func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType ENIType, status ENIStatus) ([]ecs.NetworkInterfaceSet, error) {
+func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType ENIType, status ENIStatus, tags map[string]string) ([]ecs.NetworkInterfaceSet, error) {
 	var result []ecs.NetworkInterfaceSet
-	for i := 1; ; {
+
+	nextToken := ""
+	for {
 		req := ecs.CreateDescribeNetworkInterfacesRequest()
+		req.NextToken = nextToken
 		req.VpcId = vpcID
 
+		var ecsTags []ecs.DescribeNetworkInterfacesTag
+		for k, v := range tags {
+			ecsTags = append(ecsTags, ecs.DescribeNetworkInterfacesTag{
+				Key:   k,
+				Value: v,
+			})
+		}
+		if len(ecsTags) > 0 {
+			req.Tag = &ecsTags
+		}
 		req.NetworkInterfaceId = &eniID
-
 		req.InstanceId = instanceID
 		req.Type = string(instanceType)
 		req.Status = string(status)
 
-		req.PageNumber = requests.NewInteger(i)
-		req.PageSize = requests.NewInteger(maxSinglePageSize)
+		req.MaxResults = requests.NewInteger(maxSinglePageSize)
 
 		l := log.WithFields(map[string]interface{}{
 			LogFieldAPI:        "DescribeNetworkInterfaces",
@@ -125,10 +136,10 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 		}
 		result = append(result, resp.NetworkInterfaceSets.NetworkInterfaceSet...)
 
-		if resp.TotalCount < resp.PageNumber*resp.PageSize {
+		if resp.NextToken == "" {
 			break
 		}
-		i++
+		nextToken = resp.NextToken
 	}
 	return result, nil
 }
@@ -213,7 +224,7 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 	}
 	err := wait.ExponentialBackoff(backoff,
 		func() (done bool, err error) {
-			eni, err := a.DescribeNetworkInterface(ctx, "", []string{eniID}, "", "", "")
+			eni, err := a.DescribeNetworkInterface(ctx, "", []string{eniID}, "", "", "", nil)
 			if err != nil {
 				return false, nil
 			}
@@ -355,4 +366,23 @@ func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips [
 	}
 	l.WithField(LogFieldRequestID, resp.RequestId).Infof("unassign ipv6 ip ,%s", str)
 	return nil
+}
+
+func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error) {
+	req := ecs.CreateDescribeInstanceTypesRequest()
+	if types != nil {
+		req.InstanceTypes = &types
+	}
+	start := time.Now()
+	resp, err := a.ClientSet.ECS().DescribeInstanceTypes(req)
+	metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypes", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+
+	l := log.WithFields(map[string]interface{}{
+		LogFieldAPI: "DescribeInstanceTypes",
+	})
+	if err != nil {
+		l.WithField(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err)
+		return nil, err
+	}
+	return resp.InstanceTypes.InstanceType, nil
 }

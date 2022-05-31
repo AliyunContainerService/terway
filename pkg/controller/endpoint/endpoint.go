@@ -3,11 +3,12 @@ package endpoint
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
 	"time"
 
+	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/utils"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +18,20 @@ import (
 )
 
 var log = ctrl.Log.WithName("endpoint")
+
+const controllerName = "endpoint"
+
+func init() {
+	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+		ipStr := os.Getenv("MY_POD_IP")
+		if ipStr == "" {
+			return fmt.Errorf("podIP is not found")
+		}
+		// if enable Service name should equal cfg.ControllerName
+		ep := New(ctrlCtx.Config.ControllerName, ctrlCtx.Config.ControllerNamespace, ipStr, int32(ctrlCtx.Config.WebhookPort))
+		return mgr.Add(ep)
+	}, false)
+}
 
 // ReconcilePodNetworking implements reconcile.Reconciler
 var _ manager.Runnable = &Endpoint{}

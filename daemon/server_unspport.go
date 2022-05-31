@@ -1,7 +1,10 @@
 //go:build !linux && !windows
-// +build !linux,!windows
 
 package daemon
+
+import (
+	"os"
+)
 
 var stackTriggerSignals = []os.Signal{}
 

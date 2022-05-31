@@ -29,7 +29,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
-	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
@@ -60,8 +59,8 @@ var ctrlLog = ctrl.Log.WithName(controllerName)
 const controllerName = "pod-eni"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool) error {
-		r := NewReconcilePod(mgr, aliyunClient)
+	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+		r := NewReconcilePod(mgr, ctrlCtx.AliyunClient)
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
 			Reconciler:              r,
 			MaxConcurrentReconciles: controlplane.GetConfig().PodENIMaxConcurrent,
@@ -87,7 +86,7 @@ func init() {
 			&predicate.ResourceVersionChangedPredicate{},
 			&predicateForPodENIEvent{},
 		)
-	})
+	}, true)
 }
 
 var (
@@ -335,7 +334,7 @@ func (m *ReconcilePodENI) podENIDelete(ctx context.Context, podENI *v1beta1.PodE
 
 func (m *ReconcilePodENI) gcSecondaryENI(force bool) {
 	// 1. list all available enis ( which type is secondary)
-	enis, err := m.aliyun.DescribeNetworkInterface(context.Background(), controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusAvailable)
+	enis, err := m.aliyun.DescribeNetworkInterface(context.Background(), controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusAvailable, nil)
 	if err != nil {
 		ctrlLog.Error(err, "error list all member enis")
 		return
@@ -353,7 +352,7 @@ func (m *ReconcilePodENI) gcSecondaryENI(force bool) {
 
 func (m *ReconcilePodENI) gcMemberENI(force bool) {
 	// 1. list all attached member eni
-	enis, err := m.aliyun.DescribeNetworkInterface(context.Background(), controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeMember, aliyunClient.ENIStatusInUse)
+	enis, err := m.aliyun.DescribeNetworkInterface(context.Background(), controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeMember, aliyunClient.ENIStatusInUse, nil)
 	if err != nil {
 		ctrlLog.Error(err, "error list all member enis")
 		return
@@ -667,7 +666,7 @@ func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.P
 			return err
 		}
 		if podENI.Status.InstanceID == "" {
-			enis, err := realClient.DescribeNetworkInterface(ctx, "", []string{alloc.ENI.ID}, "", "", "")
+			enis, err := realClient.DescribeNetworkInterface(ctx, "", []string{alloc.ENI.ID}, "", "", "", nil)
 			if err != nil {
 				return err
 			}

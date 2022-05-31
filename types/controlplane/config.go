@@ -118,3 +118,19 @@ func ParseAndValidate() (*Config, error) {
 
 	return &c, nil
 }
+
+// IsControllerEnabled check if a specified controller enabled or not.
+func IsControllerEnabled(name string, enable bool, controllers []string) bool {
+	for _, ctrl := range controllers {
+		if ctrl == name {
+			return true
+		}
+		if ctrl == "-"+name {
+			return false
+		}
+		if ctrl == "*" {
+			return true
+		}
+	}
+	return enable
+}

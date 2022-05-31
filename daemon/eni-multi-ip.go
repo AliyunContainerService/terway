@@ -77,7 +77,8 @@ type eniIPFactory struct {
 	ipResultChan chan *ENIIP
 	sync.RWMutex
 	// metrics
-	metricENICount prometheus.Gauge
+	metricENICount            prometheus.Gauge
+	disableSecurityGroupCheck bool
 
 	ipFamily *types.IPFamily
 }
@@ -288,7 +289,7 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 			eni.lock.Lock()
 			eni.ips = append(eni.ips, result)
 			eni.lock.Unlock()
-			metric.ENIIPFactoryIPCount.WithLabelValues(f.name, eni.MAC, fmt.Sprint(eni.MaxIPs)).Inc()
+			metric.ENIIPFactoryIPCount.WithLabelValues(f.name, eni.MAC, fmt.Sprint(f.eniMaxIP)).Inc()
 			return result.ENIIP, nil
 		}
 	}
@@ -402,7 +403,7 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 			return fmt.Errorf("ENI have pending ips to be allocate")
 		}
 		// block ip allocate
-		eni.pending = eni.MaxIPs
+		eni.pending = f.eniMaxIP
 		eni.lock.Unlock()
 
 		f.Lock()
@@ -460,7 +461,7 @@ func (f *eniIPFactory) Dispose(res types.NetworkResource) (err error) {
 		}
 	}
 	eni.lock.Unlock()
-	metric.ENIIPFactoryIPCount.WithLabelValues(f.name, eni.MAC, fmt.Sprint(eni.MaxIPs)).Dec()
+	metric.ENIIPFactoryIPCount.WithLabelValues(f.name, eni.MAC, fmt.Sprint(f.eniMaxIP)).Dec()
 	return nil
 }
 
@@ -664,7 +665,6 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 	eni.lock.Lock()
 	if utils.IsWindowsOS() {
 		// NB(thxCode): don't assign the primary IP of the assistant eni.
-		eni.ENI.MaxIPs--
 		ipv4s, ipv6s = dropPrimaryIP(eni.ENI, ipv4s, ipv6s)
 	}
 	eniIPLog.Infof("allocate status on async eni: %+v, pending: %v, ips: %v, backlog: %v",
@@ -859,52 +859,72 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 		ipResultChan: make(chan *ENIIP, maxIPBacklog),
 		ipFamily:     ipFamily,
 	}
-	limit, ok := aliyun.GetLimit(aliyun.GetInstanceMeta().InstanceType)
-	if !ok {
-		return nil, fmt.Errorf("error get max eni for eniip factory")
-	}
-	maxEni := limit.Adapters
-	maxEni = int(float64(maxEni)*poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
+	var capacity, maxEni, memberENIPod, memberLimit int
 
-	ipPerENI := limit.IPv4PerAdapter
-	if utils.IsWindowsOS() {
-		// NB(thxCode): don't assign the primary IP of one assistant eni.
-		ipPerENI--
-	}
-	factory.eniMaxIP = ipPerENI
+	if !poolConfig.DisableDevicePlugin {
+		limit, err := aliyun.GetLimit(ecs, aliyun.GetInstanceMeta().InstanceType)
+		if err != nil {
+			return nil, fmt.Errorf("error get max eni for eniip factory, %w", err)
+		}
+		maxEni = limit.Adapters
+		maxEni = int(float64(maxEni)*poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
 
-	if poolConfig.MaxENI != 0 && poolConfig.MaxENI < maxEni {
-		maxEni = poolConfig.MaxENI
-	}
-	capacity := maxEni * ipPerENI
-	if capacity < 0 {
-		capacity = 0
-	}
-	memberENIPod := limit.MemberAdapterLimit
-	if memberENIPod < 0 {
+		ipPerENI := limit.IPv4PerAdapter
+		if utils.IsWindowsOS() {
+			// NB(thxCode): don't assign the primary IP of one assistant eni.
+			ipPerENI--
+		}
+		factory.eniMaxIP = ipPerENI
+
+		if poolConfig.MaxENI != 0 && poolConfig.MaxENI < maxEni {
+			maxEni = poolConfig.MaxENI
+		}
+		capacity = maxEni * ipPerENI
+		if capacity < 0 {
+			capacity = 0
+		}
+		memberENIPod = limit.MemberAdapterLimit
+		if memberENIPod < 0 {
+			memberENIPod = 0
+		}
+
+		factory.maxENI = make(chan struct{}, maxEni)
+
+		if poolConfig.MinENI != 0 {
+			poolConfig.MinPoolSize = poolConfig.MinENI * ipPerENI
+		}
+
+		if poolConfig.MinPoolSize > capacity {
+			eniIPLog.Infof("min pool size bigger than node capacity, set min pool size to capacity")
+			poolConfig.MinPoolSize = capacity
+		}
+
+		if poolConfig.MaxPoolSize > capacity {
+			eniIPLog.Infof("max pool size bigger than node capacity, set max pool size to capacity")
+			poolConfig.MaxPoolSize = capacity
+		}
+
+		if poolConfig.MinPoolSize > poolConfig.MaxPoolSize {
+			eniIPLog.Warnf("min_pool_size bigger: %v than max_pool_size: %v, set max_pool_size to the min_pool_size",
+				poolConfig.MinPoolSize, poolConfig.MaxPoolSize)
+			poolConfig.MaxPoolSize = poolConfig.MinPoolSize
+		}
+
+		memberLimit = limit.MemberAdapterLimit
+	} else {
+		capacity = 1
+		maxEni = 1
 		memberENIPod = 0
+		memberLimit = 0
 	}
 
-	factory.maxENI = make(chan struct{}, maxEni)
-
-	if poolConfig.MinENI != 0 {
-		poolConfig.MinPoolSize = poolConfig.MinENI * ipPerENI
-	}
-
-	if poolConfig.MinPoolSize > capacity {
-		eniIPLog.Infof("min pool size bigger than node capacity, set min pool size to capacity")
-		poolConfig.MinPoolSize = capacity
-	}
-
-	if poolConfig.MaxPoolSize > capacity {
-		eniIPLog.Infof("max pool size bigger than node capacity, set max pool size to capacity")
-		poolConfig.MaxPoolSize = capacity
-	}
-
-	if poolConfig.MinPoolSize > poolConfig.MaxPoolSize {
-		eniIPLog.Warnf("min_pool_size bigger: %v than max_pool_size: %v, set max_pool_size to the min_pool_size",
-			poolConfig.MinPoolSize, poolConfig.MaxPoolSize)
-		poolConfig.MaxPoolSize = poolConfig.MinPoolSize
+	if poolConfig.WaitTrunkENI {
+		logger.DefaultLogger.Infof("waitting trunk eni ready")
+		factory.trunkOnEni, err = k8s.WaitTrunkReady()
+		if err != nil {
+			return nil, err
+		}
+		logger.DefaultLogger.Infof("trunk eni found %s", factory.trunkOnEni)
 	}
 
 	// eniip factory metrics
@@ -928,11 +948,13 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 			if factory.enableTrunk {
 				for _, eni := range enis {
 					if eni.Trunk {
-						trunkENI = eni
 						factory.trunkOnEni = eni.ID
 					}
+					if eni.ID == factory.trunkOnEni {
+						trunkENI = eni
+					}
 				}
-				if factory.trunkOnEni == "" && len(enis) < limit.MemberAdapterLimit {
+				if factory.trunkOnEni == "" && len(enis) < memberLimit {
 					trunkENIRes, err := factory.eniFactory.CreateWithIPCount(1, true)
 					if err != nil {
 						return errors.Wrapf(err, "error init trunk eni")
@@ -981,7 +1003,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 						poolENI.ips = append(poolENI.ips, &ENIIP{
 							ENIIP: eniIP,
 						})
-						metric.ENIIPFactoryIPCount.WithLabelValues(factory.name, poolENI.MAC, fmt.Sprint(poolENI.MaxIPs)).Inc()
+						metric.ENIIPFactoryIPCount.WithLabelValues(factory.name, poolENI.MAC, fmt.Sprint(maxEni)).Inc()
 
 						if !ok {
 							holder.AddIdle(eniIP)
@@ -1004,7 +1026,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 						poolENI.ips = append(poolENI.ips, &ENIIP{
 							ENIIP: eniIP,
 						})
-						metric.ENIIPFactoryIPCount.WithLabelValues(factory.name, poolENI.MAC, fmt.Sprint(poolENI.MaxIPs)).Inc()
+						metric.ENIIPFactoryIPCount.WithLabelValues(factory.name, poolENI.MAC, fmt.Sprint(maxEni)).Inc()
 
 						holder.AddInuse(eniIP, podInfoKey(res.podInfo.Namespace, res.podInfo.Name))
 
@@ -1031,7 +1053,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 						poolENI.ips = append(poolENI.ips, &ENIIP{
 							ENIIP: eniIP,
 						})
-						metric.ENIIPFactoryIPCount.WithLabelValues(factory.name, poolENI.MAC, fmt.Sprint(poolENI.MaxIPs)).Inc()
+						metric.ENIIPFactoryIPCount.WithLabelValues(factory.name, poolENI.MAC, fmt.Sprint(maxEni)).Inc()
 
 						if ipFamily.IPv4 && ipFamily.IPv6 && (unUsed.IPv6 == nil || unUsed.IPv4 == nil) {
 							holder.AddInvalid(eniIP)
@@ -1062,7 +1084,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 	}
 
 	//init device plugin for ENI
-	if poolConfig.EnableENITrunking && factory.trunkOnEni != "" {
+	if poolConfig.EnableENITrunking && factory.trunkOnEni != "" && !poolConfig.DisableDevicePlugin {
 		dp := deviceplugin.NewENIDevicePlugin(memberENIPod, deviceplugin.ENITypeMember)
 		err = dp.Serve()
 		if err != nil {
