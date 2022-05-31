@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -35,9 +36,18 @@ func (mf *Format) Format(entry *logrus.Entry) ([]byte, error) {
 }
 
 func kv(data logrus.Fields) string {
+	if len(data) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	result := make([]string, 0, len(data))
-	for k, v := range data {
-		result = append(result, fmt.Sprintf("%s=%v", k, v))
+	for _, key := range keys {
+		result = append(result, fmt.Sprintf("%s=%v", key, data[key]))
 	}
 	return strings.Join(result, " ")
 }
