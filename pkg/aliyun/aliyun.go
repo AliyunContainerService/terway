@@ -76,10 +76,12 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 	}
 	defer func() {
 		if err != nil {
+			rollBackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 			eniDestroy := &types.ENI{
 				ID: resp.NetworkInterfaceId,
 			}
-			if err = e.destroyInterface(ctx, eniDestroy.ID, instanceID, ""); err != nil {
+			if err = e.destroyInterface(rollBackCtx, eniDestroy.ID, instanceID, ""); err != nil {
 				fmtErr := fmt.Sprintf("error rollback interface, may cause eni leak: %+v", err)
 				_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
 					tracing.AllocResourceFailed, fmtErr)
@@ -248,7 +250,9 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 			tracing.AllocResourceFailed, fmtErr.Error())
 
 		// rollback ips
-		roleBackErr := e.unAssignIPsForENIUnSafe(ctx, eniID, mac, ipv4s, ipv6s)
+		rollBackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		roleBackErr := e.unAssignIPsForENIUnSafe(rollBackCtx, eniID, mac, ipv4s, ipv6s)
 		if roleBackErr != nil {
 			fmtErr = fmt.Errorf("roll back failed %s, %w", fmtErr, roleBackErr)
 			log.Error(fmtErr.Error())
