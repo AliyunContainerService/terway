@@ -391,10 +391,10 @@ func (s *ConnectionTestSuite) TestPod2Pod() {
 			for _, dst := range dstPods {
 				s.T().Logf("src %s -> dst %s", podInfo(&src), podInfo(&dst))
 				for _, ip := range podIPs(&dst) {
-					addr := net.JoinHostPort(ip, fmt.Sprintf("%d", serverPort))
+					addr := net.JoinHostPort(ip, fmt.Sprintf("%d", httpTestPort))
 					l := fmt.Sprintf("src %s -> dst %s", podInfo(&src), addr)
-					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
-					s.Expected(c.Status, stdErrOut, err, l)
+					stdout, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
+					s.Expected(c.Status, stdout, stdErrOut, err, l)
 				}
 			}
 		}
@@ -465,8 +465,8 @@ func (s *ConnectionTestSuite) TestPod2ServiceIP() {
 
 				for _, addr := range addrs {
 					l := fmt.Sprintf("src %s -> dst svc name %s, addr %s", podInfo(&src), svc.Name, addr)
-					_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
-					s.Expected(c.Status, stdErrOut, err, l)
+					stdout, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, curlAddr(addr))
+					s.Expected(c.Status, stdout, stdErrOut, err, l)
 				}
 			}
 		}
@@ -497,14 +497,15 @@ func (s *ConnectionTestSuite) TestPod2ServiceName() {
 		for _, src := range srcPods {
 			for _, svc := range dstServices {
 				l := fmt.Sprintf("src %s -> dst svc name %s", podInfo(&src), svc.Name)
-				_, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, net.JoinHostPort(svc.Name, fmt.Sprintf("%d", serverPort)))
-				s.Expected(c.Status, stdErrOut, err, l)
+				stdout, stdErrOut, err := s.ExecHTTPGet(src.Namespace, src.Name, net.JoinHostPort(svc.Name, fmt.Sprintf("%d", httpTestPort)))
+				s.Expected(c.Status, stdout, stdErrOut, err, l)
 			}
 		}
 	}
 }
 
-func (s *ConnectionTestSuite) Expected(status bool, stdErrOut []byte, err error, msg string) {
+func (s *ConnectionTestSuite) Expected(status bool, stdout []byte, stdErrOut []byte, err error, msg string) {
+	s.T().Logf("stdOut: %s, errOut: %s", string(stdout), string(stdErrOut))
 	if status {
 		if assert.NoError(s.T(), err, msg) && assert.Equal(s.T(), 0, len(stdErrOut), msg) {
 			s.T().Logf(msg + ", test pass")
@@ -523,6 +524,7 @@ func (s *ConnectionTestSuite) Expected(status bool, stdErrOut []byte, err error,
 
 func (s *ConnectionTestSuite) ExecHTTPGet(namespace, name string, dst string) ([]byte, []byte, error) {
 	cmd := fmt.Sprintf("curl -o /dev/null -s -w %%{http_code} %%{time_connect} %%{time_total} --connect-timeout 6 --retry 2 %s", dst)
+	s.T().Log(cmd)
 	return Exec(s.ClientSet, s.RestConf, namespace, name, []string{
 		"/usr/bin/bash",
 		"-c",

@@ -7,9 +7,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"net"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -147,9 +148,10 @@ func EnsureDeployment(ctx context.Context, cs kubernetes.Interface, cfg PodResCo
 					TerminationGracePeriodSeconds: func(a int64) *int64 { return &a }(0),
 					Containers: []corev1.Container{
 						{
-							Name:            "echo",
-							Image:           "l1b0k/echo",
-							Args:            []string{"--http-bind-address", fmt.Sprintf(":%d", serverPort)},
+							Name:  "echo",
+							Image: "l1b0k/echo",
+							Args: []string{"--http-bind-address", fmt.Sprintf(":%d", httpTestPort),
+								"--https-bind-address", fmt.Sprintf(":%d", httpsTestPort)},
 							ImagePullPolicy: corev1.PullAlways,
 						},
 					},
@@ -229,9 +231,10 @@ func EnsureStatefulSet(ctx context.Context, cs kubernetes.Interface, cfg PodResC
 					TerminationGracePeriodSeconds: func(a int64) *int64 { return &a }(0),
 					Containers: []corev1.Container{
 						{
-							Name:            "echo",
-							Image:           "l1b0k/echo",
-							Args:            []string{"--http-bind-address", fmt.Sprintf(":%d", serverPort)},
+							Name:  "echo",
+							Image: "l1b0k/echo",
+							Args: []string{"--http-bind-address", fmt.Sprintf(":%d", httpTestPort),
+								"--https-bind-address", fmt.Sprintf(":%d", httpsTestPort)},
 							ImagePullPolicy: corev1.PullAlways,
 						},
 					},
@@ -306,8 +309,8 @@ func EnsureService(ctx context.Context, cs kubernetes.Interface, cfg ServiceResC
 			Ports: []corev1.ServicePort{
 				{
 					Name:       "http-server",
-					Port:       int32(serverPort),
-					TargetPort: intstr.FromInt(serverPort),
+					Port:       int32(httpTestPort),
+					TargetPort: intstr.FromInt(httpTestPort),
 				},
 			},
 			Selector:              cfg.PodSelectLabels,
@@ -462,7 +465,7 @@ func ListNodeIPs(ctx context.Context, cs kubernetes.Interface) ([]net.IP, error)
 	}
 	var result []net.IP
 	for _, node := range nodes.Items {
-		if _, ok := node.Labels["type"] ; ok {
+		if _, ok := node.Labels["type"]; ok {
 			if node.Labels["type"] == "virtual-kubelet" {
 				logrus.Infof("skip virtual node %s", node.Name)
 				continue
