@@ -184,6 +184,12 @@ func EnsureDeployment(ctx context.Context, cs kubernetes.Interface, cfg PodResCo
 							},
 						},
 					},
+					Tolerations: []corev1.Toleration{
+						{
+							Key: "kubernetes.io/arch",
+							Value: "arm64",
+						},
+					},
 				},
 			},
 		},
@@ -265,6 +271,12 @@ func EnsureStatefulSet(ctx context.Context, cs kubernetes.Interface, cfg PodResC
 							LabelSelector: &metav1.LabelSelector{
 								MatchLabels: cfg.Labels,
 							},
+						},
+					},
+					Tolerations: []corev1.Toleration{
+						{
+							Key: "kubernetes.io/arch",
+							Value: "arm64",
 						},
 					},
 				},
