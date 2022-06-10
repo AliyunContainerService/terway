@@ -142,7 +142,7 @@ func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface) *Reco
 	r := &ReconcilePodENI{
 		client:    mgr.GetClient(),
 		scheme:    mgr.GetScheme(),
-		record:    mgr.GetEventRecorderFor("PodENI"),
+		record:    mgr.GetEventRecorderFor("TerwayPodENIController"),
 		aliyun:    aliyunClient,
 		trunkMode: *controlplane.GetConfig().EnableTrunk,
 	}
@@ -155,7 +155,7 @@ func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface) *Reco
 func (m *ReconcilePodENI) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	l := log.FromContext(ctx)
 	l.Info("Reconcile")
-
+	start := time.Now()
 	podENI := &v1beta1.PodENI{}
 	err := m.client.Get(context.Background(), request.NamespacedName, podENI)
 	if err != nil {
@@ -169,9 +169,37 @@ func (m *ReconcilePodENI) Reconcile(ctx context.Context, request reconcile.Reque
 		if !controllerutil.ContainsFinalizer(podENI, types.FinalizerPodENI) {
 			return reconcile.Result{}, nil
 		}
-		return m.podENIDelete(ctx, podENI)
+		result, err := m.podENIDelete(ctx, podENI)
+		m.recordPodENIDeleteErr(podENI, start, err)
+		return result, err
 	}
-	return m.podENICreate(ctx, request.NamespacedName, podENI)
+	result, err := m.podENICreate(ctx, request.NamespacedName, podENI)
+	m.recordPodENICreateErr(podENI, start, err)
+	return result, err
+}
+
+func (m *ReconcilePodENI) recordPodENIDeleteErr(podEni *v1beta1.PodENI, startTime time.Time, err error) {
+	if err == nil {
+		return
+	}
+	var pod = &corev1.Pod{}
+	if getErr := m.client.Get(context.Background(), k8stypes.NamespacedName{Namespace: podEni.Namespace, Name: podEni.Name}, pod); getErr != nil {
+		return
+	}
+	m.record.Eventf(pod, corev1.EventTypeWarning,
+		"CniPodENIDeleteErr", fmt.Sprintf("CniPodENIDeleteErr: %s, elapsedTime: %s", err, time.Now().Sub(startTime)))
+}
+
+func (m *ReconcilePodENI) recordPodENICreateErr(podEni *v1beta1.PodENI, startTime time.Time, err error) {
+	if err == nil {
+		return
+	}
+	var pod = &corev1.Pod{}
+	if getErr := m.client.Get(context.Background(), k8stypes.NamespacedName{Namespace: podEni.Namespace, Name: podEni.Name}, pod); getErr != nil {
+		return
+	}
+	m.record.Eventf(pod, corev1.EventTypeWarning,
+		"CniCreateENIError", fmt.Sprintf("CniCreateENIError: %s, elapsedTime: %s", err, time.Now().Sub(startTime)))
 }
 
 // NeedLeaderElection need election

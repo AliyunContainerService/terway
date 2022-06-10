@@ -122,7 +122,7 @@ func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface, swPoo
 	r := &ReconcilePod{
 		client: mgr.GetClient(),
 		scheme: mgr.GetScheme(),
-		record: mgr.GetEventRecorderFor("Pod"),
+		record: mgr.GetEventRecorderFor("TerwayPodController"),
 		aliyun: aliyunClient,
 		swPool: swPool,
 	}
@@ -137,18 +137,22 @@ func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface, swPoo
 func (m *ReconcilePod) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	l := log.FromContext(ctx)
 	l.V(5).Info("Reconcile")
-
+	start := time.Now()
 	pod := &corev1.Pod{}
 	err := m.client.Get(ctx, request.NamespacedName, pod)
 	if err != nil {
 		if k8sErr.IsNotFound(err) {
-			return m.podDelete(ctx, request.NamespacedName)
+			result, err := m.podDelete(ctx, request.NamespacedName)
+			m.recordPodDelete(pod, start, err)
+			return result, err
 		}
 		return reconcile.Result{}, err
 	}
 	if utils.IsJobPod(pod) {
 		if utils.PodSandboxExited(pod) {
-			return m.podDelete(ctx, request.NamespacedName)
+			result, err := m.podDelete(ctx, request.NamespacedName)
+			m.recordPodDelete(pod, start, err)
+			return result, err
 		}
 	}
 	// for pod is deleting we will wait it terminated
@@ -156,7 +160,9 @@ func (m *ReconcilePod) Reconcile(ctx context.Context, request reconcile.Request)
 		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
-	return m.podCreate(ctx, pod)
+	result, err := m.podCreate(ctx, pod)
+	m.recordPodCreate(pod, start, err)
+	return result, err
 }
 
 // NeedLeaderElection need election
@@ -232,8 +238,23 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("error create cr, %s", err)
 	}
-
 	return reconcile.Result{}, nil
+}
+
+func (m *ReconcilePod) recordPodCreate(pod *corev1.Pod, startTime time.Time, err error) {
+	if err == nil || pod == nil {
+		return
+	}
+	m.record.Eventf(pod, corev1.EventTypeWarning,
+		"CniPodCreateError", fmt.Sprintf("PodCreateError: %s, elapsedTime: %s", err, time.Now().Sub(startTime)))
+}
+
+func (m *ReconcilePod) recordPodDelete(pod *corev1.Pod, startTime time.Time, err error) {
+	if err == nil || pod == nil {
+		return
+	}
+	m.record.Eventf(pod, corev1.EventTypeWarning,
+		"CniPodDeleteError", fmt.Sprintf("CniPodDeleteError: %s, elapsedTime: %s", err, time.Now().Sub(startTime)))
 }
 
 // podDelete is proceed after pod is deleted
