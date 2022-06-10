@@ -5,8 +5,6 @@ import (
 )
 
 const (
-	// mainRouteTable the system "main" route table id
-	mainRouteTable        = 254
 	toContainerPriority   = 512
 	fromContainerPriority = 2048
 )
