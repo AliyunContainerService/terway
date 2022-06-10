@@ -106,7 +106,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 	if types.PodUseENI(pod) || controlplane.GetConfig().IPAMType == types.IPAMTypeCRD {
 		networks, err := controlplane.ParsePodNetworksFromAnnotation(pod)
 		if err != nil {
-			return webhook.Denied(fmt.Sprintf("unable parse annotation field %s", types.PodNetworks))
+			return webhook.Denied(fmt.Sprintf("unable parse annotation field %s, %s", types.PodNetworks, err))
 		}
 
 		if len(networks.PodNetworks) == 0 {
