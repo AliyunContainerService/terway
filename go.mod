@@ -4,12 +4,12 @@ go 1.18
 
 require (
 	github.com/Microsoft/go-winio v0.4.17
-	github.com/Microsoft/hcsshim v0.8.23
+	github.com/Microsoft/hcsshim v0.9.3
 	github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
 	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1383
 	github.com/boltdb/bolt v1.3.1
 	github.com/containernetworking/cni v0.8.1
-	github.com/containernetworking/plugins v0.9.0
+	github.com/containernetworking/plugins v0.9.1
 	github.com/denverdino/aliyungo v0.0.0-20201215054313-f635de23c5e0
 	github.com/docker/docker v20.10.6+incompatible
 	github.com/evanphx/json-patch v4.12.0+incompatible
@@ -52,8 +52,8 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.1 // indirect
 	github.com/containerd/cgroups v1.0.1 // indirect
-	github.com/containerd/containerd v1.4.13 // indirect
-	github.com/coreos/go-iptables v0.4.5 // indirect
+	github.com/containerd/containerd v1.5.7 // indirect
+	github.com/coreos/go-iptables v0.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/distribution v2.8.1+incompatible // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
@@ -70,7 +70,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
-	github.com/google/go-cmp v0.5.5 // indirect
+	github.com/google/go-cmp v0.5.6 // indirect
 	github.com/google/gofuzz v1.1.0 // indirect
 	github.com/googleapis/gnostic v0.5.5 // indirect
 	github.com/gookit/color v1.5.0 // indirect
@@ -86,7 +86,6 @@ require (
 	github.com/moby/spdystream v0.2.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.0.2 // indirect
