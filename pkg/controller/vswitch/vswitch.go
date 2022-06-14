@@ -1,5 +1,5 @@
 /*
-Copyright 2021 Terway Authors.
+Copyright 2021-2022 Terway Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ package vswitch
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
-
 	"k8s.io/apimachinery/pkg/util/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -54,8 +54,17 @@ func NewSwitchPool(size int, ttl string) (*SwitchPool, error) {
 }
 
 // GetOne get one vSwitch by zone and limit in ids
-func (s *SwitchPool) GetOne(ctx context.Context, client client.VSwitch, zone string, ids []string, ignoreZone bool) (*Switch, error) {
+func (s *SwitchPool) GetOne(ctx context.Context, client client.VSwitch, zone string, ids []string, opts ...SelectOption) (*Switch, error) {
 	var fallBackSwitches []*Switch
+
+	selectOptions := &SelectOptions{}
+	selectOptions.ApplyOptions(opts)
+
+	if selectOptions.VSwitchSelectPolicy == VSwitchSelectionPolicyRandom {
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(ids), func(i, j int) { ids[i], ids[j] = ids[j], ids[i] })
+	}
+
 	// lookup all vsw in cache and get one matched
 	for _, id := range ids {
 		vsw, err := s.GetByID(ctx, client, id)
@@ -65,7 +74,7 @@ func (s *SwitchPool) GetOne(ctx context.Context, client client.VSwitch, zone str
 		}
 
 		if vsw.Zone != zone {
-			if ignoreZone {
+			if selectOptions.IgnoreZone {
 				fallBackSwitches = append(fallBackSwitches, vsw)
 			}
 			continue
@@ -116,4 +125,42 @@ func (s *SwitchPool) Add(sw *Switch) {
 // Del Switch from cache. Test purpose.
 func (s *SwitchPool) Del(key string) {
 	s.cache.Remove(key)
+}
+
+type SelectionPolicy string
+
+// VSwitch Selection Policy
+const (
+	VSwitchSelectionPolicyOrdered SelectionPolicy = "ordered"
+	VSwitchSelectionPolicyRandom  SelectionPolicy = "random"
+)
+
+type SelectOption interface {
+	// Apply applies this configuration to the given select options.
+	Apply(*SelectOptions)
+}
+
+// SelectOptions contains options for requests.
+type SelectOptions struct {
+	IgnoreZone bool
+
+	VSwitchSelectPolicy SelectionPolicy
+}
+
+// ApplyOptions applies the given select options on these options
+func (o *SelectOptions) ApplyOptions(opts []SelectOption) *SelectOptions {
+	for _, opt := range opts {
+		opt.Apply(o)
+	}
+	return o
+}
+
+var _ SelectOption = &SelectOptions{}
+
+// Apply implements SelectOption.
+func (o *SelectOptions) Apply(so *SelectOptions) {
+	so.IgnoreZone = o.IgnoreZone
+	if o.VSwitchSelectPolicy != "" {
+		so.VSwitchSelectPolicy = o.VSwitchSelectPolicy
+	}
 }

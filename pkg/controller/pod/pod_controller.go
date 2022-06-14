@@ -364,7 +364,7 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod) (*common.Node
 			return nil, nil, nil, fmt.Errorf("error get podNetworking %s, %w", podNetwokingName, err)
 		}
 		var vsw *vswitch.Switch
-		vsw, err = m.swPool.GetOne(ctx, m.aliyun, nodeInfo.Zone, podNetworking.Spec.VSwitchOptions, false)
+		vsw, err = m.swPool.GetOne(ctx, m.aliyun, nodeInfo.Zone, podNetworking.Spec.VSwitchOptions)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.Zone, err)
 		}
