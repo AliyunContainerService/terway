@@ -139,7 +139,7 @@ func (m *ReconcileNode) ensureTrunkENI(ctx context.Context, node *corev1.Node) (
 			return reconcile.Result{}, err
 		}
 
-		vsw, err := m.swPool.GetOne(ctx, m.aliyun, node.Labels[corev1.LabelTopologyZone], eniConfig.GetVSwitchIDs(), false)
+		vsw, err := m.swPool.GetOne(ctx, m.aliyun, node.Labels[corev1.LabelTopologyZone], eniConfig.GetVSwitchIDs())
 		if err != nil {
 			return reconcile.Result{}, err
 		}
