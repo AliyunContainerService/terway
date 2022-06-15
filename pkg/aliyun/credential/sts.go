@@ -13,8 +13,12 @@ import (
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth/credentials"
 	"github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 )
 
@@ -65,7 +69,19 @@ func (e *EncryptedCredentialProvider) Resolve() (*Credential, error) {
 	} else {
 		log.Infof("resolve secret %s/%s", e.secretNamespace, e.secretName)
 
-		secret, err := utils.K8sClient.CoreV1().Secrets(e.secretNamespace).Get(context.Background(), e.secretName, metav1.GetOptions{})
+		var secret *corev1.Secret
+		err = retry.OnError(backoff.Backoff(backoff.WaitStsTokenReady), func(err error) bool {
+			if errors.IsNotFound(err) || errors.IsTooManyRequests(err) {
+				return true
+			}
+			return false
+		}, func() error {
+			secret, err = utils.K8sClient.CoreV1().Secrets(e.secretNamespace).Get(context.Background(), e.secretName, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			return nil
+		})
 		if err != nil {
 			return nil, err
 		}
