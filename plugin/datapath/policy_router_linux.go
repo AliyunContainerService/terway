@@ -11,6 +11,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 type PolicyRoute struct{}
@@ -192,7 +193,7 @@ func generateHostPeerCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, tab
 		// 2. add host to container rule
 		toContainerRule := netlink.NewRule()
 		toContainerRule.Dst = v4
-		toContainerRule.Table = mainRouteTable
+		toContainerRule.Table = unix.RT_TABLE_MAIN
 		toContainerRule.Priority = toContainerPriority
 
 		fromContainerRule := netlink.NewRule()
@@ -221,7 +222,7 @@ func generateHostPeerCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, tab
 		// 2. add host to container rule
 		toContainerRule := netlink.NewRule()
 		toContainerRule.Dst = v6
-		toContainerRule.Table = mainRouteTable
+		toContainerRule.Table = unix.RT_TABLE_MAIN
 		toContainerRule.Priority = toContainerPriority
 
 		fromContainerRule := netlink.NewRule()
