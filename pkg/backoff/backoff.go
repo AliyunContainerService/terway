@@ -15,6 +15,7 @@ const (
 	WaitPodENIStatus      = "wait_podeni_status"
 	MetaAssignPrivateIP   = "meta_assign_private_ip"
 	MetaUnAssignPrivateIP = "meta_unassign_private_ip"
+	WaitStsTokenReady     = "wait_sts_token_ready"
 )
 
 var backoffMap = map[string]wait.Backoff{
@@ -59,6 +60,12 @@ var backoffMap = map[string]wait.Backoff{
 		Factor:   1,
 		Jitter:   0.2,
 		Steps:    10,
+	},
+	WaitStsTokenReady: {
+		Duration: time.Second,
+		Factor:   1,
+		Jitter:   0.2,
+		Steps:    60,
 	},
 }
 
