@@ -37,9 +37,7 @@ func (q *priorityQueue) bubbleUp(index int) {
 }
 
 func (q *priorityQueue) swap(x, y int) {
-	tmp := q.slots[x]
-	q.slots[x] = q.slots[y]
-	q.slots[y] = tmp
+	q.slots[x], q.slots[y] = q.slots[y], q.slots[x]
 }
 
 func (q *priorityQueue) bubbleDown(index int) {
