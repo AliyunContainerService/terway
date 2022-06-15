@@ -44,7 +44,7 @@ rules:
     verbs: [ "*" ]
 
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: terway-binding
@@ -99,7 +99,7 @@ spec:
       labels:
         app: terway-eni-windows
       annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ""
+        priorityClassName: ""
     spec:
       terminationGracePeriodSeconds: 0
       tolerations:
@@ -116,7 +116,7 @@ spec:
                     operator: NotIn
                     values:
                       - virtual-kubelet
-                  - key: beta.kubernetes.io/os
+                  - key: kubernetes.io/os
                     operator: In
                     values:
                       - windows
@@ -164,7 +164,7 @@ spec:
                   fieldPath: metadata.name
             - name: CONTAINER_NAME
               value: "terway"
-          image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun
+          image: registry.aliyuncs.com/acs/terway:v1.2.3
           imagePullPolicy: Always
           resources:
             requests:

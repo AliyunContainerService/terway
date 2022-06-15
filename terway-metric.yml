@@ -6,13 +6,13 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: terway
+      app: terway-metric-proxy
   template:
     metadata:
       labels:
         app: terway-metric-proxy
       annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
+        priorityClassName: ''
     spec:
       nodeSelector:
         beta.kubernetes.io/arch: amd64
@@ -194,7 +194,7 @@ metadata:
 
 ---
 # deploy
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: prometheus-terway
@@ -203,6 +203,9 @@ metadata:
     app: prometheus-terway
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus-terway
   template:
     metadata:
       name: prometheus-terway

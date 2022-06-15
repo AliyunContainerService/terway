@@ -44,7 +44,7 @@ rules:
     verbs: [ "*" ]
 
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: terway-binding
@@ -206,7 +206,7 @@ spec:
       labels:
         app: terway-eniip-windows
       annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ""
+        priorityClassName: ""
     spec:
       terminationGracePeriodSeconds: 0
       tolerations:
@@ -223,7 +223,7 @@ spec:
                     operator: NotIn
                     values:
                       - virtual-kubelet
-                  - key: beta.kubernetes.io/os
+                  - key: kubernetes.io/os
                     operator: In
                     values:
                       - windows
@@ -271,7 +271,7 @@ spec:
                   fieldPath: metadata.name
             - name: CONTAINER_NAME
               value: "terway"
-          image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun
+          image: registry.aliyuncs.com/acs/terway:v1.2.3
           imagePullPolicy: Always
           resources:
             requests:
@@ -327,7 +327,7 @@ spec:
               value: 'application/vnd.kubernetes.protobuf'
             - name: FELIX_KUBECLIENTACCEPTCONTENTTYPES
               value: 'application/vnd.kubernetes.protobuf,application/json'
-          image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun
+          image: registry.aliyuncs.com/acs/terway:v1.2.3
           imagePullPolicy: Always
           resources:
             requests:
@@ -391,112 +391,207 @@ spec:
             type: ''
 
 ---
-apiVersion: apiextensions.k8s.io/v1beta1
+apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: felixconfigurations.crd.projectcalico.org
 spec:
   scope: Cluster
   group: crd.projectcalico.org
-  version: v1
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            host:
+              type: string
+            port:
+              type: string
   names:
     kind: FelixConfiguration
     plural: felixconfigurations
     singular: felixconfiguration
 
 ---
-apiVersion: apiextensions.k8s.io/v1beta1
+
+apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: bgpconfigurations.crd.projectcalico.org
 spec:
   scope: Cluster
   group: crd.projectcalico.org
-  version: v1
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            host:
+              type: string
+            port:
+              type: string
   names:
     kind: BGPConfiguration
     plural: bgpconfigurations
     singular: bgpconfiguration
 
 ---
-apiVersion: apiextensions.k8s.io/v1beta1
+
+apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: ippools.crd.projectcalico.org
 spec:
   scope: Cluster
   group: crd.projectcalico.org
-  version: v1
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            host:
+              type: string
+            port:
+              type: string
   names:
     kind: IPPool
     plural: ippools
     singular: ippool
 
 ---
-apiVersion: apiextensions.k8s.io/v1beta1
+
+apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: hostendpoints.crd.projectcalico.org
 spec:
   scope: Cluster
   group: crd.projectcalico.org
-  version: v1
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            host:
+              type: string
+            port:
+              type: string
   names:
     kind: HostEndpoint
     plural: hostendpoints
     singular: hostendpoint
 
 ---
-apiVersion: apiextensions.k8s.io/v1beta1
+
+apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: clusterinformations.crd.projectcalico.org
 spec:
   scope: Cluster
   group: crd.projectcalico.org
-  version: v1
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            host:
+              type: string
+            port:
+              type: string
   names:
     kind: ClusterInformation
     plural: clusterinformations
     singular: clusterinformation
 
 ---
-apiVersion: apiextensions.k8s.io/v1beta1
+
+apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: globalnetworkpolicies.crd.projectcalico.org
 spec:
   scope: Cluster
   group: crd.projectcalico.org
-  version: v1
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            host:
+              type: string
+            port:
+              type: string
   names:
     kind: GlobalNetworkPolicy
     plural: globalnetworkpolicies
     singular: globalnetworkpolicy
 
 ---
-apiVersion: apiextensions.k8s.io/v1beta1
+
+apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: globalnetworksets.crd.projectcalico.org
 spec:
   scope: Cluster
   group: crd.projectcalico.org
-  version: v1
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            host:
+              type: string
+            port:
+              type: string
   names:
     kind: GlobalNetworkSet
     plural: globalnetworksets
     singular: globalnetworkset
 
 ---
-apiVersion: apiextensions.k8s.io/v1beta1
+
+apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: networkpolicies.crd.projectcalico.org
 spec:
   scope: Namespaced
   group: crd.projectcalico.org
-  version: v1
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            host:
+              type: string
+            port:
+              type: string
   names:
     kind: NetworkPolicy
     plural: networkpolicies
