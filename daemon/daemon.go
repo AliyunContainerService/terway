@@ -1330,12 +1330,15 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, errors.Wrapf(err, "error create aliyun client")
 	}
 
-	if !config.DisableDevicePlugin {
-		limit, err := aliyun.GetLimit(aliyunClient, ins.InstanceType)
-		if err != nil {
-			return nil, fmt.Errorf("upable get instance limit, %w", err)
-		}
+	limit, err := aliyun.GetLimit(aliyunClient, ins.InstanceType)
+	if err != nil {
+		return nil, fmt.Errorf("upable get instance limit, %w", err)
+	}
+	if ipFamily.IPv6 {
 		if !limit.SupportIPv6() {
+			ipFamily.IPv6 = false
+			serviceLog.Warnf("instance %s is not support ipv6", aliyun.GetInstanceMeta().InstanceType)
+		} else if daemonMode == daemonModeENIMultiIP && !limit.SupportMultiIPIPv6() {
 			ipFamily.IPv6 = false
 			serviceLog.Warnf("instance %s is not support ipv6", aliyun.GetInstanceMeta().InstanceType)
 		}
