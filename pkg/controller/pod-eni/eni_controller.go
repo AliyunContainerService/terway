@@ -174,14 +174,20 @@ func (m *ReconcilePodENI) Reconcile(ctx context.Context, request reconcile.Reque
 		return result, err
 	}
 	result, err := m.podENICreate(ctx, request.NamespacedName, podENI)
-	m.recordPodENICreateErr(podENI, start, err)
-	return result, err
+	if err != nil {
+		m.recordPodENICreateErr(podENI, start, err)
+		return result, err
+	}
+
+	if err = common.SetPodAnnotation(ctx, m.client, podENI); err != nil {
+		m.recordPodENICreateErr(podENI, start, err)
+		return reconcile.Result{}, err
+	}
+
+	return result, nil
 }
 
 func (m *ReconcilePodENI) recordPodENIDeleteErr(podEni *v1beta1.PodENI, startTime time.Time, err error) {
-	if err == nil {
-		return
-	}
 	var pod = &corev1.Pod{}
 	if getErr := m.client.Get(context.Background(), k8stypes.NamespacedName{Namespace: podEni.Namespace, Name: podEni.Name}, pod); getErr != nil {
 		return
