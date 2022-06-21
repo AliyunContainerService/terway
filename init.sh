@@ -29,7 +29,6 @@ cp -f /usr/bin/cilium-cni /opt/cni/bin/
 chmod +x /opt/cni/bin/terway
 chmod +x /opt/cni/bin/cilium-cni
 
-cp /etc/eni/10-terway.conf /etc/cni/net.d/
 ENIIP_VIRTUAL_TYPE=$(jq .eniip_virtual_type? -r < /etc/eni/10-terway.conf | tr '[:upper:]' '[:lower:]')
 
 if [ "$ENIIP_VIRTUAL_TYPE" = "ipvlan" ]; then
@@ -57,9 +56,11 @@ if [ "$ENIIP_VIRTUAL_TYPE" = "ipvlan" ]; then
   rm -f /etc/cni/net.d/10-terway.conf || true
   else
     echo "Linux kernel version <= 4.19, skipping cilium config"
+    cp /etc/eni/10-terway.conf /etc/cni/net.d/
   fi
 else
   rm -f /etc/cni/net.d/10-terway.conflist || true
+  cp /etc/eni/10-terway.conf /etc/cni/net.d/
 fi
 
 sysctl -w net.ipv4.conf.eth0.rp_filter=0
