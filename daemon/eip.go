@@ -7,12 +7,13 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/ipam"
+	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 
 	"github.com/AliyunContainerService/terway/types"
-	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
+
+var eipLog = logger.DefaultLogger
 
 // eip resource manager for pod public ip address
 type eipResourceManager struct {
@@ -30,7 +31,7 @@ func newEipResourceManager(e ipam.API, k Kubernetes, allowEipRob bool) ResourceM
 }
 
 func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (types.NetworkResource, error) {
-	logrus.Infof("Allocate EIP: %v, %v", context.pod, context.resources)
+	eipLog.Infof("Allocate EIP: %v, %v, %s", context.pod, context.resources, prefer)
 	if context.pod == nil {
 		return nil, fmt.Errorf("invalid pod info: %v", context.pod)
 	}
@@ -42,14 +43,14 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 	ctx := context.Context
 	podIP := context.pod.PodIPs.IPv4
 	if podIP == nil {
-		return nil, errors.Errorf("invalid pod ip: %v", context.pod.PodIP)
+		return nil, fmt.Errorf("pod ipv4 addr is empty")
 	}
 	for _, res := range context.resources {
 		switch res.Type {
 		case types.ResourceTypeENI, types.ResourceTypeENIIP:
 			eniID, err = e.ecs.QueryEniIDByIP(ctx, aliyun.GetInstanceMeta().VPCID, podIP)
 			if err != nil {
-				return nil, errors.Wrapf(err, "error Query ENI by pod IP, %v", context.pod)
+				return nil, fmt.Errorf("error Query ENI by pod IP, %v, %w", context.pod, err)
 			}
 			eniIP = podIP
 		}
@@ -59,12 +60,18 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 	}
 	eipID := context.pod.EipInfo.PodEipID
 	if eipID == "" {
+		eipLog.Infof("eip id empty pod")
 		eipID = prefer
 	}
 	eipInfo, err := e.ecs.AllocateEipAddress(ctx, context.pod.EipInfo.PodEipBandWidth, context.pod.EipInfo.PodEipChargeType,
 		eipID, eniID, eniIP, e.allowEipRob, context.pod.EipInfo.PodEipISP, context.pod.EipInfo.PodEipBandwidthPackageID, context.pod.EipInfo.PodEipPoolID)
 	if err != nil {
-		return nil, errors.Errorf("error allocate eip info: %v", err)
+		return nil, fmt.Errorf("error allocate eip info: %w", err)
+	}
+
+	// set eip to delete if pod not specific eip id
+	if context.pod.EipInfo.PodEipID == "" {
+		eipInfo.Delete = true
 	}
 	context.pod.EipInfo.PodEipIP = eipInfo.Address.String()
 	err = e.k8s.PatchEipInfo(context.pod)
@@ -76,9 +83,9 @@ func (e *eipResourceManager) Allocate(context *networkContext, prefer string) (t
 			err1 = e.ecs.UnassociateEipAddress(ctx, eipInfo.ID, eniID, eniIP.String())
 		}
 		if err1 != nil {
-			logrus.Errorf("error rollback eip: %v", err1)
+			eipLog.Errorf("error rollback eip: %v", err1)
 		}
-		return nil, errors.Errorf("error patch pod info: %v", err)
+		return nil, fmt.Errorf("error patch pod info: %w", err)
 	}
 	return eipInfo, nil
 }
@@ -87,7 +94,7 @@ func (e *eipResourceManager) Release(context *networkContext, resItem types.Reso
 	if resItem.ExtraEipInfo == nil {
 		return nil
 	}
-	logrus.Infof("release eip: %v, %v", resItem.ID, resItem.ExtraEipInfo)
+	eipLog.Infof("release eip: %v, %v", resItem.ID, resItem.ExtraEipInfo)
 	ctx := context.Context
 
 	if resItem.ExtraEipInfo.Delete {
@@ -109,7 +116,7 @@ func (e *eipResourceManager) GarbageCollection(inUseResSet map[string]types.Reso
 		if expireItem.ExtraEipInfo == nil {
 			continue
 		}
-		logrus.Infof("release eip: %v, %v", expireRes, expireItem)
+		eipLog.Infof("release eip: %v, %v", expireRes, expireItem)
 		if expireItem.ExtraEipInfo.Delete {
 			err := e.ecs.ReleaseEipAddress(context.Background(), expireRes, expireItem.ExtraEipInfo.AssociateENI, expireItem.ExtraEipInfo.AssociateENIIP)
 			if err != nil {
@@ -130,5 +137,5 @@ func (e *eipResourceManager) Stat(context *networkContext, resID string) (types.
 }
 
 func (e *eipResourceManager) GetResourceMapping() (tracing.ResourcePoolStats, error) {
-	return nil, errors.New("eip resource manager store network resource")
+	return nil, fmt.Errorf("eip resource manager store network resource")
 }
