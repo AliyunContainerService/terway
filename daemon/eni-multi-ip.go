@@ -128,8 +128,8 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 			}
 		}
 		eniIPLog.Debugf("allocate %v ips for eni", toAllocate)
-		ips, err := e.ecs.AssignNIPsForENI(context.Background(), e.ENI.ID, e.ENI.MAC, toAllocate)
-		eniIPLog.Debugf("allocated ips for eni: eni = %+v, ips = %+v, err = %v", e.ENI, ips, err)
+		v4, v6, err := e.ecs.AssignNIPsForENI(context.Background(), e.ENI.ID, e.ENI.MAC, toAllocate)
+		eniIPLog.Debugf("allocated ips for eni: eni = %+v, v4 = %+v,v6 = %+v, err = %v", e.ENI, v4, v6, err)
 		if err != nil {
 			eniIPLog.Errorf("error allocate ips for eni: %v", err)
 			metric.ENIIPFactoryIPAllocCount.WithLabelValues(e.MAC, metric.ENIIPAllocActionFail).Add(float64(toAllocate))
@@ -143,7 +143,7 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 			}
 		} else {
 			metric.ENIIPFactoryIPAllocCount.WithLabelValues(e.MAC, metric.ENIIPAllocActionSucceed).Add(float64(toAllocate))
-			for _, ip := range ips {
+			for _, ip := range types.MergeIPs(v4, v6) {
 				resultChan <- &ENIIP{
 					ENIIP: &types.ENIIP{
 						ENI:   e.ENI,

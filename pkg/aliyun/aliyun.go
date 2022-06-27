@@ -76,10 +76,12 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 	}
 	defer func() {
 		if err != nil {
+			rollBackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 			eniDestroy := &types.ENI{
 				ID: resp.NetworkInterfaceId,
 			}
-			if err = e.destroyInterface(ctx, eniDestroy.ID, instanceID, ""); err != nil {
+			if err = e.destroyInterface(rollBackCtx, eniDestroy.ID, instanceID, ""); err != nil {
 				fmtErr := fmt.Sprintf("error rollback interface, may cause eni leak: %+v", err)
 				_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
 					tracing.AllocResourceFailed, fmtErr)
@@ -228,17 +230,16 @@ func (e *Impl) GetENIIPs(ctx context.Context, mac string) ([]net.IP, []net.IP, e
 	return ipv4, ipv6, nil
 }
 
-func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count int) (ipSet []types.IPSet, err error) {
+func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count int) ([]net.IP, []net.IP, error) {
 	if eniID == "" || mac == "" || count <= 0 {
-		return nil, fmt.Errorf("args error")
+		return nil, nil, fmt.Errorf("args error")
 	}
-
 	e.privateIPMutex.Lock()
 	defer e.privateIPMutex.Unlock()
 
 	var wg sync.WaitGroup
 	var ipv4s, ipv6s []net.IP
-	var v4Err, v6Err error
+	var err, v4Err, v6Err error
 
 	defer func() {
 		if err == nil {
@@ -249,7 +250,9 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 			tracing.AllocResourceFailed, fmtErr.Error())
 
 		// rollback ips
-		roleBackErr := e.unAssignIPsForENIUnSafe(ctx, eniID, mac, ipv4s, ipv6s)
+		rollBackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		roleBackErr := e.unAssignIPsForENIUnSafe(rollBackCtx, eniID, mac, ipv4s, ipv6s)
 		if roleBackErr != nil {
 			fmtErr = fmt.Errorf("roll back failed %s, %w", fmtErr, roleBackErr)
 			log.Error(fmtErr.Error())
@@ -271,10 +274,10 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 			return true, nil
 		})
 		if err != nil {
-			return
+			return nil, nil, err
 		}
 		if len(ipv4s) != count {
-			return nil, fmt.Errorf("openAPI return IP error.Want %d got %d", count, len(ipv4s))
+			return nil, nil, fmt.Errorf("openAPI return IP error.Want %d got %d", count, len(ipv4s))
 		}
 		wg.Add(1)
 		go func() {
@@ -307,10 +310,10 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 			return true, nil
 		})
 		if err != nil {
-			return
+			return nil, nil, err
 		}
 		if len(ipv6s) != count {
-			return nil, fmt.Errorf("openAPI return IP error.Want %d got %d", count, len(ipv6s))
+			return nil, nil, fmt.Errorf("openAPI return IP error.Want %d got %d", count, len(ipv6s))
 		}
 		wg.Add(1)
 		go func() {
@@ -331,7 +334,7 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 	}
 	wg.Wait()
 
-	return types.MergeIPs(ipv4s, ipv6s), k8sErr.NewAggregate([]error{v4Err, v6Err})
+	return ipv4s, ipv6s, k8sErr.NewAggregate([]error{v4Err, v6Err})
 }
 
 func (e *Impl) UnAssignIPsForENI(ctx context.Context, eniID, mac string, ipv4s []net.IP, ipv6s []net.IP) error {

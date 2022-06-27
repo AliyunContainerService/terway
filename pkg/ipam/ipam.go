@@ -17,7 +17,7 @@ type API interface {
 	GetENIByMac(ctx context.Context, mac string) (*types.ENI, error)
 	FreeENI(ctx context.Context, eniID string, instanceID string) error
 	GetENIIPs(ctx context.Context, mac string) ([]net.IP, []net.IP, error)
-	AssignNIPsForENI(ctx context.Context, eniID, mac string, count int) ([]types.IPSet, error)
+	AssignNIPsForENI(ctx context.Context, eniID, mac string, count int) ([]net.IP, []net.IP, error)
 	UnAssignIPsForENI(ctx context.Context, eniID, mac string, ipv4s []net.IP, ipv6s []net.IP) error
 	GetAttachedSecurityGroups(ctx context.Context, instanceID string) ([]string, error)
 	CheckEniSecurityGroup(ctx context.Context, sgIDs []string) error

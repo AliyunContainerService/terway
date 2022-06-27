@@ -24,7 +24,7 @@ func Test_10KPod(t *testing.T) {
 	ctx := context.Background()
 
 	_, _ = utils.K8sClient.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{"trunk": "trunk"}},
+		ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{"trunk": "trunk", "perf": "perf"}},
 	}, metav1.CreateOptions{})
 
 	pn := newPodNetworking("pn", nil, nil, nil,
@@ -75,9 +75,10 @@ func Test_10KPod(t *testing.T) {
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
 					{
-						Name:    "foo",
-						Image:   "registry.cn-hangzhou.aliyuncs.com/acs/pause:3.2",
-						Command: []string{"/pause"},
+						Name:            "foo",
+						Image:           "registry.cn-hangzhou.aliyuncs.com/acs/pause:3.2",
+						ImagePullPolicy: corev1.PullIfNotPresent,
+						Command:         []string{"/pause"},
 					},
 				},
 			},
