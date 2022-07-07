@@ -10,7 +10,7 @@ Terway的结构遵从业界的CNI设计方式，首先是标准的CNI接口，�
 
 在Kubernetes场景下使用，支持Network Policies，可以实现Pod之间的访问隔离。
 
-通过在Pod上声明`annotation:` `k8s.aliyun.com/ingress-bandwidth`和`k8s.aliyun.com/egress-bandwidth`可以限制Pod的入网和出网带宽。
+通过在Pod上声明`annotation:` `kubernetes.io/ingress-bandwidth`和`kubernetes.io/egress-bandwidth`可以限制Pod的入网和出网带宽。
 
 ## 架构设计与考虑
 

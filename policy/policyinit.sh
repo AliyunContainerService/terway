@@ -50,6 +50,10 @@ if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = 
 				echo "turning up in cluster loadbalance, passing args \"${extra_args}\""
 		fi
 
+		if bpftool -j feature probe | grep bpf_skb_ecn_set_ce ; then
+				extra_args="${extra_args} --enable-bandwidth-manager=true "
+		fi
+
     echo "using cilium as network routing & policy"
     # shellcheck disable=SC2086
     exec cilium-agent --tunnel=disabled --enable-ipv4-masquerade=false --enable-ipv6-masquerade=false \

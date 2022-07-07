@@ -300,6 +300,12 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 		ingress = alloc.GetPod().GetIngress()
 		egress = alloc.GetPod().GetEgress()
 	}
+	if conf.RuntimeConfig.Bandwidth.EgressRate > 0 {
+		egress = uint64(conf.RuntimeConfig.Bandwidth.EgressRate / 8)
+	}
+	if conf.RuntimeConfig.Bandwidth.IngressRate > 0 {
+		ingress = uint64(conf.RuntimeConfig.Bandwidth.IngressRate / 8)
+	}
 
 	hostStackCIDRs := make([]*net.IPNet, 0)
 	for _, v := range conf.HostStackCIDRs {
@@ -340,6 +346,7 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 		ENIGatewayIP:      eniGatewayIP,
 		ServiceCIDR:       serviceCIDR,
 		HostStackCIDRs:    hostStackCIDRs,
+		BandwidthMode:     conf.BandwidthMode,
 		Ingress:           ingress,
 		Egress:            egress,
 		StripVlan:         trunkENI,

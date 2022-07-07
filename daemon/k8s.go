@@ -420,8 +420,8 @@ const k8sKubeadmConfigmapNetworking = "MasterConfiguration"
 const k8sKubeadmConfigmapClusterconfiguration = "ClusterConfiguration"
 
 const podNeedEni = "k8s.aliyun.com/ENI"
-const podIngressBandwidth = "k8s.aliyun.com/ingress-bandwidth"
-const podEgressBandwidth = "k8s.aliyun.com/egress-bandwidth"
+const podIngressBandwidth = "k8s.aliyun.com/ingress-bandwidth" //deprecated
+const podEgressBandwidth = "k8s.aliyun.com/egress-bandwidth"   //deprecated
 
 const podWithEip = "k8s.aliyun.com/pod-with-eip"
 const eciWithEip = "k8s.aliyun.com/eci-with-eip" // to adopt ask annotation

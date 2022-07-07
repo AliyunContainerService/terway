@@ -227,7 +227,7 @@ Terway插件兼容标准的K8S中的NetworkPolicy来控制容器间的访问，�
 
 ### 限制容器的出入带宽
 
-Terway插件通过配置容器网卡上的限流规则来实现对容器的流量控制，避免由于单个容器的流量占满整个节点的流量，通过配置Pod上的`k8s.aliyun.com/ingress-bandwidth`和`k8s.aliyun.com/egress-bandwidth`分别来配置容器上的进入的和出去的带宽，例如：
+Terway插件通过配置容器网卡上的限流规则来实现对容器的流量控制，避免由于单个容器的流量占满整个节点的流量，通过配置Pod上的`kubernetes.io/ingress-bandwidth`和`kubernetes.io/egress-bandwidth`分别来配置容器上的进入的和出去的带宽，例如：
 
 ```yaml
 apiVersion: v1
@@ -235,8 +235,8 @@ kind: Pod
 metadata:
   name: nginx
   annotations:
-    k8s.aliyun.com/ingress-bandwidth: 1m
-    k8s.aliyun.com/egress-bandwidth: 1m
+    kubernetes.io/ingress-bandwidth: 10M
+    kubernetes.io/egress-bandwidth: 10M
 spec:
   nodeSelector:
     kubernetes.io/hostname: cn-shanghai.i-uf63p6s96kf4jfh8wpwn

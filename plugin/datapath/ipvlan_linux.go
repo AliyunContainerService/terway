@@ -279,7 +279,17 @@ func (d *IPvlanDriver) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 			return fmt.Errorf("error find link %s in container, %w", cfg.ContainerIfName, err)
 		}
 		contCfg := generateContCfgForIPVlan(cfg, contLink)
-		return nic.Setup(contLink, contCfg)
+		err = nic.Setup(contLink, contCfg)
+		if err != nil {
+			return err
+		}
+		if cfg.Egress == 0 && cfg.Ingress == 0 {
+			return nil
+		}
+		if cfg.BandwidthMode == "edt" {
+			return ensureFQ(contLink)
+		}
+		return utils.SetupTC(contLink, cfg.Egress)
 	})
 	if err != nil {
 		return fmt.Errorf("error set container link/address/route, %w", err)
@@ -686,4 +696,42 @@ func CheckIPVLanAvailable() (bool, error) {
 
 	return (major == ipVlanRequirementMajor && minor >= ipVlanRequirementMinor) ||
 		major > ipVlanRequirementMajor, nil
+}
+
+func ensureFQ(link netlink.Link) error {
+	fq := &netlink.GenericQdisc{
+		QdiscAttrs: netlink.QdiscAttrs{
+			LinkIndex: link.Attrs().Index,
+			Parent:    netlink.HANDLE_ROOT,
+			Handle:    netlink.MakeHandle(1, 0),
+		},
+		QdiscType: "fq",
+	}
+	qds, err := netlink.QdiscList(link)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, qd := range qds {
+		if qd.Attrs().LinkIndex != link.Attrs().Index {
+			continue
+		}
+		if qd.Attrs().LinkIndex != link.Attrs().Index {
+			continue
+		}
+		if qd.Type() != fq.Type() {
+			continue
+		}
+		if qd.Attrs().Parent != fq.Parent {
+			continue
+		}
+		if qd.Attrs().Handle != fq.Handle {
+			continue
+		}
+		found = true
+	}
+	if found {
+		return nil
+	}
+	return utils.QdiscReplace(fq)
 }
