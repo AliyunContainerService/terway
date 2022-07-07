@@ -1,31 +1,21 @@
-From edf6a59da851d1f9a9f2c0d630a1d5e7bd4ce3de Mon Sep 17 00:00:00 2001
+From 4601a35e878d142878a85ed60dea494b4b5dd0ab Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Tue, 21 Dec 2021 17:00:11 +0800
 Subject: [PATCH] performance improve
 
 ---
- daemon/daemon.go               |  7 ++-
- daemon/daemon_patch.go         | 84 ++++++++++++++++++++++++++++++++++
- fv/infrastructure/infra_k8s.go |  2 +-
- go.mod                         |  1 +
- go.sum                         |  6 +--
- k8sfv/pod.go                   |  2 +-
- 6 files changed, 94 insertions(+), 8 deletions(-)
- create mode 100644 daemon/daemon_patch.go
+ daemon/daemon.go               | 4 ++++
+ fv/infrastructure/infra_k8s.go | 2 +-
+ go.mod                         | 1 +
+ go.sum                         | 6 ++----
+ k8sfv/pod.go                   | 2 +-
+ 5 files changed, 9 insertions(+), 6 deletions(-)
 
 diff --git a/daemon/daemon.go b/daemon/daemon.go
-index 98488d56..7696fb94 100644
+index 98488d564..65fa6a3b1 100644
 --- a/daemon/daemon.go
 +++ b/daemon/daemon.go
-@@ -40,7 +40,6 @@ import (
- 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
- 	"github.com/projectcalico/libcalico-go/lib/backend/k8s"
- 	"github.com/projectcalico/libcalico-go/lib/backend/model"
--	"github.com/projectcalico/libcalico-go/lib/backend/syncersv1/felixsyncer"
- 	"github.com/projectcalico/libcalico-go/lib/backend/syncersv1/updateprocessors"
- 	"github.com/projectcalico/libcalico-go/lib/backend/watchersyncer"
- 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
-@@ -272,6 +271,7 @@ configRetry:
+@@ -272,6 +272,7 @@ configRetry:
  		// config.  We don't need to re-load the configuration _again_ because the
  		// calculation graph will spot if the config has changed since we were initialised.
  		datastoreConfig = configParams.DatastoreConfig()
@@ -33,7 +23,7 @@ index 98488d56..7696fb94 100644
  		backendClient, err = backend.NewClient(datastoreConfig)
  		if err != nil {
  			log.WithError(err).Error("Failed to (re)connect to datastore")
-@@ -295,6 +295,9 @@ configRetry:
+@@ -295,6 +296,9 @@ configRetry:
  				log.WithError(err).Info("Kubernetes in-cluster config not available. " +
  					"Assuming we're not in a Kubernetes deployment.")
  			} else {
@@ -43,107 +33,8 @@ index 98488d56..7696fb94 100644
  				k8sClientSet, err = kubernetes.NewForConfig(k8sconf)
  				if err != nil {
  					log.WithError(err).Error("Got in-cluster config but failed to create Kubernetes client.")
-@@ -470,7 +473,7 @@ configRetry:
- 		)
- 	} else {
- 		// Use the syncer locally.
--		syncer = felixsyncer.New(backendClient, datastoreConfig.Spec, syncerToValidator, configParams.IsLeader())
-+		syncer = New(backendClient, datastoreConfig.Spec, syncerToValidator, configParams.IsLeader())
-
- 		log.Info("using resource updates where applicable")
- 		configParams.SetUseNodeResourceUpdates(true)
-diff --git a/daemon/daemon_patch.go b/daemon/daemon_patch.go
-new file mode 100644
-index 00000000..b7222437
---- /dev/null
-+++ b/daemon/daemon_patch.go
-@@ -0,0 +1,84 @@
-+package daemon
-+
-+import (
-+	apiv3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
-+	"github.com/projectcalico/libcalico-go/lib/apiconfig"
-+	libapiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
-+	"github.com/projectcalico/libcalico-go/lib/backend/api"
-+	"github.com/projectcalico/libcalico-go/lib/backend/model"
-+	"github.com/projectcalico/libcalico-go/lib/backend/syncersv1/updateprocessors"
-+	"github.com/projectcalico/libcalico-go/lib/backend/watchersyncer"
-+)
-+
-+// New creates a new Felix v1 Syncer.
-+func New(client api.Client, cfg apiconfig.CalicoAPIConfigSpec, callbacks api.SyncerCallbacks, isLeader bool) api.Syncer {
-+	// Felix always needs ClusterInformation and FelixConfiguration resources.
-+	resourceTypes := []watchersyncer.ResourceType{
-+		{
-+			ListInterface:   model.ResourceListOptions{Kind: apiv3.KindClusterInformation},
-+			UpdateProcessor: updateprocessors.NewClusterInfoUpdateProcessor(),
-+		},
-+		{
-+			ListInterface:   model.ResourceListOptions{Kind: apiv3.KindFelixConfiguration},
-+			UpdateProcessor: updateprocessors.NewFelixConfigUpdateProcessor(),
-+		},
-+	}
-+
-+	if isLeader {
-+		// These resources are only required if this is the active Felix instance on the node.
-+		additionalTypes := []watchersyncer.ResourceType{
-+			{
-+				ListInterface:   model.ResourceListOptions{Kind: apiv3.KindGlobalNetworkPolicy},
-+				UpdateProcessor: updateprocessors.NewGlobalNetworkPolicyUpdateProcessor(),
-+			},
-+			{
-+				ListInterface:   model.ResourceListOptions{Kind: apiv3.KindGlobalNetworkSet},
-+				UpdateProcessor: updateprocessors.NewGlobalNetworkSetUpdateProcessor(),
-+			},
-+			{
-+				ListInterface:   model.ResourceListOptions{Kind: apiv3.KindIPPool},
-+				UpdateProcessor: updateprocessors.NewIPPoolUpdateProcessor(),
-+			},
-+			{
-+				ListInterface:   model.ResourceListOptions{Kind: libapiv3.KindNode},
-+				UpdateProcessor: updateprocessors.NewFelixNodeUpdateProcessor(cfg.K8sUsePodCIDR),
-+			},
-+			{
-+				ListInterface:   model.ResourceListOptions{Kind: apiv3.KindProfile},
-+				UpdateProcessor: updateprocessors.NewProfileUpdateProcessor(),
-+			},
-+			{
-+				ListInterface:   model.ResourceListOptions{Kind: libapiv3.KindWorkloadEndpoint},
-+				UpdateProcessor: updateprocessors.NewWorkloadEndpointUpdateProcessor(),
-+			},
-+			{
-+				ListInterface:   model.ResourceListOptions{Kind: apiv3.KindNetworkPolicy},
-+				UpdateProcessor: updateprocessors.NewNetworkPolicyUpdateProcessor(),
-+			},
-+			{
-+				ListInterface:   model.ResourceListOptions{Kind: apiv3.KindHostEndpoint},
-+				UpdateProcessor: updateprocessors.NewHostEndpointUpdateProcessor(),
-+			},
-+		}
-+
-+		// If running in kdd mode, also watch Kubernetes network policies directly.
-+		// We don't need this in etcd mode, since kube-controllers copies k8s policies into etcd.
-+		if cfg.DatastoreType == apiconfig.Kubernetes {
-+			additionalTypes = append(additionalTypes, watchersyncer.ResourceType{
-+				ListInterface:   model.ResourceListOptions{Kind: model.KindKubernetesNetworkPolicy},
-+				UpdateProcessor: updateprocessors.NewNetworkPolicyUpdateProcessor(),
-+			})
-+			additionalTypes = append(additionalTypes, watchersyncer.ResourceType{
-+				ListInterface: model.ResourceListOptions{Kind: model.KindKubernetesEndpointSlice},
-+			})
-+		}
-+
-+		resourceTypes = append(resourceTypes, additionalTypes...)
-+	}
-+
-+	return watchersyncer.New(
-+		client,
-+		resourceTypes,
-+		callbacks,
-+	)
-+}
 diff --git a/fv/infrastructure/infra_k8s.go b/fv/infrastructure/infra_k8s.go
-index 0d23b402..9864a771 100644
+index 0d23b4021..9864a7712 100644
 --- a/fv/infrastructure/infra_k8s.go
 +++ b/fv/infrastructure/infra_k8s.go
 @@ -856,7 +856,7 @@ func cleanupAllPods(clientset *kubernetes.Clientset, calicoClient client.Interfa
@@ -156,27 +47,27 @@ index 0d23b402..9864a771 100644
  				panic(err)
  			}
 diff --git a/go.mod b/go.mod
-index b2e9565c..8bb587e3 100644
+index b2e9565c2..e8fce439a 100644
 --- a/go.mod
 +++ b/go.mod
 @@ -48,6 +48,7 @@ require (
 
  replace (
  	github.com/Microsoft/hcsshim => github.com/projectcalico/hcsshim v0.8.9-calico
-+	github.com/projectcalico/libcalico-go => github.com/l1b0k/libcalico-go v1.7.2-0.20211231090758-8795a5789742
++	github.com/projectcalico/libcalico-go => github.com/l1b0k/libcalico-go v1.7.2-0.20220609085418-20ef8864cf82
  	github.com/sirupsen/logrus => github.com/projectcalico/logrus v0.0.0-20180701205716-fc9bbf2f5799
 
  	// Need replacements for all the k8s subsidiary projects that are pulled in indirectly because
 diff --git a/go.sum b/go.sum
-index 71eab3e3..5fa0857e 100644
+index 71eab3e3e..d420ac013 100644
 --- a/go.sum
 +++ b/go.sum
 @@ -454,6 +454,8 @@ github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
  github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
  github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
  github.com/kylelemons/godebug v0.0.0-20170820004349-d65d576e9348/go.mod h1:B69LEHPfb2qLo0BaaOLcbitczOKLWTsrBG9LczfCD4k=
-+github.com/l1b0k/libcalico-go v1.7.2-0.20211231090758-8795a5789742 h1:nkwFBr0jSJVDEsyzXj/IFOKnXT5wzMcArXoZ2WLSl2Y=
-+github.com/l1b0k/libcalico-go v1.7.2-0.20211231090758-8795a5789742/go.mod h1:I8icsAeLCqGTKwS13K9kE4X+NH4/GmjruZhaP4SBQ2g=
++github.com/l1b0k/libcalico-go v1.7.2-0.20220609085418-20ef8864cf82 h1:Gc+BDcWkurIbVhANa1WOj166OMgIwM5znAhvRQvqczw=
++github.com/l1b0k/libcalico-go v1.7.2-0.20220609085418-20ef8864cf82/go.mod h1:I8icsAeLCqGTKwS13K9kE4X+NH4/GmjruZhaP4SBQ2g=
  github.com/leodido/go-urn v0.0.0-20181204092800-a67a23e1c1af h1:EhEGUQX36JFkvSWzrwGjjTJxrx7atfJdxv8cxFzmaB0=
  github.com/leodido/go-urn v0.0.0-20181204092800-a67a23e1c1af/go.mod h1:+cyI34gQWZcE1eQU7NVgKkkzdXDQHr1dBMtdAPozLkw=
  github.com/libopenstorage/openstorage v1.0.0/go.mod h1:Sp1sIObHjat1BeXhfMqLZ14wnOzEhNx2YQedreMcUyc=
@@ -206,18 +97,18 @@ index 71eab3e3..5fa0857e 100644
  k8s.io/heapster v1.2.0-beta.1/go.mod h1:h1uhptVXMwC8xtZBYsPXKVi8fpdlYkTs6k949KozGrM=
  k8s.io/klog/v2 v2.0.0/go.mod h1:PBfzABfn139FHAV07az/IF9Wp1bkk3vpT2XSJ76fSDE=
 diff --git a/k8sfv/pod.go b/k8sfv/pod.go
-index 2a3bbb7a..9609f85a 100644
+index 2a3bbb7a1..9609f85ae 100644
 --- a/k8sfv/pod.go
 +++ b/k8sfv/pod.go
 @@ -235,7 +235,7 @@ func cleanupAllPods(clientset *kubernetes.Clientset, nsPrefix string) {
  			if strings.HasPrefix(nsName, nsPrefix) {
  				log.Infof("Namespace matches prefix, getting pods: %v", nsName)
- 
+
 -				podList, err := clientset.CoreV1().Pods(nsName).List(context.Background(), metav1.ListOptions{})
 +				podList, err := clientset.CoreV1().Pods(nsName).List(context.Background(), metav1.ListOptions{ResourceVersion: "0"})
  				panicIfError(err)
- 
+
  				log.WithField("count", len(podList.Items)).WithField("namespace", nsName).Debug(
--- 
-2.34.1
+--
+2.36.1
 
