@@ -38,20 +38,29 @@ if [ "$ENIIP_VIRTUAL_TYPE" = "ipvlan" ]; then
   # kernel version equal and above 4.19
   if { [ "$KERNEL_MAJOR_VERSION" -eq 4 ] && [ "$KERNEL_MINOR_VERSION" -ge 19 ]; } ||
      [ "$KERNEL_MAJOR_VERSION" -gt 4 ]; then
+
     echo "Init node BPF"
     init_node_bpf
     echo "Creating 10-terway.conflist"
-    jq '
-{
-  "cniVersion": "0.3.1",
-  "name": "terway-chainer",
-  "plugins": [
-      del(.name,.cniVersion),
-      {
-         "type": "cilium-cni"
-      }
-   ]
-}' < /etc/eni/10-terway.conf > /etc/cni/net.d/10-terway.conflist
+
+    BANDWIDTH_MODE=tc
+    if bpftool -j feature probe | grep bpf_skb_ecn_set_ce ; then
+      BANDWIDTH_MODE=edt
+    fi
+
+    jq --arg bandwidth_mode "$BANDWIDTH_MODE" '. |= . + {
+      "bandwidth_mode": $bandwidth_mode
+    }' < /etc/eni/10-terway.conf | jq '
+    {
+      "cniVersion": "0.3.1",
+      "name": "terway-chainer",
+      "plugins": [
+          del(.name,.cniVersion),
+          {
+             "type": "cilium-cni"
+          }
+       ]
+    }' > /etc/cni/net.d/10-terway.conflist
 
   rm -f /etc/cni/net.d/10-terway.conf || true
   else

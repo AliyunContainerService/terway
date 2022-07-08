@@ -33,6 +33,8 @@ type CNIConf struct {
 	// RuntimeConfig represents the options to be passed in by the runtime.
 	RuntimeConfig cni.RuntimeConfig `json:"runtimeConfig"`
 
+	BandwidthMode string `json:"bandwidth_mode"`
+
 	// Debug
 	Debug bool `json:"debug"`
 }
@@ -102,8 +104,9 @@ type SetupConfig struct {
 	// ipvlan
 	HostStackCIDRs []*net.IPNet
 
-	Ingress uint64
-	Egress  uint64
+	BandwidthMode string
+	Ingress       uint64
+	Egress        uint64
 
 	RuntimeConfig cni.RuntimeConfig
 

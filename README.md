@@ -246,8 +246,8 @@ kind: Pod
 metadata:
   name: nginx
   annotations:
-    k8s.aliyun.com/ingress-bandwidth: 1m
-    k8s.aliyun.com/egress-bandwidth: 1m
+    kubernetes.io/ingress-bandwidth: 10M
+    kubernetes.io/egress-bandwidth: 10M
 spec:
   nodeSelector:
     kubernetes.io/hostname: cn-shanghai.i-uf63p6s96kf4jfh8wpwn
