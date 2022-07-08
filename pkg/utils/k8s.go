@@ -4,9 +4,9 @@ import (
 	"time"
 
 	networkingclientset "github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned"
-	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -53,6 +53,14 @@ func IsDaemonSetPod(pod *corev1.Pod) bool {
 		if own.Kind == "DaemonSet" {
 			return true
 		}
+	}
+	return false
+}
+
+// ISVKNode node is run by virtual kubelet
+func ISVKNode(n *corev1.Node) bool {
+	if n.Labels["type"] == "virtual-kubelet" {
+		return true
 	}
 	return false
 }

@@ -33,6 +33,10 @@ const controllerName = "node"
 
 func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+		_, err := aliyun.GetLimit(ctrlCtx.AliyunClient, "")
+		if err != nil {
+			return err
+		}
 		c, err := controller.New(controllerName, mgr, controller.Options{
 			Reconciler:              NewReconcileNode(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool),
 			MaxConcurrentReconciles: ctrlCtx.Config.NodeMaxConcurrent,
@@ -47,6 +51,7 @@ func init() {
 			},
 			&handler.EnqueueRequestForObject{},
 			&predicate.ResourceVersionChangedPredicate{},
+			&predicateForNodeEvent{},
 		)
 	}, false)
 }
@@ -65,10 +70,6 @@ type ReconcileNode struct {
 }
 
 func NewReconcileNode(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool) *ReconcileNode {
-	_, err := aliyun.GetLimit(aliyunClient, "")
-	if err != nil {
-		panic(err)
-	}
 	r := &ReconcileNode{
 		client: mgr.GetClient(),
 		record: mgr.GetEventRecorderFor("Node"),
