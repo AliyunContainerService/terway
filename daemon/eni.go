@@ -79,8 +79,11 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 			memberLimit = limit.MaxMemberAdapterLimit
 		}
 	} else {
+		// NB(l1b0k): adapt DisableDevicePlugin func, will refactor latter
 		capacity = 1
 		memberLimit = 0
+		poolConfig.MaxPoolSize = 1
+		poolConfig.MinPoolSize = 0
 	}
 
 	var trunkENI *types.ENI
@@ -117,6 +120,7 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 					}
 					if eni.ID == factory.trunkOnEni {
 						trunkENI = eni
+						eni.Trunk = true
 					}
 				}
 				if factory.trunkOnEni == "" && len(enis) < memberLimit {
