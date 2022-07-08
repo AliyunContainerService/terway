@@ -148,13 +148,13 @@ func (m *ReconcilePod) Reconcile(ctx context.Context, request reconcile.Request)
 		}
 		return reconcile.Result{}, err
 	}
-	if utils.IsJobPod(pod) {
-		if utils.PodSandboxExited(pod) {
-			result, err := m.podDelete(ctx, request.NamespacedName)
-			m.recordPodDelete(pod, start, err)
-			return result, err
-		}
+
+	if utils.PodSandboxExited(pod) {
+		result, err := m.podDelete(ctx, request.NamespacedName)
+		m.recordPodDelete(pod, start, err)
+		return result, err
 	}
+
 	// for pod is deleting we will wait it terminated
 	if !pod.DeletionTimestamp.IsZero() {
 		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil

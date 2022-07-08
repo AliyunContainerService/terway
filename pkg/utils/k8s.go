@@ -57,16 +57,6 @@ func IsDaemonSetPod(pod *corev1.Pod) bool {
 	return false
 }
 
-// IsJobPod pod is create by Job
-func IsJobPod(pod *corev1.Pod) bool {
-	for _, own := range pod.GetObjectMeta().GetOwnerReferences() {
-		if own.Kind == "Job" {
-			return true
-		}
-	}
-	return false
-}
-
 // PodSandboxExited pod sandbox is exited
 func PodSandboxExited(p *corev1.Pod) bool {
 	switch p.Status.Phase {
