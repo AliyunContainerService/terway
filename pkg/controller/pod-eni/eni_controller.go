@@ -188,6 +188,9 @@ func (m *ReconcilePodENI) Reconcile(ctx context.Context, request reconcile.Reque
 }
 
 func (m *ReconcilePodENI) recordPodENIDeleteErr(podEni *v1beta1.PodENI, startTime time.Time, err error) {
+	if err == nil {
+		return
+	}
 	var pod = &corev1.Pod{}
 	if getErr := m.client.Get(context.Background(), k8stypes.NamespacedName{Namespace: podEni.Namespace, Name: podEni.Name}, pod); getErr != nil {
 		return
