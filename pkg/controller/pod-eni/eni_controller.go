@@ -812,7 +812,7 @@ func podRequirePodENI(pod *corev1.Pod) bool {
 	if !types.PodUseENI(pod) {
 		return false
 	}
-	if utils.IsJobPod(pod) && utils.PodSandboxExited(pod) {
+	if utils.PodSandboxExited(pod) {
 		return false
 	}
 	return true

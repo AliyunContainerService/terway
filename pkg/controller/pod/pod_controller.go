@@ -148,13 +148,13 @@ func (m *ReconcilePod) Reconcile(ctx context.Context, request reconcile.Request)
 		}
 		return reconcile.Result{}, err
 	}
-	if utils.IsJobPod(pod) {
-		if utils.PodSandboxExited(pod) {
-			result, err := m.podDelete(ctx, request.NamespacedName)
-			m.recordPodDelete(pod, start, err)
-			return result, err
-		}
+
+	if utils.PodSandboxExited(pod) {
+		result, err := m.podDelete(ctx, request.NamespacedName)
+		m.recordPodDelete(pod, start, err)
+		return result, err
 	}
+
 	// for pod is deleting we will wait it terminated
 	if !pod.DeletionTimestamp.IsZero() {
 		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
@@ -196,8 +196,21 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	}
 
 	// 2. cr is not found , so we will create new
-	l.Info("creating eni")
 
+	// ignore all create for eci pod
+	node, err := m.getNode(ctx, pod.Spec.NodeName)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("error get node %s, %w", node.Name, err)
+	}
+	if utils.ISVKNode(node) {
+		return reconcile.Result{}, nil
+	}
+	nodeInfo, allocType, allocs, err := m.parse(ctx, pod, node)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("error parse config, %w", err)
+	}
+
+	l.Info("creating eni")
 	podENI := &v1beta1.PodENI{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pod.Name,
@@ -211,10 +224,6 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		},
 	}
 
-	nodeInfo, allocType, allocs, err := m.parse(ctx, pod)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("error parse config, %w", err)
-	}
 	defer func() {
 		if err != nil {
 			l.Error(err, "error ,will roll back all created eni")
@@ -325,11 +334,7 @@ func (m *ReconcilePod) getNode(ctx context.Context, name string) (*corev1.Node, 
 	return node, err
 }
 
-func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod) (*common.NodeInfo, *v1beta1.AllocationType, []*v1beta1.Allocation, error) {
-	node, err := m.getNode(ctx, pod.Spec.NodeName)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error get node %s, %w", node.Name, err)
-	}
+func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.Node) (*common.NodeInfo, *v1beta1.AllocationType, []*v1beta1.Allocation, error) {
 	nodeInfo, err := common.NewNodeInfo(node)
 	if err != nil {
 		return nil, nil, nil, err
