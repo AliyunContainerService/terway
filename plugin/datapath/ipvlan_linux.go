@@ -262,6 +262,13 @@ func (d *IPvlanDriver) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 		return err
 	}
 
+	if cfg.EnableNetworkPriority {
+		err = utils.SetEgressPriority(parentLink, cfg.NetworkPriority, cfg.ContainerIPNet)
+		if err != nil {
+			return err
+		}
+	}
+
 	err = ipvlan.Setup(&ipvlan.IPVlan{
 		Parent:  parentLink.Attrs().Name,
 		PreName: cfg.HostVETHName,
@@ -306,6 +313,20 @@ func (d *IPvlanDriver) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
 	err := utils.DelLinkByName(cfg.HostVETHName)
 	if err != nil {
 		return err
+	}
+
+	if cfg.EnableNetworkPriority {
+		link, err := netlink.LinkByIndex(cfg.ENIIndex)
+		if err != nil {
+			if _, ok := err.(netlink.LinkNotFoundError); !ok {
+				return err
+			}
+		} else {
+			err = utils.DelEgressPriority(link, cfg.ContainerIPNet)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	// del route to container

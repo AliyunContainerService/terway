@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/link"
+	"github.com/AliyunContainerService/terway/plugin/datapath"
 	"github.com/AliyunContainerService/terway/plugin/driver/types"
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 	"github.com/AliyunContainerService/terway/rpc"
@@ -240,8 +241,9 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 		trunkENI       bool
 		vid            uint32
 
-		ingress uint64
-		egress  uint64
+		ingress         uint64
+		egress          uint64
+		networkPriority uint32
 
 		routes []cniTypes.Route
 
@@ -299,6 +301,7 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 	if alloc.GetPod() != nil {
 		ingress = alloc.GetPod().GetIngress()
 		egress = alloc.GetPod().GetEgress()
+		networkPriority = datapath.PrioMap[alloc.GetPod().GetNetworkPriority()]
 	}
 	if conf.RuntimeConfig.Bandwidth.EgressRate > 0 {
 		egress = uint64(conf.RuntimeConfig.Bandwidth.EgressRate / 8)
@@ -337,24 +340,26 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 
 	dp := getDatePath(ipType, conf.VlanStripType, trunkENI)
 	return &types.SetupConfig{
-		DP:                dp,
-		ContainerIfName:   name,
-		ContainerIPNet:    containerIPNet,
-		GatewayIP:         gatewayIP,
-		MTU:               conf.MTU,
-		ENIIndex:          int(deviceID),
-		ENIGatewayIP:      eniGatewayIP,
-		ServiceCIDR:       serviceCIDR,
-		HostStackCIDRs:    hostStackCIDRs,
-		BandwidthMode:     conf.BandwidthMode,
-		Ingress:           ingress,
-		Egress:            egress,
-		StripVlan:         trunkENI,
-		Vid:               int(vid),
-		DefaultRoute:      alloc.GetDefaultRoute(),
-		ExtraRoutes:       routes,
-		DisableCreatePeer: disableCreatePeer,
-		RuntimeConfig:     conf.RuntimeConfig,
+		DP:                    dp,
+		ContainerIfName:       name,
+		ContainerIPNet:        containerIPNet,
+		GatewayIP:             gatewayIP,
+		MTU:                   conf.MTU,
+		ENIIndex:              int(deviceID),
+		ENIGatewayIP:          eniGatewayIP,
+		ServiceCIDR:           serviceCIDR,
+		HostStackCIDRs:        hostStackCIDRs,
+		BandwidthMode:         conf.BandwidthMode,
+		EnableNetworkPriority: conf.EnableNetworkPriority,
+		Ingress:               ingress,
+		Egress:                egress,
+		StripVlan:             trunkENI,
+		Vid:                   int(vid),
+		DefaultRoute:          alloc.GetDefaultRoute(),
+		ExtraRoutes:           routes,
+		DisableCreatePeer:     disableCreatePeer,
+		RuntimeConfig:         conf.RuntimeConfig,
+		NetworkPriority:       networkPriority,
 	}, nil
 }
 
@@ -367,6 +372,7 @@ func parseTearDownConf(alloc *rpc.NetConf, conf *types.CNIConf, ipType rpc.IPTyp
 		err            error
 		containerIPNet *terwayTypes.IPNetSet
 		serviceCIDR    *terwayTypes.IPNetSet
+		eniIndex       int32
 	)
 
 	serviceCIDR, err = terwayTypes.ToIPNetSet(alloc.GetBasicInfo().GetServiceCIDR())
@@ -393,12 +399,20 @@ func parseTearDownConf(alloc *rpc.NetConf, conf *types.CNIConf, ipType rpc.IPTyp
 			return nil, err
 		}
 	}
+	if alloc.GetENIInfo() != nil {
+		mac := alloc.GetENIInfo().GetMAC()
+		if mac != "" {
+			eniIndex, _ = link.GetDeviceNumber(mac)
+		}
+	}
 
 	dp := getDatePath(ipType, conf.VlanStripType, false)
 	return &types.TeardownCfg{
-		DP:             dp,
-		ContainerIPNet: containerIPNet,
-		ServiceCIDR:    serviceCIDR,
+		DP:                    dp,
+		ContainerIPNet:        containerIPNet,
+		ServiceCIDR:           serviceCIDR,
+		ENIIndex:              int(eniIndex),
+		EnableNetworkPriority: conf.EnableNetworkPriority,
 	}, nil
 }
 

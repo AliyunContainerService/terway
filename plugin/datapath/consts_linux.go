@@ -2,6 +2,9 @@ package datapath
 
 import (
 	"net"
+
+	"github.com/AliyunContainerService/terway/types"
+	"github.com/vishvananda/netlink"
 )
 
 const (
@@ -24,3 +27,10 @@ var (
 		Mask: net.CIDRMask(128, 128),
 	}
 )
+
+var PrioMap = map[string]uint32{
+	string(types.NetworkPrioBestEffort): netlink.MakeHandle(1, 2), // band 1
+	string(types.NetworkPrioBurstable):  netlink.MakeHandle(1, 3), // band 2
+	string(types.NetworkPrioGuaranteed): netlink.MakeHandle(1, 1), // band 0
+	"":                                  netlink.MakeHandle(1, 2),
+}

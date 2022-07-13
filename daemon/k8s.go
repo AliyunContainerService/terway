@@ -563,6 +563,16 @@ func convertPod(daemonMode string, statefulWorkloadKindSet sets.String, pod *cor
 		}
 	}
 
+	if prio, ok := podAnnotation[types.NetworkPriority]; ok {
+		switch types.NetworkPrio(prio) {
+		case types.NetworkPrioBestEffort, types.NetworkPrioBurstable, types.NetworkPrioGuaranteed:
+			pi.NetworkPriority = prio
+		default:
+			_ = tracing.RecordPodEvent(pod.Name, pod.Namespace, eventTypeWarning,
+				"ParseFailed", fmt.Sprintf("Parse pod annotation %s failed.", types.NetworkPriority))
+		}
+	}
+
 	// determine whether pod's IP will stick 5 minutes for a reuse, priorities as below,
 	// 1. pod has a positive pod-ip-reservation annotation
 	// 2. pod is owned by a known stateful workload

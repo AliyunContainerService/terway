@@ -35,6 +35,9 @@ type CNIConf struct {
 
 	BandwidthMode string `json:"bandwidth_mode"`
 
+	// EnableNetworkPriority by enable priority control, eni qdisc is replaced with tc_prio
+	EnableNetworkPriority bool `json:"enable_network_priority"`
+
 	// Debug
 	Debug bool `json:"debug"`
 }
@@ -108,6 +111,9 @@ type SetupConfig struct {
 	Ingress       uint64
 	Egress        uint64
 
+	EnableNetworkPriority bool
+	NetworkPriority       uint32
+
 	RuntimeConfig cni.RuntimeConfig
 
 	// for windows
@@ -120,8 +126,12 @@ type TeardownCfg struct {
 
 	HostVETHName string
 
+	ENIIndex int
+
 	ContainerIfName string
 	ContainerIPNet  *terwayTypes.IPNetSet
 
 	ServiceCIDR *terwayTypes.IPNetSet
+
+	EnableNetworkPriority bool
 }
