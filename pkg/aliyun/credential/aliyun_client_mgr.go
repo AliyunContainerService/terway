@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,11 +30,15 @@ var (
 )
 
 func clientCfg() *sdk.Config {
+	scheme := "HTTPS"
+	if os.Getenv("ALICLOUD_CLIENT_SCHEME") == "HTTP" {
+		scheme = "HTTP"
+	}
 	return &sdk.Config{
 		Timeout:   20 * time.Second,
 		Transport: http.DefaultTransport,
 		UserAgent: kubernetesAlicloudIdentity,
-		Scheme:    "HTTPS",
+		Scheme:    scheme,
 	}
 }
 
@@ -60,6 +67,9 @@ type ClientMgr struct {
 
 	ecs *ecs.Client
 	vpc *vpc.Client
+
+	ecsDomainOverride string
+	vpcDomainOverride string
 }
 
 // NewClientMgr return new aliyun client manager
@@ -67,6 +77,17 @@ func NewClientMgr(key, secret, credentialPath, regionID, secretNamespace, secret
 	mgr := &ClientMgr{
 		regionID: regionID,
 	}
+
+	var err error
+	mgr.ecsDomainOverride, err = parseURL(os.Getenv("ECS_ENDPOINT"))
+	if err != nil {
+		return nil, err
+	}
+	mgr.vpcDomainOverride, err = parseURL(os.Getenv("VPC_ENDPOINT"))
+	if err != nil {
+		return nil, err
+	}
+
 	providers := []Interface{
 		NewAKPairProvider(key, secret),
 		NewEncryptedCredentialProvider(credentialPath, secretNamespace, secretName),
@@ -137,15 +158,37 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 		}
 		c.ecs.SetEndpointRules(c.ecs.EndpointMap, "regional", "vpc")
 
+		if c.ecsDomainOverride != "" {
+			c.ecs.Domain = c.ecsDomainOverride
+		}
+
 		c.vpc, err = vpc.NewClientWithOptions(c.regionID, clientCfg(), cc.Credential)
 		if err != nil {
 			return false, err
 		}
 		c.vpc.SetEndpointRules(c.vpc.EndpointMap, "regional", "vpc")
 
+		if c.vpcDomainOverride != "" {
+			c.vpc.Domain = c.vpcDomainOverride
+		}
+
 		c.expireAt = cc.Expiration
 		return true, nil
 	}
 
 	return false, nil
+}
+
+func parseURL(str string) (string, error) {
+	if str == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(str, "http") {
+		str = "http://" + str
+	}
+	u, err := url.Parse(str)
+	if err != nil {
+		return "", err
+	}
+	return u.Host, nil
 }
