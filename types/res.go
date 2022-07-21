@@ -22,18 +22,19 @@ type PodEipInfo struct {
 // NOTE: this is the type store in db
 type PodInfo struct {
 	//K8sPod *v1.Pod
-	Name           string
-	Namespace      string
-	TcIngress      uint64
-	TcEgress       uint64
-	PodNetworkType string
-	PodIP          string // used for eip and mip
-	PodIPs         IPSet  // used for eip and mip
-	SandboxExited  bool
-	EipInfo        PodEipInfo
-	IPStickTime    time.Duration
-	PodENI         bool
-	PodUID         string
+	Name            string
+	Namespace       string
+	TcIngress       uint64
+	TcEgress        uint64
+	PodNetworkType  string
+	PodIP           string // used for eip and mip
+	PodIPs          IPSet  // used for eip and mip
+	SandboxExited   bool
+	EipInfo         PodEipInfo
+	IPStickTime     time.Duration
+	PodENI          bool
+	PodUID          string
+	NetworkPriority string
 }
 
 // ExtraEipInfo store extra eip info

@@ -480,6 +480,203 @@ func EnsureClsActQdsic(link netlink.Link) error {
 	return nil
 }
 
+// EnsurePrioQdiscAt10 write qdisc  attach under mq
+func EnsurePrioQdiscAt10(link netlink.Link) error {
+	qds, err := netlink.QdiscList(link)
+	if err != nil {
+		return fmt.Errorf("list qdisc for dev %s error, %w", link.Attrs().Name, err)
+	}
+	for _, q := range qds {
+		// only handle qd under mq at 1:
+		major, minor := netlink.MajorMinor(q.Attrs().Parent)
+		if major != 1 || minor == 0 {
+			continue
+		}
+
+		_, ok := q.(*netlink.Prio)
+		if !ok {
+			err = QdiscReplace(netlink.NewPrio(netlink.QdiscAttrs{
+				LinkIndex: link.Attrs().Index,
+				Parent:    q.Attrs().Parent,
+			}))
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// EnsureMQQdisc write qdisc
+func EnsureMQQdisc(link netlink.Link) error {
+	qds, err := netlink.QdiscList(link)
+	if err != nil {
+		return fmt.Errorf("list qdisc for dev %s error, %w", link.Attrs().Name, err)
+	}
+	var prev netlink.Qdisc
+	for _, q := range qds {
+		_, minor := netlink.MajorMinor(q.Attrs().Handle)
+		if q.Attrs().Parent == netlink.HANDLE_ROOT && minor == 0 {
+			prev = q
+		}
+
+		if q.Type() == "mq" && q.Attrs().Parent == netlink.HANDLE_ROOT && q.Attrs().Handle == netlink.MakeHandle(1, 0) {
+			return nil
+		}
+	}
+	if prev != nil {
+		_ = QdiscDel(prev)
+	}
+
+	return QdiscReplace(&netlink.GenericQdisc{
+		QdiscAttrs: netlink.QdiscAttrs{
+			LinkIndex: link.Attrs().Index,
+			Parent:    netlink.HANDLE_ROOT,
+			Handle:    netlink.MakeHandle(1, 0),
+		},
+		QdiscType: "mq",
+	})
+}
+
+func FilterAdd(filter *netlink.U32) error {
+	cmd := fmt.Sprintf("tc filter add %s", filter.String())
+	Log.Info(cmd)
+	err := netlink.FilterAdd(filter)
+	if err != nil {
+		return fmt.Errorf("error %s, %w", cmd, err)
+	}
+	return nil
+}
+
+func FilterDel(filter *netlink.U32) error {
+	cmd := fmt.Sprintf("tc filter del %s", filter.String())
+	Log.Info(cmd)
+	err := netlink.FilterDel(filter)
+	if err != nil {
+		return fmt.Errorf("error %s, %w", cmd, err)
+	}
+	return nil
+}
+
+// SetFilter write u32 filter
+func SetFilter(link netlink.Link, parentID, classID uint32, ipNetSet *terwayTypes.IPNetSet) error {
+	exec := func(ipNet *net.IPNet) error {
+		found, err := tc.FilterBySrcIP(link, parentID, ipNet)
+		if err != nil {
+			return err
+		}
+		if found != nil && found.ClassId == classID {
+			return nil
+		}
+
+		u32 := &netlink.U32{
+			FilterAttrs: netlink.FilterAttrs{
+				LinkIndex: link.Attrs().Index,
+				Parent:    parentID,
+				Priority:  1,
+				Protocol:  unix.ETH_P_IP,
+			},
+			ClassId: classID,
+		}
+		tc.MatchSrc(u32, ipNet)
+
+		return FilterAdd(u32)
+	}
+
+	if ipNetSet.IPv4 != nil {
+		err := exec(NewIPNetWithMaxMask(ipNetSet.IPv4))
+		if err != nil {
+			return err
+		}
+	}
+	if ipNetSet.IPv6 != nil {
+		err := exec(NewIPNetWithMaxMask(ipNetSet.IPv6))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DelFilter del u32 filter by pod ip
+func DelFilter(link netlink.Link, parentID uint32, ipNetSet *terwayTypes.IPNetSet) error {
+	exec := func(ipNet *net.IPNet) error {
+		found, err := tc.FilterBySrcIP(link, parentID, ipNet)
+		if err != nil {
+			return err
+		}
+		if found == nil {
+			return nil
+		}
+		err = FilterDel(found)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if ipNetSet.IPv4 != nil {
+		err := exec(NewIPNetWithMaxMask(ipNetSet.IPv4))
+		if err != nil {
+			return err
+		}
+	}
+	if ipNetSet.IPv6 != nil {
+		err := exec(NewIPNetWithMaxMask(ipNetSet.IPv6))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// SetEgressPriority write egress priority rule for pod
+func SetEgressPriority(link netlink.Link, classID uint32, ipNetSet *terwayTypes.IPNetSet) error {
+	err := EnsureMQQdisc(link)
+	if err != nil {
+		return err
+	}
+	err = EnsurePrioQdiscAt10(link)
+	if err != nil {
+		return err
+	}
+	qds, err := netlink.QdiscList(link)
+	if err != nil {
+		return fmt.Errorf("list qdisc for dev %s error, %w", link.Attrs().Name, err)
+	}
+	for _, q := range qds {
+		_, ok := q.(*netlink.Prio)
+		if !ok {
+			continue
+		}
+
+		err = SetFilter(link, q.Attrs().Handle, classID, ipNetSet)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func DelEgressPriority(link netlink.Link, ipNetSet *terwayTypes.IPNetSet) error {
+	qds, err := netlink.QdiscList(link)
+	if err != nil {
+		return err
+	}
+	for _, q := range qds {
+		_, ok := q.(*netlink.Prio)
+		if !ok {
+			continue
+		}
+		err = DelFilter(link, q.Attrs().Handle, ipNetSet)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func SetupTC(link netlink.Link, bandwidthInBytes uint64) error {
 	rule := &tc.TrafficShapingRule{
 		Rate: bandwidthInBytes,

@@ -345,6 +345,14 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	if err != nil {
 		return err
 	}
+
+	if cfg.EnableNetworkPriority {
+		err = utils.SetEgressPriority(eni, cfg.NetworkPriority, cfg.ContainerIPNet)
+		if err != nil {
+			return err
+		}
+	}
+
 	table := utils.GetRouteTableID(eni.Attrs().Index)
 
 	eniCfg := generateENICfgForPolicy(cfg, eni, table)
@@ -389,4 +397,19 @@ func (d *PolicyRoute) Check(cfg *types.CheckConfig) error {
 		return nil
 	})
 	return err
+}
+
+func (d *PolicyRoute) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
+	if !cfg.EnableNetworkPriority {
+		return nil
+	}
+
+	link, err := netlink.LinkByIndex(cfg.ENIIndex)
+	if err != nil {
+		if _, ok := err.(netlink.LinkNotFoundError); !ok {
+			return err
+		}
+		return nil
+	}
+	return utils.DelEgressPriority(link, cfg.ContainerIPNet)
 }

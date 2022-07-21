@@ -180,10 +180,19 @@ func LinkSetNsFd(link netlink.Link, netNS ns.NetNS) error {
 	return nil
 }
 
-func QdiscReplace(qdisc *netlink.GenericQdisc) error {
-	cmd := fmt.Sprintf("tc qdisc replace  %s", qdisc.String())
+func QdiscReplace(qdisc netlink.Qdisc) error {
+	cmd := fmt.Sprintf("tc qdisc replace %s", qdisc.Attrs().String())
 	Log.Infof(cmd)
 	err := netlink.QdiscReplace(qdisc)
+	if err != nil {
+		return fmt.Errorf("error %s, %w", cmd, err)
+	}
+	return nil
+}
+func QdiscDel(qdisc netlink.Qdisc) error {
+	cmd := fmt.Sprintf("tc qdisc del %s", qdisc.Attrs().String())
+	Log.Infof(cmd)
+	err := netlink.QdiscDel(qdisc)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
 	}
