@@ -107,6 +107,10 @@ func ParseAndValidate() (*Config, error) {
 		}
 	}
 
+	if c.RegisterEndpoint {
+		c.Controllers = append(c.Controllers, "endpoint")
+	}
+
 	err = validator.New().Struct(&c)
 	if err != nil {
 		return nil, err
