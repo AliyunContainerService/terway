@@ -37,6 +37,7 @@ type Config struct {
 	WebhookPort        int    `json:"webhookPort" validate:"gt=0,lte=65535" mod:"default=4443"`
 	CertDir            string `json:"certDir" validate:"required" mod:"default=/var/run/webhook-cert"`
 	LeaderElection     bool   `json:"leaderElection"`
+	RegisterEndpoint   bool   `json:"registerEndpoint"` //deprecated
 
 	NodeMaxConcurrent   int `json:"nodeMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
 	PodMaxConcurrent    int `json:"podMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
