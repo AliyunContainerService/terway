@@ -1,7 +1,7 @@
-From c2e3084fe5ca96e6df5be2c63acdd82b1ed99197 Mon Sep 17 00:00:00 2001
+From b9fe625770502e5192ad050e6db05c55712570d0 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Thu, 10 Jun 2021 19:20:58 +0800
-Subject: [PATCH 5/5] adapt 1.10 for terway
+Subject: [PATCH 5/8] adapt 1.10 for terway
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
@@ -9,15 +9,15 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  1 file changed, 10 insertions(+), 10 deletions(-)
 
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index c619a9f599..036987a559 100644
+index e18af26c48..ca69edd2a5 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
-@@ -2675,16 +2675,16 @@ func (c *DaemonConfig) Populate() {
+@@ -3155,16 +3155,16 @@ func (c *DaemonConfig) Populate() {
  		}
  	}
  
 -	switch c.IPAM {
--	case ipamOption.IPAMKubernetes, ipamOption.IPAMClusterPool:
+-	case ipamOption.IPAMKubernetes, ipamOption.IPAMClusterPool, ipamOption.IPAMClusterPoolV2:
 -		if c.EnableIPv4 {
 -			c.K8sRequireIPv4PodCIDR = true
 -		}
@@ -27,7 +27,7 @@ index c619a9f599..036987a559 100644
 -		}
 -	}
 +	//switch c.IPAM {
-+	//case ipamOption.IPAMKubernetes, ipamOption.IPAMClusterPool:
++	//case ipamOption.IPAMKubernetes, ipamOption.IPAMClusterPool, ipamOption.IPAMClusterPoolV2:
 +	//	if c.EnableIPv4 {
 +	//		c.K8sRequireIPv4PodCIDR = true
 +	//	}
@@ -40,5 +40,5 @@ index c619a9f599..036987a559 100644
  	c.KubeProxyReplacementHealthzBindAddr = viper.GetString(KubeProxyReplacementHealthzBindAddr)
  
 -- 
-2.32.0
+2.36.1
 

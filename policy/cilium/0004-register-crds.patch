@@ -1,7 +1,7 @@
-From 0e365b4c2787e641b2a25f129875e8c1a6202be1 Mon Sep 17 00:00:00 2001
+From 4ab1d5b39d52ea2f2df2bc06318135e21a4d2195 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Thu, 10 Jun 2021 10:55:49 +0800
-Subject: [PATCH 4/5] register crds
+Subject: [PATCH 4/8] register crds
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
@@ -9,18 +9,18 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  1 file changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 52a19868c3..3adb75d764 100644
+index 6974b55ee2..58bb8d4c84 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
-@@ -52,6 +52,7 @@ import (
+@@ -51,6 +51,7 @@ import (
  	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
  	"github.com/cilium/cilium/pkg/ipmasq"
  	"github.com/cilium/cilium/pkg/k8s"
 +	"github.com/cilium/cilium/pkg/k8s/apis/cilium.io/client"
  	ciliumcs "github.com/cilium/cilium/pkg/k8s/client/clientset/versioned"
- 	"github.com/cilium/cilium/pkg/k8s/watchers"
+ 	"github.com/cilium/cilium/pkg/k8s/watchers/resources"
  	"github.com/cilium/cilium/pkg/kvstore"
-@@ -1564,6 +1565,14 @@ func runDaemon() {
+@@ -1666,6 +1667,14 @@ func runDaemon() {
  		bootstrapStats.k8sInit.End(true)
  	}
  
@@ -35,7 +35,7 @@ index 52a19868c3..3adb75d764 100644
  	ctx, cancel := context.WithCancel(server.ServerCtx)
  	d, restoredEndpoints, err := NewDaemon(ctx, cancel,
  		WithDefaultEndpointManager(ctx, endpoint.CheckHealth),
-@@ -1577,9 +1586,6 @@ func runDaemon() {
+@@ -1679,9 +1688,6 @@ func runDaemon() {
  		}
  		return
  	}
@@ -46,5 +46,5 @@ index 52a19868c3..3adb75d764 100644
  	// This validation needs to be done outside of the agent until
  	// datapath.NodeAddressing is used consistently across the code base.
 -- 
-2.32.0
+2.36.1
 

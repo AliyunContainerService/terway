@@ -1,7 +1,7 @@
-From 7115da2ae662be190f37f3f42a57df209bbcddc6 Mon Sep 17 00:00:00 2001
+From b8c7f26cb87e6a21957c679447d852482588f3e9 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Wed, 9 Jun 2021 16:32:33 +0800
-Subject: [PATCH 3/5] period gc cilium identity
+Subject: [PATCH 3/8] period gc cilium identity
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
@@ -14,27 +14,27 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  create mode 100644 vendor/k8s.io/apimachinery/pkg/util/uuid/uuid.go
 
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index ee513ba736..52a19868c3 100644
+index 14daa753ef..6974b55ee2 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
-@@ -52,6 +52,7 @@ import (
+@@ -20,6 +20,8 @@ import (
+ 	"github.com/spf13/cobra"
+ 	"github.com/spf13/viper"
+ 	"google.golang.org/grpc"
++	"k8s.io/client-go/kubernetes"
++	"k8s.io/client-go/tools/clientcmd"
+ 
+ 	"github.com/cilium/cilium/api/v1/server"
+ 	"github.com/cilium/cilium/api/v1/server/restapi"
+@@ -49,6 +51,7 @@ import (
  	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
  	"github.com/cilium/cilium/pkg/ipmasq"
  	"github.com/cilium/cilium/pkg/k8s"
 +	ciliumcs "github.com/cilium/cilium/pkg/k8s/client/clientset/versioned"
- 	"github.com/cilium/cilium/pkg/k8s/watchers"
+ 	"github.com/cilium/cilium/pkg/k8s/watchers/resources"
  	"github.com/cilium/cilium/pkg/kvstore"
  	"github.com/cilium/cilium/pkg/labels"
-@@ -85,6 +86,8 @@ import (
- 	"github.com/spf13/viper"
- 	"github.com/vishvananda/netlink"
- 	"google.golang.org/grpc"
-+	"k8s.io/client-go/kubernetes"
-+	"k8s.io/client-go/tools/clientcmd"
- )
- 
- const (
-@@ -1574,6 +1577,9 @@ func runDaemon() {
+@@ -1676,6 +1679,9 @@ func runDaemon() {
  		}
  		return
  	}
@@ -240,10 +240,10 @@ index 0000000000..1fa351aab6
 +	return types.UID(uuid.New().String())
 +}
 diff --git a/vendor/modules.txt b/vendor/modules.txt
-index 0f801cda27..57e4188442 100644
+index 38c2e22c60..2a981b1888 100644
 --- a/vendor/modules.txt
 +++ b/vendor/modules.txt
-@@ -1058,6 +1058,7 @@ k8s.io/apimachinery/pkg/util/net
+@@ -1255,6 +1255,7 @@ k8s.io/apimachinery/pkg/util/net
  k8s.io/apimachinery/pkg/util/runtime
  k8s.io/apimachinery/pkg/util/sets
  k8s.io/apimachinery/pkg/util/strategicpatch
@@ -252,5 +252,5 @@ index 0f801cda27..57e4188442 100644
  k8s.io/apimachinery/pkg/util/validation/field
  k8s.io/apimachinery/pkg/util/wait
 -- 
-2.32.0
+2.36.1
 
