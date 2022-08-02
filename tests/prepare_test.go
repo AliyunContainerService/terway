@@ -33,7 +33,7 @@ var backoff = wait.Backoff{
 	Duration: 2 * time.Second,
 	Factor:   1,
 	Jitter:   0,
-	Steps:    60,
+	Steps:    150,
 }
 
 func EnsureNamespace(ctx context.Context, cs kubernetes.Interface, name string) error {
@@ -186,7 +186,7 @@ func EnsureDeployment(ctx context.Context, cs kubernetes.Interface, cfg PodResCo
 					},
 					Tolerations: []corev1.Toleration{
 						{
-							Key: "kubernetes.io/arch",
+							Key:   "kubernetes.io/arch",
 							Value: "arm64",
 						},
 					},
@@ -275,7 +275,7 @@ func EnsureStatefulSet(ctx context.Context, cs kubernetes.Interface, cfg PodResC
 					},
 					Tolerations: []corev1.Toleration{
 						{
-							Key: "kubernetes.io/arch",
+							Key:   "kubernetes.io/arch",
 							Value: "arm64",
 						},
 					},
