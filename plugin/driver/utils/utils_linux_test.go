@@ -3,7 +3,6 @@
 package utils
 
 import (
-	"fmt"
 	"net"
 	"runtime"
 	"testing"
@@ -16,7 +15,16 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
+	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
 )
+
+func TestCNI(t *testing.T) {
+	RegisterFailHandler(Fail)
+
+	RunSpecsWithDefaultAndCustomReporters(t,
+		"Controller Suite",
+		[]Reporter{printer.NewlineReporter{}})
+}
 
 func TestEnsureVlanUntagger(t *testing.T) {
 	runtime.LockOSThread()
@@ -70,7 +78,6 @@ var _ = Describe("Test TC filter", func() {
 
 		err = hostNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
-			fmt.Printf("LinkAdd ---------- \n")
 			return netlink.LinkAdd(&netlink.GenericLink{
 				LinkAttrs: netlink.LinkAttrs{
 					Name:        nicName,
@@ -78,7 +85,7 @@ var _ = Describe("Test TC filter", func() {
 					NumTxQueues: 2,
 					NumRxQueues: 2,
 				},
-				LinkType: "netdevsim",
+				LinkType: "veth",
 			})
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -167,6 +174,122 @@ var _ = Describe("Test TC filter", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(u32v6).NotTo(BeNil(), "tc filter with src ipv6 should be found")
 			}
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+	It("add vlan tag", func() {
+		var err error
+		err = hostNS.Do(func(netNS ns.NetNS) error {
+			defer GinkgoRecover()
+			eni, err := netlink.LinkByName(nicName)
+			Expect(err).NotTo(HaveOccurred())
+
+			Context("add new ip", func() {
+				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
+					IPv4: &net.IPNet{
+						IP:   net.ParseIP("192.168.1.1"),
+						Mask: net.CIDRMask(32, 32),
+					},
+					IPv6: &net.IPNet{
+						IP:   net.ParseIP("fd00::1"),
+						Mask: net.CIDRMask(128, 128),
+					},
+				}, 1023)
+				Expect(err).NotTo(HaveOccurred())
+
+				filters, err := netlink.FilterList(eni, netlink.HANDLE_MIN_EGRESS)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(len(filters)).Should(Equal(2))
+			})
+
+			Context("re-add same ip shoud succeed", func() {
+				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
+					IPv4: &net.IPNet{
+						IP:   net.ParseIP("192.168.1.1"),
+						Mask: net.CIDRMask(32, 32),
+					},
+					IPv6: &net.IPNet{
+						IP:   net.ParseIP("fd00::1"),
+						Mask: net.CIDRMask(128, 128),
+					},
+				}, 1023)
+				Expect(err).NotTo(HaveOccurred())
+
+				filters, err := netlink.FilterList(eni, netlink.HANDLE_MIN_EGRESS)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(len(filters)).Should(Equal(2))
+			})
+
+			Context("add new rule should success", func() {
+				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
+					IPv4: &net.IPNet{
+						IP:   net.ParseIP("192.168.1.2"),
+						Mask: net.CIDRMask(32, 32),
+					},
+					IPv6: &net.IPNet{
+						IP:   net.ParseIP("fd00::2"),
+						Mask: net.CIDRMask(128, 128),
+					},
+				}, 1022)
+				Expect(err).NotTo(HaveOccurred())
+
+				filters, err := netlink.FilterList(eni, netlink.HANDLE_MIN_EGRESS)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(len(filters)).Should(Equal(4))
+			})
+
+			Context("delete filter should clean up", func() {
+				err = DelFilter(eni, netlink.HANDLE_MIN_EGRESS, &terwayTypes.IPNetSet{
+					IPv4: &net.IPNet{
+						IP:   net.ParseIP("192.168.1.2"),
+						Mask: net.CIDRMask(32, 32),
+					},
+					IPv6: &net.IPNet{
+						IP:   net.ParseIP("fd00::2"),
+						Mask: net.CIDRMask(128, 128),
+					},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				filters, err := netlink.FilterList(eni, netlink.HANDLE_MIN_EGRESS)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(len(filters)).Should(Equal(2))
+			})
+
+			Context("add same ip vid should be updated", func() {
+				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
+					IPv4: &net.IPNet{
+						IP:   net.ParseIP("192.168.1.1"),
+						Mask: net.CIDRMask(32, 32),
+					},
+					IPv6: &net.IPNet{
+						IP:   net.ParseIP("fd00::1"),
+						Mask: net.CIDRMask(128, 128),
+					},
+				}, 4000)
+				Expect(err).NotTo(HaveOccurred())
+
+				filters, err := netlink.FilterList(eni, netlink.HANDLE_MIN_EGRESS)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(len(filters)).Should(Equal(2))
+
+				for _, filter := range filters {
+					u32 := filter.(*netlink.U32)
+					Expect(len(u32.Actions)).Should(Equal(1))
+
+					act := u32.Actions[0].(*netlink.VlanAction)
+
+					Expect(act.Attrs().Action).Should(Equal(netlink.TC_ACT_PIPE))
+					Expect(act.Action).Should(Equal(netlink.TCA_VLAN_KEY_PUSH))
+					Expect(act.Vid).Should(Equal(uint16(4000)))
+				}
+			})
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())

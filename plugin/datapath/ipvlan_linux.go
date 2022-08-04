@@ -269,6 +269,13 @@ func (d *IPvlanDriver) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 		}
 	}
 
+	if cfg.StripVlan {
+		err = utils.EnsureVlanTag(parentLink, cfg.ContainerIPNet, uint16(cfg.Vid))
+		if err != nil {
+			return err
+		}
+	}
+
 	err = ipvlan.Setup(&ipvlan.IPVlan{
 		Parent:  parentLink.Attrs().Name,
 		PreName: cfg.HostVETHName,
@@ -327,6 +334,20 @@ func (d *IPvlanDriver) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
 				return err
 			}
 		}
+	}
+
+	err = func() error {
+		link, err := netlink.LinkByIndex(cfg.ENIIndex)
+		if err != nil {
+			if _, ok := err.(netlink.LinkNotFoundError); !ok {
+				return err
+			}
+			return nil
+		}
+		return utils.DelFilter(link, netlink.HANDLE_MIN_EGRESS, cfg.ContainerIPNet)
+	}()
+	if err != nil {
+		return err
 	}
 
 	// del route to container

@@ -426,6 +426,7 @@ func EnsureVlanUntagger(link netlink.Link) error {
 			}
 		}
 	}
+
 	vlanAct := netlink.NewVlanKeyAction()
 	vlanAct.Action = netlink.TCA_VLAN_KEY_POP
 	u32 := &netlink.U32{
@@ -453,6 +454,77 @@ func EnsureVlanUntagger(link netlink.Link) error {
 		return fmt.Errorf("error add filter for vlan untag, %w", err)
 	}
 	return nil
+}
+
+// EnsureVlanTag use tc-vlan set vlan tag
+func EnsureVlanTag(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, vid uint16) error {
+	err := EnsureClsActQdsic(link)
+	if err != nil {
+		return fmt.Errorf("error ensure cls act qdisc for %s vlan tag, %w", link.Attrs().Name, err)
+	}
+
+	filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+	if err != nil {
+		return fmt.Errorf("list ingress filter for %s error, %w", link.Attrs().Name, err)
+	}
+
+	exec := func(ipNet *net.IPNet) error {
+		vlanAct := netlink.NewVlanKeyAction()
+		vlanAct.Attrs().Action = netlink.TC_ACT_PIPE
+		vlanAct.Action = netlink.TCA_VLAN_KEY_PUSH
+		vlanAct.Vid = vid
+		expect := &netlink.U32{
+			FilterAttrs: netlink.FilterAttrs{
+				LinkIndex: link.Attrs().Index,
+				Parent:    netlink.HANDLE_MIN_EGRESS,
+				Priority:  20001,
+				Protocol:  uint16(unix.ETH_P_IP),
+			},
+			Actions: []netlink.Action{vlanAct},
+		}
+		tc.MatchSrc(expect, ipNet)
+
+		for _, filter := range filters {
+			u32, ok := filter.(*netlink.U32)
+			if !ok {
+				continue
+			}
+			if u32.Attrs().LinkIndex != link.Attrs().Index || u32.Attrs().Protocol != unix.ETH_P_IP || len(u32.Actions) == 0 || u32.Sel == nil {
+				continue
+			}
+			act, ok := u32.Actions[0].(*netlink.VlanAction)
+			if !ok {
+				continue
+			}
+			if act.Action != netlink.TCA_VLAN_KEY_PUSH || act.Attrs().Action != netlink.TC_ACT_PIPE {
+				continue
+			}
+			if !tc.Contain(u32.Sel.Keys, expect.Sel.Keys) {
+				continue
+			}
+			if act.Vid != vid {
+				err = FilterDel(u32)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			return nil
+		}
+
+		return FilterAdd(expect)
+	}
+
+	if ipNetSet.IPv4 != nil {
+		err = exec(NewIPNetWithMaxMask(ipNetSet.IPv4))
+		if err != nil {
+			return err
+		}
+	}
+	if ipNetSet.IPv6 != nil {
+		err = exec(NewIPNetWithMaxMask(ipNetSet.IPv6))
+	}
+	return err
 }
 
 func EnsureClsActQdsic(link netlink.Link) error {
