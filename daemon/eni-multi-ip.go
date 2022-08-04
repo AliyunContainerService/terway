@@ -859,7 +859,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 		ipResultChan: make(chan *ENIIP, maxIPBacklog),
 		ipFamily:     ipFamily,
 	}
-	var capacity, maxEni, memberENIPod, memberLimit int
+	var capacity, maxEni, memberENIPod, adapters int
 
 	if !poolConfig.DisableDevicePlugin {
 		limit, err := aliyun.GetLimit(ecs, aliyun.GetInstanceMeta().InstanceType)
@@ -910,12 +910,12 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 			poolConfig.MaxPoolSize = poolConfig.MinPoolSize
 		}
 
-		memberLimit = limit.MemberAdapterLimit
+		adapters = limit.Adapters
 	} else {
 		capacity = 1
 		maxEni = 1
 		memberENIPod = 0
-		memberLimit = 0
+		adapters = 0
 	}
 
 	if poolConfig.WaitTrunkENI {
@@ -954,7 +954,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 						trunkENI = eni
 					}
 				}
-				if factory.trunkOnEni == "" && len(enis) < memberLimit {
+				if factory.trunkOnEni == "" && len(enis) < adapters {
 					trunkENIRes, err := factory.eniFactory.CreateWithIPCount(1, true)
 					if err != nil {
 						return errors.Wrapf(err, "error init trunk eni")
