@@ -114,3 +114,21 @@ func U32IPv6Src(ipNet *net.IPNet) []netlink.TcU32Key {
 	}
 	return r
 }
+
+func Contain(keys []netlink.TcU32Key, subKeys []netlink.TcU32Key) bool {
+	for _, subKey := range subKeys {
+		found := false
+
+		for _, key := range keys {
+			if key.Off != subKey.Off || key.Val != subKey.Val || key.Mask != subKey.Mask {
+				continue
+			}
+			found = true
+			break
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}

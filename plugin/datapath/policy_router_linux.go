@@ -361,6 +361,13 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 		return fmt.Errorf("setup eni config, %w", err)
 	}
 
+	if cfg.StripVlan {
+		err = utils.EnsureVlanTag(eni, cfg.ContainerIPNet, uint16(cfg.Vid))
+		if err != nil {
+			return err
+		}
+	}
+
 	hostVETHCfg := generateHostPeerCfgForPolicy(cfg, hostVETH, table)
 	err = nic.Setup(hostVETH, hostVETHCfg)
 	if err != nil {
@@ -411,5 +418,19 @@ func (d *PolicyRoute) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
 		}
 		return nil
 	}
+	err = func() error {
+		link, err := netlink.LinkByIndex(cfg.ENIIndex)
+		if err != nil {
+			if _, ok := err.(netlink.LinkNotFoundError); !ok {
+				return err
+			}
+			return nil
+		}
+		return utils.DelFilter(link, netlink.HANDLE_MIN_EGRESS, cfg.ContainerIPNet)
+	}()
+	if err != nil {
+		return err
+	}
+
 	return utils.DelEgressPriority(link, cfg.ContainerIPNet)
 }
