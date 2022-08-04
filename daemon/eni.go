@@ -123,7 +123,7 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 						eni.Trunk = true
 					}
 				}
-				if factory.trunkOnEni == "" && len(enis) < memberLimit {
+				if factory.trunkOnEni == "" && len(enis) < capacity {
 					trunkENIRes, err := factory.CreateWithIPCount(1, true)
 					if err != nil {
 						return errors.Wrapf(err, "error init trunk eni")
