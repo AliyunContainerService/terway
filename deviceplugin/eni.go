@@ -297,9 +297,9 @@ func (m *ENIDevicePlugin) Serve() error {
 	)
 	if err != nil {
 		log.Errorf("Could not register device plugin: %v", err)
-		err := m.Stop()
-		if err != nil {
-			log.Errorf("stop current device plugin server with error: %v", err)
+		stopErr := m.Stop()
+		if stopErr != nil {
+			log.Errorf("stop current device plugin server with error: %v", stopErr)
 		}
 		return err
 	}
