@@ -8,7 +8,7 @@ FROM --platform=$TARGETPLATFORM ${CILIUM_LLVM_IMAGE} as llvm-dist
 FROM --platform=$TARGETPLATFORM ${CILIUM_BPFTOOL_IMAGE} as bpftool-dist
 FROM --platform=$TARGETPLATFORM ${CILIUM_IPROUTE2_IMAGE} as iproute2-dist
 
-FROM --platform=$TARGETPLATFORM golang:1.18.0 as builder
+FROM --platform=$TARGETPLATFORM golang:1.18.5 as builder
 ARG GOPROXY
 ENV GOPROXY $GOPROXY
 WORKDIR /go/src/github.com/AliyunContainerService/terway/
