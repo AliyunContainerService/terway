@@ -295,15 +295,20 @@ func setResourceRequest(pod *corev1.Pod, resName string, count int) {
 		return
 	}
 	// we only patch one container for res request
-	if pod.Spec.Containers[0].Resources.Requests == nil {
-		pod.Spec.Containers[0].Resources.Requests = make(corev1.ResourceList)
-	}
-	if pod.Spec.Containers[0].Resources.Limits == nil {
-		pod.Spec.Containers[0].Resources.Limits = make(corev1.ResourceList)
+	index := selectContainer(pod)
+	if index < 0 {
+		return
 	}
 
-	pod.Spec.Containers[0].Resources.Requests[corev1.ResourceName(resName)] = resource.MustParse(strconv.Itoa(count))
-	pod.Spec.Containers[0].Resources.Limits[corev1.ResourceName(resName)] = resource.MustParse(strconv.Itoa(count))
+	if pod.Spec.Containers[index].Resources.Requests == nil {
+		pod.Spec.Containers[index].Resources.Requests = make(corev1.ResourceList)
+	}
+	if pod.Spec.Containers[index].Resources.Limits == nil {
+		pod.Spec.Containers[index].Resources.Limits = make(corev1.ResourceList)
+	}
+
+	pod.Spec.Containers[index].Resources.Requests[corev1.ResourceName(resName)] = resource.MustParse(strconv.Itoa(count))
+	pod.Spec.Containers[index].Resources.Limits[corev1.ResourceName(resName)] = resource.MustParse(strconv.Itoa(count))
 }
 
 func setNodeAffinityByZones(pod *corev1.Pod, zones []string) {
