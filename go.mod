@@ -22,7 +22,7 @@ require (
 	github.com/prometheus/client_golang v1.13.0
 	github.com/pterm/pterm v0.12.41
 	github.com/sirupsen/logrus v1.8.1
-	github.com/spf13/cobra v1.2.1
+	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.7.1
 	github.com/vishvananda/netlink v1.1.1-0.20210510164352-d17758a128bf
 	golang.org/x/net v0.0.0-20220225172249-27dd8689420f
