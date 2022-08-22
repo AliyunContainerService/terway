@@ -12,7 +12,7 @@ require (
 	github.com/containernetworking/plugins v0.9.1
 	github.com/denverdino/aliyungo v0.0.0-20201215054313-f635de23c5e0
 	github.com/docker/docker v20.10.6+incompatible
-	github.com/evanphx/json-patch v4.12.0+incompatible
+	github.com/evanphx/json-patch v5.6.0+incompatible
 	github.com/go-playground/mold/v4 v4.2.0
 	github.com/go-playground/validator/v10 v10.10.1
 	github.com/google/uuid v1.2.0
