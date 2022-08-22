@@ -3,7 +3,7 @@ module github.com/AliyunContainerService/terway
 go 1.18
 
 require (
-	github.com/Microsoft/go-winio v0.4.17
+	github.com/Microsoft/go-winio v0.5.2
 	github.com/Microsoft/hcsshim v0.9.3
 	github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
 	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1383
