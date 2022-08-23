@@ -45,6 +45,7 @@ func (s *ConnectionTestSuite) SetupSuite() {
 	s.PodNetworkingClientSet, _ = versioned.NewForConfig(s.RestConf)
 
 	ctx := context.Background()
+	s.T().Logf("test image: %v", image)
 	s.T().Logf("test namespace: %s", testNamespace)
 	s.T().Logf("enable trunk: %v", enableTrunk)
 	s.T().Logf("enable policy: %v", enablePolicy)

@@ -149,7 +149,7 @@ func EnsureDeployment(ctx context.Context, cs kubernetes.Interface, cfg PodResCo
 					Containers: []corev1.Container{
 						{
 							Name:  "echo",
-							Image: "l1b0k/echo",
+							Image: image,
 							Args: []string{"--http-bind-address", fmt.Sprintf(":%d", httpTestPort),
 								"--https-bind-address", fmt.Sprintf(":%d", httpsTestPort)},
 							ImagePullPolicy: corev1.PullAlways,
@@ -238,7 +238,7 @@ func EnsureStatefulSet(ctx context.Context, cs kubernetes.Interface, cfg PodResC
 					Containers: []corev1.Container{
 						{
 							Name:  "echo",
-							Image: "l1b0k/echo",
+							Image: image,
 							Args: []string{"--http-bind-address", fmt.Sprintf(":%d", httpTestPort),
 								"--https-bind-address", fmt.Sprintf(":%d", httpsTestPort)},
 							ImagePullPolicy: corev1.PullAlways,

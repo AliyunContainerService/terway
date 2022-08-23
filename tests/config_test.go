@@ -14,6 +14,7 @@ import (
 
 var enableTrunk bool
 var enablePolicy bool
+var image string
 var testNamespace = "network-test-" + strconv.FormatInt(time.Now().Unix(), 10)
 var httpTestPort = 81
 var httpsTestPort = 444
@@ -21,6 +22,7 @@ var httpsTestPort = 444
 func init() {
 	flag.BoolVar(&enableTrunk, "trunk", false, "install trunk policy")
 	flag.BoolVar(&enablePolicy, "policy", false, "install network policy")
+	flag.StringVar(&image, "image", "l1b0k/echo", "custom test image")
 }
 
 type ResConfig struct {
