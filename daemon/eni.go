@@ -111,7 +111,7 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 				return fmt.Errorf("error get attach ENI on pool init, %w", err)
 			}
 
-			if factory.enableTrunk {
+			if factory.enableTrunk && memberLimit > 0 {
 				logger.DefaultLogger.Infof("lookup trunk eni")
 				for _, eni := range enis {
 					if eni.Trunk {
