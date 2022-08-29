@@ -14,7 +14,7 @@ require (
 	github.com/docker/docker v20.10.6+incompatible
 	github.com/evanphx/json-patch v5.6.0+incompatible
 	github.com/go-playground/mold/v4 v4.2.0
-	github.com/go-playground/validator/v10 v10.10.1
+	github.com/go-playground/validator/v10 v10.11.0
 	github.com/google/uuid v1.2.0
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.17.0
