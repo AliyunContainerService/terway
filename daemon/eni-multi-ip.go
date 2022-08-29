@@ -945,7 +945,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 				return fmt.Errorf("error get attach ENI on pool init, %w", err)
 			}
 
-			if factory.enableTrunk {
+			if factory.enableTrunk && memberENIPod > 0 {
 				for _, eni := range enis {
 					if eni.Trunk {
 						factory.trunkOnEni = eni.ID
