@@ -1,7 +1,7 @@
-ARG TERWAY_POLICY_IMAGE=registry.cn-hongkong.aliyuncs.com/acs/terway:policy-20220713-5a8380f@sha256:ff96f47d90f99640bf7df263f31394a0601cb1203219c73e20d0868cb55bbc8f
-ARG CILIUM_LLVM_IMAGE=quay.io/cilium/cilium-llvm:0147a23fdada32bd51b4f313c645bcb5fbe188d6@sha256:24fd3ad32471d0e45844c856c38f1b2d4ac8bd0a2d4edf64cffaaa3fd0b21202
-ARG CILIUM_BPFTOOL_IMAGE=quay.io/cilium/cilium-bpftool:b5ba881d2a7ec68d88ecd72efd60ac551c720701@sha256:458282e59657b8f779d52ae2be2cdbeecfe68c3d807ff87c97c8d5c6f97820a9
-ARG CILIUM_IPROUTE2_IMAGE=quay.io/cilium/cilium-iproute2:4db2c4bdf00ce461406e1c82aada461356fac935@sha256:e4c9ba92996a07964c1b7cd97c4aac950754ec75d7ac8c626a99c79acd0479ab
+ARG TERWAY_POLICY_IMAGE=registry.cn-hongkong.aliyuncs.com/acs/terway:policy-20220829-6424432@sha256:a3426a17a1d3369a64ea35d7bb5f802ab979539ef9d088e13d615483ccb40dca
+ARG CILIUM_LLVM_IMAGE=quay.io/cilium/cilium-llvm:547db7ec9a750b8f888a506709adb41f135b952e@sha256:4d6fa0aede3556c5fb5a9c71bc6b9585475ac9b1064f516d4c45c8fb691c9d9e
+ARG CILIUM_BPFTOOL_IMAGE=quay.io/cilium/cilium-bpftool:78448c1a37ff2b790d5e25c3d8b8ec3e96e6405f@sha256:99a9453a921a8de99899ef82e0822f0c03f65d97005c064e231c06247ad8597d
+ARG CILIUM_IPROUTE2_IMAGE=quay.io/cilium/cilium-iproute2:3570d58349efb2d6b0342369a836998c93afd291@sha256:1abcd7a5d2117190ab2690a163ee9cd135bc9e4cf8a4df662a8f993044c79342
 
 FROM --platform=$TARGETPLATFORM ${TERWAY_POLICY_IMAGE} as policy-dist
 FROM --platform=$TARGETPLATFORM ${CILIUM_LLVM_IMAGE} as llvm-dist
@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y kmod libelf1 libmnl0 iptables nftables 
 COPY --from=llvm-dist /usr/local/bin/clang /usr/local/bin/llc /bin/
 COPY --from=bpftool-dist /usr/local /usr/local
 COPY --from=iproute2-dist /usr/local /usr/local
+COPY --from=iproute2-dist /usr/lib/libbpf* /usr/lib/
 COPY --from=policy-dist /bin/calico-felix /bin/calico-felix
 COPY policy/policyinit.sh /bin/
 COPY policy/uninstall_policy.sh /bin/
