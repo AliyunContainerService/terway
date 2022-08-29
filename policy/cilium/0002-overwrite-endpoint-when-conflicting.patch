@@ -1,7 +1,7 @@
-From 11a7b39c2e846d8c330a54309a696796079cb033 Mon Sep 17 00:00:00 2001
+From ce55da63ec42e5ecb61786d5167fee1f186d458f Mon Sep 17 00:00:00 2001
 From: Lyt99 <lyt1999131@163.com>
 Date: Wed, 9 Jun 2021 16:29:32 +0800
-Subject: [PATCH 2/5] overwrite endpoint when conflicting
+Subject: [PATCH 2/8] overwrite endpoint when conflicting
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
@@ -9,10 +9,10 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/daemon/cmd/endpoint.go b/daemon/cmd/endpoint.go
-index 63792669ad..b354bce04a 100644
+index 7fce43739a..57776f0f1d 100644
 --- a/daemon/cmd/endpoint.go
 +++ b/daemon/cmd/endpoint.go
-@@ -366,7 +366,9 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
+@@ -355,7 +355,9 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
  		if err != nil {
  			return invalidDataError(ep, err)
  		} else if oldEp != nil {
@@ -24,5 +24,5 @@ index 63792669ad..b354bce04a 100644
  	}
  
 -- 
-2.32.0
+2.36.1
 

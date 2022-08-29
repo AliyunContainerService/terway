@@ -1,7 +1,7 @@
-From 3a1075b1a9e638602538b2fc28a55ac9de50c64d Mon Sep 17 00:00:00 2001
+From 42d5f2b921d770b56abdd4675758b5744087e783 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Thu, 9 Dec 2021 10:39:49 +0800
-Subject: [PATCH] add flag to control in cluster loadBalance
+Subject: [PATCH 6/8] add flag to control in cluster loadBalance
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
@@ -11,64 +11,64 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  3 files changed, 11 insertions(+), 1 deletion(-)
 
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 44018edc81..9052d3d3a2 100644
+index 58bb8d4c84..b7a1db0087 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
-@@ -384,6 +384,9 @@ func init() {
+@@ -393,6 +393,9 @@ func initializeFlags() {
  	flags.Bool(option.EnableExternalIPs, defaults.EnableExternalIPs, fmt.Sprintf("Enable k8s service externalIPs feature (requires enabling %s)", option.EnableNodePort))
  	option.BindEnv(option.EnableExternalIPs)
-
+ 
 +	flags.Bool(option.EnableInClusterLoadBalance, false, "Enable k8s in cluster loadbalance")
 +	option.BindEnv(option.EnableInClusterLoadBalance)
 +
  	flags.Bool(option.K8sEnableEndpointSlice, defaults.K8sEnableEndpointSlice, "Enables k8s EndpointSlice feature in Cilium if the k8s cluster supports it")
  	option.BindEnv(option.K8sEnableEndpointSlice)
-
+ 
 diff --git a/pkg/k8s/service.go b/pkg/k8s/service.go
-index 98ec6cfe90..24455adc07 100644
+index bbd35f3365..a055344850 100644
 --- a/pkg/k8s/service.go
 +++ b/pkg/k8s/service.go
-@@ -439,7 +439,7 @@ func NewService(ips []net.IP, externalIPs, loadBalancerIPs, loadBalancerSourceRa
- 		loadBalancerSourceCIDRs[cidr.String()] = cidr
- 	}
-
+@@ -471,7 +471,7 @@ func NewService(ips []net.IP, externalIPs, loadBalancerIPs, loadBalancerSourceRa
+ 	// By omitting these IPs in the returned Service object, they
+ 	// are no longer considered in equality checks and thus save
+ 	// CPU cycles processing events Cilium will not act upon.
 -	if option.Config.EnableNodePort {
 +	if option.Config.EnableNodePort || option.Config.EnableInClusterLoadBalance {
  		k8sExternalIPs = parseIPs(externalIPs)
  		k8sLoadBalancerIPs = parseIPs(loadBalancerIPs)
- 	}
+ 	} else if option.Config.BGPAnnounceLBIP {
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 01f62d6e39..21cfd25acc 100644
+index ca69edd2a5..0df3422dac 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
-@@ -242,6 +242,9 @@ const (
+@@ -244,6 +244,9 @@ const (
  	// EnableNodePort enables NodePort services implemented by Cilium in BPF
  	EnableNodePort = "enable-node-port"
-
+ 
 +	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
 +	EnableInClusterLoadBalance = "enable-in-cluster-loadbalance"
 +
  	// EnableSVCSourceRangeCheck enables check of service source range checks
  	EnableSVCSourceRangeCheck = "enable-svc-source-range-check"
-
-@@ -1644,6 +1647,9 @@ type DaemonConfig struct {
+ 
+@@ -1823,6 +1826,9 @@ type DaemonConfig struct {
  	// EnableNodePort enables k8s NodePort service implementation in BPF
  	EnableNodePort bool
-
+ 
 +	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
 +	EnableInClusterLoadBalance bool
 +
  	// EnableSVCSourceRangeCheck enables check of loadBalancerSourceRanges
  	EnableSVCSourceRangeCheck bool
-
-@@ -2399,6 +2405,7 @@ func (c *DaemonConfig) Populate() {
- 	c.EnableL7Proxy = viper.GetBool(EnableL7Proxy)
+ 
+@@ -2796,6 +2802,7 @@ func (c *DaemonConfig) Populate() {
  	c.EnableTracing = viper.GetBool(EnableTracing)
+ 	c.EnableUnreachableRoutes = viper.GetBool(EnableUnreachableRoutes)
  	c.EnableNodePort = viper.GetBool(EnableNodePort)
 +	c.EnableInClusterLoadBalance = viper.GetBool(EnableInClusterLoadBalance)
  	c.EnableSVCSourceRangeCheck = viper.GetBool(EnableSVCSourceRangeCheck)
  	c.EnableHostPort = viper.GetBool(EnableHostPort)
  	c.EnableHostLegacyRouting = viper.GetBool(EnableHostLegacyRouting)
---
-2.33.1
+-- 
+2.36.1
 
