@@ -620,8 +620,8 @@ func FilterAdd(filter *netlink.U32) error {
 	return nil
 }
 
-func FilterDel(filter *netlink.U32) error {
-	cmd := fmt.Sprintf("tc filter del %s", filter.String())
+func FilterDel(filter netlink.Filter) error {
+	cmd := fmt.Sprintf("tc filter del %s", filter.Attrs().String())
 	Log.Info(cmd)
 	err := netlink.FilterDel(filter)
 	if err != nil {
