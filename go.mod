@@ -14,20 +14,20 @@ require (
 	github.com/docker/docker v20.10.6+incompatible
 	github.com/evanphx/json-patch v5.6.0+incompatible
 	github.com/go-playground/mold/v4 v4.2.0
-	github.com/go-playground/validator/v10 v10.10.1
+	github.com/go-playground/validator/v10 v10.11.0
 	github.com/google/uuid v1.2.0
 	github.com/onsi/ginkgo v1.16.5
-	github.com/onsi/gomega v1.17.0
+	github.com/onsi/gomega v1.20.1
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.13.0
 	github.com/pterm/pterm v0.12.41
-	github.com/sirupsen/logrus v1.8.1
+	github.com/sirupsen/logrus v1.9.0
 	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.7.1
 	github.com/vishvananda/netlink v1.1.1-0.20210510164352-d17758a128bf
-	golang.org/x/net v0.0.0-20220225172249-27dd8689420f
+	golang.org/x/net v0.0.0-20220425223048-2871e0cb64e4
 	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f
-	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a
+	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8
 	gomodules.xyz/jsonpatch/v2 v2.2.0
 	google.golang.org/grpc v1.40.0
 	google.golang.org/protobuf v1.28.1
