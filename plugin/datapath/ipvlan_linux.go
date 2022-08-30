@@ -475,7 +475,10 @@ func (d *IPvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIn
 		if matchAny {
 			continue
 		}
-		if err := netlink.FilterDel(filter); err != nil {
+		if filter.Attrs() != nil && filter.Attrs().Priority != 4000 {
+			continue
+		}
+		if err := utils.FilterDel(filter); err != nil {
 			return fmt.Errorf("delete filter of %s error, %w", link.Attrs().Name, err)
 		}
 	}
@@ -484,7 +487,7 @@ func (d *IPvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIn
 		if !in {
 			u32 := rule.toU32Filter()
 			u32.Parent = parent
-			if err := netlink.FilterAdd(u32); err != nil {
+			if err := utils.FilterAdd(u32); err != nil {
 				return fmt.Errorf("add filter for %s error, %w", link.Attrs().Name, err)
 			}
 		}
