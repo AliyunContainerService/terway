@@ -246,7 +246,7 @@ func (k *k8s) WaitTrunkReady() (string, error) {
 }
 
 // newK8S return Kubernetes service by pod spec and daemon mode
-func newK8S(master, kubeconfig string, daemonMode string) (Kubernetes, error) {
+func newK8S(master, kubeconfig string, daemonMode string, globalConfig *types.Configure) (Kubernetes, error) {
 
 	k8sRestConfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
 	if err != nil {
@@ -260,6 +260,10 @@ func newK8S(master, kubeconfig string, daemonMode string) (Kubernetes, error) {
 	k8sRestConfig.Dial = t.DialContext
 	k8sRestConfig.AcceptContentTypes = strings.Join([]string{runtime.ContentTypeProtobuf, runtime.ContentTypeJSON}, ",")
 	k8sRestConfig.ContentType = runtime.ContentTypeProtobuf
+
+	k8sRestConfig.QPS = globalConfig.KubeClientQPS
+	k8sRestConfig.Burst = globalConfig.KubeClientBurst
+
 	client, err := kubernetes.NewForConfig(k8sRestConfig)
 	if err != nil {
 		return nil, err

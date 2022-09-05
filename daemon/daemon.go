@@ -100,7 +100,7 @@ func (n *networkService) getResourceManagerForRes(resType string) ResourceManage
 	return n.mgrForResource[resType]
 }
 
-//return resource relation in db, or return nil.
+// return resource relation in db, or return nil.
 func (n *networkService) getPodResource(info *types.PodInfo) (types.PodResources, error) {
 	obj, err := n.resourceDB.Get(podInfoKey(info.Namespace, info.Name))
 	if err == nil {
@@ -1293,7 +1293,12 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 
 	var err error
 
-	netSrv.k8s, err = newK8S(master, kubeconfig, daemonMode)
+	globalConfig, err := types.GetConfigFromFileWithMerge(configFilePath, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	netSrv.k8s, err = newK8S(master, kubeconfig, daemonMode, globalConfig)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error init k8s service")
 	}
@@ -1534,7 +1539,7 @@ func restoreLocalENIRes(ecs ipam.API, k8s Kubernetes, resourceDB storage.Storage
 	return nil
 }
 
-//setup default value
+// setup default value
 func setDefault(cfg *types.Configure) error {
 	if cfg.EniCapRatio == 0 {
 		cfg.EniCapRatio = 1
