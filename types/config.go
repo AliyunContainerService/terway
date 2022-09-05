@@ -42,6 +42,8 @@ type Configure struct {
 	DisableDevicePlugin         bool                    `json:"disable_device_plugin"`
 	WaitTrunkENI                bool                    `json:"wait_trunk_eni"` // true for don't create trunk eni
 	DisableSecurityGroupCheck   bool                    `json:"disable_security_group_check"`
+	KubeClientQPS               float32                 `json:"kube_client_qps"`
+	KubeClientBurst             int                     `json:"kube_client_burst"`
 }
 
 func (c *Configure) GetSecurityGroups() []string {

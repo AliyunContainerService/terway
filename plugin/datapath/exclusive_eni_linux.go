@@ -346,6 +346,13 @@ func (r *ExclusiveENI) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 			return err
 		}
 
+		if cfg.Egress > 0 {
+			err = utils.SetupTC(contLink, cfg.Egress)
+			if err != nil {
+				return err
+			}
+		}
+
 		// for now we only create slave link for eth0
 		if !cfg.DisableCreatePeer && cfg.ContainerIfName == "eth0" {
 			err = veth.Setup(&veth.Veth{
