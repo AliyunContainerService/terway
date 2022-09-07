@@ -58,10 +58,6 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 		return nil, fmt.Errorf("invalid eni args for allocate")
 	}
 
-	var instanceType client.ENIType
-	if trunk {
-		instanceType = client.ENITypeTrunk
-	}
 	ipv4Count, ipv6Count := 0, 0
 	if e.ipFamily.IPv4 {
 		ipv4Count = ipCount
@@ -70,7 +66,7 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 		ipv6Count = ipCount
 	}
 
-	resp, err := e.CreateNetworkInterface(ctx, instanceType, vSwitch, securityGroups, ipv4Count, ipv6Count, eniTags)
+	resp, err := e.CreateNetworkInterface(ctx, trunk, vSwitch, securityGroups, ipv4Count, ipv6Count, eniTags)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +75,7 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 			rollBackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			eniDestroy := &types.ENI{
-				ID: resp.NetworkInterfaceId,
+				ID: resp.NetworkInterfaceID,
 			}
 			if err = e.destroyInterface(rollBackCtx, eniDestroy.ID, instanceID, ""); err != nil {
 				fmtErr := fmt.Sprintf("error rollback interface, may cause eni leak: %+v", err)
@@ -92,7 +88,7 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 
 	var innerErr error
 	err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.WaitENIStatus), func() (bool, error) {
-		innerErr = e.AttachNetworkInterface(ctx, resp.NetworkInterfaceId, instanceID, "")
+		innerErr = e.AttachNetworkInterface(ctx, resp.NetworkInterfaceID, instanceID, "")
 		if innerErr != nil {
 			return false, nil
 		}
@@ -105,12 +101,12 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 		return nil, fmt.Errorf("%s, %w", fmtErr, err)
 	}
 
-	logrus.Debugf("wait network interface attach: %v, %v, %v", resp.NetworkInterfaceId, resp.RequestId, instanceID)
+	logrus.Debugf("wait network interface attach: %v, %v", resp.NetworkInterfaceID, instanceID)
 
 	start := time.Now()
 	// bind status is async api, sleep for first bind status inspect
 	time.Sleep(backoff.Backoff(backoff.WaitENIStatus).Duration)
-	eniStatus, err := e.WaitForNetworkInterface(ctx, resp.NetworkInterfaceId, client.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
+	eniStatus, err := e.WaitForNetworkInterface(ctx, resp.NetworkInterfaceID, client.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
 	metric.OpenAPILatency.WithLabelValues("WaitForNetworkInterfaceBind/"+string(client.ENIStatusInUse), fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 	if err != nil {
@@ -122,11 +118,11 @@ func (e *Impl) AllocateENI(ctx context.Context, vSwitch string, securityGroups [
 	err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.WaitENIStatus),
 		func() (done bool, err error) {
 			eni, innerErr = e.metadata.GetENIByMac(eniStatus.MacAddress)
-			if innerErr != nil || eni.ID != resp.NetworkInterfaceId {
+			if innerErr != nil || eni.ID != resp.NetworkInterfaceID {
 				logrus.Warnf("error get eni config by mac: %v, retrying...", innerErr)
 				return false, nil
 			}
-			eni.Trunk = client.ENIType(eniStatus.Type) == client.ENITypeTrunk
+			eni.Trunk = eniStatus.Type == client.ENITypeTrunk
 			return true, nil
 		},
 	)
@@ -199,7 +195,7 @@ func (e *Impl) GetAttachedENIs(ctx context.Context, containsMainENI bool) ([]*ty
 			return nil, err
 		}
 		for _, eni := range eniSet {
-			enisMap[eni.NetworkInterfaceId].Trunk = client.ENIType(eni.Type) == client.ENITypeTrunk
+			enisMap[eni.NetworkInterfaceID].Trunk = eni.Type == client.ENITypeTrunk
 		}
 	}
 	return enis, nil
@@ -504,13 +500,13 @@ func (e *Impl) CheckEniSecurityGroup(ctx context.Context, sg []string) error {
 		if eni.Type == string(client.ENITypePrimary) {
 			continue
 		}
-		eniSgSet := sets.NewString(eni.SecurityGroupIds.SecurityGroupId...)
+		eniSgSet := sets.NewString(eni.SecurityGroupIDs...)
 		if sgSet.Intersection(eniSgSet).Len() > 0 {
 			continue
 		}
 		err := fmt.Errorf("found eni %s security group [%s] mismatch witch ecs security group [%s]."+
-			"If you can confirm config is correct, you can ignore this", eni.NetworkInterfaceId,
-			strings.Join(eni.SecurityGroupIds.SecurityGroupId, ","), strings.Join(sg, ","))
+			"If you can confirm config is correct, you can ignore this", eni.NetworkInterfaceID,
+			strings.Join(eni.SecurityGroupIDs, ","), strings.Join(sg, ","))
 		logrus.WithField("instance", instanceID).Warn(err)
 
 		errs = append(errs, err)

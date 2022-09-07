@@ -11,16 +11,17 @@ import (
 )
 
 type ENI interface {
-	CreateNetworkInterface(ctx context.Context, instanceType ENIType, vSwitch string, securityGroups []string, ipCount, ipv6Count int, eniTags map[string]string) (*ecs.CreateNetworkInterfaceResponse, error)
-	DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType ENIType, status ENIStatus, tags map[string]string) ([]ecs.NetworkInterfaceSet, error)
+	CreateNetworkInterface(ctx context.Context, trunk bool, vSwitchID string, securityGroups []string, ipCount, ipv6Count int, eniTags map[string]string) (*NetworkInterface, error)
+	DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error)
 	AttachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
 	DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
 	DeleteNetworkInterface(ctx context.Context, eniID string) error
-	WaitForNetworkInterface(ctx context.Context, eniID string, status ENIStatus, backoff wait.Backoff, ignoreNotExist bool) (*ecs.NetworkInterfaceSet, error)
+	WaitForNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error)
 	AssignPrivateIPAddress(ctx context.Context, eniID string, count int) ([]net.IP, error)
 	UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []net.IP) error
 	AssignIpv6Addresses(ctx context.Context, eniID string, count int) ([]net.IP, error)
 	UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []net.IP) error
+	ModifyNetworkInterfaceAttribute(ctx context.Context, eniID string, securityGroupIDs []string) error
 }
 
 type ECS interface {

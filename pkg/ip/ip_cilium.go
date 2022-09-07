@@ -15,6 +15,7 @@
 package ip
 
 import (
+	"encoding/binary"
 	"math/big"
 	"net"
 )
@@ -22,6 +23,8 @@ import (
 var (
 	// v4Mappedv6Prefix is the RFC2765 IPv4-mapped address prefix.
 	v4Mappedv6Prefix = []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0xff}
+	upperIPv4        = []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0xff, 255, 255, 255, 255}
+	upperIPv6        = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 )
 
 func ipNetToRange(ipNet net.IPNet) netWithRange {
@@ -70,6 +73,37 @@ func GetIPAtIndex(ipNet net.IPNet, index int64) net.IP {
 		return val.Bytes()
 	}
 	return nil
+}
+
+// GetNextIP returns the next IP from the given IP address. If the given IP is
+// the last IP of a v4 or v6 range, the same IP is returned.
+func GetNextIP(ip net.IP) net.IP {
+	if ip.Equal(upperIPv4) || ip.Equal(upperIPv6) {
+		return ip
+	}
+
+	nextIP := make(net.IP, len(ip))
+	switch len(ip) {
+	case net.IPv4len:
+		ipU32 := binary.BigEndian.Uint32(ip)
+		ipU32++
+		binary.BigEndian.PutUint32(nextIP, ipU32)
+		return nextIP
+	case net.IPv6len:
+		ipU64 := binary.BigEndian.Uint64(ip[net.IPv6len/2:])
+		ipU64++
+		binary.BigEndian.PutUint64(nextIP[net.IPv6len/2:], ipU64)
+		if ipU64 == 0 {
+			ipU64 = binary.BigEndian.Uint64(ip[:net.IPv6len/2])
+			ipU64++
+			binary.BigEndian.PutUint64(nextIP[:net.IPv6len/2], ipU64)
+		} else {
+			copy(nextIP[:net.IPv6len/2], ip[:net.IPv6len/2])
+		}
+		return nextIP
+	default:
+		return ip
+	}
 }
 
 type netWithRange struct {

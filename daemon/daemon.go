@@ -1391,7 +1391,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	}
 
 	// get pool config
-	poolConfig, err := getPoolConfig(config)
+	poolConfig, err := getPoolConfig(config, config.IPAMType)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get pool config")
 	}
@@ -1567,7 +1567,7 @@ func validateConfig(cfg *types.Configure) error {
 	return nil
 }
 
-func getPoolConfig(cfg *types.Configure) (*types.PoolConfig, error) {
+func getPoolConfig(cfg *types.Configure, ipamType types.IPAMType) (*types.PoolConfig, error) {
 	poolConfig := &types.PoolConfig{
 		MaxPoolSize:               cfg.MaxPoolSize,
 		MinPoolSize:               cfg.MinPoolSize,
@@ -1603,6 +1603,12 @@ func getPoolConfig(cfg *types.Configure) (*types.PoolConfig, error) {
 	poolConfig.VPC = ins.VPCID
 	poolConfig.InstanceID = ins.InstanceID
 
+	if ipamType == types.IPAMTypeCRD {
+		poolConfig.MaxPoolSize = 0
+		poolConfig.MinPoolSize = 0
+		poolConfig.MaxENI = 0
+		poolConfig.MinENI = 0
+	}
 	return poolConfig, nil
 }
 

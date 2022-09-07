@@ -1,5 +1,5 @@
 /*
-Copyright 2021 Terway Authors.
+Copyright 2021-2022 Terway Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,10 +22,10 @@ import (
 	"strings"
 	"time"
 
-	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
+	eni_pool "github.com/AliyunContainerService/terway/pkg/controller/pool"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
@@ -52,9 +52,8 @@ const controllerName = "pod"
 
 func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
-		r := NewReconcilePod(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool)
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
-			Reconciler:              r,
+			Reconciler:              NewReconcilePod(mgr, ctrlCtx.DelegateClient, ctrlCtx.VSwitchPool),
 			MaxConcurrentReconciles: controlplane.GetConfig().PodMaxConcurrent,
 		})
 		if err != nil {
@@ -63,7 +62,6 @@ func init() {
 
 		w := &Wrapper{
 			ctrl: c,
-			r:    r,
 		}
 		err = mgr.Add(w)
 		if err != nil {
@@ -98,7 +96,6 @@ type ReconcilePod struct {
 
 type Wrapper struct {
 	ctrl controller.Controller
-	r    *ReconcilePod
 }
 
 // Start the controller
@@ -224,6 +221,10 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		},
 	}
 
+	if controlplane.GetConfig().EnableENIPool {
+		ctx = common.NodeNameWithCtx(ctx, nodeInfo.NodeName)
+	}
+
 	defer func() {
 		if err != nil {
 			l.Error(err, "error ,will roll back all created eni")
@@ -234,7 +235,15 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		}
 	}()
 
-	podENI.Spec.Zone = nodeInfo.Zone
+	podENI.Spec.Zone = nodeInfo.ZoneID
+
+	if controlplane.GetConfig().EnableENIPool {
+		podENI.Annotations[types.ENIRelatedNodeName] = nodeInfo.NodeName
+		if cacheable(&allocs, allocType) {
+			ctx = eni_pool.AllocTypeWithCtx(ctx, eni_pool.AllocPolicyPreferPool)
+			podENI.Annotations[types.ENIAllocFromPool] = ""
+		}
+	}
 
 	// 2.2 create eni
 	err = m.createENI(ctx, &allocs, allocType, pod, podENI)
@@ -312,12 +321,7 @@ func (m *ReconcilePod) deleteAllENI(ctx context.Context, podENI *v1beta1.PodENI)
 		if alloc.ENI.ID == "" {
 			continue
 		}
-		ctx := common.WithCtx(ctx, &alloc)
-		realClient, _, err := common.Became(ctx, m.aliyun)
-		if err != nil {
-			return err
-		}
-		err = realClient.DeleteNetworkInterface(ctx, alloc.ENI.ID)
+		err := m.aliyun.DeleteNetworkInterface(common.WithCtx(ctx, &alloc), alloc.ENI.ID)
 		if err != nil {
 			return err
 		}
@@ -348,7 +352,7 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 		return nil, nil, nil, fmt.Errorf("error parse pod annotation, %w", err)
 	}
 
-	allocs, err := m.ParsePodNetworksFromAnnotation(ctx, nodeInfo.Zone, anno)
+	allocs, err := m.ParsePodNetworksFromAnnotation(ctx, nodeInfo.ZoneID, anno)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("error parse pod annotation, %w", err)
 	}
@@ -369,9 +373,9 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 			return nil, nil, nil, fmt.Errorf("error get podNetworking %s, %w", podNetwokingName, err)
 		}
 		var vsw *vswitch.Switch
-		vsw, err = m.swPool.GetOne(ctx, m.aliyun, nodeInfo.Zone, podNetworking.Spec.VSwitchOptions)
+		vsw, err = m.swPool.GetOne(ctx, m.aliyun, nodeInfo.ZoneID, podNetworking.Spec.VSwitchOptions)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.Zone, err)
+			return nil, nil, nil, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.ZoneID, err)
 		}
 
 		allocs = append(allocs, &v1beta1.Allocation{
@@ -426,6 +430,11 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 		return reconcile.Result{Requeue: true}, err
 	}
 
+	if _, ok := prePodENI.Annotations[types.ENIAllocFromPool]; ok {
+		_, err := common.UpdatePodENI(ctx, m.client, update)
+		return reconcile.Result{Requeue: true}, err
+	}
+
 	// TODO check and update podENI spec
 	anno, err := controlplane.ParsePodNetworksFromAnnotation(pod)
 	if err != nil {
@@ -457,13 +466,7 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 		l.Info("changed remove eni", "if", name, "eni", alloc.ENI.ID)
 
 		if alloc.ENI.ID != "" {
-			ctx := common.WithCtx(context.Background(), &alloc)
-			realClient, _, err := common.Became(ctx, m.aliyun)
-			if err != nil {
-				m.record.Eventf(prePodENI, corev1.EventTypeWarning, types.EventDeleteENIFailed, err.Error())
-				return reconcile.Result{}, err
-			}
-			err = realClient.DeleteNetworkInterface(context.Background(), alloc.ENI.ID)
+			err = m.aliyun.DeleteNetworkInterface(common.WithCtx(context.Background(), &alloc), alloc.ENI.ID)
 			if err != nil {
 				m.record.Eventf(prePodENI, corev1.EventTypeWarning, types.EventDeleteENIFailed, err.Error())
 				return reconcile.Result{}, err
@@ -491,7 +494,7 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 		return reconcile.Result{}, err
 	}
 
-	allocs, err := m.ParsePodNetworksFromAnnotation(ctx, nodeInfo.Zone, newAnno)
+	allocs, err := m.ParsePodNetworksFromAnnotation(ctx, nodeInfo.ZoneID, newAnno)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -548,42 +551,54 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 		g.Go(func() error {
 			alloc := (*allocs)[ii]
 			ctx := common.WithCtx(ctx, alloc)
-			realClient, _, err := common.Became(ctx, m.aliyun)
-			if err != nil {
-				return fmt.Errorf("get client failed, %w", err)
-			}
 
-			eni, err := realClient.CreateNetworkInterface(ctx, aliyunClient.ENITypeSecondary, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, 1, ipv6Count, map[string]string{
+			eni, err := m.aliyun.CreateNetworkInterface(ctx, false, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, 1, ipv6Count, map[string]string{
 				types.TagKeyClusterID:               clusterID,
 				types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
-				types.TagKubernetesPodName:          utils.TrimStr(pod.Name, 120),
-				types.TagKubernetesPodNamespace:     utils.TrimStr(pod.Namespace, 120),
 			})
 			if err != nil {
 				return fmt.Errorf("create eni with openAPI err, %w", err)
 			}
 
 			v6 := ""
-			if len(eni.Ipv6Sets.Ipv6Set) > 0 {
-				v6 = eni.Ipv6Sets.Ipv6Set[0].Ipv6Address
+			if len(eni.IPv6Set) > 0 {
+				v6 = eni.IPv6Set[0].Ipv6Address
 			}
 			alloc.ENI = v1beta1.ENI{
-				ID:               eni.NetworkInterfaceId,
+				ID:               eni.NetworkInterfaceID,
 				MAC:              eni.MacAddress,
-				Zone:             eni.ZoneId,
-				VSwitchID:        eni.VSwitchId,
-				SecurityGroupIDs: eni.SecurityGroupIds.SecurityGroupId,
+				Zone:             eni.ZoneID,
+				VSwitchID:        eni.VSwitchID,
+				SecurityGroupIDs: eni.SecurityGroupIDs,
 			}
-			alloc.IPv4 = eni.PrivateIpAddress
+			alloc.IPv4 = eni.PrivateIPAddress
 			alloc.IPv6 = v6
 			alloc.AllocationType = *allocType
 
 			ch <- alloc
-			return m.PostENICreate(ctx, realClient, alloc)
+			return m.PostENICreate(ctx, alloc)
 		})
 	}
 	err = g.Wait()
 	close(ch)
 	<-done
 	return err
+}
+
+// cacheable check this allocation is allowed to use cached eni resource
+func cacheable(allocs *[]*v1beta1.Allocation, allocType *v1beta1.AllocationType) bool {
+	// set ctx
+	if allocs == nil {
+		return false
+	}
+	if len(*allocs) != 1 {
+		return false
+	}
+	if allocType.Type == v1beta1.IPAllocTypeFixed {
+		return false
+	}
+	if len((*allocs)[0].ExtraConfig) > 0 {
+		return false
+	}
+	return true
 }
