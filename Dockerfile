@@ -18,8 +18,9 @@ RUN go mod download
 COPY . .
 RUN cd cmd/terway && CGO_ENABLED=0 GOOS=linux go build -tags default_build \
     -ldflags \
-    "-X \"k8s.io/client-go/pkg/version.gitCommit=`git rev-parse HEAD`\" \
-    -X \"k8s.io/client-go/pkg/version.buildDate=`date -u +'%Y-%m-%dT%H:%M:%SZ'`\" \
+    "-X \"github.com/AliyunContainerService/terway/pkg/version.gitCommit=`git rev-parse HEAD`\" \
+    -X \"github.com/AliyunContainerService/terway/pkg/version.buildDate=`date -u +'%Y-%m-%dT%H:%M:%SZ'`\" \
+    -X \"github.com/AliyunContainerService/terway/pkg/version.gitVersion=`git describe --tags --match='v*' --abbrev=14`\" \
     -X \"github.com/AliyunContainerService/terway/pkg/aliyun.kubernetesAlicloudIdentity=Kubernetes.Alicloud/`git rev-parse --short HEAD 2>/dev/null`\"" -o terwayd .
 RUN cd plugin/terway && CGO_ENABLED=0 GOOS=linux go build -tags default_build -o terway .
 RUN cd cmd/terway-cli && CGO_ENABLED=0 GOOS=linux go build -tags default_build -o terway-cli .
