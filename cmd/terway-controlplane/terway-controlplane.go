@@ -18,7 +18,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"math/rand"
 	"time"
 
@@ -33,12 +32,12 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
 	terwayMetric "github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/version"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/pkg/version"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/klog/v2/klogr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -63,8 +62,7 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(klogr.New())
-	log.Info(fmt.Sprintf("GitCommit %s BuildDate %s Platform %s",
-		version.Get().GitCommit, version.Get().BuildDate, version.Get().Platform))
+	log.Info(version.Version)
 
 	cfg := controlplane.GetConfig()
 	log.Info("using config", "config", cfg)
@@ -74,6 +72,7 @@ func main() {
 	restConfig := ctrl.GetConfigOrDie()
 	restConfig.QPS = cfg.KubeClientQPS
 	restConfig.Burst = cfg.KubeClientBurst
+	restConfig.UserAgent = version.UA
 	utils.RegisterClients(restConfig)
 
 	err := crds.RegisterCRDs()

@@ -19,6 +19,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/version"
 	"github.com/AliyunContainerService/terway/types"
 
 	"github.com/pkg/errors"
@@ -260,6 +261,7 @@ func newK8S(master, kubeconfig string, daemonMode string, globalConfig *types.Co
 	k8sRestConfig.Dial = t.DialContext
 	k8sRestConfig.AcceptContentTypes = strings.Join([]string{runtime.ContentTypeProtobuf, runtime.ContentTypeJSON}, ",")
 	k8sRestConfig.ContentType = runtime.ContentTypeProtobuf
+	k8sRestConfig.UserAgent = version.UA
 
 	k8sRestConfig.QPS = globalConfig.KubeClientQPS
 	k8sRestConfig.Burst = globalConfig.KubeClientBurst

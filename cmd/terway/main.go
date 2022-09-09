@@ -7,10 +7,8 @@ import (
 	"github.com/AliyunContainerService/terway/daemon"
 	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/utils"
-
+	"github.com/AliyunContainerService/terway/pkg/version"
 	"k8s.io/klog/v2"
-
-	"k8s.io/client-go/pkg/version"
 )
 
 const defaultConfigPath = "/etc/eni/eni.json"
@@ -41,8 +39,7 @@ func main() {
 
 	klog.SetOutput(os.Stderr)
 
-	logger.DefaultLogger.Infof("GitCommit %s BuildDate %s Platform %s",
-		version.Get().GitCommit, version.Get().BuildDate, version.Get().Platform)
+	logger.DefaultLogger.Info(version.Version)
 	if err := daemon.Run(utils.NormalizePath(defaultPidPath), utils.NormalizePath(defaultSocketPath), readonlyListen, utils.NormalizePath(defaultConfigPath), kubeconfig, master, daemonMode, logLevel); err != nil {
 		logger.DefaultLogger.Fatal(err)
 	}
