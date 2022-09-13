@@ -27,13 +27,14 @@ import (
 
 // NodeInfo is the type describe the eni config for this pod
 type NodeInfo struct {
+	NodeName   string
 	InstanceID string
-	Zone       string
+	ZoneID     string
 	TrunkENIID string
 }
 
 func NewNodeInfo(node *corev1.Node) (*NodeInfo, error) {
-	res := &NodeInfo{}
+	res := &NodeInfo{NodeName: node.Name}
 	ids := strings.Split(node.Spec.ProviderID, ".")
 	if len(ids) < 2 {
 		return nil, fmt.Errorf("error parse providerID %s", node.Spec.ProviderID)
@@ -44,12 +45,12 @@ func NewNodeInfo(node *corev1.Node) (*NodeInfo, error) {
 
 	zone, ok := node.GetLabels()[corev1.LabelTopologyZone]
 	if ok {
-		res.Zone = zone
+		res.ZoneID = zone
 		return res, nil
 	}
 	zone, ok = node.GetLabels()[corev1.LabelZoneFailureDomain]
 	if ok {
-		res.Zone = zone
+		res.ZoneID = zone
 		return res, nil
 	}
 	return nil, fmt.Errorf("cat not found zone label from node %s", node.Name)

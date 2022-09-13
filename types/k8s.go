@@ -48,6 +48,9 @@ const (
 
 	// NetworkPriority set pod network priority
 	NetworkPriority = AnnotationPrefix + "network-priority"
+
+	ENIAllocFromPool   = AnnotationPrefix + "eni-alloc-from-pool"
+	ENIRelatedNodeName = AnnotationPrefix + "node"
 )
 
 // FinalizerPodENI finalizer for podENI resource

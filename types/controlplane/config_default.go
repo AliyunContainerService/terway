@@ -50,8 +50,10 @@ type Config struct {
 	ClusterID string `json:"clusterID" validate:"required"`
 	VPCID     string `json:"vpcID" validate:"required"`
 
-	EnableTrunk *bool  `json:"enableTrunk,omitempty"`
-	IPStack     string `json:"ipStack,omitempty" validate:"oneof=ipv4 ipv6 dual" mod:"default=ipv4"`
+	EnableENIPool      bool   `json:"enableENIPool"`
+	EnableTrunk        *bool  `json:"enableTrunk,omitempty"`
+	EnableDevicePlugin bool   `json:"enableDevicePlugin"`
+	IPStack            string `json:"ipStack,omitempty" validate:"oneof=ipv4 ipv6 dual" mod:"default=ipv4"`
 
 	KubeClientQPS   float32 `json:"kubeClientQPS" validate:"gt=0,lte=10000" mod:"default=20"`
 	KubeClientBurst int     `json:"kubeClientBurst" validate:"gt=0,lte=10000" mod:"default=30"`

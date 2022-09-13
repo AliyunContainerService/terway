@@ -86,6 +86,10 @@ type Limits struct {
 	// attached to the instance
 	Adapters int
 
+	// TotalAdapters maximum number of interfaces that can be
+	// attached to the instance
+	TotalAdapters int
+
 	// IPv4PerAdapter is the maximum number of ipv4 addresses per adapter/interface
 	IPv4PerAdapter int
 
@@ -159,6 +163,7 @@ func GetLimit(client client.ECS, instanceType string) (*Limits, error) {
 		}
 		limits.Store(instanceType, &Limits{
 			Adapters:              adapterLimit,
+			TotalAdapters:         instanceTypeInfo.EniTotalQuantity,
 			IPv4PerAdapter:        utils.Minimal(ipv4PerAdapter),
 			IPv6PerAdapter:        utils.Minimal(ipv6PerAdapter),
 			MemberAdapterLimit:    utils.Minimal(memberAdapterLimit),
@@ -170,6 +175,7 @@ func GetLimit(client client.ECS, instanceType string) (*Limits, error) {
 		logger.DefaultLogger.WithFields(map[string]interface{}{
 			"instance-type":       instanceType,
 			"adapters":            adapterLimit,
+			"total-adapters":      instanceTypeInfo.EniTotalQuantity,
 			"ipv4":                ipv4PerAdapter,
 			"ipv6":                ipv6PerAdapter,
 			"member-adapters":     memberAdapterLimit,

@@ -51,10 +51,13 @@ func NewAliyun(ak, sk, regionID, credentialPath, secretNamespace, secretName str
 }
 
 // CreateNetworkInterface instanceType Secondary Trunk
-func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, instanceType ENIType, vSwitch string, securityGroups []string, ipCount, ipv6Count int, eniTags map[string]string) (*ecs.CreateNetworkInterfaceResponse, error) {
+func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitch string, securityGroups []string, ipCount, ipv6Count int, eniTags map[string]string) (*NetworkInterface, error) {
 	req := ecs.CreateCreateNetworkInterfaceRequest()
 	req.VSwitchId = vSwitch
-	req.InstanceType = string(instanceType)
+	req.InstanceType = string(ENITypeSecondary)
+	if trunk {
+		req.InstanceType = string(ENITypeTrunk)
+	}
 	req.SecurityGroupIds = &securityGroups
 	req.NetworkInterfaceName = generateEniName()
 	req.Description = eniDescription
@@ -91,12 +94,12 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, instanceType ENITy
 		LogFieldENIID:     resp.NetworkInterfaceId,
 		LogFieldRequestID: resp.RequestId,
 	}).Info("create ENI")
-	return resp, err
+	return FromCreateResp(resp), err
 }
 
 // DescribeNetworkInterface list eni
-func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType ENIType, status ENIStatus, tags map[string]string) ([]ecs.NetworkInterfaceSet, error) {
-	var result []ecs.NetworkInterfaceSet
+func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error) {
+	var result []*NetworkInterface
 
 	nextToken := ""
 	for {
@@ -134,7 +137,9 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 			l.WithField(LogFieldRequestID, apiErr.ErrRequestID(err)).Warn(err)
 			return nil, err
 		}
-		result = append(result, resp.NetworkInterfaceSets.NetworkInterfaceSet...)
+		for _, r := range resp.NetworkInterfaceSets.NetworkInterfaceSet {
+			result = append(result, FromDescribeResp(&r))
+		}
 
 		if resp.NextToken == "" {
 			break
@@ -217,8 +222,8 @@ func (a *OpenAPI) DeleteNetworkInterface(ctx context.Context, eniID string) erro
 }
 
 // WaitForNetworkInterface wait status of eni
-func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, status ENIStatus, backoff wait.Backoff, ignoreNotExist bool) (*ecs.NetworkInterfaceSet, error) {
-	var eniInfo *ecs.NetworkInterfaceSet
+func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error) {
+	var eniInfo *NetworkInterface
 	if eniID == "" {
 		return nil, fmt.Errorf("eniID not set")
 	}
@@ -236,7 +241,7 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 					return false, nil
 				}
 
-				eniInfo = &eni[0]
+				eniInfo = eni[0]
 				return true, nil
 			}
 			return false, nil
@@ -278,7 +283,11 @@ func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, eniID string, coun
 
 // UnAssignPrivateIPAddresses remove ip from eni
 // return ok if 1. eni is released 2. ip is already released 3. release success
+// for primaryIP err is InvalidIp.IpUnassigned
 func (a *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []net.IP) error {
+	if len(ips) == 0 {
+		return nil
+	}
 	req := ecs.CreateUnassignPrivateIpAddressesRequest()
 	req.NetworkInterfaceId = eniID
 	str := ip.IPs2str(ips)
@@ -339,6 +348,9 @@ func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, eniID string, count i
 // UnAssignIpv6Addresses remove ip from eni
 // return ok if 1. eni is released 2. ip is already released 3. release success
 func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []net.IP) error {
+	if len(ips) == 0 {
+		return nil
+	}
 	req := ecs.CreateUnassignIpv6AddressesRequest()
 	req.NetworkInterfaceId = eniID
 	str := ip.IPs2str(ips)
@@ -385,4 +397,23 @@ func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]
 		return nil, err
 	}
 	return resp.InstanceTypes.InstanceType, nil
+}
+
+func (a *OpenAPI) ModifyNetworkInterfaceAttribute(ctx context.Context, eniID string, securityGroupIDs []string) error {
+	req := ecs.CreateModifyNetworkInterfaceAttributeRequest()
+	req.NetworkInterfaceId = eniID
+	req.SecurityGroupId = &securityGroupIDs
+	start := time.Now()
+	resp, err := a.ClientSet.ECS().ModifyNetworkInterfaceAttribute(req)
+	metric.OpenAPILatency.WithLabelValues("ModifyNetworkInterfaceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+
+	l := log.WithFields(map[string]interface{}{
+		LogFieldAPI: "ModifyNetworkInterfaceAttribute",
+	})
+	if err != nil {
+		l.WithField(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err)
+		return err
+	}
+	l.WithField(LogFieldRequestID, resp.RequestId).Infof("modify securityGroup %s", securityGroupIDs)
+	return nil
 }

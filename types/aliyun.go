@@ -12,6 +12,10 @@ const (
 	// TagTerwayController terway controller
 	TagTerwayController = "terway-controller"
 
+	TagENIAllocPolicy = "eni-alloc-policy"
+
+	TagK8SNodeName = "node-name"
+
 	TagKubernetesPodName      = "k8s_pod_name"
 	TagKubernetesPodNamespace = "k8s_pod_namespace"
 )

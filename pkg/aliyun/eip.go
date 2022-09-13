@@ -15,7 +15,6 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -26,14 +25,14 @@ func (e *Impl) AllocateEipAddress(ctx context.Context, bandwidth int, chargeType
 		eipInfo *types.EIP
 		err     error
 	)
-	var eni *ecs.NetworkInterfaceSet
+	var eni *client.NetworkInterface
 	eni, err = e.WaitForNetworkInterface(ctx, eniID, "", backoff.Backoff(backoff.ENIOps), false)
 	if err != nil {
 		return nil, err
 	}
 	eipBindedPrivateIP := eniIP.String()
 	// get privateIP form eip , if privateIP is eni's primary ip , it's empty
-	if eni.PrivateIpAddress == eniIP.String() {
+	if eni.PrivateIPAddress == eniIP.String() {
 		eipBindedPrivateIP = ""
 	}
 
@@ -190,7 +189,7 @@ func (e *Impl) UnassociateEipAddress(ctx context.Context, eipID, eniID, eniIP st
 			if eip.InstanceId != eniID {
 				return true, nil
 			}
-			// eip bind to eni primary address, the eip.PrivateIpAddress is empty
+			// eip bind to eni primary address, the eip.PrivateIPAddress is empty
 			if eip.PrivateIpAddress != "" {
 				if eniIP != eip.PrivateIpAddress {
 					return true, nil

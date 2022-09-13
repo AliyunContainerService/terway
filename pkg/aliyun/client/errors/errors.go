@@ -39,6 +39,9 @@ const (
 
 	// ErrTaskConflict for eip
 	ErrTaskConflict = "TaskConflict"
+
+	// ErrThrottling .
+	ErrThrottling = "Throttling"
 )
 
 // define well known err
