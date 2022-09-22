@@ -126,6 +126,9 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 			default:
 				break popAll
 			}
+			if toAllocate >= maxIPBacklog {
+				break popAll
+			}
 		}
 		eniIPLog.Debugf("allocate %v ips for eni", toAllocate)
 		v4, v6, err := e.ecs.AssignNIPsForENI(context.Background(), e.ENI.ID, e.ENI.MAC, toAllocate)

@@ -237,6 +237,11 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 	var ipv4s, ipv6s []net.IP
 	var err, v4Err, v6Err error
 
+	wrap := func(e error) error {
+		err = e
+		return err
+	}
+
 	defer func() {
 		if err == nil {
 			return
@@ -270,26 +275,31 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 			return true, nil
 		})
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, wrap(fmt.Errorf("%w, innerErr %v", err, innerErr))
 		}
 		if len(ipv4s) != count {
-			return nil, nil, fmt.Errorf("openAPI return IP error.Want %d got %d", count, len(ipv4s))
+			return nil, nil, wrap(fmt.Errorf("openAPI return IP error.Want %d got %d", count, len(ipv4s)))
 		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			v4Err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.MetaAssignPrivateIP),
-				func() (done bool, err error) {
-					remoteIPs, err := e.metadata.GetENIPrivateAddressesByMAC(mac)
-					if err != nil {
+				func() (bool, error) {
+					var remoteIPs []net.IP
+					remoteIPs, innerErr = e.metadata.GetENIPrivateAddressesByMAC(mac)
+					if innerErr != nil {
 						return false, nil
 					}
 					if !ip.IPsIntersect(remoteIPs, ipv4s) {
+						innerErr = fmt.Errorf("ip is not present in metadataAPI,expect %s got %s", ipv4s, remoteIPs)
 						return false, nil
 					}
 					return true, nil
 				},
 			)
+			if v4Err != nil {
+				v4Err = fmt.Errorf("%w, metadataAPI %v", v4Err, innerErr)
+			}
 		}()
 	}
 
@@ -306,26 +316,31 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 			return true, nil
 		})
 		if err != nil {
-			return nil, nil, err
+			return ipv4s, ipv6s, wrap(fmt.Errorf("%w, innerErr %v", err, innerErr))
 		}
 		if len(ipv6s) != count {
-			return nil, nil, fmt.Errorf("openAPI return IP error.Want %d got %d", count, len(ipv6s))
+			return ipv4s, ipv6s, wrap(fmt.Errorf("openAPI return IP error.Want %d got %d", count, len(ipv6s)))
 		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			v6Err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.MetaAssignPrivateIP),
-				func() (done bool, err error) {
-					remoteIPs, err := e.metadata.GetENIPrivateIPv6AddressesByMAC(mac)
-					if err != nil {
+				func() (bool, error) {
+					var remoteIPs []net.IP
+					remoteIPs, innerErr = e.metadata.GetENIPrivateIPv6AddressesByMAC(mac)
+					if innerErr != nil {
 						return false, nil
 					}
 					if !ip.IPsIntersect(remoteIPs, ipv6s) {
+						innerErr = fmt.Errorf("ip is not present in metadataAPI,expect %s got %s", ipv6s, remoteIPs)
 						return false, nil
 					}
 					return true, nil
 				},
 			)
+			if v6Err != nil {
+				v6Err = fmt.Errorf("%w, metadataAPI %v", v6Err, innerErr)
+			}
 		}()
 	}
 	wg.Wait()
@@ -392,22 +407,26 @@ func (e *Impl) unAssignIPsForENIUnSafe(ctx context.Context, eniID, mac string, i
 	var innerErr error
 
 	err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.MetaUnAssignPrivateIP),
-		func() (done bool, err error) {
+		func() (bool, error) {
 			if len(ipv4s) > 0 {
-				remoteIPs, err := e.metadata.GetENIPrivateAddressesByMAC(mac)
-				if err != nil {
+				var remoteIPs []net.IP
+				remoteIPs, innerErr = e.metadata.GetENIPrivateAddressesByMAC(mac)
+				if innerErr != nil {
 					return false, nil
 				}
 				if ip.IPsIntersect(remoteIPs, ipv4s) {
+					innerErr = fmt.Errorf("ip is present in metadataAPI,expect %s be removed, got %s", ipv4s, remoteIPs)
 					return false, nil
 				}
 			}
 			if len(ipv6s) > 0 {
-				remoteIPs, err := e.metadata.GetENIPrivateIPv6AddressesByMAC(mac)
-				if err != nil {
+				var remoteIPs []net.IP
+				remoteIPs, innerErr = e.metadata.GetENIPrivateIPv6AddressesByMAC(mac)
+				if innerErr != nil {
 					return false, nil
 				}
 				if ip.IPsIntersect(remoteIPs, ipv6s) {
+					innerErr = fmt.Errorf("ip is present in metadataAPI,expect %s be removed, got %s", ipv6s, remoteIPs)
 					return false, nil
 				}
 			}
