@@ -187,7 +187,18 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		case v1beta1.ENIPhaseUnbind:
 			return m.reConfig(ctx, pod, prePodENI)
 		case v1beta1.ENIPhaseBind:
-			return reconcile.Result{}, nil
+			// check pod uid
+			if prePodENI.Annotations[types.PodUID] == string(pod.UID) {
+				return reconcile.Result{}, nil
+			}
+			// if using fixed ip , unbind it
+			if prePodENI.Spec.HaveFixedIP() {
+				prePodENICopy := prePodENI.DeepCopy()
+				prePodENICopy.Status.Phase = v1beta1.ENIPhaseDetaching
+				_, err = common.UpdatePodENIStatus(ctx, m.client, prePodENICopy)
+				return reconcile.Result{RequeueAfter: 5 * time.Second}, err
+			}
+			return reconcile.Result{RequeueAfter: 5 * time.Second}, m.client.Delete(ctx, prePodENI)
 		}
 		return reconcile.Result{Requeue: true}, nil
 	}
