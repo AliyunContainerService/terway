@@ -301,6 +301,9 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 				NetNs: func(s string) *string {
 					return &s
 				}(r.Netns),
+				ContainerID: func(s string) *string {
+					return &s
+				}(r.K8SPodInfraContainerId),
 			}
 			networkContext.resources = append(networkContext.resources, newRes.Resources...)
 			if n.eipResMgr != nil && podinfo.EipInfo.PodEip {
@@ -367,6 +370,9 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 				NetNs: func(s string) *string {
 					return &s
 				}(r.Netns),
+				ContainerID: func(s string) *string {
+					return &s
+				}(r.K8SPodInfraContainerId),
 			}
 			networkContext.resources = append(networkContext.resources, newRes.Resources...)
 			if n.eipResMgr != nil && podinfo.EipInfo.PodEip {
@@ -419,6 +425,9 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 			NetNs: func(s string) *string {
 				return &s
 			}(r.Netns),
+			ContainerID: func(s string) *string {
+				return &s
+			}(r.K8SPodInfraContainerId),
 		}
 		networkContext.resources = append(networkContext.resources, newRes.Resources...)
 		err = n.resourceDB.Put(podInfoKey(podinfo.Namespace, podinfo.Name), newRes)
@@ -512,7 +521,12 @@ func (n *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest)
 		netCtx.Log().Warnf("unexpect pod network type release, maybe daemon mode changed: %+v", podinfo.PodNetworkType)
 		return releaseReply, nil
 	}
-
+	if oldRes.ContainerID != nil {
+		if r.K8SPodInfraContainerId != *oldRes.ContainerID {
+			netCtx.Log().Warnf("cni request not macth stored resource, expect %s, got %s, ignored", *oldRes.ContainerID, r.K8SPodInfraContainerId)
+			return releaseReply, nil
+		}
+	}
 	for _, res := range oldRes.Resources {
 		//record old resource for pod
 		netCtx.resources = append(netCtx.resources, res)
@@ -571,6 +585,13 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 	if err != nil {
 		networkContext.Log().Errorf("failed to get pod info : %+v", err)
 		return getIPInfoResult, err
+	}
+
+	if podRes.ContainerID != nil {
+		if r.K8SPodInfraContainerId != *podRes.ContainerID {
+			networkContext.Log().Warnf("cni request not macth stored resource, expect %s, got %s, ignored", *podRes.ContainerID, r.K8SPodInfraContainerId)
+			return getIPInfoResult, nil
+		}
 	}
 
 	var netConf []*rpc.NetConf
