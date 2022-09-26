@@ -315,7 +315,7 @@ func GetHostIP(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
 			return nil, err
 		}
 		if terwayIP.IPv6(v4) {
-			return nil, fmt.Errorf("error get node ipv4 address.This may dure to 1. no ipv4 address 2. no ipv4 default route")
+			return nil, fmt.Errorf("error get node ipv4 address.This may due to 1. no ipv4 address 2. no ipv4 default route")
 		}
 		nodeIPv4 = &net.IPNet{
 			IP:   v4,
@@ -329,7 +329,7 @@ func GetHostIP(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
 			return nil, err
 		}
 		if !terwayIP.IPv6(v6) {
-			return nil, fmt.Errorf("error get node ipv6 address.This may dure to 1. no ipv6 address 2. no ipv6 default route")
+			return nil, fmt.Errorf("error get node ipv6 address.This may due to 1. no ipv6 address 2. no ipv6 default route")
 		}
 		nodeIPv6 = &net.IPNet{
 			IP:   v6,
