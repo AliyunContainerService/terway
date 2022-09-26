@@ -64,6 +64,7 @@ if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = 
          --enable-policy=$ENABLE_POLICY \
          --agent-health-port=9099 --disable-envoy-version-check=true \
          --enable-local-node-route=false --ipv4-range=169.254.10.0/30 --ipv6-range=fe80:2400:3200:baba::/30 --enable-endpoint-health-checking=false \
+         --enable-health-checking=false --enable-service-topology=true --disable-cnp-status-updates=true --k8s-heartbeat-timeout=0 \
          --ipam=cluster-pool ${extra_args}
   fi
 fi
