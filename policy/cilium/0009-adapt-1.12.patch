@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Wed, 28 Sep 2022 10:11:36 +0800
+Subject: [PATCH] adapt 1.12
+
+- disable source ip check
+- disable host bpf
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ pkg/datapath/loader/loader.go                | 3 +--
+ plugins/cilium-cni/chaining/terway/terway.go | 9 +++++----
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
+index 1dba925080..629ef1bece 100644
+--- a/pkg/datapath/loader/loader.go
++++ b/pkg/datapath/loader/loader.go
+@@ -235,8 +235,7 @@ func (l *Loader) reloadHostDatapath(ctx context.Context, ep datapath.Endpoint, o
+ 		interfaceNames = append(interfaceNames, device)
+ 		symbols = append(symbols, symbolFromHostNetdevEp)
+ 		directions = append(directions, dirIngress)
+-		if option.Config.EnableNodePort || option.Config.EnableHostFirewall ||
+-			option.Config.EnableBandwidthManager {
++		if option.Config.EnableNodePort || option.Config.EnableHostFirewall {
+ 			interfaceNames = append(interfaceNames, device)
+ 			symbols = append(symbols, symbolToHostNetdevEp)
+ 			directions = append(directions, dirEgress)
+diff --git a/plugins/cilium-cni/chaining/terway/terway.go b/plugins/cilium-cni/chaining/terway/terway.go
+index 3783cbcb5a..562b76a79b 100644
+--- a/plugins/cilium-cni/chaining/terway/terway.go
++++ b/plugins/cilium-cni/chaining/terway/terway.go
+@@ -140,10 +140,11 @@ func (f *TerwayChainer) Add(ctx context.Context, pluginCtx chainingapi.PluginCon
+ 		SyncBuildEndpoint: true,
+ 		DatapathMapID:     int64(mapID),
+ 		DatapathConfiguration: &models.EndpointDatapathConfiguration{
+-			RequireArpPassthrough: true,
+-			RequireEgressProg:     true,
+-			ExternalIpam:          true,
+-			RequireRouting:        &disabled,
++			DisableSipVerification: true,
++			RequireArpPassthrough:  true,
++			RequireEgressProg:      true,
++			ExternalIpam:           true,
++			RequireRouting:         &disabled,
+ 		},
+ 	}
+ 
+-- 
+2.37.3
+
