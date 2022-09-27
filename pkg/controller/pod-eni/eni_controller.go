@@ -314,7 +314,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		}
 
 		if m.trunkMode && nodeInfo.TrunkENIID == "" {
-			return reconcile.Result{}, fmt.Errorf("trunk eni id not found, this may dure to terway agent is not started")
+			return reconcile.Result{}, fmt.Errorf("trunk eni id not found, this may due to terway agent is not started")
 		} else if !m.trunkMode && nodeInfo.TrunkENIID != "" {
 			nodeInfo.TrunkENIID = ""
 		}

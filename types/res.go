@@ -59,9 +59,10 @@ type ResourceItem struct {
 
 // PodResources pod resources related
 type PodResources struct {
-	Resources []ResourceItem
-	PodInfo   *PodInfo
-	NetNs     *string
+	Resources   []ResourceItem
+	PodInfo     *PodInfo
+	NetNs       *string
+	ContainerID *string
 }
 
 // GetResourceItemByType get pod resource by resource type

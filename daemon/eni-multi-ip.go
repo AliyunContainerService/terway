@@ -127,7 +127,7 @@ func (e *ENI) allocateWorker(resultChan chan<- *ENIIP) {
 				break popAll
 			}
 			if toAllocate >= maxIPBacklog {
-				break popAll
+				break
 			}
 		}
 		eniIPLog.Debugf("allocate %v ips for eni", toAllocate)

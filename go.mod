@@ -40,8 +40,8 @@ require (
 	k8s.io/klog/v2 v2.30.0
 	k8s.io/kubelet v0.21.4
 	k8s.io/utils v0.0.0-20210930125809-cb0fa318a74b
-	sigs.k8s.io/controller-runtime v0.11.0
-	sigs.k8s.io/e2e-framework v0.0.6
+	sigs.k8s.io/controller-runtime v0.11.1
+	sigs.k8s.io/e2e-framework v0.0.7
 	sigs.k8s.io/yaml v1.3.0
 )
 
@@ -70,7 +70,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/go-cmp v0.5.8 // indirect
-	github.com/google/gofuzz v1.1.0 // indirect
+	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/googleapis/gnostic v0.5.5 // indirect
 	github.com/gookit/color v1.5.0 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
