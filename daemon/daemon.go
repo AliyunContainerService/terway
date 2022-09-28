@@ -936,6 +936,15 @@ func (n *networkService) startPeriodCheck() {
 			func() {
 				ctx, cancel := context.WithTimeout(context.Background(), cniExecTimeout)
 				defer cancel()
+
+				args := [][2]string{
+					{"K8S_POD_NAME", res.PodInfo.Name},
+					{"K8S_POD_NAMESPACE", res.PodInfo.Namespace},
+				}
+				if res.ContainerID != nil {
+					args = append(args, [2]string{"K8S_POD_INFRA_CONTAINER_ID", *res.ContainerID})
+				}
+
 				err := cniCfg.CheckNetwork(ctx, &libcni.NetworkConfig{
 					Network: &containertypes.NetConf{
 						CNIVersion: "0.4.0",
@@ -947,10 +956,7 @@ func (n *networkService) startPeriodCheck() {
 					ContainerID: "fake", // must provide
 					NetNS:       netNs,
 					IfName:      "eth0",
-					Args: [][2]string{
-						{"K8S_POD_NAME", res.PodInfo.Name},
-						{"K8S_POD_NAMESPACE", res.PodInfo.Namespace},
-					},
+					Args:        args,
 				})
 				if err != nil {
 					serviceLog.Error(err)
