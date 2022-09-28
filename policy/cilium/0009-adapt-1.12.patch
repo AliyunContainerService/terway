@@ -8,24 +8,23 @@ Subject: [PATCH] adapt 1.12
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
- pkg/datapath/loader/loader.go                | 3 +--
+ pkg/datapath/loader/loader.go                | 2 +-
  plugins/cilium-cni/chaining/terway/terway.go | 9 +++++----
- 2 files changed, 6 insertions(+), 6 deletions(-)
+ 2 files changed, 6 insertions(+), 5 deletions(-)
 
 diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
-index 1dba925080..629ef1bece 100644
+index 1dba925080..a387da4920 100644
 --- a/pkg/datapath/loader/loader.go
 +++ b/pkg/datapath/loader/loader.go
-@@ -235,8 +235,7 @@ func (l *Loader) reloadHostDatapath(ctx context.Context, ep datapath.Endpoint, o
- 		interfaceNames = append(interfaceNames, device)
- 		symbols = append(symbols, symbolFromHostNetdevEp)
- 		directions = append(directions, dirIngress)
--		if option.Config.EnableNodePort || option.Config.EnableHostFirewall ||
--			option.Config.EnableBandwidthManager {
-+		if option.Config.EnableNodePort || option.Config.EnableHostFirewall {
- 			interfaceNames = append(interfaceNames, device)
- 			symbols = append(symbols, symbolToHostNetdevEp)
- 			directions = append(directions, dirEgress)
+@@ -250,7 +250,7 @@ func (l *Loader) reloadHostDatapath(ctx context.Context, ep datapath.Endpoint, o
+ 			}
+ 		}
+ 	}
+-
++	return nil
+ 	for i, interfaceName := range interfaceNames {
+ 		symbol := symbols[i]
+ 		finalize, err := replaceDatapath(ctx, interfaceName, objPaths[i], symbol, directions[i], false, "")
 diff --git a/plugins/cilium-cni/chaining/terway/terway.go b/plugins/cilium-cni/chaining/terway/terway.go
 index 3783cbcb5a..562b76a79b 100644
 --- a/plugins/cilium-cni/chaining/terway/terway.go
