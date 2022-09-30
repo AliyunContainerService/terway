@@ -1,7 +1,7 @@
-From 0d306d2dd35e8c91a955225d2710adc672b8fbf4 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Mon, 23 May 2022 17:43:50 +0800
-Subject: [PATCH 7/8] terway: support kubelet health check
+Subject: [PATCH] terway: support kubelet health check
 
 when package travel cross netns fw mark will lost ,this will cause bpf unable to identify host network.
 
@@ -35,5 +35,5 @@ index ce5a9f65f5..1bca01a43f 100644
  		}
  		cilium_dbg(ctx, info ? DBG_IP_ID_MAP_SUCCEED4 : DBG_IP_ID_MAP_FAILED4,
 -- 
-2.36.1
+2.37.3
 

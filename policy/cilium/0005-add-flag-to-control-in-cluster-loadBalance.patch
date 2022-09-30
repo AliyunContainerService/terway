@@ -1,7 +1,7 @@
-From 42d5f2b921d770b56abdd4675758b5744087e783 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Thu, 9 Dec 2021 10:39:49 +0800
-Subject: [PATCH 6/8] add flag to control in cluster loadBalance
+Subject: [PATCH] add flag to control in cluster loadBalance
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
@@ -11,10 +11,10 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  3 files changed, 11 insertions(+), 1 deletion(-)
 
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 58bb8d4c84..b7a1db0087 100644
+index 53ef9a828f..42741ca3ff 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
-@@ -393,6 +393,9 @@ func initializeFlags() {
+@@ -389,6 +389,9 @@ func initializeFlags() {
  	flags.Bool(option.EnableExternalIPs, defaults.EnableExternalIPs, fmt.Sprintf("Enable k8s service externalIPs feature (requires enabling %s)", option.EnableNodePort))
  	option.BindEnv(option.EnableExternalIPs)
  
@@ -70,5 +70,5 @@ index ca69edd2a5..0df3422dac 100644
  	c.EnableHostPort = viper.GetBool(EnableHostPort)
  	c.EnableHostLegacyRouting = viper.GetBool(EnableHostLegacyRouting)
 -- 
-2.36.1
+2.37.3
 
