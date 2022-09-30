@@ -2,7 +2,6 @@ package delegate
 
 import (
 	"context"
-	"errors"
 	"net"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
@@ -20,7 +19,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-var ErrNotNotSynced = errors.New("node is not synced")
 var _ register.Interface = &Delegate{}
 
 // Delegate is the delegate for each node
@@ -49,7 +47,11 @@ func (d *Delegate) CreateNetworkInterface(ctx context.Context, trunk bool, vSwit
 	if err != nil {
 		return nil, err
 	}
-	return nodeClient.GetClient().CreateNetworkInterface(ctx, trunk, vSwitchID, securityGroups, resourceGroupID, ipCount, ipv6Count, eniTags)
+	c, err := nodeClient.GetClient()
+	if err != nil {
+		return nil, err
+	}
+	return c.CreateNetworkInterface(ctx, trunk, vSwitchID, securityGroups, resourceGroupID, ipCount, ipv6Count, eniTags)
 }
 
 func (d *Delegate) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*aliyunClient.NetworkInterface, error) {
@@ -69,7 +71,11 @@ func (d *Delegate) AttachNetworkInterface(ctx context.Context, eniID, instanceID
 	if err != nil {
 		return err
 	}
-	return nodeClient.GetClient().AttachNetworkInterface(ctx, eniID, instanceID, trunkENIID)
+	c, err := nodeClient.GetClient()
+	if err != nil {
+		return err
+	}
+	return c.AttachNetworkInterface(ctx, eniID, instanceID, trunkENIID)
 }
 
 func (d *Delegate) DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error {
@@ -78,10 +84,11 @@ func (d *Delegate) DetachNetworkInterface(ctx context.Context, eniID, instanceID
 	if nodeName == "" || err != nil {
 		return d.defaultClient.DetachNetworkInterface(ctx, eniID, instanceID, trunkENIID)
 	}
-	if !nodeClient.GetSynced() {
-		return ErrNotNotSynced
+	c, err := nodeClient.GetClient()
+	if err != nil {
+		return err
 	}
-	return nodeClient.GetClient().DetachNetworkInterface(ctx, eniID, instanceID, trunkENIID)
+	return c.DetachNetworkInterface(ctx, eniID, instanceID, trunkENIID)
 }
 
 func (d *Delegate) DeleteNetworkInterface(ctx context.Context, eniID string) error {
@@ -98,10 +105,11 @@ func (d *Delegate) DeleteNetworkInterface(ctx context.Context, eniID string) err
 		return realClient.DeleteNetworkInterface(ctx, eniID)
 	}
 
-	if !nodeClient.GetSynced() {
-		return ErrNotNotSynced
+	c, err := nodeClient.GetClient()
+	if err != nil {
+		return err
 	}
-	return nodeClient.GetClient().DeleteNetworkInterface(ctx, eniID)
+	return c.DeleteNetworkInterface(ctx, eniID)
 }
 
 func (d *Delegate) WaitForNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*aliyunClient.NetworkInterface, error) {
@@ -110,16 +118,21 @@ func (d *Delegate) WaitForNetworkInterface(ctx context.Context, eniID string, st
 	l.Info("WaitForNetworkInterface", "nodeName", nodeName)
 	nodeClient, err := node.GetPoolManager(nodeName)
 	if nodeName == "" || (err != nil && ignoreNotExist) {
+		// not use pool or node already gone
 		realClient, _, err := common.Became(ctx, d.defaultClient)
 		if err != nil {
 			return nil, err
 		}
 		return realClient.WaitForNetworkInterface(ctx, eniID, status, backoff, ignoreNotExist)
 	}
-	if err != nil && !ignoreNotExist {
+	if err != nil {
 		return nil, err
 	}
-	return nodeClient.GetClient().WaitForNetworkInterface(ctx, eniID, status, backoff, ignoreNotExist)
+	c, err := nodeClient.GetClient()
+	if err != nil {
+		return nil, err
+	}
+	return c.WaitForNetworkInterface(ctx, eniID, status, backoff, ignoreNotExist)
 }
 
 func (d *Delegate) DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*vpc.VSwitch, error) {
