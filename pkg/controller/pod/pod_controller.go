@@ -563,7 +563,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 			alloc := (*allocs)[ii]
 			ctx := common.WithCtx(ctx, alloc)
 
-			eni, err := m.aliyun.CreateNetworkInterface(ctx, false, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, 1, ipv6Count, map[string]string{
+			eni, err := m.aliyun.CreateNetworkInterface(ctx, false, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, alloc.ENI.ResourceGroupID, 1, ipv6Count, map[string]string{
 				types.TagKeyClusterID:               clusterID,
 				types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
 			})
@@ -581,6 +581,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 				Zone:             eni.ZoneID,
 				VSwitchID:        eni.VSwitchID,
 				SecurityGroupIDs: eni.SecurityGroupIDs,
+				ResourceGroupID:  eni.ResourceGroupID,
 			}
 			alloc.IPv4 = eni.PrivateIPAddress
 			alloc.IPv6 = v6
@@ -611,5 +612,12 @@ func cacheable(allocs *[]*v1beta1.Allocation, allocType *v1beta1.AllocationType)
 	if len((*allocs)[0].ExtraConfig) > 0 {
 		return false
 	}
+
+	for _, v := range *allocs {
+		if v.ENI.ResourceGroupID != "" {
+			return false
+		}
+	}
+
 	return true
 }

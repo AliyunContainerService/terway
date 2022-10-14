@@ -211,7 +211,7 @@ func (m *ReconcileNode) ensureTrunkENI(ctx context.Context, node *corev1.Node) (
 			return reconcile.Result{}, err
 		}
 
-		resp, err := m.aliyun.CreateNetworkInterface(ctx, true, vsw.ID, eniConfig.GetSecurityGroups(), 1, 0, tags)
+		resp, err := m.aliyun.CreateNetworkInterface(ctx, true, vsw.ID, eniConfig.GetSecurityGroups(), "", 1, 0, tags)
 		if err != nil {
 			return reconcile.Result{}, err
 		}

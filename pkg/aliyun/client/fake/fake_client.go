@@ -63,7 +63,7 @@ func (o *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]
 	}, nil
 }
 
-func (o *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitch string, securityGroups []string, ipCount, ipv6Count int, eniTags map[string]string) (*client.NetworkInterface, error) {
+func (o *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitch string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*client.NetworkInterface, error) {
 	o.Lock()
 	defer o.Unlock()
 
@@ -91,6 +91,7 @@ func (o *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitc
 		NetworkInterfaceID: fmt.Sprintf("eni-%s", uuid.NewUUID()),
 		VSwitchID:          vSwitch,
 		SecurityGroupIDs:   securityGroups,
+		ResourceGroupID:    resourceGroupID,
 		PrivateIPAddress:   v4Set[0].PrivateIpAddress,
 		PrivateIPSets:      v4Set,
 		IPv6Set:            v6Set,
