@@ -71,40 +71,6 @@ func DelLinkByName(ifName string) error {
 	return LinkDel(contLink)
 }
 
-// EnsureAddrWithPrefix take the ipNet set and ensure only one IP for each family is present on link
-// it will remove other unmatched IPs
-func EnsureAddrWithPrefix(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, prefixRoute bool) (bool, error) {
-	var changed bool
-
-	if ipNetSet.IPv4 != nil {
-		newAddr := &netlink.Addr{IPNet: ipNetSet.IPv4}
-		if !prefixRoute {
-			newAddr.Flags = unix.IFA_F_NOPREFIXROUTE
-		}
-		c, err := EnsureAddr(link, newAddr)
-		if err != nil {
-			return c, err
-		}
-		if c {
-			changed = true
-		}
-	}
-	if ipNetSet.IPv6 != nil {
-		newAddr := &netlink.Addr{IPNet: ipNetSet.IPv6}
-		if !prefixRoute {
-			newAddr.Flags = unix.IFA_F_NOPREFIXROUTE
-		}
-		c, err := EnsureAddr(link, newAddr)
-		if err != nil {
-			return c, err
-		}
-		if c {
-			changed = true
-		}
-	}
-	return changed, nil
-}
-
 // EnsureAddr ensure only one IP for each family is present on link
 func EnsureAddr(link netlink.Link, expect *netlink.Addr) (bool, error) {
 	var changed bool
