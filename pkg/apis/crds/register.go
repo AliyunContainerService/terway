@@ -21,6 +21,8 @@ var log = ctrl.Log.WithName("crd")
 const (
 	CRDPodENI        = "podenis.network.alibabacloud.com"
 	CRDPodNetworking = "podnetworkings.network.alibabacloud.com"
+
+	crdVersionKey = "crd.network.alibabacloud.com/version"
 )
 
 var (
@@ -50,11 +52,11 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 	return ciliumCRD
 }
 
-func createCRD(cs apiextensionsclient.Interface, name string) error {
+func createOrUpdateCRD(cs apiextensionsclient.Interface, name string) error {
 	log.Info("syncing", "crd", name)
 	client := cs.ApiextensionsV1().CustomResourceDefinitions()
 	crd := getCRD(name)
-	_, err := client.Get(context.TODO(), name, metav1.GetOptions{})
+	exist, err := client.Get(context.TODO(), name, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		log.Info("creating", "crd", name)
 		_, err = client.Create(context.TODO(), &crd, metav1.CreateOptions{})
@@ -65,15 +67,22 @@ func createCRD(cs apiextensionsclient.Interface, name string) error {
 		}
 		return err
 	}
-
-	return nil
+	if exist.Annotations[crdVersionKey] == crd.Annotations[crdVersionKey] {
+		return nil
+	}
+	crd.CreationTimestamp = exist.CreationTimestamp
+	crd.ResourceVersion = exist.ResourceVersion
+	crd.UID = exist.UID
+	crd.Generation = exist.Generation
+	_, err = client.Update(context.TODO(), &crd, metav1.UpdateOptions{})
+	return err
 }
 
 // RegisterCRDs will create all crds if not present
 func RegisterCRDs() error {
 	crds := []string{CRDPodENI, CRDPodNetworking}
 	for _, crd := range crds {
-		err := createCRD(utils.APIExtensionsClient, crd)
+		err := createOrUpdateCRD(utils.APIExtensionsClient, crd)
 		if err != nil {
 			return err
 		}

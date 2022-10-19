@@ -116,7 +116,7 @@ func (c *FakePodENIs) UpdateStatus(ctx context.Context, podENI *v1beta1.PodENI, 
 // Delete takes name of the podENI and deletes it. Returns an error if one occurs.
 func (c *FakePodENIs) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(podenisResource, c.ns, name), &v1beta1.PodENI{})
+		Invokes(testing.NewDeleteActionWithOptions(podenisResource, c.ns, name, opts), &v1beta1.PodENI{})
 
 	return err
 }
