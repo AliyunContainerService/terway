@@ -91,27 +91,6 @@ func (d *Delegate) DetachNetworkInterface(ctx context.Context, eniID, instanceID
 	return c.DetachNetworkInterface(ctx, eniID, instanceID, trunkENIID)
 }
 
-func (d *Delegate) DeleteNetworkInterface(ctx context.Context, eniID string) error {
-	nodeName := common.NodeNameFromCtx(ctx)
-	l := log.FromContext(ctx)
-	l.Info("DeleteNetworkInterface", "nodeName", nodeName)
-
-	nodeClient, err := node.GetPoolManager(nodeName)
-	if nodeName == "" || err != nil {
-		realClient, _, err := common.Became(ctx, d.defaultClient)
-		if err != nil {
-			return err
-		}
-		return realClient.DeleteNetworkInterface(ctx, eniID)
-	}
-
-	c, err := nodeClient.GetClient()
-	if err != nil {
-		return err
-	}
-	return c.DeleteNetworkInterface(ctx, eniID)
-}
-
 func (d *Delegate) WaitForNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*aliyunClient.NetworkInterface, error) {
 	nodeName := common.NodeNameFromCtx(ctx)
 	l := log.FromContext(ctx)
