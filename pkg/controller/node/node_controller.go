@@ -152,8 +152,16 @@ func (m *ReconcileNode) createOrUpdate(ctx context.Context, node *corev1.Node) (
 	}
 
 	if controlplane.GetConfig().EnableENIPool {
+		needInit := false
 		v, ok := nodePool.Load(node.Name)
-		if !(ok && v.(*Client).GetSynced()) {
+		if !ok {
+			needInit = true
+		} else {
+			if _, err = v.(*Client).GetClient(); err != nil {
+				needInit = true
+			}
+		}
+		if needInit {
 			err = m.initENIManagerForNode(ctx, node, nodeInfo)
 			if err != nil {
 				return reconcile.Result{}, err
@@ -170,8 +178,8 @@ func (m *ReconcileNode) createOrUpdate(ctx context.Context, node *corev1.Node) (
 func (m *ReconcileNode) delete(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	v, ok := nodePool.LoadAndDelete(request.Name)
 	if ok {
-		mgr := v.(*Client).GetClient()
-		if mgr != nil {
+		mgr, err := v.(*Client).GetClient()
+		if err == nil {
 			mgr.Stop()
 		}
 	}
@@ -341,7 +349,6 @@ func (m *ReconcileNode) initENIManagerForNode(ctx context.Context, node *corev1.
 
 	v, ok := nodePool.LoadOrStore(node.Name, &Client{
 		client: nodeENIMgr,
-		synced: true,
 	})
 	if !ok {
 		go func() {
@@ -353,7 +360,7 @@ func (m *ReconcileNode) initENIManagerForNode(ctx context.Context, node *corev1.
 
 	// for old one
 	nodeClient := v.(*Client)
-	if nodeClient.GetClient() != nil {
+	if _, err = nodeClient.GetClient(); err == nil {
 		// already working
 		return nil
 	}

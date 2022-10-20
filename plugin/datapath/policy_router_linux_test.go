@@ -150,7 +150,7 @@ func TestDataPathPolicyRoute(t *testing.T) {
 	assert.Equal(t, len(rules), 1)
 	assert.Nil(t, rules[0].Src)
 
-	// 2048 from 169.10.0.10 iif hostVETH lookup table
+	// 2048 from 169.10.0.10 lookup table
 	rules, err = netlink.RuleListFiltered(netlink.FAMILY_V4, &netlink.Rule{
 		Priority: fromContainerPriority,
 		Table:    utils.GetRouteTableID(eni.Attrs().Index),
@@ -158,7 +158,6 @@ func TestDataPathPolicyRoute(t *testing.T) {
 			IP:   cfg.ContainerIPNet.IPv4.IP,
 			Mask: net.CIDRMask(32, 32),
 		},
-		IifName: cfg.HostVETHName,
 	}, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_SRC|netlink.RT_FILTER_PRIORITY|netlink.RT_FILTER_IIF)
 	assert.NoError(t, err)
 	assert.Equal(t, len(rules), 1)
@@ -179,6 +178,17 @@ func TestDataPathPolicyRoute(t *testing.T) {
 	err = utils.GenericTearDown(containerNS)
 	assert.NoError(t, err)
 
+	err = d.Teardown(&types.TeardownCfg{
+		HostVETHName:    cfg.HostVETHName,
+		ContainerIfName: cfg.ContainerIfName,
+		ContainerIPNet: &terwayTypes.IPNetSet{
+			IPv4: containerIPNet,
+			IPv6: containerIPNetIPv6,
+		},
+		ENIIndex: eni.Attrs().Index,
+	}, containerNS)
+	assert.NoError(t, err)
+
 	_, err = netlink.LinkByName(cfg.HostVETHName)
 	assert.Error(t, err)
 	_, ok = err.(netlink.LinkNotFoundError)
@@ -187,4 +197,8 @@ func TestDataPathPolicyRoute(t *testing.T) {
 	rules, err = netlink.RuleList(netlink.FAMILY_V4)
 	assert.NoError(t, err)
 	assert.Equal(t, 4, len(rules))
+
+	for _, r := range rules {
+		t.Logf("%s %#v ", r, r)
+	}
 }

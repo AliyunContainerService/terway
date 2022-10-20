@@ -1,7 +1,7 @@
-From b9fe625770502e5192ad050e6db05c55712570d0 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Thu, 10 Jun 2021 19:20:58 +0800
-Subject: [PATCH 5/8] adapt 1.10 for terway
+Subject: [PATCH] adapt 1.10 for terway
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
@@ -40,5 +40,5 @@ index e18af26c48..ca69edd2a5 100644
  	c.KubeProxyReplacementHealthzBindAddr = viper.GetString(KubeProxyReplacementHealthzBindAddr)
  
 -- 
-2.36.1
+2.37.3
 

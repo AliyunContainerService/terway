@@ -8,10 +8,24 @@ Subject: [PATCH] adapt 1.12
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
+ bpf/lib/icmp6.h                              | 2 +-
  pkg/datapath/loader/loader.go                | 3 +--
  plugins/cilium-cni/chaining/terway/terway.go | 9 +++++----
- 2 files changed, 6 insertions(+), 6 deletions(-)
+ 3 files changed, 7 insertions(+), 7 deletions(-)
 
+diff --git a/bpf/lib/icmp6.h b/bpf/lib/icmp6.h
+index 46b1fc29ff..0a0f74a689 100644
+--- a/bpf/lib/icmp6.h
++++ b/bpf/lib/icmp6.h
+@@ -394,7 +394,7 @@ static __always_inline int __icmp6_handle_ns(struct __ctx_buff *ctx, int nh_off)
+ 	}
+ 
+ 	/* Unknown target address, drop */
+-	return ACTION_UNKNOWN_ICMP6_NS;
++	return 0;
+ }
+ 
+ #ifndef SKIP_ICMPV6_NS_HANDLING
 diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
 index 1dba925080..629ef1bece 100644
 --- a/pkg/datapath/loader/loader.go

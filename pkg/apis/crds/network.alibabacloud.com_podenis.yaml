@@ -5,6 +5,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.7.0
+    crd.network.alibabacloud.com/version: v0.1.0
   creationTimestamp: null
   name: podenis.network.alibabacloud.com
 spec:
@@ -69,6 +70,8 @@ spec:
                         id:
                           type: string
                         mac:
+                          type: string
+                        resourceGroupID:
                           type: string
                         securityGroupIDs:
                           items:

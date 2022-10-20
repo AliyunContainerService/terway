@@ -109,7 +109,7 @@ func (c *FakePodNetworkings) UpdateStatus(ctx context.Context, podNetworking *v1
 // Delete takes name of the podNetworking and deletes it. Returns an error if one occurs.
 func (c *FakePodNetworkings) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewRootDeleteAction(podnetworkingsResource, name), &v1beta1.PodNetworking{})
+		Invokes(testing.NewRootDeleteActionWithOptions(podnetworkingsResource, name, opts), &v1beta1.PodNetworking{})
 	return err
 }
 
