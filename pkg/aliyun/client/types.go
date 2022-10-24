@@ -21,6 +21,8 @@ const (
 	LogFieldEIPID            = "eip"
 	LogFieldPrivateIP        = "privateIP"
 	LogFieldVSwitchID        = "vSwitchID"
+	LogFieldSgID             = "securityGroupID"
+	LogFieldResourceGroupID  = "resourceGroupID"
 )
 
 const (
@@ -87,6 +89,7 @@ func FromCreateResp(in *ecs.CreateNetworkInterfaceResponse) *NetworkInterface {
 		IPv6Set:            in.Ipv6Sets.Ipv6Set,
 		Tags:               in.Tags.Tag,
 		Type:               in.Type,
+		ResourceGroupID:    in.ResourceGroupId,
 	}
 }
 

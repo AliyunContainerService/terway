@@ -92,7 +92,7 @@ func (s *SwitchPool) GetOne(ctx context.Context, client client.VSwitch, zone str
 		return vsw, nil
 	}
 
-	return nil, fmt.Errorf("no available vSwitch for zone %s", zone)
+	return nil, fmt.Errorf("no available vSwitch for zone %s, vswList %v", zone, ids)
 }
 
 // GetByID will get vSwitch info from local store or openAPI
