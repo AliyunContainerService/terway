@@ -178,6 +178,7 @@ func (m *Manager) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitc
 		}
 		result.Type = attachResp.Type
 		result.Status = attachResp.Status
+		result.ResourceGroupID = attachResp.ResourceGroupID
 		result.DeviceIndex = attachResp.DeviceIndex
 		result.InstanceID = attachResp.InstanceID
 		result.CreationTime = attachResp.CreationTime

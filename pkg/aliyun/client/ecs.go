@@ -79,8 +79,10 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitc
 	req.Tag = &tags
 
 	l := log.WithFields(map[string]interface{}{
-		LogFieldAPI:       "CreateNetworkInterface",
-		LogFieldVSwitchID: vSwitch,
+		LogFieldAPI:             "CreateNetworkInterface",
+		LogFieldVSwitchID:       vSwitch,
+		LogFieldSgID:            securityGroups,
+		LogFieldResourceGroupID: resourceGroupID,
 	})
 	a.MutatingRateLimiter.Accept()
 	start := time.Now()
