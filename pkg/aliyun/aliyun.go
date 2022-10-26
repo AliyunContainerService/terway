@@ -345,7 +345,9 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 	}
 	wg.Wait()
 
-	return ipv4s, ipv6s, k8sErr.NewAggregate([]error{v4Err, v6Err})
+	err = k8sErr.NewAggregate([]error{v4Err, v6Err})
+
+	return ipv4s, ipv6s, err
 }
 
 func (e *Impl) UnAssignIPsForENI(ctx context.Context, eniID, mac string, ipv4s []net.IP, ipv6s []net.IP) error {
