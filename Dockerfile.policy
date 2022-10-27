@@ -45,6 +45,9 @@ RUN cd cilium && make NOSTRIP=$NOSTRIP LOCKDEBUG=$LOCKDEBUG PKG_BUILD=1 V=$V LIB
     SKIP_DOCS=true DESTDIR=/tmp/install clean-container build-container install-container
 RUN cp /tmp/install/opt/cni/bin/cilium-cni /tmp/install/usr/bin/
 
+RUN cd /go/src/github.com/cilium/cilium/operator && make cilium-operator-generic \
+    && mv cilium-operator-generic /tmp/install/usr/bin/
+
 FROM scratch
 COPY --from=felix-builder /go/src/github.com/projectcalico/felix/bin/calico-felix /bin/calico-felix
 COPY --from=cilium-builder /tmp/install/ /tmp/install/

@@ -5,16 +5,13 @@ Subject: [PATCH] run operator
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
- daemon/cmd/daemon_main.go                     |  22 +-
- operator/Makefile                             |   2 +-
- operator/main.go                              | 218 ------------------
- .../k8s.io/apimachinery/pkg/util/uuid/uuid.go |  27 +++
- vendor/modules.txt                            |   1 +
- 5 files changed, 44 insertions(+), 226 deletions(-)
- create mode 100644 vendor/k8s.io/apimachinery/pkg/util/uuid/uuid.go
+ daemon/cmd/daemon_main.go |  22 ++--
+ operator/Makefile         |   2 +-
+ operator/main.go          | 218 --------------------------------------
+ 3 files changed, 16 insertions(+), 226 deletions(-)
 
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 14daa753ef..53ef9a828f 100644
+index 14daa753ef..3880abdd9c 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
 @@ -14,13 +14,6 @@ import (
@@ -57,11 +54,11 @@ index 14daa753ef..53ef9a828f 100644
  
  func runDaemon() {
 +	go func() {
-+		cmd := exec.CommandContext(server.ServerCtx, "cilium-operator-generic", "--skip-crd-creation", "true", "--k8s-namespace", os.Getenv("CILIUM_K8S_NAMESPACE"), "--identity-gc-interval", "10m", "--identity-heartbeat-timeout", "20m")
++		cmd := exec.CommandContext(server.ServerCtx, "cilium-operator-generic", "--skip-crd-creation", "--k8s-namespace", os.Getenv("CILIUM_K8S_NAMESPACE"), "--identity-gc-interval", "10m", "--identity-heartbeat-timeout", "20m")
 +		cmd.Stdout = os.Stdout
 +		cmd.Stderr = os.Stderr
-+		_ = cmd.Run()
-+		log.Fatal("cilium-operator exited")
++		err := cmd.Run()
++		log.Fatal(fmt.Errorf("cilium-operator exited, %w", err))
 +	}()
 +
  	datapathConfig := linuxdatapath.DatapathConfiguration{
@@ -360,51 +357,6 @@ index 803a95322a..9d6c2522a2 100644
  	log.Info("Initialization complete")
  
  	<-shutdownSignal
-diff --git a/vendor/k8s.io/apimachinery/pkg/util/uuid/uuid.go b/vendor/k8s.io/apimachinery/pkg/util/uuid/uuid.go
-new file mode 100644
-index 0000000000..1fa351aab6
---- /dev/null
-+++ b/vendor/k8s.io/apimachinery/pkg/util/uuid/uuid.go
-@@ -0,0 +1,27 @@
-+/*
-+Copyright 2014 The Kubernetes Authors.
-+
-+Licensed under the Apache License, Version 2.0 (the "License");
-+you may not use this file except in compliance with the License.
-+You may obtain a copy of the License at
-+
-+    http://www.apache.org/licenses/LICENSE-2.0
-+
-+Unless required by applicable law or agreed to in writing, software
-+distributed under the License is distributed on an "AS IS" BASIS,
-+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-+See the License for the specific language governing permissions and
-+limitations under the License.
-+*/
-+
-+package uuid
-+
-+import (
-+	"github.com/google/uuid"
-+
-+	"k8s.io/apimachinery/pkg/types"
-+)
-+
-+func NewUUID() types.UID {
-+	return types.UID(uuid.New().String())
-+}
-diff --git a/vendor/modules.txt b/vendor/modules.txt
-index 38c2e22c60..2a981b1888 100644
---- a/vendor/modules.txt
-+++ b/vendor/modules.txt
-@@ -1255,6 +1255,7 @@ k8s.io/apimachinery/pkg/util/net
- k8s.io/apimachinery/pkg/util/runtime
- k8s.io/apimachinery/pkg/util/sets
- k8s.io/apimachinery/pkg/util/strategicpatch
-+k8s.io/apimachinery/pkg/util/uuid
- k8s.io/apimachinery/pkg/util/validation
- k8s.io/apimachinery/pkg/util/validation/field
- k8s.io/apimachinery/pkg/util/wait
 -- 
 2.37.3
 

@@ -11,7 +11,7 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  3 files changed, 11 insertions(+), 1 deletion(-)
 
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 53ef9a828f..42741ca3ff 100644
+index 3880abdd9c..1c979ecb62 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
 @@ -389,6 +389,9 @@ func initializeFlags() {
