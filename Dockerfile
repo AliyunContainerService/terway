@@ -8,15 +8,16 @@ FROM --platform=$TARGETPLATFORM ${CILIUM_LLVM_IMAGE} as llvm-dist
 FROM --platform=$TARGETPLATFORM ${CILIUM_BPFTOOL_IMAGE} as bpftool-dist
 FROM --platform=$TARGETPLATFORM ${CILIUM_IPROUTE2_IMAGE} as iproute2-dist
 
-FROM --platform=$TARGETPLATFORM golang:1.18.5 as builder
+FROM --platform=$BUILDPLATFORM golang:1.19.2 as builder
 ARG GOPROXY
+ARG TARGETOS
+ARG TARGETARCH
 ENV GOPROXY $GOPROXY
 WORKDIR /go/src/github.com/AliyunContainerService/terway/
-COPY go.sum go.sum
-COPY go.mod go.mod
+COPY go.sum go.mod ./
 RUN go mod download
 COPY . .
-RUN cd cmd/terway && CGO_ENABLED=0 GOOS=linux go build -tags default_build \
+RUN cd cmd/terway && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags default_build \
     -ldflags \
     "-X \"github.com/AliyunContainerService/terway/pkg/version.gitCommit=`git rev-parse HEAD`\" \
     -X \"github.com/AliyunContainerService/terway/pkg/version.buildDate=`date -u +'%Y-%m-%dT%H:%M:%SZ'`\" \
@@ -37,9 +38,7 @@ COPY policy/policyinit.sh /bin/
 COPY policy/uninstall_policy.sh /bin/
 COPY init.sh /bin/
 COPY --from=policy-dist /tmp/install/ /
-COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cmd/terway/terwayd /usr/bin/terwayd
-COPY --from=builder /go/src/github.com/AliyunContainerService/terway/plugin/terway/terway /usr/bin/terway
-COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cmd/terway-cli/terway-cli /usr/bin/terway-cli
+COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cmd/terway/terwayd /go/src/github.com/AliyunContainerService/terway/plugin/terway/terway /go/src/github.com/AliyunContainerService/terway/cmd/terway-cli/terway-cli /usr/bin/
 COPY hack/iptables-wrapper-installer.sh /iptables-wrapper-installer.sh
 RUN /iptables-wrapper-installer.sh --no-sanity-check
 ENTRYPOINT ["/usr/bin/terwayd"]
