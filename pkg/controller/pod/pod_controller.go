@@ -298,7 +298,7 @@ func (m *ReconcilePod) podDelete(ctx context.Context, namespacedName client.Obje
 		}
 	}
 	// already deleting
-	if prePodENI.Status.Phase == v1beta1.ENIPhaseDeleting {
+	if prePodENI.Status.Phase == v1beta1.ENIPhaseDeleting || !prePodENI.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
 
