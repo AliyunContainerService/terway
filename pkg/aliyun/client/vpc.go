@@ -7,8 +7,6 @@ import (
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/metric"
-	"github.com/AliyunContainerService/terway/types"
-
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"k8s.io/client-go/util/retry"
 )
@@ -43,7 +41,7 @@ func (a *OpenAPI) AssociateEIPAddress(eipID, eniID, privateIP string) error {
 	req.AllocationId = eipID
 	req.InstanceId = eniID
 	req.PrivateIpAddress = privateIP
-	req.InstanceType = string(types.EIPInstanceTypeNetworkInterface)
+	req.InstanceType = EIPInstanceTypeNetworkInterface
 
 	l := log.WithFields(map[string]interface{}{
 		LogFieldAPI:   "AssociateEipAddress",
@@ -75,7 +73,7 @@ func (a *OpenAPI) UnAssociateEIPAddress(eipID, eniID, eniIP string) error {
 	req.AllocationId = eipID
 	req.InstanceId = eniID
 	req.PrivateIpAddress = eniIP
-	req.InstanceType = string(types.EIPInstanceTypeNetworkInterface)
+	req.InstanceType = EIPInstanceTypeNetworkInterface
 
 	l := log.WithFields(map[string]interface{}{
 		LogFieldAPI:   "UnassociateEipAddress",

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth/credentials"
-	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -133,13 +132,11 @@ func pks5UnPadding(origData []byte) []byte {
 func decrypt(s string, keyring []byte) ([]byte, error) {
 	cdata, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		logrus.Errorf("failed to decode base64 string, err: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to decode base64 string, err: %w", err)
 	}
 	block, err := aes.NewCipher(keyring)
 	if err != nil {
-		logrus.Errorf("failed to new cipher, err: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to new cipher, err:%w", err)
 	}
 	blockSize := block.BlockSize()
 

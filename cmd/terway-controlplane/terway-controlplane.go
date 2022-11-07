@@ -31,7 +31,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/controller/delegate"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
-	terwayMetric "github.com/AliyunContainerService/terway/pkg/metric"
+	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/version"
 	"github.com/AliyunContainerService/terway/types/controlplane"
@@ -55,7 +55,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(networkv1beta1.AddToScheme(scheme))
 
-	metrics.Registry.MustRegister(terwayMetric.OpenAPILatency)
+	metrics.Registry.MustRegister(metric.OpenAPILatency)
 }
 
 func main() {
