@@ -51,6 +51,8 @@ const (
 
 	ENIAllocFromPool   = AnnotationPrefix + "eni-alloc-from-pool"
 	ENIRelatedNodeName = AnnotationPrefix + "node"
+
+	PodIPs = AnnotationPrefix + "pod-ips"
 )
 
 // FinalizerPodENI finalizer for podENI resource
