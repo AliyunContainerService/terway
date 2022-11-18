@@ -34,10 +34,6 @@ const (
 	PayByTraffic   = InternetChargeType("PayByTraffic")
 )
 
-type EIPInstanceType string
-
-const EIPInstanceTypeNetworkInterface EIPInstanceType = "NetworkInterface"
-
 // network resource type
 const (
 	ResourceTypeVeth  = "veth"

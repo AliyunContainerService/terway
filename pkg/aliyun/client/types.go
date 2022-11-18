@@ -54,6 +54,8 @@ const (
 	ENITypeMember    string = "Member"
 )
 
+const EIPInstanceTypeNetworkInterface = "NetworkInterface"
+
 // NetworkInterface openAPI result for ecs.CreateNetworkInterfaceResponse and ecs.NetworkInterfaceSet
 type NetworkInterface struct {
 	Status             string             `json:"status,omitempty"`

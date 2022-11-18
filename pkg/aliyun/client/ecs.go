@@ -54,9 +54,9 @@ func NewAliyun(ak, sk, regionID, credentialPath, secretNamespace, secretName str
 func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitch string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*NetworkInterface, error) {
 	req := ecs.CreateCreateNetworkInterfaceRequest()
 	req.VSwitchId = vSwitch
-	req.InstanceType = string(ENITypeSecondary)
+	req.InstanceType = ENITypeSecondary
 	if trunk {
-		req.InstanceType = string(ENITypeTrunk)
+		req.InstanceType = ENITypeTrunk
 	}
 	req.SecurityGroupIds = &securityGroups
 	req.NetworkInterfaceName = generateEniName()

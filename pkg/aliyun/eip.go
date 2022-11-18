@@ -292,7 +292,7 @@ func (e *Impl) describeEipAddresses(eipID, eniID string) ([]vpc.EipAddress, erro
 	req := vpc.CreateDescribeEipAddressesRequest()
 	req.AllocationId = eipID
 	if eniID != "" {
-		req.AssociatedInstanceType = string(types.EIPInstanceTypeNetworkInterface)
+		req.AssociatedInstanceType = client.EIPInstanceTypeNetworkInterface
 		req.AssociatedInstanceId = eniID
 	}
 	req.PageSize = requests.NewInteger(100)

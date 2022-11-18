@@ -63,6 +63,8 @@ const (
 	// this file is generated from configmap
 	terwayCNIConf  = "/etc/eni/10-terway.conf"
 	cniExecTimeout = 10 * time.Second
+
+	IfEth0 = "eth0"
 )
 
 type networkService struct {
@@ -258,6 +260,20 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 			}
 		} else {
 			networkContext.Log().Infof("alloc result: %+v", allocIPReply)
+
+			for _, netConfig := range allocIPReply.NetConfs {
+				if netConfig.IfName != IfEth0 && netConfig.IfName != "" {
+					continue
+				}
+				var ips []string
+				if netConfig.BasicInfo.PodIP.IPv4 != "" {
+					ips = append(ips, netConfig.BasicInfo.PodIP.IPv4)
+				}
+				if netConfig.BasicInfo.PodIP.IPv6 != "" {
+					ips = append(ips, netConfig.BasicInfo.PodIP.IPv6)
+				}
+				_ = n.k8s.PatchPodIPInfo(podinfo, strings.Join(ips, ","))
+			}
 		}
 	}()
 
@@ -955,7 +971,7 @@ func (n *networkService) startPeriodCheck() {
 				}, &libcni.RuntimeConf{
 					ContainerID: "fake", // must provide
 					NetNS:       netNs,
-					IfName:      "eth0",
+					IfName:      IfEth0,
 					Args:        args,
 				})
 				if err != nil {
@@ -1677,7 +1693,7 @@ func defaultForNetConf(netConf []*rpc.NetConf) error {
 
 	if !defaultRouteSet {
 		for i := 0; i < len(netConf); i++ {
-			if netConf[i].IfName == "" || netConf[i].IfName == "eth0" {
+			if netConf[i].IfName == "" || netConf[i].IfName == IfEth0 {
 				netConf[i].DefaultRoute = true
 				break
 			}
@@ -1688,7 +1704,7 @@ func defaultForNetConf(netConf []*rpc.NetConf) error {
 }
 
 func defaultIf(name string) bool {
-	if name == "" || name == "eth0" {
+	if name == "" || name == IfEth0 {
 		return true
 	}
 	return false

@@ -65,6 +65,7 @@ type Kubernetes interface {
 	SetNodeAllocatablePod(count int) error
 	PatchEipInfo(info *types.PodInfo) error
 	PatchTrunkInfo(trunkEni string) error
+	PatchPodIPInfo(info *types.PodInfo, ips string) error
 	WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
 	GetPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
 	RecordNodeEvent(eventType, reason, message string)
@@ -173,6 +174,27 @@ func (k *k8s) PatchEipInfo(info *types.PodInfo) error {
 	pod.Annotations[podEipAddress] = info.EipInfo.PodEipIP
 
 	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, podEipAddress, info.EipInfo.PodEipIP)
+
+	_, err = k.client.CoreV1().Pods(info.Namespace).Patch(context.TODO(), info.Name, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
+	if err != nil {
+		k.reconnectOnTimeoutError(err)
+		return err
+	}
+	return nil
+}
+
+func (k *k8s) PatchPodIPInfo(info *types.PodInfo, ips string) error {
+	pod, err := k.client.CoreV1().Pods(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
+		ResourceVersion: "0",
+	})
+	if err != nil || pod == nil {
+		k.reconnectOnTimeoutError(err)
+		return err
+	}
+	if pod.GetAnnotations()[types.PodIPs] == ips {
+		return nil
+	}
+	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, types.PodIPs, ips)
 
 	_, err = k.client.CoreV1().Pods(info.Namespace).Patch(context.TODO(), info.Name, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
 	if err != nil {

@@ -18,6 +18,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/rpc"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -155,7 +156,7 @@ func runDebugServer(debugSocketListen string) error {
 		}
 	}
 
-	metric.RegisterPrometheus()
+	registerPrometheus()
 	http.DefaultServeMux.Handle("/metrics", promhttp.Handler())
 
 	go func() {
@@ -166,4 +167,19 @@ func runDebugServer(debugSocketListen string) error {
 	}()
 
 	return nil
+}
+
+// RegisterPrometheus register metrics to prometheus server
+func registerPrometheus() {
+	prometheus.MustRegister(metric.RPCLatency)
+	prometheus.MustRegister(metric.OpenAPILatency)
+	prometheus.MustRegister(metric.MetadataLatency)
+	// ResourcePool
+	prometheus.MustRegister(metric.ResourcePoolTotal)
+	prometheus.MustRegister(metric.ResourcePoolIdle)
+	prometheus.MustRegister(metric.ResourcePoolDisposed)
+	// ENIIP
+	prometheus.MustRegister(metric.ENIIPFactoryIPCount)
+	prometheus.MustRegister(metric.ENIIPFactoryENICount)
+	prometheus.MustRegister(metric.ENIIPFactoryIPAllocCount)
 }
