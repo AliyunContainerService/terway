@@ -443,7 +443,7 @@ func EnsureVlanTag(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, vid uint16
 			FilterAttrs: netlink.FilterAttrs{
 				LinkIndex: link.Attrs().Index,
 				Parent:    netlink.HANDLE_MIN_EGRESS,
-				Priority:  20001,
+				Priority:  50001,
 				Protocol:  uint16(unix.ETH_P_IP),
 			},
 			Actions: []netlink.Action{vlanAct},
