@@ -6,10 +6,10 @@ import (
 	"fmt"
 
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/yaml"
@@ -57,16 +57,21 @@ func createOrUpdateCRD(cs apiextensionsclient.Interface, name string) error {
 	client := cs.ApiextensionsV1().CustomResourceDefinitions()
 	crd := getCRD(name)
 	exist, err := client.Get(context.TODO(), name, metav1.GetOptions{})
-	if errors.IsNotFound(err) {
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
 		log.Info("creating", "crd", name)
 		_, err = client.Create(context.TODO(), &crd, metav1.CreateOptions{})
-	}
-	if err != nil {
+		if err == nil {
+			return nil
+		}
 		if errors.IsAlreadyExists(err) {
 			return nil
 		}
 		return err
 	}
+
 	if exist.Annotations[crdVersionKey] == crd.Annotations[crdVersionKey] {
 		return nil
 	}
