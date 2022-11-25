@@ -23,8 +23,8 @@ RUN cd cmd/terway && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -t
     -X \"github.com/AliyunContainerService/terway/pkg/version.buildDate=`date -u +'%Y-%m-%dT%H:%M:%SZ'`\" \
     -X \"github.com/AliyunContainerService/terway/pkg/version.gitVersion=`git describe --tags --match='v*' --abbrev=14`\" \
     -X \"github.com/AliyunContainerService/terway/pkg/aliyun.kubernetesAlicloudIdentity=Kubernetes.Alicloud/`git rev-parse --short HEAD 2>/dev/null`\"" -o terwayd .
-RUN cd plugin/terway && CGO_ENABLED=0 GOOS=linux go build -tags default_build -o terway .
-RUN cd cmd/terway-cli && CGO_ENABLED=0 GOOS=linux go build -tags default_build -o terway-cli .
+RUN cd plugin/terway && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags default_build -o terway .
+RUN cd cmd/terway-cli && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags default_build -o terway-cli .
 
 FROM --platform=$TARGETPLATFORM ubuntu:20.04
 RUN apt-get update && apt-get install -y kmod libelf1 libmnl0 iptables nftables kmod curl ipset bash ethtool bridge-utils socat grep findutils jq conntrack iputils-ping && \
