@@ -265,6 +265,9 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 				if netConfig.IfName != IfEth0 && netConfig.IfName != "" {
 					continue
 				}
+				if netConfig.BasicInfo == nil || netConfig.BasicInfo.PodIP == nil {
+					continue
+				}
 				var ips []string
 				if netConfig.BasicInfo.PodIP.IPv4 != "" {
 					ips = append(ips, netConfig.BasicInfo.PodIP.IPv4)
