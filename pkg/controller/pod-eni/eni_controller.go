@@ -186,12 +186,16 @@ func (m *ReconcilePodENI) Reconcile(ctx context.Context, request reconcile.Reque
 		}
 		if nodeName != "" {
 			_, err = m.getNode(ctx, nodeName)
-			if err != nil && !k8sErr.IsNotFound(err) {
-				return reconcile.Result{}, err
+			if err != nil {
+				if !k8sErr.IsNotFound(err) {
+					return reconcile.Result{}, err
+				}
+				// for node has gone , use default client
+			} else {
+				// set node name in ctx
+				l.Info("set ctx", "nodeName", nodeName)
+				ctx = common.NodeNameWithCtx(ctx, nodeName)
 			}
-			// set node name in ctx
-			l.Info("set ctx nodeName", nodeName)
-			ctx = common.NodeNameWithCtx(ctx, nodeName)
 		}
 		// use default client
 	}
