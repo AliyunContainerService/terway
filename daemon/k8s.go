@@ -21,6 +21,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/version"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/daemon"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -269,7 +270,7 @@ func (k *k8s) WaitTrunkReady() (string, error) {
 }
 
 // newK8S return Kubernetes service by pod spec and daemon mode
-func newK8S(master, kubeconfig string, daemonMode string, globalConfig *types.Configure) (Kubernetes, error) {
+func newK8S(master, kubeconfig string, daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) {
 
 	k8sRestConfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
 	if err != nil {

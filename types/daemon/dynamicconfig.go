@@ -1,18 +1,30 @@
-package common
+package daemon
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/AliyunContainerService/terway/types"
-
+	"github.com/go-playground/mold/v4/modifiers"
+	"github.com/go-playground/validator/v10"
 	corev1 "k8s.io/api/core/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// ConfigFromConfigMConfigFromConfigMap get eni-config form configmap if nodeName is not empty dynamic config is read
-func ConfigFromConfigMConfigFromConfigMap(ctx context.Context, client client.Client, nodeName string) (*types.Configure, error) {
+var (
+	cfg *Config
+)
+
+func GetConfig() *Config {
+	return cfg
+}
+
+func SetConfig(c *Config) {
+	cfg = c
+}
+
+// ConfigFromConfigMap get eni-config form configmap if nodeName is not empty dynamic config is read
+func ConfigFromConfigMap(ctx context.Context, client client.Client, nodeName string) (*Config, error) {
 	baseConfig, err := eniConfigFromConfigMap(ctx, client, "kube-system", "eni-config")
 	if err != nil {
 		return nil, err
@@ -31,9 +43,20 @@ func ConfigFromConfigMConfigFromConfigMap(ctx context.Context, client client.Cli
 		}
 	}
 
-	eniConf, err := types.MergeConfigAndUnmarshal([]byte(topConfig), []byte(baseConfig))
+	eniConf, err := MergeConfigAndUnmarshal([]byte(topConfig), []byte(baseConfig))
 	if err != nil {
 		return nil, fmt.Errorf("error parse terway configmap eni-config, %w", err)
+	}
+
+	mod := modifiers.New()
+	err = mod.Struct(ctx, eniConf)
+	if err != nil {
+		return nil, err
+	}
+
+	err = validator.New().Struct(eniConf)
+	if err != nil {
+		return nil, err
 	}
 
 	sgs := eniConf.GetSecurityGroups()
@@ -51,7 +74,7 @@ func eniConfigFromConfigMap(ctx context.Context, client client.Client, namespace
 		Name:      name,
 	}, cm)
 	if err != nil {
-		return "", fmt.Errorf("error get terway configmap eni-config, %w", err)
+		return "", fmt.Errorf("error get configmap %s/%s, %w", namespace, name, err)
 	}
 	return cm.Data["eni_conf"], nil
 }

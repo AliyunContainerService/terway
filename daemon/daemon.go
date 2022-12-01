@@ -29,6 +29,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/daemon"
 
 	"github.com/containernetworking/cni/libcni"
 	containertypes "github.com/containernetworking/cni/pkg/types"
@@ -1347,7 +1348,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 
 	var err error
 
-	globalConfig, err := types.GetConfigFromFileWithMerge(configFilePath, nil)
+	globalConfig, err := daemon.GetConfigFromFileWithMerge(configFilePath, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1364,7 +1365,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		dynamicCfg = ""
 	}
 
-	config, err := types.GetConfigFromFileWithMerge(configFilePath, []byte(dynamicCfg))
+	config, err := daemon.GetConfigFromFileWithMerge(configFilePath, []byte(dynamicCfg))
 	if err != nil {
 		return nil, fmt.Errorf("failed parse config: %v", err)
 	}
@@ -1594,7 +1595,7 @@ func restoreLocalENIRes(ecs ipam.API, k8s Kubernetes, resourceDB storage.Storage
 }
 
 // setup default value
-func setDefault(cfg *types.Configure) error {
+func setDefault(cfg *daemon.Config) error {
 	if cfg.EniCapRatio == 0 {
 		cfg.EniCapRatio = 1
 	}
@@ -1611,7 +1612,7 @@ func setDefault(cfg *types.Configure) error {
 	return nil
 }
 
-func validateConfig(cfg *types.Configure) error {
+func validateConfig(cfg *daemon.Config) error {
 	switch cfg.IPStack {
 	case "", string(types.IPStackIPv4), string(types.IPStackDual):
 	default:
@@ -1621,7 +1622,7 @@ func validateConfig(cfg *types.Configure) error {
 	return nil
 }
 
-func getPoolConfig(cfg *types.Configure, ipamType types.IPAMType) (*types.PoolConfig, error) {
+func getPoolConfig(cfg *daemon.Config, ipamType types.IPAMType) (*types.PoolConfig, error) {
 	poolConfig := &types.PoolConfig{
 		MaxPoolSize:               cfg.MaxPoolSize,
 		MinPoolSize:               cfg.MinPoolSize,

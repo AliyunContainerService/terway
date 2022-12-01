@@ -595,7 +595,8 @@ func (m *ReconcilePodENI) gcCRPodENIs(ctx context.Context) {
 				ll.V(5).Info("update pod lastSeen to now")
 				update := podENI.DeepCopy()
 				update.Status.PodLastSeen = metav1.Now()
-				_, err = common.PatchPodENIStatus(ctx, m.client, update, &podENI)
+
+				err = m.client.Status().Patch(ctx, update, client.MergeFrom(&podENI))
 				if err != nil {
 					ll.Error(err, "error update timestamp")
 				}

@@ -49,6 +49,7 @@ import (
 )
 
 const controllerName = "pod"
+const defaultInterface = "eth0"
 
 func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
@@ -471,7 +472,7 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 	for i, n := range anno.PodNetworks {
 		name := n.Interface
 		if name == "" {
-			name = "eth0"
+			name = defaultInterface
 		}
 		targets[name] = i
 	}
@@ -481,7 +482,7 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 		alloc := update.Spec.Allocations[i]
 		name := alloc.Interface
 		if name == "" {
-			name = "eth0"
+			name = defaultInterface
 		}
 
 		if _, ok := targets[name]; ok {

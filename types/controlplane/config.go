@@ -18,40 +18,26 @@ package controlplane
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
-	"sync"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
-
 	"github.com/go-playground/mold/v4/modifiers"
 	"github.com/go-playground/validator/v10"
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
 var (
-	config     string
-	credential string
-	cfg        *Config
-	once       sync.Once
+	cfg *Config
 )
 
-func init() {
-	flag.StringVar(&config, "config", "/etc/config/ctrl-config.yaml", "config file for controlplane")
-	flag.StringVar(&credential, "credential", "/etc/credential/ctrl-secret.yaml", "secret file for controlplane")
+func GetConfig() *Config {
+	return cfg
 }
 
-func GetConfig() *Config {
-	once.Do(func() {
-		var err error
-		cfg, err = ParseAndValidate()
-		if err != nil {
-			panic(err)
-		}
-	})
-	return cfg
+func SetConfig(c *Config) {
+	cfg = c
 }
 
 func ParseAndValidateCredential(file string) (*Credential, error) {
@@ -71,8 +57,8 @@ func ParseAndValidateCredential(file string) (*Credential, error) {
 }
 
 // ParseAndValidate ready config and verify it
-func ParseAndValidate() (*Config, error) {
-	b, err := os.ReadFile(config)
+func ParseAndValidate(configFilePath, credentialFilePath string) (*Config, error) {
+	b, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +69,7 @@ func ParseAndValidate() (*Config, error) {
 		return nil, err
 	}
 
-	cr, err := ParseAndValidateCredential(credential)
+	cr, err := ParseAndValidateCredential(credentialFilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +85,6 @@ func ParseAndValidate() (*Config, error) {
 		t := true
 		c.EnableTrunk = &t
 	}
-
 	if c.RegionID == "" {
 		c.RegionID, err = metadata.GetLocalRegion()
 		if err != nil || c.RegionID == "" {
@@ -117,7 +102,6 @@ func ParseAndValidate() (*Config, error) {
 	}
 
 	backoff.OverrideBackoff(c.BackoffOverride)
-
 	cfg = &c
 
 	return &c, nil
