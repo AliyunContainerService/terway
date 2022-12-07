@@ -494,6 +494,14 @@ func (n *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest)
 		"containerID": r.K8SPodInfraContainerId,
 	}).Info("release ip req")
 
+	_, exist := n.pendingPods.LoadOrStore(podInfoKey(r.K8SPodNamespace, r.K8SPodName), struct{}{})
+	if exist {
+		return nil, fmt.Errorf("pod %s resource processing", podInfoKey(r.K8SPodNamespace, r.K8SPodName))
+	}
+	defer func() {
+		n.pendingPods.Delete(podInfoKey(r.K8SPodNamespace, r.K8SPodName))
+	}()
+
 	n.RLock()
 	defer n.RUnlock()
 	var (
