@@ -384,22 +384,40 @@ func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips [
 }
 
 func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error) {
-	req := ecs.CreateDescribeInstanceTypesRequest()
-	if types != nil {
-		req.InstanceTypes = &types
-	}
-	start := time.Now()
-	resp, err := a.ClientSet.ECS().DescribeInstanceTypes(req)
-	metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypes", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	var result []ecs.InstanceType
 
-	l := log.WithFields(map[string]interface{}{
-		LogFieldAPI: "DescribeInstanceTypes",
-	})
-	if err != nil {
-		l.WithField(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err)
-		return nil, err
+	nextToken := ""
+	for {
+		req := ecs.CreateDescribeInstanceTypesRequest()
+		req.NextToken = nextToken
+		// nb(l1b0k): see https://help.aliyun.com/practice_detail/461278.
+		req.MaxResults = requests.NewInteger(100)
+		if types != nil {
+			req.InstanceTypes = &types
+		}
+		start := time.Now()
+		resp, err := a.ClientSet.ECS().DescribeInstanceTypes(req)
+		metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypes", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+
+		l := log.WithFields(map[string]interface{}{
+			LogFieldAPI: "DescribeInstanceTypes",
+		})
+		if err != nil {
+			l.WithField(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err)
+			return nil, err
+		}
+
+		for _, r := range resp.InstanceTypes.InstanceType {
+			result = append(result, r)
+		}
+
+		if resp.NextToken == "" {
+			break
+		}
+		nextToken = resp.NextToken
 	}
-	return resp.InstanceTypes.InstanceType, nil
+
+	return result, nil
 }
 
 func (a *OpenAPI) ModifyNetworkInterfaceAttribute(ctx context.Context, eniID string, securityGroupIDs []string) error {
