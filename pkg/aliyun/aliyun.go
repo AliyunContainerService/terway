@@ -177,7 +177,7 @@ func (e *Impl) destroyInterface(ctx context.Context, eniID, instanceID, trunkENI
 
 // GetAttachedENIs of instanceId
 // containsMainENI is contains the main interface(eth0) of instance
-func (e *Impl) GetAttachedENIs(ctx context.Context, containsMainENI bool) ([]*types.ENI, error) {
+func (e *Impl) GetAttachedENIs(ctx context.Context, containsMainENI bool, trunkENIID string) ([]*types.ENI, error) {
 	enis, err := e.metadata.GetENIs(containsMainENI)
 	if err != nil {
 		return nil, fmt.Errorf("error get eni config by mac, %w", err)
@@ -188,14 +188,20 @@ func (e *Impl) GetAttachedENIs(ctx context.Context, containsMainENI bool) ([]*ty
 	for _, eni := range enis {
 		eniIDs = append(eniIDs, eni.ID)
 		enisMap[eni.ID] = eni
+
+		if trunkENIID == eni.ID {
+			eni.Trunk = true
+		}
 	}
 	if e.eniTypeAttr && len(eniIDs) > 0 {
-		eniSet, err := e.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", nil)
-		if err != nil {
-			return nil, err
-		}
-		for _, eni := range eniSet {
-			enisMap[eni.NetworkInterfaceID].Trunk = eni.Type == client.ENITypeTrunk
+		if trunkENIID == "" {
+			eniSet, err := e.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", nil)
+			if err != nil {
+				return nil, err
+			}
+			for _, eni := range eniSet {
+				enisMap[eni.NetworkInterfaceID].Trunk = eni.Type == client.ENITypeTrunk
+			}
 		}
 	}
 	return enis, nil

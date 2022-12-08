@@ -19,7 +19,6 @@ import (
 	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
-	"github.com/AliyunContainerService/terway/pkg/ipam"
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -1452,10 +1451,6 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	}
 	serviceLog.Infof("init pool config: %+v", poolConfig)
 
-	err = restoreLocalENIRes(ecs, netSrv.k8s, netSrv.resourceDB)
-	if err != nil {
-		return nil, errors.Wrapf(err, "error restore local eni resources")
-	}
 	localResource := make(map[string]map[string]resourceManagerInitItem)
 	resObjList, err := netSrv.resourceDB.List()
 	if err != nil {
@@ -1547,51 +1542,6 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	tracing.RegisterEventRecorder(netSrv.k8s.RecordNodeEvent, netSrv.k8s.RecordPodEvent)
 
 	return netSrv, nil
-}
-
-// restore local eni resources for old terway migration
-func restoreLocalENIRes(ecs ipam.API, k8s Kubernetes, resourceDB storage.Storage) error {
-	resList, err := resourceDB.List()
-	if err != nil {
-		return errors.Wrapf(err, "error list resourceDB storage")
-	}
-	if len(resList) != 0 {
-		serviceLog.Debugf("skip restore for upgraded")
-		return nil
-	}
-
-	eniList, err := ecs.GetAttachedENIs(context.Background(), false)
-	if err != nil {
-		return errors.Wrapf(err, "error get attached eni for restore")
-	}
-	ipEniMap := map[string]*types.ENI{}
-	for _, eni := range eniList {
-		ipEniMap[eni.PrimaryIP.IPv4.String()] = eni
-	}
-
-	podList, err := k8s.GetLocalPods()
-	if err != nil {
-		return errors.Wrapf(err, "error get local pod for restore")
-	}
-	for _, pod := range podList {
-		if pod.PodNetworkType != podNetworkTypeVPCENI {
-			continue
-		}
-		serviceLog.Debugf("restore for local pod: %+v, enis: %+v", pod, ipEniMap)
-		eni, ok := ipEniMap[pod.PodIPs.IPv4.String()]
-		if ok {
-			err = resourceDB.Put(podInfoKey(pod.Namespace, pod.Name), types.PodResources{
-				PodInfo:   pod,
-				Resources: eni.ToResItems(),
-			})
-			if err != nil {
-				return errors.Wrapf(err, "error put resource into store")
-			}
-		} else {
-			serviceLog.Warnf("error found pod relate eni, pod: %+v", pod)
-		}
-	}
-	return nil
 }
 
 // setup default value

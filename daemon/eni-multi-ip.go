@@ -781,7 +781,7 @@ func (f *eniIPFactory) checkAccount(message chan<- string) {
 	// get ENIs via Aliyun API
 	message <- "fetching attached ENIs from aliyun\n"
 	ctx := context.Background()
-	enis, err := f.eniFactory.ecs.GetAttachedENIs(ctx, false)
+	enis, err := f.eniFactory.ecs.GetAttachedENIs(ctx, false, f.trunkOnEni)
 	if err != nil {
 		message <- fmt.Sprintf("error while fetching from remote: %s\n", err.Error())
 		return
@@ -943,7 +943,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 		Initializer: func(holder pool.ResourceHolder) error {
 			ctx := context.Background()
 			// not use main ENI for ENI multiple ip allocate
-			enis, err := ecs.GetAttachedENIs(ctx, false)
+			enis, err := ecs.GetAttachedENIs(ctx, false, factory.trunkOnEni)
 			if err != nil {
 				return fmt.Errorf("error get attach ENI on pool init, %w", err)
 			}
