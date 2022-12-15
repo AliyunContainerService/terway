@@ -15,6 +15,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
+	"github.com/AliyunContainerService/terway/types/daemon"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
@@ -209,7 +210,7 @@ func (m *ReconcileNode) ensureTrunkENI(ctx context.Context, node *corev1.Node) (
 		l.Info("no eni found, will create trunk eni")
 
 		// create and attach eni
-		eniConfig, err := common.ConfigFromConfigMConfigFromConfigMap(ctx, m.client, node.Name)
+		eniConfig, err := daemon.ConfigFromConfigMap(ctx, m.client, node.Name)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
@@ -284,7 +285,7 @@ func (m *ReconcileNode) initENIManagerForNode(ctx context.Context, node *corev1.
 		return err
 	}
 
-	eniConfig, err := common.ConfigFromConfigMConfigFromConfigMap(ctx, m.client, node.Name)
+	eniConfig, err := daemon.ConfigFromConfigMap(ctx, m.client, node.Name)
 	if err != nil {
 		return err
 	}

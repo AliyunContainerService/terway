@@ -186,12 +186,16 @@ func (m *ReconcilePodENI) Reconcile(ctx context.Context, request reconcile.Reque
 		}
 		if nodeName != "" {
 			_, err = m.getNode(ctx, nodeName)
-			if err != nil && !k8sErr.IsNotFound(err) {
-				return reconcile.Result{}, err
+			if err != nil {
+				if !k8sErr.IsNotFound(err) {
+					return reconcile.Result{}, err
+				}
+				// for node has gone , use default client
+			} else {
+				// set node name in ctx
+				l.Info("set ctx", "nodeName", nodeName)
+				ctx = common.NodeNameWithCtx(ctx, nodeName)
 			}
-			// set node name in ctx
-			l.Info("set ctx nodeName", nodeName)
-			ctx = common.NodeNameWithCtx(ctx, nodeName)
 		}
 		// use default client
 	}
@@ -591,7 +595,8 @@ func (m *ReconcilePodENI) gcCRPodENIs(ctx context.Context) {
 				ll.V(5).Info("update pod lastSeen to now")
 				update := podENI.DeepCopy()
 				update.Status.PodLastSeen = metav1.Now()
-				_, err = common.PatchPodENIStatus(ctx, m.client, update, &podENI)
+
+				err = m.client.Status().Patch(ctx, update, client.MergeFrom(&podENI))
 				if err != nil {
 					ll.Error(err, "error update timestamp")
 				}

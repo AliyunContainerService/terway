@@ -24,10 +24,12 @@ import (
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
+	"github.com/AliyunContainerService/terway/types/daemon"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"gomodules.xyz/jsonpatch/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -94,125 +96,107 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		return webhook.Errored(1, fmt.Errorf(msg))
 	}
 
-	zones := sets.NewString()
-
-	memberCount := 0
-
 	// 1. check pod annotation config first
 	if pod.Annotations[types.PodNetworking] != "" && pod.Annotations[types.PodNetworks] != "" {
 		return webhook.Denied("can not use pod annotation and podNetworking at same time")
 	}
 
-	if types.PodUseENI(pod) || controlplane.GetConfig().IPAMType == types.IPAMTypeCRD {
-		networks, err := controlplane.ParsePodNetworksFromAnnotation(pod)
-		if err != nil {
-			return webhook.Denied(fmt.Sprintf("unable parse annotation field %s, %s", types.PodNetworks, err))
-		}
+	// 1. pod annotation config
+	// 2. pod match podNetworking
+	// 3. write default config from eni-config
+	networks, err := controlplane.ParsePodNetworksFromAnnotation(pod)
+	if err != nil {
+		return webhook.Denied(fmt.Sprintf("unable parse annotation field %s, %s", types.PodNetworks, err))
+	}
 
-		if len(networks.PodNetworks) == 0 {
-			networks.PodNetworks = append(networks.PodNetworks, controlplane.PodNetworks{Interface: eth0})
-		}
-		// validate and set default
-		require := false
-		iF := sets.NewString()
-		for _, n := range networks.PodNetworks {
-			if len(n.VSwitchOptions) == 0 || len(n.SecurityGroupIDs) == 0 || len(n.ExtraRoutes) == 0 {
-				require = true
-			}
-			if len(n.SecurityGroupIDs) > 5 {
-				return admission.Denied("security group can not more than 5")
-			}
-			if len(n.Interface) <= 0 || len(n.Interface) >= 6 {
-				return admission.Denied("interface name should >0 and <6 ")
-			}
-			if iF.Has(n.Interface) {
-				return admission.Denied("duplicated interface")
-			}
-			iF.Insert(n.Interface)
+	zones := sets.NewString()
 
-			if needPreviousZoneForAnnotation(previousZone, n) {
-				zones.Insert(previousZone)
-			}
-		}
-
-		if require {
-			cfg, err := common.ConfigFromConfigMConfigFromConfigMap(ctx, client, "")
-			if err != nil {
-				return webhook.Errored(1, err)
-			}
-			for i := range networks.PodNetworks {
-				// for now only fill eth0
-				if networks.PodNetworks[i].Interface != eth0 {
-					continue
-				}
-				if len(networks.PodNetworks[i].VSwitchOptions) == 0 {
-					networks.PodNetworks[i].VSwitchOptions = cfg.GetVSwitchIDs()
-				}
-				if len(networks.PodNetworks[i].SecurityGroupIDs) == 0 {
-					networks.PodNetworks[i].SecurityGroupIDs = cfg.GetSecurityGroups()
-				}
-				if len(networks.PodNetworks[i].ExtraRoutes) == 0 {
-					networks.PodNetworks[i].ExtraRoutes = cfg.ExtraRoutes
-				}
-			}
-			pnaBytes, err := json.Marshal(networks)
-			if err != nil {
-				return webhook.Errored(1, err)
-			}
-			pod.Annotations[types.PodNetworks] = string(pnaBytes)
-			pod.Annotations[types.PodENI] = "true"
-		}
-		memberCount = len(networks.PodNetworks)
-	} else {
-		if pod.Annotations[types.PodNetworks] != "" {
-			return webhook.Denied("can not use pod annotation and podNetworking at same time, pod-eni is missing")
-		}
-
-		if previousZone != "" {
-			zones.Insert(previousZone)
-		}
-
-		memberCount = 1
-
-		// 1. check pod with podNetworking config and get one
-		podNetworkings := &v1beta1.PodNetworkingList{}
-		err = client.List(ctx, podNetworkings)
-		if err != nil {
-			return webhook.Errored(1, fmt.Errorf("error list podNetworking, %w", err))
-		}
-
-		ns := &corev1.Namespace{}
-		err = client.Get(ctx, k8stypes.NamespacedName{
-			Name: req.Namespace,
-		}, ns)
-		if err != nil {
-			return webhook.Errored(1, fmt.Errorf("error get namespace, %w", err))
-		}
-
-		podNetworking, err := common.MatchOnePodNetworking(pod, ns, podNetworkings.Items)
+	if len(networks.PodNetworks) == 0 {
+		// get pn
+		podNetworking, err := matchOnePodNetworking(ctx, req.Namespace, client, pod)
 		if err != nil {
 			l.Error(err, "error match podNetworking")
 			return webhook.Errored(1, err)
 		}
 		if podNetworking == nil {
-			l.V(5).Info("no selector is matched or CRD is not ready")
-			return webhook.Allowed("not match")
-		}
-		pod.Annotations[types.PodENI] = "true"
-		pod.Annotations[types.PodNetworking] = podNetworking.Name
+			if !types.PodUseENI(pod) && controlplane.GetConfig().IPAMType != types.IPAMTypeCRD {
+				l.V(5).Info("no selector is matched or CRD is not ready")
+				return webhook.Allowed("not match")
+			}
 
-		if previousZone == "" {
-			// 3. if no previous conf found, we will add zone limit by vSwitches
-			for _, vsw := range podNetworking.Status.VSwitches {
-				zones.Insert(vsw.Zone)
+			networks.PodNetworks = append(networks.PodNetworks, controlplane.PodNetworks{Interface: eth0})
+		} else {
+			// use config from pn
+			pod.Annotations[types.PodNetworking] = podNetworking.Name
+			networks.PodNetworks = append(networks.PodNetworks, controlplane.PodNetworks{
+				Interface:        eth0,
+				VSwitchOptions:   podNetworking.Spec.VSwitchOptions,
+				SecurityGroupIDs: podNetworking.Spec.SecurityGroupIDs,
+			})
+			if previousZone == "" {
+				for _, vsw := range podNetworking.Status.VSwitches {
+					zones.Insert(vsw.Zone)
+				}
 			}
 		}
 	}
+	// validate and set default
+	require := false
+	iF := sets.NewString()
+	for _, n := range networks.PodNetworks {
+		if len(n.VSwitchOptions) == 0 || len(n.SecurityGroupIDs) == 0 || len(n.ExtraRoutes) == 0 {
+			require = true
+		}
+		if len(n.SecurityGroupIDs) > 5 {
+			return admission.Denied("security group can not more than 5")
+		}
+		if len(n.Interface) <= 0 || len(n.Interface) >= 6 {
+			return admission.Denied("interface name should >0 and <6 ")
+		}
+		if iF.Has(n.Interface) {
+			return admission.Denied("duplicated interface")
+		}
+		iF.Insert(n.Interface)
+
+		if needPreviousZoneForAnnotation(previousZone, n) {
+			zones.Insert(previousZone)
+		}
+	}
+
+	if require {
+		cfg, err := daemon.ConfigFromConfigMap(ctx, client, "")
+		if err != nil {
+			return webhook.Errored(1, err)
+		}
+		for i := range networks.PodNetworks {
+			// for now only fill eth0
+			if networks.PodNetworks[i].Interface != eth0 {
+				continue
+			}
+			if len(networks.PodNetworks[i].VSwitchOptions) == 0 {
+				networks.PodNetworks[i].VSwitchOptions = cfg.GetVSwitchIDs()
+			}
+			if len(networks.PodNetworks[i].SecurityGroupIDs) == 0 {
+				networks.PodNetworks[i].SecurityGroupIDs = cfg.GetSecurityGroups()
+			}
+			if len(networks.PodNetworks[i].ExtraRoutes) == 0 {
+				networks.PodNetworks[i].ExtraRoutes = cfg.ExtraRoutes
+			}
+		}
+
+	}
+	pnaBytes, err := json.Marshal(networks)
+	if err != nil {
+		return webhook.Errored(1, err)
+	}
+	pod.Annotations[types.PodNetworks] = string(pnaBytes)
+	pod.Annotations[types.PodENI] = "true"
+
 	resName := deviceplugin.MemberENIResName
 	if !*controlplane.GetConfig().EnableTrunk {
 		resName = deviceplugin.ENIResName
 	}
-	setResourceRequest(pod, resName, memberCount)
+	setResourceRequest(pod, resName, len(networks.PodNetworks))
 
 	setNodeAffinityByZones(pod, zones.List())
 
@@ -244,7 +228,7 @@ func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, cli
 		return webhook.Allowed("podNetworking all set")
 	}
 
-	cfg, err := common.ConfigFromConfigMConfigFromConfigMap(ctx, client, "")
+	cfg, err := daemon.ConfigFromConfigMap(ctx, client, "")
 	if err != nil {
 		return webhook.Errored(1, err)
 	}
@@ -266,6 +250,67 @@ func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, cli
 	}
 	l.Info("patch podNetworking with terway default config")
 	return webhook.Patched("ok", patches...)
+}
+
+// matchOnePodNetworking will range all podNetworking and try to found a matched podNetworking for this pod
+// for stateless pod Fixed ip config is never matched
+func matchOnePodNetworking(ctx context.Context, namespace string, client client.Client, pod *corev1.Pod) (*v1beta1.PodNetworking, error) {
+	podNetworkings := &v1beta1.PodNetworkingList{}
+	err := client.List(ctx, podNetworkings)
+	if err != nil {
+		return nil, fmt.Errorf("error list podNetworking, %w", err)
+	}
+	if len(podNetworkings.Items) == 0 {
+		return nil, nil
+	}
+
+	ns := &corev1.Namespace{}
+	err = client.Get(ctx, k8stypes.NamespacedName{
+		Name: namespace,
+	}, ns)
+	if err != nil {
+		return nil, fmt.Errorf("error get namespace, %w", err)
+	}
+
+	podLabels := labels.Set(pod.Labels)
+	nsLabels := labels.Set(ns.Labels)
+	for _, podNetworking := range podNetworkings.Items {
+		if podNetworking.Status.Status != v1beta1.NetworkingStatusReady {
+			continue
+		}
+		if !utils.IsStsPod(pod) {
+			// for fixed ip , only match sts pod
+			if podNetworking.Spec.AllocationType.Type == v1beta1.IPAllocTypeFixed {
+				continue
+			}
+		}
+
+		matchOne := false
+		if podNetworking.Spec.Selector.PodSelector != nil {
+			ok, err := PodMatchSelector(podNetworking.Spec.Selector.PodSelector, podLabels)
+			if err != nil {
+				return nil, fmt.Errorf("error match pod selector, %w", err)
+			}
+			if !ok {
+				continue
+			}
+			matchOne = true
+		}
+		if podNetworking.Spec.Selector.NamespaceSelector != nil {
+			ok, err := PodMatchSelector(podNetworking.Spec.Selector.NamespaceSelector, nsLabels)
+			if err != nil {
+				return nil, fmt.Errorf("error match namespace selector, %w", err)
+			}
+			if !ok {
+				continue
+			}
+			matchOne = true
+		}
+		if matchOne {
+			return &podNetworking, nil
+		}
+	}
+	return nil, nil
 }
 
 func getPreviousZone(ctx context.Context, client client.Client, pod *corev1.Pod) (string, error) {
@@ -335,4 +380,13 @@ func setNodeAffinityByZones(pod *corev1.Pod, zones []string) {
 			Values:   zones,
 		})
 	}
+}
+
+// PodMatchSelector pod is selected by selector
+func PodMatchSelector(labelSelector *metav1.LabelSelector, l labels.Set) (bool, error) {
+	selector, err := metav1.LabelSelectorAsSelector(labelSelector)
+	if err != nil {
+		return false, err
+	}
+	return selector.Matches(l), nil
 }

@@ -1,5 +1,4 @@
 //go:build test_env
-// +build test_env
 
 package podnetworking
 

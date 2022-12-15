@@ -106,7 +106,7 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 		Factory:  factory,
 		Initializer: func(holder pool.ResourceHolder) error {
 			ctx := context.Background()
-			enis, err := ecs.GetAttachedENIs(ctx, false)
+			enis, err := ecs.GetAttachedENIs(ctx, false, factory.trunkOnEni)
 			if err != nil {
 				return fmt.Errorf("error get attach ENI on pool init, %w", err)
 			}
@@ -425,7 +425,7 @@ func (f *eniFactory) Check(res types.NetworkResource) error {
 }
 
 func (f *eniFactory) ListResource() (map[string]types.NetworkResource, error) {
-	enis, err := f.ecs.GetAttachedENIs(context.Background(), false)
+	enis, err := f.ecs.GetAttachedENIs(context.Background(), false, f.trunkOnEni)
 	if err != nil {
 		return nil, err
 	}

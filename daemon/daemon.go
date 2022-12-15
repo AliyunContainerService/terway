@@ -19,7 +19,6 @@ import (
 	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
-	"github.com/AliyunContainerService/terway/pkg/ipam"
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -29,6 +28,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/daemon"
 
 	"github.com/containernetworking/cni/libcni"
 	containertypes "github.com/containernetworking/cni/pkg/types"
@@ -265,6 +265,9 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 				if netConfig.IfName != IfEth0 && netConfig.IfName != "" {
 					continue
 				}
+				if netConfig.BasicInfo == nil || netConfig.BasicInfo.PodIP == nil {
+					continue
+				}
 				var ips []string
 				if netConfig.BasicInfo.PodIP.IPv4 != "" {
 					ips = append(ips, netConfig.BasicInfo.PodIP.IPv4)
@@ -490,6 +493,14 @@ func (n *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest)
 		"pod":         podInfoKey(r.K8SPodNamespace, r.K8SPodName),
 		"containerID": r.K8SPodInfraContainerId,
 	}).Info("release ip req")
+
+	_, exist := n.pendingPods.LoadOrStore(podInfoKey(r.K8SPodNamespace, r.K8SPodName), struct{}{})
+	if exist {
+		return nil, fmt.Errorf("pod %s resource processing", podInfoKey(r.K8SPodNamespace, r.K8SPodName))
+	}
+	defer func() {
+		n.pendingPods.Delete(podInfoKey(r.K8SPodNamespace, r.K8SPodName))
+	}()
 
 	n.RLock()
 	defer n.RUnlock()
@@ -1336,7 +1347,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 
 	var err error
 
-	globalConfig, err := types.GetConfigFromFileWithMerge(configFilePath, nil)
+	globalConfig, err := daemon.GetConfigFromFileWithMerge(configFilePath, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1353,7 +1364,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		dynamicCfg = ""
 	}
 
-	config, err := types.GetConfigFromFileWithMerge(configFilePath, []byte(dynamicCfg))
+	config, err := daemon.GetConfigFromFileWithMerge(configFilePath, []byte(dynamicCfg))
 	if err != nil {
 		return nil, fmt.Errorf("failed parse config: %v", err)
 	}
@@ -1440,10 +1451,6 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	}
 	serviceLog.Infof("init pool config: %+v", poolConfig)
 
-	err = restoreLocalENIRes(ecs, netSrv.k8s, netSrv.resourceDB)
-	if err != nil {
-		return nil, errors.Wrapf(err, "error restore local eni resources")
-	}
 	localResource := make(map[string]map[string]resourceManagerInitItem)
 	resObjList, err := netSrv.resourceDB.List()
 	if err != nil {
@@ -1537,53 +1544,8 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	return netSrv, nil
 }
 
-// restore local eni resources for old terway migration
-func restoreLocalENIRes(ecs ipam.API, k8s Kubernetes, resourceDB storage.Storage) error {
-	resList, err := resourceDB.List()
-	if err != nil {
-		return errors.Wrapf(err, "error list resourceDB storage")
-	}
-	if len(resList) != 0 {
-		serviceLog.Debugf("skip restore for upgraded")
-		return nil
-	}
-
-	eniList, err := ecs.GetAttachedENIs(context.Background(), false)
-	if err != nil {
-		return errors.Wrapf(err, "error get attached eni for restore")
-	}
-	ipEniMap := map[string]*types.ENI{}
-	for _, eni := range eniList {
-		ipEniMap[eni.PrimaryIP.IPv4.String()] = eni
-	}
-
-	podList, err := k8s.GetLocalPods()
-	if err != nil {
-		return errors.Wrapf(err, "error get local pod for restore")
-	}
-	for _, pod := range podList {
-		if pod.PodNetworkType != podNetworkTypeVPCENI {
-			continue
-		}
-		serviceLog.Debugf("restore for local pod: %+v, enis: %+v", pod, ipEniMap)
-		eni, ok := ipEniMap[pod.PodIPs.IPv4.String()]
-		if ok {
-			err = resourceDB.Put(podInfoKey(pod.Namespace, pod.Name), types.PodResources{
-				PodInfo:   pod,
-				Resources: eni.ToResItems(),
-			})
-			if err != nil {
-				return errors.Wrapf(err, "error put resource into store")
-			}
-		} else {
-			serviceLog.Warnf("error found pod relate eni, pod: %+v", pod)
-		}
-	}
-	return nil
-}
-
 // setup default value
-func setDefault(cfg *types.Configure) error {
+func setDefault(cfg *daemon.Config) error {
 	if cfg.EniCapRatio == 0 {
 		cfg.EniCapRatio = 1
 	}
@@ -1600,7 +1562,7 @@ func setDefault(cfg *types.Configure) error {
 	return nil
 }
 
-func validateConfig(cfg *types.Configure) error {
+func validateConfig(cfg *daemon.Config) error {
 	switch cfg.IPStack {
 	case "", string(types.IPStackIPv4), string(types.IPStackDual):
 	default:
@@ -1610,7 +1572,7 @@ func validateConfig(cfg *types.Configure) error {
 	return nil
 }
 
-func getPoolConfig(cfg *types.Configure, ipamType types.IPAMType) (*types.PoolConfig, error) {
+func getPoolConfig(cfg *daemon.Config, ipamType types.IPAMType) (*types.PoolConfig, error) {
 	poolConfig := &types.PoolConfig{
 		MaxPoolSize:               cfg.MaxPoolSize,
 		MinPoolSize:               cfg.MinPoolSize,

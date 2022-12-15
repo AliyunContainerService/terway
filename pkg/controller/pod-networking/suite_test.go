@@ -1,5 +1,4 @@
 //go:build test_env
-// +build test_env
 
 package podnetworking
 
@@ -12,6 +11,7 @@ import (
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
+	"github.com/AliyunContainerService/terway/types/controlplane"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	. "github.com/onsi/ginkgo"
@@ -74,7 +74,12 @@ var _ = BeforeSuite(func() {
 			},
 		},
 	}
-	err = register.Controllers[controllerName](k8sManager, fakeClient, vsw)
+	err = register.Controllers[controllerName].Creator(k8sManager, &register.ControllerCtx{
+		Config:         &controlplane.Config{},
+		VSwitchPool:    vsw,
+		AliyunClient:   fakeClient,
+		DelegateClient: fakeClient,
+	})
 	Expect(err).ToNot(HaveOccurred())
 
 	go func() {

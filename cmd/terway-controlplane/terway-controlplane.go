@@ -21,10 +21,11 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	aliyun "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	"github.com/AliyunContainerService/terway/pkg/apis/crds"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/cert"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/all"
@@ -35,7 +36,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/version"
 	"github.com/AliyunContainerService/terway/types/controlplane"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -60,14 +60,25 @@ func init() {
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
+	var (
+		configFilePath     string
+		credentialFilePath string
+	)
+	flag.StringVar(&configFilePath, "config", "/etc/config/ctrl-config.yaml", "config file for controlplane")
+	flag.StringVar(&credentialFilePath, "credential", "/etc/credential/ctrl-secret.yaml", "secret file for controlplane")
+
 	flag.Parse()
 
 	ctrl.SetLogger(klogr.New())
 	log.Info(version.Version)
 
-	cfg := controlplane.GetConfig()
-	log.Info("using config", "config", cfg)
+	ctx := ctrl.SetupSignalHandler()
 
+	cfg, err := controlplane.ParseAndValidate(configFilePath, credentialFilePath)
+	if err != nil {
+		panic(err)
+	}
+	backoff.OverrideBackoff(cfg.BackoffOverride)
 	utils.SetStsKinds(cfg.CustomStatefulWorkloadKinds)
 
 	restConfig := ctrl.GetConfigOrDie()
@@ -76,7 +87,9 @@ func main() {
 	restConfig.UserAgent = version.UA
 	utils.RegisterClients(restConfig)
 
-	err := crds.RegisterCRDs()
+	log.Info("using config", "config", cfg)
+
+	err = crds.RegisterCRDs()
 	if err != nil {
 		panic(err)
 	}
@@ -91,12 +104,10 @@ func main() {
 		panic(err)
 	}
 
-	aliyunClient, err := client.New(clientSet, flowcontrol.NewTokenBucketRateLimiter(cfg.ReadOnlyQPS, cfg.ReadOnlyBurst), flowcontrol.NewTokenBucketRateLimiter(cfg.MutatingQPS, cfg.MutatingBurst))
+	aliyunClient, err := aliyun.New(clientSet, flowcontrol.NewTokenBucketRateLimiter(cfg.ReadOnlyQPS, cfg.ReadOnlyBurst), flowcontrol.NewTokenBucketRateLimiter(cfg.MutatingQPS, cfg.MutatingBurst))
 	if err != nil {
 		panic(err)
 	}
-
-	ctx := ctrl.SetupSignalHandler()
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                     scheme,

@@ -49,6 +49,7 @@ import (
 )
 
 const controllerName = "pod"
+const defaultInterface = "eth0"
 
 func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
@@ -171,7 +172,19 @@ func (m *ReconcilePod) NeedLeaderElection() bool {
 func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	l := log.FromContext(ctx)
 
-	var err error
+	// ignore all create for eci pod
+	node, err := m.getNode(ctx, pod.Spec.NodeName)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("error get node %s, %w", node.Name, err)
+	}
+	if utils.ISVKNode(node) {
+		return reconcile.Result{}, nil
+	}
+	nodeInfo, allocType, allocs, err := m.parse(ctx, pod, node)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("error parse config, %w", err)
+	}
+
 	// 1. check podENI is existed
 	prePodENI := &v1beta1.PodENI{}
 	err = m.client.Get(ctx, k8stypes.NamespacedName{
@@ -204,19 +217,6 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	}
 
 	// 2. cr is not found , so we will create new
-
-	// ignore all create for eci pod
-	node, err := m.getNode(ctx, pod.Spec.NodeName)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("error get node %s, %w", node.Name, err)
-	}
-	if utils.ISVKNode(node) {
-		return reconcile.Result{}, nil
-	}
-	nodeInfo, allocType, allocs, err := m.parse(ctx, pod, node)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("error parse config, %w", err)
-	}
 
 	l.Info("creating eni")
 	podENI := &v1beta1.PodENI{
@@ -424,6 +424,22 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 
 	update := prePodENI.DeepCopy()
 
+	if prePodENI.Annotations[types.ENIRelatedNodeName] != "" {
+		// ignore all create for eci pod
+		node, err := m.getNode(ctx, pod.Spec.NodeName)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("error get node %s, %w", node.Name, err)
+		}
+		if utils.ISVKNode(node) {
+			return reconcile.Result{}, nil
+		}
+		if prePodENI.Annotations[types.ENIRelatedNodeName] != node.Name {
+			update.Annotations[types.ENIRelatedNodeName] = node.Name
+			err = m.client.Patch(ctx, update, client.MergeFrom(prePodENI))
+			return reconcile.Result{Requeue: true}, err
+		}
+	}
+
 	if prePodENI.Annotations[types.PodUID] == string(pod.UID) {
 		update.Status.Phase = v1beta1.ENIPhaseBinding
 		_, err := common.UpdatePodENIStatus(ctx, m.client, update)
@@ -456,7 +472,7 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 	for i, n := range anno.PodNetworks {
 		name := n.Interface
 		if name == "" {
-			name = "eth0"
+			name = defaultInterface
 		}
 		targets[name] = i
 	}
@@ -466,7 +482,7 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 		alloc := update.Spec.Allocations[i]
 		name := alloc.Interface
 		if name == "" {
-			name = "eth0"
+			name = defaultInterface
 		}
 
 		if _, ok := targets[name]; ok {
