@@ -20,10 +20,10 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  create mode 100644 plugins/cilium-cni/chaining/terway/terway.go
 
 diff --git a/daemon/cmd/endpoint.go b/daemon/cmd/endpoint.go
-index af6fb5f52f..7fce43739a 100644
+index 9605f8ad3f..02137811e4 100644
 --- a/daemon/cmd/endpoint.go
 +++ b/daemon/cmd/endpoint.go
-@@ -440,6 +440,12 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
+@@ -442,6 +442,12 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
  		return d.errorDuringCreation(ep, fmt.Errorf("unable to insert endpoint into manager: %s", err))
  	}
  
@@ -261,7 +261,7 @@ index f39d064078..0865a8451d 100644
  func (ep *epInfoCache) IPv4Address() addressing.CiliumIPv4 {
  	return ep.ipv4
 diff --git a/pkg/endpoint/endpoint.go b/pkg/endpoint/endpoint.go
-index f8314e71a5..e878937435 100644
+index 605d178beb..916c3f72b7 100644
 --- a/pkg/endpoint/endpoint.go
 +++ b/pkg/endpoint/endpoint.go
 @@ -19,6 +19,7 @@ import (
@@ -325,7 +325,7 @@ index f8314e71a5..e878937435 100644
  	return e.ifName
  }
  
-@@ -2099,6 +2118,32 @@ func (e *Endpoint) IsDisconnecting() bool {
+@@ -2100,6 +2119,32 @@ func (e *Endpoint) IsDisconnecting() bool {
  	return e.state == StateDisconnected || e.state == StateDisconnecting
  }
  
@@ -359,10 +359,10 @@ index f8314e71a5..e878937435 100644
  	e.buildMutex.Lock()
  	defer e.buildMutex.Unlock()
 diff --git a/pkg/endpoint/restore.go b/pkg/endpoint/restore.go
-index d70bf02375..c26f366e9e 100644
+index 97f2b1a910..ba905543f0 100644
 --- a/pkg/endpoint/restore.go
 +++ b/pkg/endpoint/restore.go
-@@ -381,6 +381,7 @@ func (e *Endpoint) toSerializedEndpoint() *serializableEndpoint {
+@@ -383,6 +383,7 @@ func (e *Endpoint) toSerializedEndpoint() *serializableEndpoint {
  		ContainerID:           e.containerID,
  		DockerNetworkID:       e.dockerNetworkID,
  		DockerEndpointID:      e.dockerEndpointID,
@@ -370,7 +370,7 @@ index d70bf02375..c26f366e9e 100644
  		IfName:                e.ifName,
  		IfIndex:               e.ifIndex,
  		OpLabels:              e.OpLabels,
-@@ -429,6 +430,9 @@ type serializableEndpoint struct {
+@@ -431,6 +432,9 @@ type serializableEndpoint struct {
  	// libnetwork
  	DockerEndpointID string
  
@@ -380,7 +380,7 @@ index d70bf02375..c26f366e9e 100644
  	// ifName is the name of the host facing interface (veth pair) which
  	// connects into the endpoint
  	IfName string
-@@ -516,6 +520,7 @@ func (ep *Endpoint) fromSerializedEndpoint(r *serializableEndpoint) {
+@@ -518,6 +522,7 @@ func (ep *Endpoint) fromSerializedEndpoint(r *serializableEndpoint) {
  	ep.containerID = r.ContainerID
  	ep.dockerNetworkID = r.DockerNetworkID
  	ep.dockerEndpointID = r.DockerEndpointID
@@ -730,5 +730,5 @@ index 5eca17daeb..1ee2227373 100644
  )
  
 -- 
-2.37.3
+2.39.0
 

@@ -6,14 +6,15 @@ Subject: [PATCH] add bandwidth for terway ipvlan
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
  bpf/bpf_lxc.c                       | 15 +++++++++++++--
+ pkg/bandwidth/bandwidth.go          | 12 ++++++------
  pkg/datapath/linux/config/config.go |  6 ++++++
- 2 files changed, 19 insertions(+), 2 deletions(-)
+ 3 files changed, 25 insertions(+), 8 deletions(-)
 
 diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
-index 1bca01a43f..9e554506d6 100644
+index 9a535a4c27..b0b2193452 100644
 --- a/bpf/bpf_lxc.c
 +++ b/bpf/bpf_lxc.c
-@@ -1333,17 +1333,28 @@ int handle_xgress(struct __ctx_buff *ctx)
+@@ -1335,17 +1335,28 @@ int handle_xgress(struct __ctx_buff *ctx)
  		goto out;
  	}
  
@@ -44,6 +45,36 @@ index 1bca01a43f..9e554506d6 100644
  		ep_tail_call(ctx, CILIUM_CALL_IPV4_FROM_LXC);
  		ret = DROP_MISSED_TAIL_CALL;
  		break;
+diff --git a/pkg/bandwidth/bandwidth.go b/pkg/bandwidth/bandwidth.go
+index ef652dfce7..b01c94930e 100644
+--- a/pkg/bandwidth/bandwidth.go
++++ b/pkg/bandwidth/bandwidth.go
+@@ -87,11 +87,11 @@ func InitBandwidthManager() {
+ 		return
+ 	}
+ 
+-	if len(option.Config.GetDevices()) == 0 {
+-		log.Warn("BPF bandwidth manager could not detect host devices. Disabling the feature.")
+-		option.Config.EnableBandwidthManager = false
+-		return
+-	}
++	//if len(option.Config.GetDevices()) == 0 {
++	//	log.Warn("BPF bandwidth manager could not detect host devices. Disabling the feature.")
++	//	option.Config.EnableBandwidthManager = false
++	//	return
++	//}
+ 	// Going via host stack will orphan skb->sk, so we do need BPF host
+ 	// routing for it to work properly.
+ 	if option.Config.EnableBBR && option.Config.EnableHostLegacyRouting {
+@@ -130,7 +130,7 @@ func InitBandwidthManager() {
+ 			}).Fatal("Failed to set sysctl needed by BPF bandwidth manager.")
+ 		}
+ 	}
+-
++	return
+ 	for _, device := range option.Config.GetDevices() {
+ 		link, err := netlink.LinkByName(device)
+ 		if err != nil {
 diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
 index ea542dd527..0f078ad502 100644
 --- a/pkg/datapath/linux/config/config.go
@@ -62,5 +93,5 @@ index ea542dd527..0f078ad502 100644
  		ctmap.WriteBPFMacros(fw, e)
  	} else {
 -- 
-2.37.3
+2.39.0
 

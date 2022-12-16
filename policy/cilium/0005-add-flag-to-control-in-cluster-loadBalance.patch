@@ -11,10 +11,10 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  3 files changed, 11 insertions(+), 1 deletion(-)
 
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 3880abdd9c..1c979ecb62 100644
+index 7ca1c4af6e..b68980bdae 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
-@@ -389,6 +389,9 @@ func initializeFlags() {
+@@ -390,6 +390,9 @@ func initializeFlags() {
  	flags.Bool(option.EnableExternalIPs, defaults.EnableExternalIPs, fmt.Sprintf("Enable k8s service externalIPs feature (requires enabling %s)", option.EnableNodePort))
  	option.BindEnv(option.EnableExternalIPs)
  
@@ -38,7 +38,7 @@ index bbd35f3365..a055344850 100644
  		k8sLoadBalancerIPs = parseIPs(loadBalancerIPs)
  	} else if option.Config.BGPAnnounceLBIP {
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index ca69edd2a5..0df3422dac 100644
+index 4fd430f1d1..93340bb1c8 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -244,6 +244,9 @@ const (
@@ -51,7 +51,7 @@ index ca69edd2a5..0df3422dac 100644
  	// EnableSVCSourceRangeCheck enables check of service source range checks
  	EnableSVCSourceRangeCheck = "enable-svc-source-range-check"
  
-@@ -1823,6 +1826,9 @@ type DaemonConfig struct {
+@@ -1826,6 +1829,9 @@ type DaemonConfig struct {
  	// EnableNodePort enables k8s NodePort service implementation in BPF
  	EnableNodePort bool
  
@@ -61,7 +61,7 @@ index ca69edd2a5..0df3422dac 100644
  	// EnableSVCSourceRangeCheck enables check of loadBalancerSourceRanges
  	EnableSVCSourceRangeCheck bool
  
-@@ -2796,6 +2802,7 @@ func (c *DaemonConfig) Populate() {
+@@ -2808,6 +2814,7 @@ func (c *DaemonConfig) Populate() {
  	c.EnableTracing = viper.GetBool(EnableTracing)
  	c.EnableUnreachableRoutes = viper.GetBool(EnableUnreachableRoutes)
  	c.EnableNodePort = viper.GetBool(EnableNodePort)
@@ -70,5 +70,5 @@ index ca69edd2a5..0df3422dac 100644
  	c.EnableHostPort = viper.GetBool(EnableHostPort)
  	c.EnableHostLegacyRouting = viper.GetBool(EnableHostLegacyRouting)
 -- 
-2.37.3
+2.39.0
 
