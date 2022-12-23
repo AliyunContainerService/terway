@@ -5,13 +5,13 @@ Subject: [PATCH] run operator
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
- daemon/cmd/daemon_main.go |  22 ++--
+ daemon/cmd/daemon_main.go |  25 +++--
  operator/Makefile         |   2 +-
- operator/main.go          | 218 --------------------------------------
- 3 files changed, 16 insertions(+), 226 deletions(-)
+ operator/main.go          | 219 --------------------------------------
+ 3 files changed, 19 insertions(+), 227 deletions(-)
 
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 14daa753ef..3880abdd9c 100644
+index 8948ece323..7ca1c4af6e 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
 @@ -14,13 +14,6 @@ import (
@@ -49,11 +49,14 @@ index 14daa753ef..3880abdd9c 100644
  )
  
  const (
-@@ -1613,6 +1613,14 @@ func (d *Daemon) initKVStore() {
+@@ -1617,6 +1617,17 @@ func (d *Daemon) initKVStore() {
  }
  
  func runDaemon() {
 +	go func() {
++		if os.Getenv("DISABLE_CILIUM_OPERATOR") == "true" {
++			return
++		}
 +		cmd := exec.CommandContext(server.ServerCtx, "cilium-operator-generic", "--skip-crd-creation", "--k8s-namespace", os.Getenv("CILIUM_K8S_NAMESPACE"), "--identity-gc-interval", "10m", "--identity-heartbeat-timeout", "20m")
 +		cmd.Stdout = os.Stdout
 +		cmd.Stderr = os.Stderr
@@ -78,7 +81,7 @@ index ebd1285e3d..1710880c84 100644
  cilium-operator-aws: GO_TAGS_FLAGS+=ipam_provider_aws
  cilium-operator-azure: GO_TAGS_FLAGS+=ipam_provider_azure
 diff --git a/operator/main.go b/operator/main.go
-index 803a95322a..9d6c2522a2 100644
+index ac0ad59924..9d6c2522a2 100644
 --- a/operator/main.go
 +++ b/operator/main.go
 @@ -15,29 +15,22 @@ import (
@@ -311,7 +314,7 @@ index 803a95322a..9d6c2522a2 100644
 -		// Once the CiliumNodes are synchronized with the operator we will
 -		// be able to watch for K8s Node events which they will be used
 -		// to create the remaining CiliumNodes.
--		<-k8sCiliumNodesCacheSynced
+-		<-ciliumNodeManagerQueueSynced
 -
 -		// We don't want CiliumNodes that don't have podCIDRs to be
 -		// allocated with a podCIDR already being used by another node.
@@ -326,7 +329,7 @@ index 803a95322a..9d6c2522a2 100644
  	if operatorOption.Config.IdentityGCInterval != 0 {
  		identityRateLimiter = rate.NewLimiter(
  			operatorOption.Config.IdentityGCRateInterval,
-@@ -566,30 +372,6 @@ func onOperatorStartLeading(ctx context.Context) {
+@@ -566,31 +372,6 @@ func onOperatorStartLeading(ctx context.Context) {
  		enableCiliumEndpointSyncGC(true)
  	}
  
@@ -346,7 +349,8 @@ index 803a95322a..9d6c2522a2 100644
 -		ingressController, err := ingress.NewIngressController(
 -			ingress.WithHTTPSEnforced(operatorOption.Config.EnforceIngressHTTPS),
 -			ingress.WithSecretsSyncEnabled(operatorOption.Config.EnableIngressSecretsSync),
--			ingress.WithSecretsNamespace(operatorOption.Config.IngressSecretsNamespace))
+-			ingress.WithSecretsNamespace(operatorOption.Config.IngressSecretsNamespace),
+-			ingress.WithLBAnnotationPrefixes(operatorOption.Config.IngressLBAnnotationPrefixes))
 -		if err != nil {
 -			log.WithError(err).WithField(logfields.LogSubsys, ingress.Subsys).Fatal(
 -				"Failed to start ingress controller")
@@ -358,5 +362,5 @@ index 803a95322a..9d6c2522a2 100644
  
  	<-shutdownSignal
 -- 
-2.37.3
+2.39.0
 
