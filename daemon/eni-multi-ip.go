@@ -1020,6 +1020,9 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 
 					// put all local res in
 					for id, res := range allocatedResources {
+						if res.item.ENIMAC != eni.MAC {
+							continue
+						}
 						ipSet := types.IPSet{}
 						eniIP := &types.ENIIP{
 							ENI:   eni,
