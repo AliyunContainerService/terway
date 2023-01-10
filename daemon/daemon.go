@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -944,7 +943,7 @@ func (n *networkService) startPeriodCheck() {
 			serviceLog.Error(err)
 			return
 		}
-		ff, err := ioutil.ReadFile(utils.NormalizePath(terwayCNIConf))
+		ff, err := os.ReadFile(utils.NormalizePath(terwayCNIConf))
 		if err != nil {
 			serviceLog.Error(err)
 			return

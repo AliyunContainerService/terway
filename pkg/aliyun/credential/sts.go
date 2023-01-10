@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"time"
 
@@ -61,7 +60,7 @@ func (e *EncryptedCredentialProvider) Resolve() (*Credential, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read config %s, err: %w", e.credentialPath, err)
 		}
-		encodeTokenCfg, err = ioutil.ReadFile(e.credentialPath)
+		encodeTokenCfg, err = os.ReadFile(e.credentialPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read token config, err: %w", err)
 		}

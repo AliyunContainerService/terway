@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -64,7 +63,7 @@ func (f *vethResourceManager) GarbageCollection(inUseResSet map[string]types.Res
 		sandboxStubSet[sandbox] = struct{}{}
 	}
 
-	files, err := ioutil.ReadDir(defaultIpamPath)
+	files, err := os.ReadDir(defaultIpamPath)
 	if err != nil {
 		log.Errorf("Failed to list files in %q: %v", defaultIpamPath, err)
 		return fmt.Errorf("failed to list files in %q: %v", defaultIpamPath, err)
