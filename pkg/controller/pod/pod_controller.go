@@ -229,6 +229,9 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 			Annotations: map[string]string{
 				types.PodUID: string(pod.UID),
 			},
+			Labels: map[string]string{
+				types.ENIRelatedNodeName: nodeInfo.NodeName,
+			},
 		},
 	}
 
@@ -249,7 +252,6 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	podENI.Spec.Zone = nodeInfo.ZoneID
 
 	if controlplane.GetConfig().EnableENIPool {
-		podENI.Annotations[types.ENIRelatedNodeName] = nodeInfo.NodeName
 		if cacheable(&allocs, allocType) {
 			ctx = eni_pool.AllocTypeWithCtx(ctx, eni_pool.AllocPolicyPreferPool)
 			podENI.Annotations[types.ENIAllocFromPool] = ""
@@ -424,7 +426,7 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 
 	update := prePodENI.DeepCopy()
 
-	if prePodENI.Annotations[types.ENIRelatedNodeName] != "" {
+	if prePodENI.Labels[types.ENIRelatedNodeName] != "" {
 		// ignore all create for eci pod
 		node, err := m.getNode(ctx, pod.Spec.NodeName)
 		if err != nil {
@@ -433,8 +435,8 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 		if utils.ISVKNode(node) {
 			return reconcile.Result{}, nil
 		}
-		if prePodENI.Annotations[types.ENIRelatedNodeName] != node.Name {
-			update.Annotations[types.ENIRelatedNodeName] = node.Name
+		if prePodENI.Labels[types.ENIRelatedNodeName] != node.Name {
+			update.Labels[types.ENIRelatedNodeName] = node.Name
 			err = m.client.Patch(ctx, update, client.MergeFrom(prePodENI))
 			return reconcile.Result{Requeue: true}, err
 		}

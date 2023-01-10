@@ -162,7 +162,7 @@ func (m *ReconcilePodENI) Reconcile(ctx context.Context, request reconcile.Reque
 	}
 
 	if controlplane.GetConfig().EnableENIPool {
-		nodeName := podENI.Annotations[types.ENIRelatedNodeName]
+		nodeName := podENI.Labels[types.ENIRelatedNodeName]
 		if nodeName == "" {
 			// for legacy
 			nodes := &corev1.NodeList{}
