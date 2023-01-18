@@ -138,6 +138,14 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 					zones.Insert(vsw.Zone)
 				}
 			}
+
+			allocBytes, err := json.Marshal(podNetworking.Spec.AllocationType)
+			if err != nil {
+				l.Error(err, "error parse allocationType")
+				return webhook.Errored(1, err)
+			}
+			pod.Annotations[types.PodAllocType] = string(allocBytes)
+
 		}
 	}
 	// validate and set default

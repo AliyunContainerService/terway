@@ -16,7 +16,7 @@ jobs:
     - uses: actions/setup-go@v3
       with:
         go-version: 1.18.0
-    - uses: actions/cache@v2
+    - uses: actions/cache@v3
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
@@ -43,7 +43,7 @@ jobs:
     - uses: actions/setup-go@v3
       with:
         go-version: 1.18.0
-    - uses: actions/cache@v2
+    - uses: actions/cache@v3
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
@@ -73,7 +73,7 @@ jobs:
     name: Shellcheck
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Run ShellCheck
       uses: ludeeus/action-shellcheck@1.1.0
       env:
@@ -84,7 +84,7 @@ jobs:
   super-linter:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Lint Code Base
       uses: github/super-linter@v4.9.2
       env:

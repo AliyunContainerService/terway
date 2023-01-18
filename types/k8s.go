@@ -43,6 +43,9 @@ const (
 	// PodAllocType for additional net config
 	PodAllocType = AnnotationPrefix + "pod-alloc-type"
 
+	// PodENIAllocated pod annotation for allocated eni
+	PodENIAllocated = AnnotationPrefix + "allocated"
+
 	// PodUID store pod uid
 	PodUID = AnnotationPrefix + "pod-uid"
 

@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	_ "net/http/pprof" // import pprof for diagnose
@@ -20,7 +19,6 @@ import (
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -54,7 +52,7 @@ func stackTriger() {
 func Run(pidFilePath, socketFilePath, debugSocketListen, configFilePath, kubeconfig, master, daemonMode, logLevel string) error {
 	level, err := log.ParseLevel(logLevel)
 	if err != nil {
-		return errors.Wrapf(err, "error set log level: %s", logLevel)
+		return fmt.Errorf("error set log level: %s, %w", logLevel, err)
 	}
 	logger.DefaultLogger.SetLevel(level)
 	if !utils.IsWindowsOS() {
@@ -72,7 +70,7 @@ func Run(pidFilePath, socketFilePath, debugSocketListen, configFilePath, kubecon
 				return fmt.Errorf("error create pid file: %+v", err)
 			}
 		}
-		if err := ioutil.WriteFile(pidFilePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+		if err := os.WriteFile(pidFilePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
 			return fmt.Errorf("error writing pidfile %q: %v", pidFilePath, err)
 		}
 	}

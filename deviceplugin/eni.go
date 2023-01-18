@@ -2,7 +2,6 @@ package deviceplugin
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path"
@@ -215,7 +214,7 @@ func (m *ENIDevicePlugin) Allocate(ctx context.Context, r *pluginapi.AllocateReq
 }
 
 func (m *ENIDevicePlugin) cleanup() error {
-	preSocks, err := ioutil.ReadDir(pluginapi.DevicePluginPath)
+	preSocks, err := os.ReadDir(pluginapi.DevicePluginPath)
 	if err != nil {
 		return err
 	}

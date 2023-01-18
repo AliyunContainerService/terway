@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
@@ -33,8 +33,8 @@ func init() {
 
 func main() {
 	flag.Parse()
-	log.SetOutput(ioutil.Discard)
-	logrus.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
+	logrus.SetOutput(io.Discard)
 	ins := aliyun.GetInstanceMeta()
 	api, err := client.NewAliyun(accessKeyID, accessKeySecret, ins.RegionID, credentialPath, "", "")
 	if err != nil {

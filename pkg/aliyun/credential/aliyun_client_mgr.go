@@ -1,3 +1,5 @@
+//go:build default_build
+
 package credential
 
 import (

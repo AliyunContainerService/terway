@@ -16,14 +16,14 @@ package sysctl
 
 import (
 	"bytes"
-	"io/ioutil"
+	"os"
 )
 
 func EnsureConf(fPath string, cfg string) error {
-	if content, err := ioutil.ReadFile(fPath); err == nil {
+	if content, err := os.ReadFile(fPath); err == nil {
 		if bytes.Equal(bytes.TrimSpace(content), []byte(cfg)) {
 			return nil
 		}
 	}
-	return ioutil.WriteFile(fPath, []byte(cfg), 0644)
+	return os.WriteFile(fPath, []byte(cfg), 0644)
 }
