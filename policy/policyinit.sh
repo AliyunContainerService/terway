@@ -68,6 +68,8 @@ if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = 
          --ipam=cluster-pool ${extra_args}
   fi
 fi
+  # shellcheck disable=SC1091
+  source uninstall_policy.sh
 
   # check kernel version
   KERNEL_MAJOR_VERSION=$(uname -r | awk -F . '{print $1}')
@@ -77,6 +79,9 @@ fi
     export FELIX_IPTABLESBACKEND=Legacy
   elif ( uname -r | grep -E "el8|an8" && [ "${KERNEL_MAJOR_VERSION}" -ge 4 ] ) || ( uname -r | grep -E "al8|lifsea8" && [ "${KERNEL_MAJOR_VERSION}" -ge 5 ] ); then
     export FELIX_IPTABLESBACKEND=NFT
+
+    # clean legacy rules if exist
+    cleanup_legacy
   fi
 
   # default for veth
@@ -110,5 +115,12 @@ fi
   if [ -z "$DISABLE_POLICY" ] || [ "$DISABLE_POLICY" = "false" ] || [ "$DISABLE_POLICY" = "0" ]; then
       exec calico-felix
   else
-      exec uninstall_policy.sh
+      config_masquerade
+      cleanup_felix
+      # for health check
+      if [ "$FELIX_HEALTHPORT" != "" ]; then
+          exec socat PIPE TCP-LISTEN:"$FELIX_HEALTHPORT",fork
+      else
+          exec socat PIPE TCP-LISTEN:9099,fork
+      fi
   fi
