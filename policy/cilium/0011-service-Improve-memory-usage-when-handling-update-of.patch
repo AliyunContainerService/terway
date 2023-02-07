@@ -1,0 +1,1008 @@
+From 73a16a5192c1061f8eaeac8f6316770b2c8fb064 Mon Sep 17 00:00:00 2001
+From: Alan Kutniewski <kutniewski@google.com>
+Date: Wed, 6 Jul 2022 13:39:14 +0200
+Subject: [PATCH] service: Improve memory usage when handling update of a big
+ service.
+
+Change slices of Backends into slices of pointers to Backends.
+That way the slice can be garbage collected even if some parts of
+Backends are still in use.
+
+Before this change the upsertService function had slice of backends.
+This slice was assgined to service (svc.backends) and then the
+notifyMonitorServiceUpsert function was used to push the even about the
+upsert. The event created contained some fields from the backends.
+Because of that the whole slice was kept in the memory.
+
+After this fix the slice contains the pointers and they are not accessed
+later so the slice can be removed from the memory. Only the accessed
+fields need to be kept instead of whole objects.
+
+Signed-off-by: Alan Kutniewski <kutniewski@google.com>
+---
+ daemon/cmd/loadbalancer.go                |   8 +-
+ pkg/envoy/ciliumenvoyconfig.go            |   2 +-
+ pkg/k8s/watchers/pod.go                   |  12 +--
+ pkg/k8s/watchers/watcher.go               |   4 +-
+ pkg/k8s/watchers/watcher_test.go          | 118 +++++++++++-----------
+ pkg/loadbalancer/loadbalancer.go          |   2 +-
+ pkg/loadbalancer/zz_generated.deepcopy.go |   8 +-
+ pkg/maps/lbmap/lbmap.go                   |  24 ++---
+ pkg/redirectpolicy/manager.go             |   4 +-
+ pkg/service/service.go                    |  46 ++++-----
+ pkg/testutils/mockmaps/lbmap.go           |   8 +-
+ 12 files changed, 155 insertions(+), 151 deletions(-)
+
+diff --git a/daemon/cmd/loadbalancer.go b/daemon/cmd/loadbalancer.go
+index 9545624e0b..59b057d1e1 100644
+--- a/daemon/cmd/loadbalancer.go
++++ b/daemon/cmd/loadbalancer.go
+@@ -31,13 +31,13 @@ func (h *putServiceID) Handle(params PutServiceIDParams) middleware.Responder {
+ 		if !params.Config.UpdateServices {
+ 			return api.Error(PutServiceIDFailureCode, fmt.Errorf("invalid service ID 0"))
+ 		}
+-		backends := []loadbalancer.Backend{}
++		backends := []*loadbalancer.Backend{}
+ 		for _, v := range params.Config.BackendAddresses {
+ 			b, err := loadbalancer.NewBackendFromBackendModel(v)
+ 			if err != nil {
+ 				return api.Error(PutServiceIDInvalidBackendCode, err)
+ 			}
+-			backends = append(backends, *b)
++			backends = append(backends, b)
+ 		}
+ 		if err := h.svc.UpdateBackendsState(backends); err != nil {
+ 			return api.Error(PutServiceIDUpdateBackendFailureCode, err)
+@@ -54,13 +54,13 @@ func (h *putServiceID) Handle(params PutServiceIDParams) middleware.Responder {
+ 		L3n4Addr: *f,
+ 		ID:       loadbalancer.ID(params.Config.ID),
+ 	}
+-	backends := []loadbalancer.Backend{}
++	backends := []*loadbalancer.Backend{}
+ 	for _, v := range params.Config.BackendAddresses {
+ 		b, err := loadbalancer.NewBackendFromBackendModel(v)
+ 		if err != nil {
+ 			return api.Error(PutServiceIDInvalidBackendCode, err)
+ 		}
+-		backends = append(backends, *b)
++		backends = append(backends, b)
+ 	}
+ 
+ 	var svcType loadbalancer.SVCType
+diff --git a/pkg/envoy/ciliumenvoyconfig.go b/pkg/envoy/ciliumenvoyconfig.go
+index ed6b4b67ec..f56edaab68 100644
+--- a/pkg/envoy/ciliumenvoyconfig.go
++++ b/pkg/envoy/ciliumenvoyconfig.go
+@@ -662,7 +662,7 @@ func (s *XDSServer) DeleteEnvoyResources(ctx context.Context, resources Resource
+ 	return nil
+ }
+ 
+-func (s *XDSServer) UpsertEnvoyEndpoints(serviceName service.Name, backendMap map[string][]lb.Backend) error {
++func (s *XDSServer) UpsertEnvoyEndpoints(serviceName service.Name, backendMap map[string][]*lb.Backend) error {
+ 	var resources Resources
+ 	lbEndpoints := []*envoy_config_endpoint.LbEndpoint{}
+ 	for port, bes := range backendMap {
+diff --git a/pkg/k8s/watchers/pod.go b/pkg/k8s/watchers/pod.go
+index 0cecea0ba4..ceeadcb426 100644
+--- a/pkg/k8s/watchers/pod.go
++++ b/pkg/k8s/watchers/pod.go
+@@ -493,8 +493,8 @@ func (k *K8sWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string, l
+ 				continue
+ 			}
+ 
+-			var bes4 []loadbalancer.Backend
+-			var bes6 []loadbalancer.Backend
++			var bes4 []*loadbalancer.Backend
++			var bes6 []*loadbalancer.Backend
+ 
+ 			for _, podIP := range podIPs {
+ 				be := loadbalancer.Backend{
+@@ -507,9 +507,9 @@ func (k *K8sWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string, l
+ 					},
+ 				}
+ 				if be.L3n4Addr.IP.To4() != nil {
+-					bes4 = append(bes4, be)
++					bes4 = append(bes4, &be)
+ 				} else {
+-					bes6 = append(bes6, be)
++					bes6 = append(bes6, &be)
+ 				}
+ 			}
+ 
+@@ -854,8 +854,8 @@ func (k *K8sWatcher) deletePodHostData(pod *slim_corev1.Pod) (bool, error) {
+ // agent flag `option.Config.K8sEventHandover` this function might only return
+ // local pods.
+ // If `option.Config.K8sEventHandover` is:
+-//  - true: returns only local pods received by the pod watcher.
+-//  - false: returns any pod in the cluster received by the pod watcher.
++//   - true: returns only local pods received by the pod watcher.
++//   - false: returns any pod in the cluster received by the pod watcher.
+ func (k *K8sWatcher) GetCachedPod(namespace, name string) (*slim_corev1.Pod, error) {
+ 	<-k.controllersStarted
+ 	k.WaitForCacheSync(resources.K8sAPIGroupPodV1Core)
+diff --git a/pkg/k8s/watchers/watcher.go b/pkg/k8s/watchers/watcher.go
+index 5c815dfcc3..c0bd27a2e7 100644
+--- a/pkg/k8s/watchers/watcher.go
++++ b/pkg/k8s/watchers/watcher.go
+@@ -715,7 +715,7 @@ func genCartesianProduct(
+ 	feFamilyIPv6 := ip.IsIPv6(fe)
+ 
+ 	for fePortName, fePort := range ports {
+-		var besValues []loadbalancer.Backend
++		var besValues []*loadbalancer.Backend
+ 		for netIP, backend := range bes.Backends {
+ 			parsedIP := net.ParseIP(netIP)
+ 
+@@ -724,7 +724,7 @@ func genCartesianProduct(
+ 				if backend.Terminating {
+ 					backendState = loadbalancer.BackendStateTerminating
+ 				}
+-				besValues = append(besValues, loadbalancer.Backend{
++				besValues = append(besValues, &loadbalancer.Backend{
+ 					FEPortName: string(fePortName),
+ 					NodeName:   backend.NodeName,
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+diff --git a/pkg/k8s/watchers/watcher_test.go b/pkg/k8s/watchers/watcher_test.go
+index ecd7a5e173..d93bcd7e48 100644
+--- a/pkg/k8s/watchers/watcher_test.go
++++ b/pkg/k8s/watchers/watcher_test.go
+@@ -363,7 +363,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ClusterIP(c *C) {
+ 		lb1.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *lb1,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -382,7 +382,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ClusterIP(c *C) {
+ 		// lb2.Hash(): {
+ 		// 	Type:     loadbalancer.SVCTypeClusterIP,
+ 		// 	Frontend: *lb2,
+-		// 	Backends: []loadbalancer.Backend{
++		// 	Backends: []*loadbalancer.Backend{
+ 		// 		{
+ 		// 			L3n4Addr: loadbalancer.L3n4Addr{
+ 		// 				IP: net.ParseIP("10.0.0.2"),
+@@ -397,7 +397,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ClusterIP(c *C) {
+ 		lb3.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *lb3,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -422,7 +422,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ClusterIP(c *C) {
+ 		lb1.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *lb1,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -451,7 +451,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ClusterIP(c *C) {
+ 		// lb2.Hash(): {
+ 		// 	Type:     loadbalancer.SVCTypeClusterIP,
+ 		// 	Frontend: *lb2,
+-		// 	Backends: []loadbalancer.Backend{
++		// 	Backends: []*loadbalancer.Backend{
+ 		// 		{
+ 		// 			L3n4Addr: loadbalancer.L3n4Addr{
+ 		// 				IP: net.ParseIP("10.0.0.2"),
+@@ -475,7 +475,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ClusterIP(c *C) {
+ 		lb3.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *lb3,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -637,7 +637,7 @@ func (s *K8sWatcherSuite) TestChangeSVCPort(c *C) {
+ 		{
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *lb1,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -653,7 +653,7 @@ func (s *K8sWatcherSuite) TestChangeSVCPort(c *C) {
+ 		{
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *lb2,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -818,7 +818,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 		clusterIP1.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP1,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -837,7 +837,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 		// clusterIP2.Hash(): {
+ 		// 	Type:     loadbalancer.SVCTypeClusterIP,
+ 		// 	Frontend: *clusterIP2,
+-		// 	Backends: []loadbalancer.Backend{
++		// 	Backends: []*loadbalancer.Backend{
+ 		// 		{
+ 		// 			L3n4Addr: loadbalancer.L3n4Addr{
+ 		// 				IP: net.ParseIP("10.0.0.2"),
+@@ -852,7 +852,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 		clusterIP3.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP3,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -876,7 +876,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 		upsert1stWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -899,7 +899,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 	// 	upsert1stWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 	// 		Type:     loadbalancer.SVCTypeNodePort,
+ 	// 		Frontend: *nodePort,
+-	// 		Backends: []loadbalancer.Backend{
++	// 		Backends: []*loadbalancer.Backend{
+ 	// 			{
+ 	// 				L3n4Addr: loadbalancer.L3n4Addr{
+ 	// 					IP: net.ParseIP("10.0.0.2"),
+@@ -921,7 +921,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 		upsert1stWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -946,7 +946,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 		clusterIP1.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP1,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -975,7 +975,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 		// clusterIP2.Hash(): {
+ 		// 	Type:     loadbalancer.SVCTypeClusterIP,
+ 		// 	Frontend: *clusterIP2,
+-		// 	Backends: []loadbalancer.Backend{
++		// 	Backends: []*loadbalancer.Backend{
+ 		// 		{
+ 		// 			L3n4Addr: loadbalancer.L3n4Addr{
+ 		// 				IP: net.ParseIP("10.0.0.2"),
+@@ -999,7 +999,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 		clusterIP3.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP3,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1028,7 +1028,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 		upsert2ndWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1056,7 +1056,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 	// 	upsert2ndWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 	// 		Type:     loadbalancer.SVCTypeNodePort,
+ 	// 		Frontend: *nodePort,
+-	// 		Backends: []loadbalancer.Backend{
++	// 		Backends: []*loadbalancer.Backend{
+ 	// 			{
+ 	// 				L3n4Addr: loadbalancer.L3n4Addr{
+ 	// 					IP: net.ParseIP("10.0.0.2"),
+@@ -1082,7 +1082,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
+ 		upsert2ndWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1307,7 +1307,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_1(c *C) {
+ 		clusterIP1.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP1,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1323,7 +1323,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_1(c *C) {
+ 		clusterIP2.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP2,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1341,7 +1341,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_1(c *C) {
+ 		upsert1stWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1359,7 +1359,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_1(c *C) {
+ 		upsert1stWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1380,7 +1380,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_1(c *C) {
+ 		clusterIP2.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP2,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1396,7 +1396,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_1(c *C) {
+ 		clusterIP3.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP3,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1600,7 +1600,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_2(c *C) {
+ 		clusterIP1.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP1,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1616,7 +1616,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_2(c *C) {
+ 		clusterIP2.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP2,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1634,7 +1634,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_2(c *C) {
+ 		upsert1stWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1652,7 +1652,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_2(c *C) {
+ 		upsert1stWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1671,7 +1671,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_2(c *C) {
+ 		clusterIP1.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP1,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1693,7 +1693,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_2(c *C) {
+ 		upsert2ndWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1896,7 +1896,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		clusterIP1.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP1,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1915,7 +1915,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		// clusterIP2.Hash(): {
+ 		// 	Type:     loadbalancer.SVCTypeClusterIP,
+ 		// 	Frontend: *clusterIP2,
+-		// 	Backends: []loadbalancer.Backend{
++		// 	Backends: []*loadbalancer.Backend{
+ 		// 		{
+ 		// 			L3n4Addr: loadbalancer.L3n4Addr{
+ 		// 				IP: net.ParseIP("10.0.0.2"),
+@@ -1930,7 +1930,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		clusterIP3.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP3,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1955,7 +1955,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert1stWanted[externalIP.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeExternalIPs,
+ 			Frontend: *externalIP,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -1973,7 +1973,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 	// 	upsert1stWanted[externalIP.Hash()] = loadbalancer.SVC{
+ 	// 		Type:     loadbalancer.SVCTypeExternalIPs,
+ 	// 		Frontend: *externalIP,
+-	// 		Backends: []loadbalancer.Backend{
++	// 		Backends: []*loadbalancer.Backend{
+ 	// 			{
+ 	// 				L3n4Addr: loadbalancer.L3n4Addr{
+ 	// 					IP: net.ParseIP("10.0.0.2"),
+@@ -1990,7 +1990,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert1stWanted[externalIP.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeExternalIPs,
+ 			Frontend: *externalIP,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2014,7 +2014,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert1stWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2037,7 +2037,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 	// 	upsert1stWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 	// 		Type:     loadbalancer.SVCTypeNodePort,
+ 	// 		Frontend: *nodePort,
+-	// 		Backends: []loadbalancer.Backend{
++	// 		Backends: []*loadbalancer.Backend{
+ 	// 			{
+ 	// 				L3n4Addr: loadbalancer.L3n4Addr{
+ 	// 					IP: net.ParseIP("10.0.0.2"),
+@@ -2059,7 +2059,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert1stWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2078,7 +2078,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		clusterIP1.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP1,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2107,7 +2107,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		// clusterIP2.Hash(): {
+ 		// 	Type:     loadbalancer.SVCTypeClusterIP,
+ 		// 	Frontend: *clusterIP2,
+-		// 	Backends: []loadbalancer.Backend{
++		// 	Backends: []*loadbalancer.Backend{
+ 		// 		{
+ 		// 			L3n4Addr: loadbalancer.L3n4Addr{
+ 		// 				IP: net.ParseIP("10.0.0.2"),
+@@ -2131,7 +2131,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		clusterIP3.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP3,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2160,7 +2160,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert2ndWanted[externalIP.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeExternalIPs,
+ 			Frontend: *externalIP,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2188,7 +2188,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 	// 	upsert2ndWanted[externalIP.Hash()] = loadbalancer.SVC{
+ 	// 		Type:     loadbalancer.SVCTypeExternalIPs,
+ 	// 		Frontend: *externalIP,
+-	// 		Backends: []loadbalancer.Backend{
++	// 		Backends: []*loadbalancer.Backend{
+ 	// 			{
+ 	// 				L3n4Addr: loadbalancer.L3n4Addr{
+ 	// 					IP: net.ParseIP("10.0.0.2"),
+@@ -2214,7 +2214,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert2ndWanted[externalIP.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeExternalIPs,
+ 			Frontend: *externalIP,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2243,7 +2243,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert2ndWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2271,7 +2271,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 	// 	upsert2ndWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 	// 		Type:     loadbalancer.SVCTypeNodePort,
+ 	// 		Frontend: *nodePort,
+-	// 		Backends: []loadbalancer.Backend{
++	// 		Backends: []*loadbalancer.Backend{
+ 	// 			{
+ 	// 				L3n4Addr: loadbalancer.L3n4Addr{
+ 	// 					IP: net.ParseIP("10.0.0.2"),
+@@ -2297,7 +2297,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert2ndWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2326,7 +2326,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		clusterIP1.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP1,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2355,7 +2355,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		// clusterIP2.Hash(): {
+ 		// 	Type:     loadbalancer.SVCTypeClusterIP,
+ 		// 	Frontend: *clusterIP2,
+-		// 	Backends: []loadbalancer.Backend{
++		// 	Backends: []*loadbalancer.Backend{
+ 		// 		{
+ 		// 			L3n4Addr: loadbalancer.L3n4Addr{
+ 		// 				IP: net.ParseIP("10.0.0.2"),
+@@ -2379,7 +2379,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		clusterIP3.Hash(): {
+ 			Type:     loadbalancer.SVCTypeClusterIP,
+ 			Frontend: *clusterIP3,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2408,7 +2408,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert3rdWanted[externalIP.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeExternalIPs,
+ 			Frontend: *externalIP,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2436,7 +2436,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 	// 	upsert3rdWanted[externalIP.Hash()] = loadbalancer.SVC{
+ 	// 		Type:     loadbalancer.SVCTypeExternalIPs,
+ 	// 		Frontend: *externalIP,
+-	// 		Backends: []loadbalancer.Backend{
++	// 		Backends: []*loadbalancer.Backend{
+ 	// 			{
+ 	// 				L3n4Addr: loadbalancer.L3n4Addr{
+ 	// 					IP: net.ParseIP("10.0.0.2"),
+@@ -2462,7 +2462,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert3rdWanted[externalIP.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeExternalIPs,
+ 			Frontend: *externalIP,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2491,7 +2491,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert3rdWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-udp-80",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+@@ -2519,7 +2519,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 	// 	upsert3rdWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 	// 		Type:     loadbalancer.SVCTypeNodePort,
+ 	// 		Frontend: *nodePort,
+-	// 		Backends: []loadbalancer.Backend{
++	// 		Backends: []*loadbalancer.Backend{
+ 	// 			{
+ 	// 				L3n4Addr: loadbalancer.L3n4Addr{
+ 	// 					IP: net.ParseIP("10.0.0.2"),
+@@ -2545,7 +2545,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
+ 		upsert3rdWanted[nodePort.Hash()] = loadbalancer.SVC{
+ 			Type:     loadbalancer.SVCTypeNodePort,
+ 			Frontend: *nodePort,
+-			Backends: []loadbalancer.Backend{
++			Backends: []*loadbalancer.Backend{
+ 				{
+ 					FEPortName: "port-tcp-81",
+ 					L3n4Addr: loadbalancer.L3n4Addr{
+diff --git a/pkg/loadbalancer/loadbalancer.go b/pkg/loadbalancer/loadbalancer.go
+index 22b1015843..dbd0820c17 100644
+--- a/pkg/loadbalancer/loadbalancer.go
++++ b/pkg/loadbalancer/loadbalancer.go
+@@ -333,7 +333,7 @@ func (b *Backend) String() string {
+ // SVC is a structure for storing service details.
+ type SVC struct {
+ 	Frontend                  L3n4AddrID       // SVC frontend addr and an allocated ID
+-	Backends                  []Backend        // List of service backends
++	Backends                  []*Backend       // List of service backends
+ 	Type                      SVCType          // Service type
+ 	TrafficPolicy             SVCTrafficPolicy // Service traffic policy
+ 	NatPolicy                 SVCNatPolicy     // Service NAT 46/64 policy
+diff --git a/pkg/loadbalancer/zz_generated.deepcopy.go b/pkg/loadbalancer/zz_generated.deepcopy.go
+index ec9986e98d..9f3df23920 100644
+--- a/pkg/loadbalancer/zz_generated.deepcopy.go
++++ b/pkg/loadbalancer/zz_generated.deepcopy.go
+@@ -92,9 +92,13 @@ func (in *SVC) DeepCopyInto(out *SVC) {
+ 	in.Frontend.DeepCopyInto(&out.Frontend)
+ 	if in.Backends != nil {
+ 		in, out := &in.Backends, &out.Backends
+-		*out = make([]Backend, len(*in))
++		*out = make([]*Backend, len(*in))
+ 		for i := range *in {
+-			(*in)[i].DeepCopyInto(&(*out)[i])
++			if (*in)[i] != nil {
++				in, out := &(*in)[i], &(*out)[i]
++				*out = new(Backend)
++				(*in).DeepCopyInto(*out)
++			}
+ 		}
+ 	}
+ 	if in.LoadBalancerSourceRanges != nil {
+diff --git a/pkg/maps/lbmap/lbmap.go b/pkg/maps/lbmap/lbmap.go
+index f047d005bf..b227a095d6 100644
+--- a/pkg/maps/lbmap/lbmap.go
++++ b/pkg/maps/lbmap/lbmap.go
+@@ -320,7 +320,7 @@ func (*LBBPFMap) DeleteService(svc loadbalancer.L3n4AddrID, backendCount int, us
+ 
+ // AddBackend adds a backend into a BPF map. ipv6 indicates if the backend needs
+ // to be added in the v4 or v6 backend map.
+-func (*LBBPFMap) AddBackend(b loadbalancer.Backend, ipv6 bool) error {
++func (*LBBPFMap) AddBackend(b *loadbalancer.Backend, ipv6 bool) error {
+ 	var (
+ 		backend Backend
+ 		err     error
+@@ -339,7 +339,7 @@ func (*LBBPFMap) AddBackend(b loadbalancer.Backend, ipv6 bool) error {
+ // UpdateBackendWithState updates the state for the given backend.
+ //
+ // This function should only be called to update backend's state.
+-func (*LBBPFMap) UpdateBackendWithState(b loadbalancer.Backend) error {
++func (*LBBPFMap) UpdateBackendWithState(b *loadbalancer.Backend) error {
+ 	var (
+ 		backend Backend
+ 		err     error
+@@ -662,7 +662,7 @@ func deleteServiceLocked(key ServiceKey) error {
+ 	return key.Map().Delete(key.ToNetwork())
+ }
+ 
+-func getBackend(backend loadbalancer.Backend, ipv6 bool) (Backend, error) {
++func getBackend(backend *loadbalancer.Backend, ipv6 bool) (Backend, error) {
+ 	var (
+ 		lbBackend Backend
+ 		err       error
+@@ -746,29 +746,29 @@ func (svcs svcMap) addFEnBE(fe *loadbalancer.L3n4AddrID, be *loadbalancer.Backen
+ 	hash := fe.Hash()
+ 	lbsvc, ok := svcs[hash]
+ 	if !ok {
+-		var bes []loadbalancer.Backend
++		var bes []*loadbalancer.Backend
+ 		if beIndex == 0 {
+-			bes = make([]loadbalancer.Backend, 1)
+-			bes[0] = *be
++			bes = make([]*loadbalancer.Backend, 1)
++			bes[0] = be
+ 		} else {
+-			bes = make([]loadbalancer.Backend, beIndex)
+-			bes[beIndex-1] = *be
++			bes = make([]*loadbalancer.Backend, beIndex)
++			bes[beIndex-1] = be
+ 		}
+ 		lbsvc = loadbalancer.SVC{
+ 			Frontend: *fe,
+ 			Backends: bes,
+ 		}
+ 	} else {
+-		var bes []loadbalancer.Backend
++		var bes []*loadbalancer.Backend
+ 		if len(lbsvc.Backends) < beIndex {
+-			bes = make([]loadbalancer.Backend, beIndex)
++			bes = make([]*loadbalancer.Backend, beIndex)
+ 			copy(bes, lbsvc.Backends)
+ 			lbsvc.Backends = bes
+ 		}
+ 		if beIndex == 0 {
+-			lbsvc.Backends = append(lbsvc.Backends, *be)
++			lbsvc.Backends = append(lbsvc.Backends, be)
+ 		} else {
+-			lbsvc.Backends[beIndex-1] = *be
++			lbsvc.Backends[beIndex-1] = be
+ 		}
+ 	}
+ 
+diff --git a/pkg/redirectpolicy/manager.go b/pkg/redirectpolicy/manager.go
+index 25a5527bdb..31b615ea1a 100644
+--- a/pkg/redirectpolicy/manager.go
++++ b/pkg/redirectpolicy/manager.go
+@@ -532,9 +532,9 @@ func (rpm *Manager) upsertService(config *LRPConfig, frontendMapping *feMapping)
+ 		L3n4Addr: *frontendMapping.feAddr,
+ 		ID:       lb.ID(0),
+ 	}
+-	backendAddrs := make([]lb.Backend, 0, len(frontendMapping.podBackends))
++	backendAddrs := make([]*lb.Backend, 0, len(frontendMapping.podBackends))
+ 	for _, be := range frontendMapping.podBackends {
+-		backendAddrs = append(backendAddrs, lb.Backend{
++		backendAddrs = append(backendAddrs, &lb.Backend{
+ 			NodeName: nodeTypes.GetName(),
+ 			L3n4Addr: be.L3n4Addr,
+ 		})
+diff --git a/pkg/service/service.go b/pkg/service/service.go
+index a85264813c..1fb72dc890 100644
+--- a/pkg/service/service.go
++++ b/pkg/service/service.go
+@@ -43,8 +43,8 @@ type LBMap interface {
+ 	UpsertMaglevLookupTable(uint16, map[string]lb.BackendID, bool) error
+ 	IsMaglevLookupTableRecreated(bool) bool
+ 	DeleteService(lb.L3n4AddrID, int, bool, lb.SVCNatPolicy) error
+-	AddBackend(lb.Backend, bool) error
+-	UpdateBackendWithState(lb.Backend) error
++	AddBackend(*lb.Backend, bool) error
++	UpdateBackendWithState(*lb.Backend) error
+ 	DeleteBackendByID(lb.BackendID) error
+ 	AddAffinityMatch(uint16, lb.BackendID) error
+ 	DeleteAffinityMatch(uint16, lb.BackendID) error
+@@ -79,13 +79,13 @@ func (n Name) String() string {
+ 
+ // envoyCache is used to sync Envoy resources to Envoy proxy
+ type envoyCache interface {
+-	UpsertEnvoyEndpoints(Name, map[string][]lb.Backend) error
++	UpsertEnvoyEndpoints(Name, map[string][]*lb.Backend) error
+ }
+ 
+ type svcInfo struct {
+ 	hash          string
+ 	frontend      lb.L3n4AddrID
+-	backends      []lb.Backend
++	backends      []*lb.Backend
+ 	backendByHash map[string]*lb.Backend
+ 
+ 	svcType                   lb.SVCType
+@@ -108,9 +108,9 @@ func (svc *svcInfo) isL7LBService() bool {
+ }
+ 
+ func (svc *svcInfo) deepCopyToLBSVC() *lb.SVC {
+-	backends := make([]lb.Backend, len(svc.backends))
++	backends := make([]*lb.Backend, len(svc.backends))
+ 	for i, backend := range svc.backends {
+-		backends[i] = *backend.DeepCopy()
++		backends[i] = backend.DeepCopy()
+ 	}
+ 	return &lb.SVC{
+ 		Frontend:            *svc.frontend.DeepCopy(),
+@@ -610,7 +610,7 @@ func (s *Service) upsertService(params *lb.SVC) (bool, lb.ID, error) {
+ 	onlyLocalBackends, filterBackends := svc.requireNodeLocalBackends(params.Frontend)
+ 	prevBackendCount := len(svc.backends)
+ 
+-	backendsCopy := []lb.Backend{}
++	backendsCopy := []*lb.Backend{}
+ 	for _, b := range params.Backends {
+ 		// Local redirect services or services with trafficPolicy=Local may
+ 		// only use node-local backends for external scope. We implement this by
+@@ -618,7 +618,7 @@ func (s *Service) upsertService(params *lb.SVC) (bool, lb.ID, error) {
+ 		if filterBackends && len(b.NodeName) > 0 && b.NodeName != nodeTypes.GetName() {
+ 			continue
+ 		}
+-		backendsCopy = append(backendsCopy, *b.DeepCopy())
++		backendsCopy = append(backendsCopy, b.DeepCopy())
+ 	}
+ 
+ 	// TODO (Aditi) When we filter backends for LocalRedirect service, there
+@@ -678,18 +678,18 @@ func (s *Service) upsertService(params *lb.SVC) (bool, lb.ID, error) {
+ 
+ // filterServiceBackends returns the list of backends based on given front end ports.
+ // The returned map will have key as port name/number, and value as list of respective backends.
+-func filterServiceBackends(svc *svcInfo, onlyPorts []string) map[string][]lb.Backend {
++func filterServiceBackends(svc *svcInfo, onlyPorts []string) map[string][]*lb.Backend {
+ 	if len(onlyPorts) == 0 {
+-		return map[string][]lb.Backend{
++		return map[string][]*lb.Backend{
+ 			anyPort: svc.backends,
+ 		}
+ 	}
+ 
+-	res := map[string][]lb.Backend{}
++	res := map[string][]*lb.Backend{}
+ 	for _, port := range onlyPorts {
+ 		// check for port number
+ 		if port == strconv.Itoa(int(svc.frontend.Port)) {
+-			return map[string][]lb.Backend{
++			return map[string][]*lb.Backend{
+ 				port: svc.backends,
+ 			}
+ 		}
+@@ -710,7 +710,7 @@ func filterServiceBackends(svc *svcInfo, onlyPorts []string) map[string][]lb.Bac
+ //
+ // In case of duplicated backends in the list, the state will be updated to the
+ // last duplicate entry.
+-func (s *Service) UpdateBackendsState(backends []lb.Backend) error {
++func (s *Service) UpdateBackendsState(backends []*lb.Backend) error {
+ 	if len(backends) == 0 {
+ 		return nil
+ 	}
+@@ -804,7 +804,7 @@ func (s *Service) UpdateBackendsState(backends []lb.Backend) error {
+ 			logfields.BackendState:     b.State,
+ 			logfields.BackendPreferred: b.Preferred,
+ 		}).Info("Persisting updated backend state for backend")
+-		if err := s.lbmap.UpdateBackendWithState(*b); err != nil {
++		if err := s.lbmap.UpdateBackendWithState(b); err != nil {
+ 			e := fmt.Errorf("failed to update backend %+v %w", b, err)
+ 			errs = multierr.Append(errs, e)
+ 		}
+@@ -1143,7 +1143,7 @@ func (s *Service) addBackendsToAffinityMatchMap(svcID lb.ID, backendIDs []lb.Bac
+ }
+ 
+ func (s *Service) upsertServiceIntoLBMaps(svc *svcInfo, onlyLocalBackends bool,
+-	prevBackendCount int, newBackends []lb.Backend, obsoleteBackendIDs []lb.BackendID,
++	prevBackendCount int, newBackends []*lb.Backend, obsoleteBackendIDs []lb.BackendID,
+ 	prevSessionAffinity bool, prevLoadBalancerSourceRanges []*cidr.CIDR,
+ 	obsoleteSVCBackendIDs []lb.BackendID, scopedLog *logrus.Entry) error {
+ 
+@@ -1373,7 +1373,7 @@ func (s *Service) restoreServicesLocked() error {
+ 		for j, backend := range svc.Backends {
+ 			hash := backend.L3n4Addr.Hash()
+ 			s.backendRefCount.Add(hash)
+-			newSVC.backendByHash[hash] = &svc.Backends[j]
++			newSVC.backendByHash[hash] = svc.Backends[j]
+ 		}
+ 
+ 		// Recalculate Maglev lookup tables if the maps were removed due to
+@@ -1461,12 +1461,12 @@ func (s *Service) deleteServiceLocked(svc *svcInfo) error {
+ 	return nil
+ }
+ 
+-func (s *Service) updateBackendsCacheLocked(svc *svcInfo, backends []lb.Backend) (
+-	[]lb.Backend, []lb.BackendID, []lb.BackendID, error) {
++func (s *Service) updateBackendsCacheLocked(svc *svcInfo, backends []*lb.Backend) (
++	[]*lb.Backend, []lb.BackendID, []lb.BackendID, error) {
+ 
+ 	obsoleteBackendIDs := []lb.BackendID{}    // not used by any svc
+ 	obsoleteSVCBackendIDs := []lb.BackendID{} // removed from the svc, but might be used by other svc
+-	newBackends := []lb.Backend{}             // previously not used by any svc
++	newBackends := []*lb.Backend{}            // previously not used by any svc
+ 	backendSet := map[string]struct{}{}
+ 
+ 	for i, backend := range backends {
+@@ -1485,12 +1485,12 @@ func (s *Service) updateBackendsCacheLocked(svc *svcInfo, backends []lb.Backend)
+ 				backends[i].State = lb.BackendStateActive
+ 				newBackends = append(newBackends, backends[i])
+ 				// TODO make backendByHash by value not by ref
+-				s.backendByHash[hash] = &backends[i]
++				s.backendByHash[hash] = backends[i]
+ 			} else {
+ 				backends[i].ID = s.backendByHash[hash].ID
+ 				backends[i].State = s.backendByHash[hash].State
+ 			}
+-			svc.backendByHash[hash] = &backends[i]
++			svc.backendByHash[hash] = backends[i]
+ 		} else {
+ 			backends[i].ID = b.ID
+ 			// Update backend state.
+@@ -1550,7 +1550,7 @@ func (s *Service) deleteBackendsFromCacheLocked(svc *svcInfo) []lb.BackendID {
+ 	return obsoleteBackendIDs
+ }
+ 
+-func (s *Service) notifyMonitorServiceUpsert(frontend lb.L3n4AddrID, backends []lb.Backend,
++func (s *Service) notifyMonitorServiceUpsert(frontend lb.L3n4AddrID, backends []*lb.Backend,
+ 	svcType lb.SVCType, svcTrafficPolicy lb.SVCTrafficPolicy, svcName, svcNamespace string) {
+ 	if s.monitorNotify == nil {
+ 		return
+@@ -1604,7 +1604,7 @@ func isWildcardAddr(frontend lb.L3n4AddrID) bool {
+ 	return net.IPv4zero.Equal(frontend.IP)
+ }
+ 
+-func segregateBackends(backends []lb.Backend) (preferredBackends map[string]lb.BackendID,
++func segregateBackends(backends []*lb.Backend) (preferredBackends map[string]lb.BackendID,
+ 	activeBackends map[string]lb.BackendID, nonActiveBackends []lb.BackendID) {
+ 	preferredBackends = make(map[string]lb.BackendID)
+ 	activeBackends = make(map[string]lb.BackendID, len(backends))
+diff --git a/pkg/testutils/mockmaps/lbmap.go b/pkg/testutils/mockmaps/lbmap.go
+index c6e095ef6e..3337b6ddee 100644
+--- a/pkg/testutils/mockmaps/lbmap.go
++++ b/pkg/testutils/mockmaps/lbmap.go
+@@ -33,13 +33,13 @@ func NewLBMockMap() *LBMockMap {
+ 
+ func (m *LBMockMap) UpsertService(p *lbmap.UpsertServiceParams) error {
+ 	backendIDs := lbmap.GetOrderedBackends(p)
+-	backendsList := make([]lb.Backend, 0, len(backendIDs))
++	backendsList := make([]*lb.Backend, 0, len(backendIDs))
+ 	for _, backendID := range backendIDs {
+ 		b, found := m.BackendByID[backendID]
+ 		if !found {
+ 			return fmt.Errorf("backend %d not found", p.ID)
+ 		}
+-		backendsList = append(backendsList, *b)
++		backendsList = append(backendsList, b)
+ 	}
+ 	backends := p.ActiveBackends
+ 	if len(p.PreferredBackends) > 0 {
+@@ -94,7 +94,7 @@ func (m *LBMockMap) DeleteService(addr lb.L3n4AddrID, backendCount int, maglev b
+ 	return nil
+ }
+ 
+-func (m *LBMockMap) AddBackend(b lb.Backend, ipv6 bool) error {
++func (m *LBMockMap) AddBackend(b *lb.Backend, ipv6 bool) error {
+ 	id := b.ID
+ 	ip := b.IP
+ 	port := b.Port
+@@ -111,7 +111,7 @@ func (m *LBMockMap) AddBackend(b lb.Backend, ipv6 bool) error {
+ 	return nil
+ }
+ 
+-func (m *LBMockMap) UpdateBackendWithState(b lb.Backend) error {
++func (m *LBMockMap) UpdateBackendWithState(b *lb.Backend) error {
+ 	id := b.ID
+ 
+ 	be, found := m.BackendByID[id]
+-- 
+2.37.1 (Apple Git-137.1)
+

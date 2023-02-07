@@ -1,0 +1,42 @@
+From 866401a5283bfd53369a95be02803fc6103905f0 Mon Sep 17 00:00:00 2001
+From: Dorde Lapcevic <dordel@google.com>
+Date: Mon, 30 Jan 2023 10:22:22 +0000
+Subject: [PATCH 2/2] Fix restoreServicesLocked() potential nil pointer panic
+
+restoreServicesLocked() uses DumpServiceMaps() to get service maps entries, which can return services with some empty (nil) backends. Later it loops through service backends and accesses fields of pointers that can be nil. Previously, the Backends slice was holding objects, not pointers. Since https://github.com/cilium/cilium/pull/20410 change, it holds pointers, and this issue can occur.
+
+Signed-off-by: Dorde Lapcevic <dordel@google.com>
+---
+ pkg/service/service.go | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/pkg/service/service.go b/pkg/service/service.go
+index 1fb72dc890..428b451c95 100644
+--- a/pkg/service/service.go
++++ b/pkg/service/service.go
+@@ -1371,6 +1371,11 @@ func (s *Service) restoreServicesLocked() error {
+ 		}
+ 
+ 		for j, backend := range svc.Backends {
++			// DumpServiceMaps() can return services with some empty (nil) backends.
++			if backend == nil {
++				continue
++			}
++
+ 			hash := backend.L3n4Addr.Hash()
+ 			s.backendRefCount.Add(hash)
+ 			newSVC.backendByHash[hash] = svc.Backends[j]
+@@ -1385,6 +1390,10 @@ func (s *Service) restoreServicesLocked() error {
+ 
+ 			backends := make(map[string]lb.BackendID, len(newSVC.backends))
+ 			for _, b := range newSVC.backends {
++				// DumpServiceMaps() can return services with some empty (nil) backends.
++				if b == nil {
++					continue
++				}
+ 				backends[b.String()] = b.ID
+ 			}
+ 			if err := s.lbmap.UpsertMaglevLookupTable(uint16(newSVC.frontend.ID), backends,
+-- 
+2.37.1 (Apple Git-137.1)
+
