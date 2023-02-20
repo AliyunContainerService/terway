@@ -135,7 +135,7 @@ func (d *Delegate) DescribeInstanceTypes(ctx context.Context, types []string) ([
 	return d.defaultClient.DescribeInstanceTypes(ctx, types)
 }
 
-func (d *Delegate) AssignPrivateIPAddress(ctx context.Context, eniID string, count int) ([]net.IP, error) {
+func (d *Delegate) AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
 	//TODO implement me
 	panic("implement me")
 }
