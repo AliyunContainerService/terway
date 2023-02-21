@@ -9,6 +9,7 @@ import (
 // backoff keys
 const (
 	DefaultKey            = ""
+	ENICreate             = "eni_create"
 	ENIOps                = "eni_ops"
 	ENIRelease            = "eni_release"
 	WaitENIStatus         = "wait_eni_status"
@@ -24,6 +25,12 @@ var backoffMap = map[string]wait.Backoff{
 		Factor:   1.5,
 		Jitter:   0.3,
 		Steps:    6,
+	},
+	ENICreate: {
+		Duration: time.Second * 10,
+		Factor:   2,
+		Jitter:   0.3,
+		Steps:    2,
 	},
 	ENIOps: {
 		Duration: time.Second * 5,

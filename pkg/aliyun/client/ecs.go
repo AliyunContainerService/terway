@@ -6,6 +6,11 @@ import (
 	"net"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/backoff"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/uuid"
+
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	"github.com/AliyunContainerService/terway/pkg/ip"
@@ -53,6 +58,7 @@ func NewAliyun(ak, sk, regionID, credentialPath, secretNamespace, secretName str
 // CreateNetworkInterface instanceType Secondary Trunk
 func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitch string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*NetworkInterface, error) {
 	req := ecs.CreateCreateNetworkInterfaceRequest()
+	req.ClientToken = string(uuid.NewUUID())
 	req.VSwitchId = vSwitch
 	req.InstanceType = ENITypeSecondary
 	if trunk {
@@ -84,13 +90,29 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitc
 		LogFieldSgID:            securityGroups,
 		LogFieldResourceGroupID: resourceGroupID,
 	})
-	a.MutatingRateLimiter.Accept()
-	start := time.Now()
-	resp, err := a.ClientSet.ECS().CreateNetworkInterface(req)
-	metric.OpenAPILatency.WithLabelValues("CreateNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	var (
+		innerErr error
+		resp     *ecs.CreateNetworkInterfaceResponse
+	)
+	err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENICreate), func() (bool, error) {
+		a.MutatingRateLimiter.Accept()
+		start := time.Now()
+		resp, innerErr = a.ClientSet.ECS().CreateNetworkInterface(req)
+		metric.OpenAPILatency.WithLabelValues("CreateNetworkInterface", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
+		if innerErr != nil {
+			if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
+				return false, innerErr
+			}
+			l.WithField(LogFieldRequestID, apiErr.ErrRequestID(innerErr)).Errorf("error create ENI, %s", innerErr.Error())
+			return false, nil
+		}
+		return true, nil
+	})
 	if err != nil {
-		l.WithField(LogFieldRequestID, apiErr.ErrRequestID(err)).Errorf("error create ENI, %s", err.Error())
-		return nil, err
+		fmtErr := fmt.Sprintf("error create ENI, %v", innerErr)
+		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning,
+			tracing.AllocResourceFailed, fmtErr)
+		return nil, fmt.Errorf("%s, %w", fmtErr, err)
 	}
 
 	l.WithFields(map[string]interface{}{
@@ -257,10 +279,11 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 }
 
 // AssignPrivateIPAddress assign secondary ip
-func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, eniID string, count int) ([]net.IP, error) {
+func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
 	req := ecs.CreateAssignPrivateIpAddressesRequest()
 	req.NetworkInterfaceId = eniID
 	req.SecondaryPrivateIpAddressCount = requests.NewInteger(count)
+	req.ClientToken = idempotentKey
 
 	l := log.WithFields(map[string]interface{}{
 		LogFieldAPI:              "AssignPrivateIpAddresses",

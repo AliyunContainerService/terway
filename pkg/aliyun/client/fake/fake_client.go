@@ -189,7 +189,7 @@ func (o *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 	return nil, apiErr.ErrNotFound
 }
 
-func (o *OpenAPI) AssignPrivateIPAddress(ctx context.Context, eniID string, count int) ([]net.IP, error) {
+func (o *OpenAPI) AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
 	o.Lock()
 	defer o.Unlock()
 

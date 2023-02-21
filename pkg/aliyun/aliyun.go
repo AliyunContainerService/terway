@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/uuid"
+
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
@@ -270,8 +272,9 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 
 	if e.ipFamily.IPv4 {
 		var innerErr error
+		idempotentKey := string(uuid.NewUUID())
 		err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENIOps), func() (bool, error) {
-			ipv4s, innerErr = e.AssignPrivateIPAddress(ctx, eniID, count)
+			ipv4s, innerErr = e.AssignPrivateIPAddress(ctx, eniID, count, idempotentKey)
 			if innerErr != nil {
 				if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
 					return false, innerErr
@@ -312,6 +315,8 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 	if e.ipFamily.IPv6 {
 		var innerErr error
 		err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENIOps), func() (bool, error) {
+			// fixme: add idempotent key for assign ipv6 addresses when ECS API support it
+			// https://help.aliyun.com/document_detail/98610.html
 			ipv6s, innerErr = e.AssignIpv6Addresses(ctx, eniID, count)
 			if innerErr != nil {
 				if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {

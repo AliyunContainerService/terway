@@ -263,7 +263,7 @@ func (m *Manager) DescribeInstanceTypes(ctx context.Context, types []string) ([]
 	panic("implement me")
 }
 
-func (m *Manager) AssignPrivateIPAddress(ctx context.Context, eniID string, count int) ([]net.IP, error) {
+func (m *Manager) AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
 	panic("implement me")
 }
 

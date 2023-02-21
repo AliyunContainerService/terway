@@ -17,7 +17,7 @@ type ENI interface {
 	DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
 	DeleteNetworkInterface(ctx context.Context, eniID string) error
 	WaitForNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error)
-	AssignPrivateIPAddress(ctx context.Context, eniID string, count int) ([]net.IP, error)
+	AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotent string) ([]net.IP, error)
 	UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []net.IP) error
 	AssignIpv6Addresses(ctx context.Context, eniID string, count int) ([]net.IP, error)
 	UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []net.IP) error
