@@ -11,10 +11,10 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  3 files changed, 25 insertions(+), 8 deletions(-)
 
 diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
-index 9a535a4c27..b0b2193452 100644
+index 64f9169958..7eab9fa3fa 100644
 --- a/bpf/bpf_lxc.c
 +++ b/bpf/bpf_lxc.c
-@@ -1335,17 +1335,28 @@ int handle_xgress(struct __ctx_buff *ctx)
+@@ -1341,17 +1341,28 @@ int handle_xgress(struct __ctx_buff *ctx)
  		goto out;
  	}
  
@@ -93,5 +93,5 @@ index ea542dd527..0f078ad502 100644
  		ctmap.WriteBPFMacros(fw, e)
  	} else {
 -- 
-2.39.0
+2.39.1
 

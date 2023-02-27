@@ -14,13 +14,13 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  pkg/endpoint/cache.go                        |  12 +
  pkg/endpoint/endpoint.go                     |  45 +++
  pkg/endpoint/restore.go                      |   5 +
- plugins/cilium-cni/chaining/terway/terway.go | 323 +++++++++++++++++++
+ plugins/cilium-cni/chaining/terway/terway.go | 328 +++++++++++++++++++
  plugins/cilium-cni/cilium-cni.go             |   1 +
- 11 files changed, 477 insertions(+), 7 deletions(-)
+ 11 files changed, 482 insertions(+), 7 deletions(-)
  create mode 100644 plugins/cilium-cni/chaining/terway/terway.go
 
 diff --git a/daemon/cmd/endpoint.go b/daemon/cmd/endpoint.go
-index 9605f8ad3f..02137811e4 100644
+index 9c5caf0288..9700af0b3a 100644
 --- a/daemon/cmd/endpoint.go
 +++ b/daemon/cmd/endpoint.go
 @@ -442,6 +442,12 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
@@ -359,10 +359,10 @@ index 605d178beb..916c3f72b7 100644
  	e.buildMutex.Lock()
  	defer e.buildMutex.Unlock()
 diff --git a/pkg/endpoint/restore.go b/pkg/endpoint/restore.go
-index 97f2b1a910..ba905543f0 100644
+index 099b363f2d..21124db6fb 100644
 --- a/pkg/endpoint/restore.go
 +++ b/pkg/endpoint/restore.go
-@@ -383,6 +383,7 @@ func (e *Endpoint) toSerializedEndpoint() *serializableEndpoint {
+@@ -384,6 +384,7 @@ func (e *Endpoint) toSerializedEndpoint() *serializableEndpoint {
  		ContainerID:           e.containerID,
  		DockerNetworkID:       e.dockerNetworkID,
  		DockerEndpointID:      e.dockerEndpointID,
@@ -370,7 +370,7 @@ index 97f2b1a910..ba905543f0 100644
  		IfName:                e.ifName,
  		IfIndex:               e.ifIndex,
  		OpLabels:              e.OpLabels,
-@@ -431,6 +432,9 @@ type serializableEndpoint struct {
+@@ -433,6 +434,9 @@ type serializableEndpoint struct {
  	// libnetwork
  	DockerEndpointID string
  
@@ -380,7 +380,7 @@ index 97f2b1a910..ba905543f0 100644
  	// ifName is the name of the host facing interface (veth pair) which
  	// connects into the endpoint
  	IfName string
-@@ -518,6 +522,7 @@ func (ep *Endpoint) fromSerializedEndpoint(r *serializableEndpoint) {
+@@ -526,6 +530,7 @@ func (ep *Endpoint) fromSerializedEndpoint(r *serializableEndpoint) {
  	ep.containerID = r.ContainerID
  	ep.dockerNetworkID = r.DockerNetworkID
  	ep.dockerEndpointID = r.DockerEndpointID
@@ -390,10 +390,10 @@ index 97f2b1a910..ba905543f0 100644
  	ep.OpLabels = r.OpLabels
 diff --git a/plugins/cilium-cni/chaining/terway/terway.go b/plugins/cilium-cni/chaining/terway/terway.go
 new file mode 100644
-index 0000000000..3783cbcb5a
+index 0000000000..d85bba9285
 --- /dev/null
 +++ b/plugins/cilium-cni/chaining/terway/terway.go
-@@ -0,0 +1,323 @@
+@@ -0,0 +1,328 @@
 +// Copyright 2019 Authors of Cilium
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -515,8 +515,13 @@ index 0000000000..3783cbcb5a
 +		return
 +	}
 +	defer m.Close()
-+	mapID, err := m.ID()
++	info, err := m.Info()
 +	if err != nil {
++		return nil, fmt.Errorf("failed to get map info: %w", err)
++	}
++
++	mapID, ok := info.ID()
++	if !ok {
 +		return nil, fmt.Errorf("failed to get map ID: %w", err)
 +	}
 +	// create endpoint
@@ -730,5 +735,5 @@ index 5eca17daeb..1ee2227373 100644
  )
  
 -- 
-2.39.0
+2.39.1
 

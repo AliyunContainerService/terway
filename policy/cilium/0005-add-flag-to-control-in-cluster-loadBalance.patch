@@ -11,7 +11,7 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  3 files changed, 11 insertions(+), 1 deletion(-)
 
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 7ca1c4af6e..b68980bdae 100644
+index 1f2796810b..375a11d5cf 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
 @@ -390,6 +390,9 @@ func initializeFlags() {
@@ -25,10 +25,10 @@ index 7ca1c4af6e..b68980bdae 100644
  	option.BindEnv(option.K8sEnableEndpointSlice)
  
 diff --git a/pkg/k8s/service.go b/pkg/k8s/service.go
-index bbd35f3365..a055344850 100644
+index 2dd6d152a2..88cf4556d0 100644
 --- a/pkg/k8s/service.go
 +++ b/pkg/k8s/service.go
-@@ -471,7 +471,7 @@ func NewService(ips []net.IP, externalIPs, loadBalancerIPs, loadBalancerSourceRa
+@@ -482,7 +482,7 @@ func NewService(ips []net.IP, externalIPs, loadBalancerIPs, loadBalancerSourceRa
  	// By omitting these IPs in the returned Service object, they
  	// are no longer considered in equality checks and thus save
  	// CPU cycles processing events Cilium will not act upon.
@@ -38,7 +38,7 @@ index bbd35f3365..a055344850 100644
  		k8sLoadBalancerIPs = parseIPs(loadBalancerIPs)
  	} else if option.Config.BGPAnnounceLBIP {
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 4fd430f1d1..93340bb1c8 100644
+index f713067030..df026092f8 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -244,6 +244,9 @@ const (
@@ -51,7 +51,7 @@ index 4fd430f1d1..93340bb1c8 100644
  	// EnableSVCSourceRangeCheck enables check of service source range checks
  	EnableSVCSourceRangeCheck = "enable-svc-source-range-check"
  
-@@ -1826,6 +1829,9 @@ type DaemonConfig struct {
+@@ -1842,6 +1845,9 @@ type DaemonConfig struct {
  	// EnableNodePort enables k8s NodePort service implementation in BPF
  	EnableNodePort bool
  
@@ -61,7 +61,7 @@ index 4fd430f1d1..93340bb1c8 100644
  	// EnableSVCSourceRangeCheck enables check of loadBalancerSourceRanges
  	EnableSVCSourceRangeCheck bool
  
-@@ -2808,6 +2814,7 @@ func (c *DaemonConfig) Populate() {
+@@ -2829,6 +2835,7 @@ func (c *DaemonConfig) Populate() {
  	c.EnableTracing = viper.GetBool(EnableTracing)
  	c.EnableUnreachableRoutes = viper.GetBool(EnableUnreachableRoutes)
  	c.EnableNodePort = viper.GetBool(EnableNodePort)
@@ -70,5 +70,5 @@ index 4fd430f1d1..93340bb1c8 100644
  	c.EnableHostPort = viper.GetBool(EnableHostPort)
  	c.EnableHostLegacyRouting = viper.GetBool(EnableHostLegacyRouting)
 -- 
-2.39.0
+2.39.1
 
