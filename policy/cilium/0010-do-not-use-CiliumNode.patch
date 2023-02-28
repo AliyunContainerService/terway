@@ -12,10 +12,10 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  4 files changed, 22 insertions(+), 40 deletions(-)
 
 diff --git a/pkg/defaults/defaults.go b/pkg/defaults/defaults.go
-index 2ca3049940..8d90d0a48d 100644
+index df797c44e9..398e50474d 100644
 --- a/pkg/defaults/defaults.go
 +++ b/pkg/defaults/defaults.go
-@@ -384,7 +384,7 @@ const (
+@@ -398,7 +398,7 @@ const (
  
  	// AutoCreateCiliumNodeResource enables automatic creation of a
  	// CiliumNode resource for the local node
@@ -25,7 +25,7 @@ index 2ca3049940..8d90d0a48d 100644
  	// PolicyTriggerInterval is default amount of time between triggers of
  	// policy updates are invoked.
 diff --git a/pkg/k8s/init.go b/pkg/k8s/init.go
-index 31e2f3a96f..9a8693aa72 100644
+index 2e090cd729..f06218f317 100644
 --- a/pkg/k8s/init.go
 +++ b/pkg/k8s/init.go
 @@ -17,7 +17,6 @@ import (
@@ -117,10 +117,10 @@ index d8122ee052..b2dafa1e52 100644
  	}
  
 diff --git a/pkg/k8s/watchers/watcher.go b/pkg/k8s/watchers/watcher.go
-index 0225671c46..627d438928 100644
+index e8e3ced771..354cb7b707 100644
 --- a/pkg/k8s/watchers/watcher.go
 +++ b/pkg/k8s/watchers/watcher.go
-@@ -369,7 +369,7 @@ var ciliumResourceToGroupMapping = map[string]watcherInfo{
+@@ -375,7 +375,7 @@ var ciliumResourceToGroupMapping = map[string]watcherInfo{
  	synced.CRDResourceName(v2.CNPName):           {start, k8sAPIGroupCiliumNetworkPolicyV2},
  	synced.CRDResourceName(v2.CCNPName):          {start, k8sAPIGroupCiliumClusterwideNetworkPolicyV2},
  	synced.CRDResourceName(v2.CEPName):           {start, k8sAPIGroupCiliumEndpointV2}, // ipcache
@@ -130,5 +130,5 @@ index 0225671c46..627d438928 100644
  	synced.CRDResourceName(v2.CLRPName):          {start, k8sAPIGroupCiliumLocalRedirectPolicyV2},
  	synced.CRDResourceName(v2.CEWName):           {skip, ""}, // Handled in clustermesh-apiserver/
 -- 
-2.39.0
+2.39.1
 

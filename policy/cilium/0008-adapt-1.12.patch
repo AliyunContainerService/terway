@@ -41,10 +41,10 @@ index 1dba925080..629ef1bece 100644
  			symbols = append(symbols, symbolToHostNetdevEp)
  			directions = append(directions, dirEgress)
 diff --git a/plugins/cilium-cni/chaining/terway/terway.go b/plugins/cilium-cni/chaining/terway/terway.go
-index 3783cbcb5a..562b76a79b 100644
+index d85bba9285..802384084e 100644
 --- a/plugins/cilium-cni/chaining/terway/terway.go
 +++ b/plugins/cilium-cni/chaining/terway/terway.go
-@@ -140,10 +140,11 @@ func (f *TerwayChainer) Add(ctx context.Context, pluginCtx chainingapi.PluginCon
+@@ -145,10 +145,11 @@ func (f *TerwayChainer) Add(ctx context.Context, pluginCtx chainingapi.PluginCon
  		SyncBuildEndpoint: true,
  		DatapathMapID:     int64(mapID),
  		DatapathConfiguration: &models.EndpointDatapathConfiguration{
@@ -61,5 +61,5 @@ index 3783cbcb5a..562b76a79b 100644
  	}
  
 -- 
-2.39.0
+2.39.1
 

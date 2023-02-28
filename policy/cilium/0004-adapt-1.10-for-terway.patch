@@ -9,10 +9,10 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  1 file changed, 10 insertions(+), 10 deletions(-)
 
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 23c8c8b84c..4fd430f1d1 100644
+index 7c0eaa8932..f713067030 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
-@@ -3170,16 +3170,16 @@ func (c *DaemonConfig) Populate() {
+@@ -3193,16 +3193,16 @@ func (c *DaemonConfig) Populate() {
  		}
  	}
  
@@ -40,5 +40,5 @@ index 23c8c8b84c..4fd430f1d1 100644
  	c.KubeProxyReplacementHealthzBindAddr = viper.GetString(KubeProxyReplacementHealthzBindAddr)
  
 -- 
-2.39.0
+2.39.1
 
