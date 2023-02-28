@@ -75,7 +75,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Run ShellCheck
-      uses: ludeeus/action-shellcheck@1.1.0
+      uses: ludeeus/action-shellcheck@2.0.0
       env:
         SHELLCHECK_OPTS: -e SC2236,SC2162,SC2268
       with:
