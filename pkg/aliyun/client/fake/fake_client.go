@@ -214,7 +214,7 @@ func (o *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, 
 	return nil
 }
 
-func (o *OpenAPI) AssignIpv6Addresses(ctx context.Context, eniID string, count int) ([]net.IP, error) {
+func (o *OpenAPI) AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
 	eni, ok := o.ENIs[eniID]
 	if !ok {
 		return nil, apiErr.ErrNotFound

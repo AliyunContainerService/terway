@@ -19,7 +19,7 @@ type ENI interface {
 	WaitForNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error)
 	AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotent string) ([]net.IP, error)
 	UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []net.IP) error
-	AssignIpv6Addresses(ctx context.Context, eniID string, count int) ([]net.IP, error)
+	AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error)
 	UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []net.IP) error
 	ModifyNetworkInterfaceAttribute(ctx context.Context, eniID string, securityGroupIDs []string) error
 }

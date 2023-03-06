@@ -145,7 +145,7 @@ func (d *Delegate) UnAssignPrivateIPAddresses(ctx context.Context, eniID string,
 	panic("implement me")
 }
 
-func (d *Delegate) AssignIpv6Addresses(ctx context.Context, eniID string, count int) ([]net.IP, error) {
+func (d *Delegate) AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
 	//TODO implement me
 	panic("implement me")
 }

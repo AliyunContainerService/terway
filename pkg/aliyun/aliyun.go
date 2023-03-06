@@ -314,10 +314,9 @@ func (e *Impl) AssignNIPsForENI(ctx context.Context, eniID, mac string, count in
 
 	if e.ipFamily.IPv6 {
 		var innerErr error
+		idempotentKey := string(uuid.NewUUID())
 		err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENIOps), func() (bool, error) {
-			// fixme: add idempotent key for assign ipv6 addresses when ECS API support it
-			// https://help.aliyun.com/document_detail/98610.html
-			ipv6s, innerErr = e.AssignIpv6Addresses(ctx, eniID, count)
+			ipv6s, innerErr = e.AssignIpv6Addresses(ctx, eniID, count, idempotentKey)
 			if innerErr != nil {
 				if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
 					return false, innerErr
