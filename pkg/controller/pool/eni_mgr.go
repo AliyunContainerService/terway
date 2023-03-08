@@ -271,7 +271,7 @@ func (m *Manager) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, 
 	panic("implement me")
 }
 
-func (m *Manager) AssignIpv6Addresses(ctx context.Context, eniID string, count int) ([]net.IP, error) {
+func (m *Manager) AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
 	panic("implement me")
 }
 

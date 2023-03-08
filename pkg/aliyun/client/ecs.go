@@ -344,10 +344,11 @@ func (a *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, 
 }
 
 // AssignIpv6Addresses assign ipv6 address
-func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, eniID string, count int) ([]net.IP, error) {
+func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
 	req := ecs.CreateAssignIpv6AddressesRequest()
 	req.NetworkInterfaceId = eniID
 	req.Ipv6AddressCount = requests.NewInteger(count)
+	req.ClientToken = idempotentKey
 
 	l := log.WithFields(map[string]interface{}{
 		LogFieldAPI:              "AssignIpv6Addresses",
