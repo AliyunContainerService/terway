@@ -16,42 +16,10 @@ limitations under the License.
 
 package common
 
-import (
-	"fmt"
-	"strings"
-
-	"github.com/AliyunContainerService/terway/types"
-
-	corev1 "k8s.io/api/core/v1"
-)
-
 // NodeInfo is the type describe the eni config for this pod
 type NodeInfo struct {
 	NodeName   string
 	InstanceID string
 	ZoneID     string
 	TrunkENIID string
-}
-
-func NewNodeInfo(node *corev1.Node) (*NodeInfo, error) {
-	res := &NodeInfo{NodeName: node.Name}
-	ids := strings.Split(node.Spec.ProviderID, ".")
-	if len(ids) < 2 {
-		return nil, fmt.Errorf("error parse providerID %s", node.Spec.ProviderID)
-	}
-	res.InstanceID = ids[1]
-
-	res.TrunkENIID = node.GetAnnotations()[types.TrunkOn]
-
-	zone, ok := node.GetLabels()[corev1.LabelTopologyZone]
-	if ok {
-		res.ZoneID = zone
-		return res, nil
-	}
-	zone, ok = node.GetLabels()[corev1.LabelZoneFailureDomain]
-	if ok {
-		res.ZoneID = zone
-		return res, nil
-	}
-	return nil, fmt.Errorf("cat not found zone label from node %s", node.Name)
 }
