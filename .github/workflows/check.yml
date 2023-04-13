@@ -27,7 +27,7 @@ jobs:
         sudo go test -tags default_build,privileged -v ./...
         sudo go test -tags default_build,privileged -race -v ./...
         sudo go test -tags default_build,privileged -coverpkg=./... -race -coverprofile=coverage.txt -covermode=atomic ./...
-    - uses: codecov/codecov-action@v1
+    - uses: codecov/codecov-action@v3
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.txt
@@ -79,7 +79,7 @@ jobs:
       env:
         SHELLCHECK_OPTS: -e SC2236,SC2162,SC2268
       with:
-        ignore: tests hack
+        ignore_paths: tests hack
 
   super-linter:
     runs-on: ubuntu-latest
