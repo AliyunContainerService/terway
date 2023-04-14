@@ -1,22 +1,22 @@
-From ed390e7385f4fea72406f59afe32ce57c01a7cfc Mon Sep 17 00:00:00 2001
+From 62f1eb4cc0635f6329a9c7d258da6763bd414d8f Mon Sep 17 00:00:00 2001
 From: "bingshen.wbs" <bingshen.wbs@alibaba-inc.com>
 Date: Wed, 9 Jun 2021 20:32:09 +0800
-Subject: [PATCH] terway
+Subject: [PATCH 1/3] terway
 
 ---
- calc/calc_graph.go               |  4 +--
- daemon/daemon.go                 | 56 ++++++++++++++++----------------
- dataplane/linux/endpoint_mgr.go  | 28 ++++++++--------
- dataplane/linux/masq_mgr.go      |  8 ++++-
- iptables/feature_detect.go       | 11 +++++++
- iptables/features_detect_test.go | 18 ++++++++++
- 6 files changed, 80 insertions(+), 45 deletions(-)
+ felix/calc/calc_graph.go                 |  4 +-
+ felix/daemon/daemon.go                   | 54 ++++++++++++------------
+ felix/dataplane/linux/endpoint_mgr.go    | 26 ++++++------
+ felix/dataplane/linux/masq_mgr.go        |  8 +++-
+ felix/environment/feature_detect.go      | 11 +++++
+ felix/environment/feature_detect_test.go | 18 ++++++++
+ 6 files changed, 78 insertions(+), 43 deletions(-)
 
-diff --git a/calc/calc_graph.go b/calc/calc_graph.go
-index abe9ca29..a39193e1 100644
---- a/calc/calc_graph.go
-+++ b/calc/calc_graph.go
-@@ -380,8 +380,8 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
+diff --git a/felix/calc/calc_graph.go b/felix/calc/calc_graph.go
+index 42159e49d..22128aa0d 100644
+--- a/felix/calc/calc_graph.go
++++ b/felix/calc/calc_graph.go
+@@ -383,8 +383,8 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
  	//         |
  	//      <dataplane>
  	//
@@ -24,23 +24,14 @@ index abe9ca29..a39193e1 100644
 -	configBatcher.RegisterWith(allUpdDispatcher)
 +	//configBatcher := NewConfigBatcher(hostname, callbacks)
 +	//configBatcher.RegisterWith(allUpdDispatcher)
-
+ 
  	// The profile decoder identifies objects with special dataplane significance which have
  	// been encoded as profiles by libcalico-go. At present this includes Kubernetes Service
-diff --git a/daemon/daemon.go b/daemon/daemon.go
-index 21cf78ef..98488d56 100644
---- a/daemon/daemon.go
-+++ b/daemon/daemon.go
-@@ -119,7 +119,7 @@ func Run(configFile string, gitVersion string, buildDate string, gitRevision str
- 	// Initialise early so we can trace out config parsing.
- 	logutils.ConfigureEarlyLogging()
-
--	ctx := context.Background()
-+	//ctx := context.Background()
-
- 	if os.Getenv("GOGC") == "" {
- 		// Tune the GC to trade off a little extra CPU usage for significantly lower
-@@ -233,33 +233,33 @@ configRetry:
+diff --git a/felix/daemon/daemon.go b/felix/daemon/daemon.go
+index 11dc156db..4429ada5f 100644
+--- a/felix/daemon/daemon.go
++++ b/felix/daemon/daemon.go
+@@ -235,33 +235,33 @@ configRetry:
  		log.Info("Created datastore client")
  		numClientsCreated++
  		backendClient = v3Client.(interface{ Backend() bapi.Client }).Backend()
@@ -101,16 +92,15 @@ index 21cf78ef..98488d56 100644
  		err = configParams.Validate()
  		if err != nil {
  			log.WithError(err).Error("Failed to parse/validate configuration from datastore.")
-diff --git a/dataplane/linux/endpoint_mgr.go b/dataplane/linux/endpoint_mgr.go
-index e8c74dad..ac5f9e62 100644
---- a/dataplane/linux/endpoint_mgr.go
-+++ b/dataplane/linux/endpoint_mgr.go
-@@ -704,20 +704,20 @@ func (m *endpointManager) resolveWorkloadEndpoints() {
+diff --git a/felix/dataplane/linux/endpoint_mgr.go b/felix/dataplane/linux/endpoint_mgr.go
+index 2d980d01f..3151e0ac3 100644
+--- a/felix/dataplane/linux/endpoint_mgr.go
++++ b/felix/dataplane/linux/endpoint_mgr.go
+@@ -737,19 +737,19 @@ func (m *endpointManager) resolveWorkloadEndpoints() {
  		m.needToCheckEndpointMarkChains = true
  	}
-
--	m.wlIfaceNamesToReconfigure.Iter(func(item interface{}) error {
--		ifaceName := item.(string)
+ 
+-	m.wlIfaceNamesToReconfigure.Iter(func(ifaceName string) error {
 -		err := m.configureInterface(ifaceName)
 -		if err != nil {
 -			if exists, err := m.interfaceExistsInProcSys(ifaceName); err == nil && !exists {
@@ -123,8 +113,7 @@ index e8c74dad..ac5f9e62 100644
 -		}
 -		return set.RemoveItem
 -	})
-+	//m.wlIfaceNamesToReconfigure.Iter(func(item interface{}) error {
-+	//	ifaceName := item.(string)
++	//m.wlIfaceNamesToReconfigure.Iter(func(ifaceName string) error {
 +	//	err := m.configureInterface(ifaceName)
 +	//	if err != nil {
 +	//		if exists, err := m.interfaceExistsInProcSys(ifaceName); err == nil && !exists {
@@ -138,24 +127,24 @@ index e8c74dad..ac5f9e62 100644
 +	//	return set.RemoveItem
 +	//})
  }
-
+ 
  func wlIdsAscending(id1, id2 *proto.WorkloadEndpointID) bool {
-diff --git a/dataplane/linux/masq_mgr.go b/dataplane/linux/masq_mgr.go
-index 402a4507..09a451a4 100644
---- a/dataplane/linux/masq_mgr.go
-+++ b/dataplane/linux/masq_mgr.go
+diff --git a/felix/dataplane/linux/masq_mgr.go b/felix/dataplane/linux/masq_mgr.go
+index 8b82c9f89..1bec80ba5 100644
+--- a/felix/dataplane/linux/masq_mgr.go
++++ b/felix/dataplane/linux/masq_mgr.go
 @@ -15,6 +15,7 @@
  package intdataplane
-
+ 
  import (
 +	"os"
  	"strings"
-
+ 
  	log "github.com/sirupsen/logrus"
-@@ -69,6 +70,11 @@ func newMasqManager(
+@@ -70,6 +71,11 @@ func newMasqManager(
  		Type:    ipsets.IPSetTypeHashNet,
  	}, []string{})
-
+ 
 +	if os.Getenv("CALICO_IPV4POOL_CIDR") != "" {
 +		ipsetsDataplane.AddMembers(rules.IPSetIDNATOutgoingMasqPools, []string{os.Getenv("CALICO_IPV4POOL_CIDR")})
 +		ipsetsDataplane.AddMembers(rules.IPSetIDNATOutgoingAllPools, []string{os.Getenv("CALICO_IPV4POOL_CIDR")})
@@ -164,7 +153,7 @@ index 402a4507..09a451a4 100644
  	return &masqManager{
  		ipVersion:       ipVersion,
  		ipsetsDataplane: ipsetsDataplane,
-@@ -142,7 +148,7 @@ func (m *masqManager) CompleteDeferredWork() error {
+@@ -143,7 +149,7 @@ func (m *masqManager) CompleteDeferredWork() error {
  	// Refresh the chain in case we've gone from having no masq pools to
  	// having some or vice-versa.
  	m.logCxt.Info("IPAM pools updated, refreshing iptables rule")
@@ -172,27 +161,27 @@ index 402a4507..09a451a4 100644
 +	chain := m.ruleRenderer.NATOutgoingChain(true, m.ipVersion)
  	m.natTable.UpdateChain(chain)
  	m.dirty = false
-
-diff --git a/iptables/feature_detect.go b/iptables/feature_detect.go
-index 0a940e69..603baad7 100644
---- a/iptables/feature_detect.go
-+++ b/iptables/feature_detect.go
-@@ -43,6 +43,11 @@ var (
+ 
+diff --git a/felix/environment/feature_detect.go b/felix/environment/feature_detect.go
+index 0b2fbe1b7..8457b9d5c 100644
+--- a/felix/environment/feature_detect.go
++++ b/felix/environment/feature_detect.go
+@@ -45,6 +45,11 @@ var (
  	// Linux kernel versions:
  	// v3Dot10Dot0 is the oldest version we support at time of writing.
- 	v3Dot10Dot0 = versionparse.MustParseVersion("3.10.0")
+ 	v3Dot10Dot0 = MustParseVersion("3.10.0")
 +
 +	// RHEL spec kernel versions:
-+	v3Dot10Dot1   = versionparse.MustParseVersion("3.10.1")
-+	v3Dot10Dot693 = versionparse.MustParseVersion("3.10.0-693")
++	v3Dot10Dot1   = MustParseVersion("3.10.1")
++	v3Dot10Dot693 = MustParseVersion("3.10.0-693")
 +
  	// v3Dot14Dot0 added the random-fully feature on the iptables interface.
- 	v3Dot14Dot0 = versionparse.MustParseVersion("3.14.0")
+ 	v3Dot14Dot0 = MustParseVersion("3.14.0")
  	// v5Dot7Dot0 contains a fix for checksum offloading.
-@@ -145,6 +150,12 @@ func (d *FeatureDetector) refreshFeaturesLockHeld() {
+@@ -155,6 +160,12 @@ func (d *FeatureDetector) refreshFeaturesLockHeld() {
  	// Avoid logging all the override values every time through this function.
  	d.loggedOverrides = true
-
+ 
 +	// for rhel/centos >= 7.4 which backport fully-random
 +	if kerV.Compare(v3Dot10Dot1) < 0 && kerV.Compare(v3Dot10Dot693) >= 0 {
 +		features.SNATFullyRandom = true
@@ -202,11 +191,11 @@ index 0a940e69..603baad7 100644
  	if d.featureCache == nil || *d.featureCache != features {
  		log.WithFields(log.Fields{
  			"features":        features,
-diff --git a/iptables/features_detect_test.go b/iptables/features_detect_test.go
-index bd74e130..f4b66d71 100644
---- a/iptables/features_detect_test.go
-+++ b/iptables/features_detect_test.go
-@@ -125,6 +125,24 @@ func TestFeatureDetection(t *testing.T) {
+diff --git a/felix/environment/feature_detect_test.go b/felix/environment/feature_detect_test.go
+index 62d478d1c..ec1e8d397 100644
+--- a/felix/environment/feature_detect_test.go
++++ b/felix/environment/feature_detect_test.go
+@@ -128,6 +128,24 @@ func TestFeatureDetection(t *testing.T) {
  				ChecksumOffloadBroken: false,
  			},
  		},
@@ -231,6 +220,6 @@ index bd74e130..f4b66d71 100644
  	} {
  		tst := tst
  		t.Run("iptables version "+tst.iptablesVersion+" kernel "+tst.kernelVersion, func(t *testing.T) {
---
-2.30.1 (Apple Git-130)
+-- 
+2.40.0
 

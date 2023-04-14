@@ -1,22 +1,22 @@
-FROM --platform=$TARGETPLATFORM calico/go-build:v0.57 as felix-builder
+FROM --platform=$TARGETPLATFORM calico/go-build:v0.75 as felix-builder
 ARG GOPROXY
 ENV GOPROXY $GOPROXY
-ENV GIT_BRANCH=v3.20.2
-ENV GIT_COMMIT=ab06c3940caa8ac201f85c1313b2d72d724409d2
+ENV GIT_BRANCH=v3.24.5
+ENV GIT_COMMIT=f1a1611acb98d9187f48bbbe2227301aa69f0499
 
 RUN mkdir -p /go/src/github.com/projectcalico/ && cd /go/src/github.com/projectcalico/ && \
-    git clone -b ${GIT_BRANCH} --depth 1 https://github.com/projectcalico/felix.git && \
-    cd felix && [ "`git rev-parse HEAD`" = "${GIT_COMMIT}" ]
+    git clone -b ${GIT_BRANCH} --depth 1 https://github.com/projectcalico/calico.git && \
+    cd calico && [ "`git rev-parse HEAD`" = "${GIT_COMMIT}" ]
 COPY policy/felix /terway_patch
-RUN cd /go/src/github.com/projectcalico/felix && git apply /terway_patch/*.patch
-RUN cd /go/src/github.com/projectcalico/felix && \
+RUN cd /go/src/github.com/projectcalico/calico && git apply /terway_patch/*.patch
+RUN cd /go/src/github.com/projectcalico/calico && \
     go build -v -o bin/calico-felix -v -ldflags \
-    "-X github.com/projectcalico/felix/buildinfo.GitVersion=${GIT_BRANCH} \
-    -X github.com/projectcalico/felix/buildinfo.BuildDate=$(date -u +'%FT%T%z') \
-    -X github.com/projectcalico/felix/buildinfo.GitRevision=${GIT_COMMIT} \
-    -B 0x${GIT_COMMIT}" "github.com/projectcalico/felix/cmd/calico-felix" && \
+    "-X github.com/projectcalico/calico/felix/buildinfo.GitVersion=${GIT_BRANCH} \
+    -X github.com/projectcalico/calico/felix/buildinfo.BuildDate=$(date -u +'%FT%T%z') \
+    -X github.com/projectcalico/calico/felix/buildinfo.GitRevision=${GIT_COMMIT} \
+    -B 0x${GIT_COMMIT}" "github.com/projectcalico/calico/felix/cmd/calico-felix" && \
     ( ! $(readelf -d bin/calico-felix | grep -q NEEDED) || ( echo "Error: bin/calico-felix was not statically linked"; false )) \
-    && chmod +x /go/src/github.com/projectcalico/felix/bin/calico-felix
+    && chmod +x /go/src/github.com/projectcalico/calico/bin/calico-felix
 
 FROM --platform=$TARGETPLATFORM quay.io/cilium/cilium-builder:0a47f410d147719a579cd3c069fd0e4a84b8b055@sha256:191db32a7cb4c5143a6fcc8a83ffd9a701925bed7523e6628dc75cbadf694858 as cilium-builder
 ARG GOPROXY
@@ -49,5 +49,5 @@ RUN cd /go/src/github.com/cilium/cilium/operator && make cilium-operator-generic
     && mv cilium-operator-generic /tmp/install/usr/bin/
 
 FROM scratch
-COPY --from=felix-builder /go/src/github.com/projectcalico/felix/bin/calico-felix /bin/calico-felix
+COPY --from=felix-builder /go/src/github.com/projectcalico/calico/bin/calico-felix /bin/calico-felix
 COPY --from=cilium-builder /tmp/install/ /tmp/install/

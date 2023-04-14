@@ -1,21 +1,18 @@
-From 4601a35e878d142878a85ed60dea494b4b5dd0ab Mon Sep 17 00:00:00 2001
-From: l1b0k <libokang.dev@gmail.com>
-Date: Tue, 21 Dec 2021 17:00:11 +0800
-Subject: [PATCH] performance improve
+From 0242634f4cf47e2cf135eaf42385c21628d00939 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=B8=85=E5=BC=A6?= <libokang.lbk@alibaba-inc.com>
+Date: Thu, 13 Apr 2023 15:13:39 +0800
+Subject: [PATCH 2/3] performance improve
 
 ---
- daemon/daemon.go               | 4 ++++
- fv/infrastructure/infra_k8s.go | 2 +-
- go.mod                         | 1 +
- go.sum                         | 6 ++----
- k8sfv/pod.go                   | 2 +-
- 5 files changed, 9 insertions(+), 6 deletions(-)
+ felix/daemon/daemon.go               |  4 ++++
+ felix/fv/infrastructure/infra_k8s.go | 19 +++++++++----------
+ 2 files changed, 13 insertions(+), 10 deletions(-)
 
-diff --git a/daemon/daemon.go b/daemon/daemon.go
-index 98488d564..65fa6a3b1 100644
---- a/daemon/daemon.go
-+++ b/daemon/daemon.go
-@@ -272,6 +272,7 @@ configRetry:
+diff --git a/felix/daemon/daemon.go b/felix/daemon/daemon.go
+index 4429ada5f..7992b7446 100644
+--- a/felix/daemon/daemon.go
++++ b/felix/daemon/daemon.go
+@@ -287,6 +287,7 @@ configRetry:
  		// config.  We don't need to re-load the configuration _again_ because the
  		// calculation graph will spot if the config has changed since we were initialised.
  		datastoreConfig = configParams.DatastoreConfig()
@@ -23,7 +20,7 @@ index 98488d564..65fa6a3b1 100644
  		backendClient, err = backend.NewClient(datastoreConfig)
  		if err != nil {
  			log.WithError(err).Error("Failed to (re)connect to datastore")
-@@ -295,6 +296,9 @@ configRetry:
+@@ -310,6 +311,9 @@ configRetry:
  				log.WithError(err).Info("Kubernetes in-cluster config not available. " +
  					"Assuming we're not in a Kubernetes deployment.")
  			} else {
@@ -33,11 +30,64 @@ index 98488d564..65fa6a3b1 100644
  				k8sClientSet, err = kubernetes.NewForConfig(k8sconf)
  				if err != nil {
  					log.WithError(err).Error("Got in-cluster config but failed to create Kubernetes client.")
-diff --git a/fv/infrastructure/infra_k8s.go b/fv/infrastructure/infra_k8s.go
-index 0d23b4021..9864a7712 100644
---- a/fv/infrastructure/infra_k8s.go
-+++ b/fv/infrastructure/infra_k8s.go
-@@ -856,7 +856,7 @@ func cleanupAllPods(clientset *kubernetes.Clientset, calicoClient client.Interfa
+diff --git a/felix/fv/infrastructure/infra_k8s.go b/felix/fv/infrastructure/infra_k8s.go
+index fa235288a..296429db0 100644
+--- a/felix/fv/infrastructure/infra_k8s.go
++++ b/felix/fv/infrastructure/infra_k8s.go
+@@ -29,7 +29,6 @@ import (
+ 	"github.com/davecgh/go-spew/spew"
+ 	"github.com/onsi/ginkgo"
+ 
+-	. "github.com/onsi/gomega"
+ 	log "github.com/sirupsen/logrus"
+ 	v1 "k8s.io/api/core/v1"
+ 	apierrs "k8s.io/apimachinery/pkg/api/errors"
+@@ -315,7 +314,7 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
+ 
+ 	start = time.Now()
+ 	for {
+-		_, err := kds.K8sClient.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
++		_, err := kds.K8sClient.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{ResourceVersion: "0"})
+ 		if err == nil {
+ 			break
+ 		}
+@@ -787,7 +786,7 @@ func (kds *K8sDatastoreInfra) AddDefaultDeny() error {
+ }
+ 
+ func (kds *K8sDatastoreInfra) DumpErrorData() {
+-	nsList, err := kds.K8sClient.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
++	nsList, err := kds.K8sClient.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{ResourceVersion: "0"})
+ 	if err == nil {
+ 		log.Info("DIAGS: Kubernetes Namespaces:")
+ 		for _, ns := range nsList.Items {
+@@ -852,7 +851,7 @@ func isSystemNamespace(ns string) bool {
+ 
+ func cleanupAllNamespaces(clientset *kubernetes.Clientset, calicoClient client.Interface) {
+ 	log.Info("Cleaning up all namespaces...")
+-	nsList, err := clientset.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
++	nsList, err := clientset.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{ResourceVersion: "0"})
+ 	if err != nil {
+ 		panic(err)
+ 	}
+@@ -870,7 +869,7 @@ func cleanupAllNamespaces(clientset *kubernetes.Clientset, calicoClient client.I
+ 
+ func cleanupAllNodes(clientset *kubernetes.Clientset, calicoClient client.Interface) {
+ 	log.Info("Cleaning up all nodes...")
+-	nodeList, err := clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
++	nodeList, err := clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{ResourceVersion: "0"})
+ 	if err != nil {
+ 		panic(err)
+ 	}
+@@ -886,7 +885,7 @@ func cleanupAllNodes(clientset *kubernetes.Clientset, calicoClient client.Interf
+ 
+ func cleanupAllPods(clientset *kubernetes.Clientset, calicoClient client.Interface) {
+ 	log.Info("Cleaning up Pods")
+-	nsList, err := clientset.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
++	nsList, err := clientset.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{ResourceVersion: "0"})
+ 	if err != nil {
+ 		panic(err)
+ 	}
+@@ -899,7 +898,7 @@ func cleanupAllPods(clientset *kubernetes.Clientset, calicoClient client.Interfa
  		nsName := ns.ObjectMeta.Name
  		go func() {
  			admission <- 1
@@ -46,69 +96,31 @@ index 0d23b4021..9864a7712 100644
  			if err != nil {
  				panic(err)
  			}
-diff --git a/go.mod b/go.mod
-index b2e9565c2..e8fce439a 100644
---- a/go.mod
-+++ b/go.mod
-@@ -48,6 +48,7 @@ require (
-
- replace (
- 	github.com/Microsoft/hcsshim => github.com/projectcalico/hcsshim v0.8.9-calico
-+	github.com/projectcalico/libcalico-go => github.com/l1b0k/libcalico-go v1.7.2-0.20220609085418-20ef8864cf82
- 	github.com/sirupsen/logrus => github.com/projectcalico/logrus v0.0.0-20180701205716-fc9bbf2f5799
-
- 	// Need replacements for all the k8s subsidiary projects that are pulled in indirectly because
-diff --git a/go.sum b/go.sum
-index 71eab3e3e..d420ac013 100644
---- a/go.sum
-+++ b/go.sum
-@@ -454,6 +454,8 @@ github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
- github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
- github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
- github.com/kylelemons/godebug v0.0.0-20170820004349-d65d576e9348/go.mod h1:B69LEHPfb2qLo0BaaOLcbitczOKLWTsrBG9LczfCD4k=
-+github.com/l1b0k/libcalico-go v1.7.2-0.20220609085418-20ef8864cf82 h1:Gc+BDcWkurIbVhANa1WOj166OMgIwM5znAhvRQvqczw=
-+github.com/l1b0k/libcalico-go v1.7.2-0.20220609085418-20ef8864cf82/go.mod h1:I8icsAeLCqGTKwS13K9kE4X+NH4/GmjruZhaP4SBQ2g=
- github.com/leodido/go-urn v0.0.0-20181204092800-a67a23e1c1af h1:EhEGUQX36JFkvSWzrwGjjTJxrx7atfJdxv8cxFzmaB0=
- github.com/leodido/go-urn v0.0.0-20181204092800-a67a23e1c1af/go.mod h1:+cyI34gQWZcE1eQU7NVgKkkzdXDQHr1dBMtdAPozLkw=
- github.com/libopenstorage/openstorage v1.0.0/go.mod h1:Sp1sIObHjat1BeXhfMqLZ14wnOzEhNx2YQedreMcUyc=
-@@ -589,8 +591,6 @@ github.com/projectcalico/go-yaml-wrapper v0.0.0-20191112210931-090425220c54 h1:J
- github.com/projectcalico/go-yaml-wrapper v0.0.0-20191112210931-090425220c54/go.mod h1:UgC0aTQ2KMDxlX3lU/stndk7DMUBJqzN40yFiILHgxc=
- github.com/projectcalico/hcsshim v0.8.9-calico h1:aRrOWouDTzKwaIoRGMV/I1QikR+ikwj1G9T9h3wD090=
- github.com/projectcalico/hcsshim v0.8.9-calico/go.mod h1:5692vkUqntj1idxauYlpoINNKeqCiG6Sg38RRsjT5y8=
--github.com/projectcalico/libcalico-go v1.7.2-0.20210812161418-8f238d1920a5 h1:NThMmuy54k0BufTP4s2MtbbuQl2cDKdigRXX3q19wqs=
--github.com/projectcalico/libcalico-go v1.7.2-0.20210812161418-8f238d1920a5/go.mod h1:I8icsAeLCqGTKwS13K9kE4X+NH4/GmjruZhaP4SBQ2g=
- github.com/projectcalico/logrus v0.0.0-20180701205716-fc9bbf2f5799 h1:9jp4YoHqZvEKDW3Z9464x/whSRCWEinIo4/JifaKR+g=
- github.com/projectcalico/logrus v0.0.0-20180701205716-fc9bbf2f5799/go.mod h1:DfgrchabbtEO9wjOz5lVae+XRvjFKKWEA9GTMme6A8g=
- github.com/projectcalico/pod2daemon v0.0.0-20210816230834-b3a8b892d114 h1:HtV3Xp2R4jKbnye08zkD4NzUIyTxxtoO3dcyM72LrY4=
-@@ -1131,7 +1131,6 @@ k8s.io/client-go v0.21.0-rc.0 h1:lsPZHT1ZniXJcwg2udlaTOhAT8wf7BE0rn9Vj0+LWMA=
- k8s.io/client-go v0.21.0-rc.0/go.mod h1:zU5HY/bSOKH3YOqoge9nFvICgrpeSdJu8DQ4fkjKIZk=
- k8s.io/cloud-provider v0.21.0-rc.0/go.mod h1:dXTEXZuesbZ0g2tXButYQlr5mVnQ6lmWGJyODVXKFTY=
- k8s.io/cluster-bootstrap v0.21.0-rc.0/go.mod h1:lsAFz54QLO/Eg1o2FmI9EreB+nEpY8KWiXXCpyhjnsQ=
--k8s.io/code-generator v0.21.0-rc.0 h1:5XqZwy0dHr3LssJ9ImpO8dCjdTvZ8Bw84b90dZ46kPk=
- k8s.io/code-generator v0.21.0-rc.0/go.mod h1:hUlps5+9QaTrKx+jiM4rmq7YmH8wPOIko64uZCHDh6Q=
- k8s.io/component-base v0.21.0-rc.0 h1:8YgFPDsIhRx7zCOxikZn77nYRnwxrc9aMiuQDJtK1+g=
- k8s.io/component-base v0.21.0-rc.0/go.mod h1:XlP0bM7QJFWRGZYPc5NmphkvsYQ+o7804HWH3GTGjDY=
-@@ -1140,7 +1139,6 @@ k8s.io/controller-manager v0.21.0-rc.0/go.mod h1:K9485cOofmSjHGwNod14iRhLjNU65/A
- k8s.io/cri-api v0.21.0-rc.0/go.mod h1:nJbXlTpXwYCYuGMR7v3PQb1Du4WOGj2I9085xMVjr3I=
- k8s.io/csi-translation-lib v0.21.0-rc.0/go.mod h1:oG3Gth9/qb2RPjhoqJIZSPTqNqDt/rZFSLShuntPb90=
- k8s.io/gengo v0.0.0-20200413195148-3a45101e95ac/go.mod h1:ezvh/TsK7cY6rbqRK0oQQ8IAqLxYwwyPxAX1Pzy0ii0=
--k8s.io/gengo v0.0.0-20201214224949-b6c5ce23f027 h1:Uusb3oh8XcdzDF/ndlI4ToKTYVlkCSJP39SRY2mfRAw=
- k8s.io/gengo v0.0.0-20201214224949-b6c5ce23f027/go.mod h1:FiNAH4ZV3gBg2Kwh89tzAEV2be7d5xI0vBa/VySYy3E=
- k8s.io/heapster v1.2.0-beta.1/go.mod h1:h1uhptVXMwC8xtZBYsPXKVi8fpdlYkTs6k949KozGrM=
- k8s.io/klog/v2 v2.0.0/go.mod h1:PBfzABfn139FHAV07az/IF9Wp1bkk3vpT2XSJ76fSDE=
-diff --git a/k8sfv/pod.go b/k8sfv/pod.go
-index 2a3bbb7a1..9609f85ae 100644
---- a/k8sfv/pod.go
-+++ b/k8sfv/pod.go
-@@ -235,7 +235,7 @@ func cleanupAllPods(clientset *kubernetes.Clientset, nsPrefix string) {
- 			if strings.HasPrefix(nsName, nsPrefix) {
- 				log.Infof("Namespace matches prefix, getting pods: %v", nsName)
-
--				podList, err := clientset.CoreV1().Pods(nsName).List(context.Background(), metav1.ListOptions{})
-+				podList, err := clientset.CoreV1().Pods(nsName).List(context.Background(), metav1.ListOptions{ResourceVersion: "0"})
- 				panicIfError(err)
-
- 				log.WithField("count", len(podList.Items)).WithField("namespace", nsName).Debug(
---
-2.36.1
+@@ -1009,13 +1008,13 @@ func cleanupAllFelixConfigurations(clientset *kubernetes.Clientset, client clien
+ func cleanupAllServices(clientset *kubernetes.Clientset, calicoClient client.Interface) {
+ 	log.Info("Cleaning up services")
+ 	coreV1 := clientset.CoreV1()
+-	namespaceList, err := coreV1.Namespaces().List(context.Background(), metav1.ListOptions{})
++	namespaceList, err := coreV1.Namespaces().List(context.Background(), metav1.ListOptions{ResourceVersion: "0"})
+ 	if err != nil {
+ 		panic(err)
+ 	}
+ 	for _, ns := range namespaceList.Items {
+ 		serviceInterface := coreV1.Services(ns.Name)
+-		services, err := serviceInterface.List(context.Background(), metav1.ListOptions{})
++		services, err := serviceInterface.List(context.Background(), metav1.ListOptions{ResourceVersion: "0"})
+ 		if err != nil {
+ 			panic(err)
+ 		}
+@@ -1030,7 +1029,7 @@ func cleanupAllServices(clientset *kubernetes.Clientset, calicoClient client.Int
+ 			}
+ 		}
+ 		endpointsInterface := coreV1.Endpoints(ns.Name)
+-		endpoints, err := endpointsInterface.List(context.Background(), metav1.ListOptions{})
++		endpoints, err := endpointsInterface.List(context.Background(), metav1.ListOptions{ResourceVersion: "0"})
+ 		if err != nil {
+ 			panic(err)
+ 		}
+-- 
+2.40.0
 

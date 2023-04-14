@@ -1,41 +1,50 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: l1b0k <libokang.dev@gmail.com>
-Date: Tue, 25 Oct 2022 16:10:21 +0800
-Subject: [PATCH] Use Aliyun CNI annotation to get pod IPs, if set
+From 23b3ff3f1837442feba4ce1eb60f9f6b98c5c125 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=B8=85=E5=BC=A6?= <libokang.lbk@alibaba-inc.com>
+Date: Thu, 13 Apr 2023 15:15:34 +0800
+Subject: [PATCH 3/3] Use Aliyun CNI annotation to get pod IPs, if set
 
 ---
- go.mod | 2 +-
- go.sum | 4 ++--
- 2 files changed, 3 insertions(+), 3 deletions(-)
+ libcalico-go/lib/backend/k8s/conversion/constants.go  | 3 +++
+ libcalico-go/lib/backend/k8s/conversion/conversion.go | 5 ++++-
+ 2 files changed, 7 insertions(+), 1 deletion(-)
 
-diff --git a/go.mod b/go.mod
-index e8fce439a..b675b66d9 100644
---- a/go.mod
-+++ b/go.mod
-@@ -48,7 +48,7 @@ require (
+diff --git a/libcalico-go/lib/backend/k8s/conversion/constants.go b/libcalico-go/lib/backend/k8s/conversion/constants.go
+index 504f4d4fe..9c3f49ff7 100644
+--- a/libcalico-go/lib/backend/k8s/conversion/constants.go
++++ b/libcalico-go/lib/backend/k8s/conversion/constants.go
+@@ -36,6 +36,9 @@ const (
+ 	// AnnotationPodIPs is the annotation set by the Amazon VPC CNI plugin.
+ 	AnnotationAWSPodIPs = "vpc.amazonaws.com/pod-ips"
  
- replace (
- 	github.com/Microsoft/hcsshim => github.com/projectcalico/hcsshim v0.8.9-calico
--	github.com/projectcalico/libcalico-go => github.com/l1b0k/libcalico-go v1.7.2-0.20220609085418-20ef8864cf82
-+	github.com/projectcalico/libcalico-go => github.com/l1b0k/libcalico-go v1.7.2-0.20221103024436-83eb6c9d9fa5
- 	github.com/sirupsen/logrus => github.com/projectcalico/logrus v0.0.0-20180701205716-fc9bbf2f5799
++	// AnnotationAliyunPodIPs is the annotation set by the Aliyun CNI plugin.
++	AnnotationAliyunPodIPs = "k8s.aliyun.com/pod-ips"
++
+ 	// AnnotationContainerID stores the container ID of the pod.  This allows us to disambiguate different pods
+ 	// that have the same name and namespace.  For example, stateful set pod that is restarted.  May be missing
+ 	// on older Pods.
+diff --git a/libcalico-go/lib/backend/k8s/conversion/conversion.go b/libcalico-go/lib/backend/k8s/conversion/conversion.go
+index 4f30f6687..c25a9c6d4 100644
+--- a/libcalico-go/lib/backend/k8s/conversion/conversion.go
++++ b/libcalico-go/lib/backend/k8s/conversion/conversion.go
+@@ -193,7 +193,7 @@ func (c converter) IsHostNetworked(pod *kapiv1.Pod) bool {
+ }
  
- 	// Need replacements for all the k8s subsidiary projects that are pulled in indirectly because
-diff --git a/go.sum b/go.sum
-index d420ac013..cefd27e2f 100644
---- a/go.sum
-+++ b/go.sum
-@@ -454,8 +454,8 @@ github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
- github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
- github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
- github.com/kylelemons/godebug v0.0.0-20170820004349-d65d576e9348/go.mod h1:B69LEHPfb2qLo0BaaOLcbitczOKLWTsrBG9LczfCD4k=
--github.com/l1b0k/libcalico-go v1.7.2-0.20220609085418-20ef8864cf82 h1:Gc+BDcWkurIbVhANa1WOj166OMgIwM5znAhvRQvqczw=
--github.com/l1b0k/libcalico-go v1.7.2-0.20220609085418-20ef8864cf82/go.mod h1:I8icsAeLCqGTKwS13K9kE4X+NH4/GmjruZhaP4SBQ2g=
-+github.com/l1b0k/libcalico-go v1.7.2-0.20221103024436-83eb6c9d9fa5 h1:3kgtov8AqnBlEEsqpdN2ZVfFejiaYly1/0fIXWniwiU=
-+github.com/l1b0k/libcalico-go v1.7.2-0.20221103024436-83eb6c9d9fa5/go.mod h1:I8icsAeLCqGTKwS13K9kE4X+NH4/GmjruZhaP4SBQ2g=
- github.com/leodido/go-urn v0.0.0-20181204092800-a67a23e1c1af h1:EhEGUQX36JFkvSWzrwGjjTJxrx7atfJdxv8cxFzmaB0=
- github.com/leodido/go-urn v0.0.0-20181204092800-a67a23e1c1af/go.mod h1:+cyI34gQWZcE1eQU7NVgKkkzdXDQHr1dBMtdAPozLkw=
- github.com/libopenstorage/openstorage v1.0.0/go.mod h1:Sp1sIObHjat1BeXhfMqLZ14wnOzEhNx2YQedreMcUyc=
+ func (c converter) HasIPAddress(pod *kapiv1.Pod) bool {
+-	return pod.Status.PodIP != "" || pod.Annotations[AnnotationPodIP] != "" || pod.Annotations[AnnotationAWSPodIPs] != ""
++	return pod.Status.PodIP != "" || pod.Annotations[AnnotationPodIP] != "" || pod.Annotations[AnnotationAWSPodIPs] != "" || pod.Annotations[AnnotationAliyunPodIPs] != ""
+ 	// Note: we don't need to check PodIPs and AnnotationPodIPs here, because those cannot be
+ 	// non-empty if the corresponding singular field is empty.
+ }
+@@ -221,6 +221,9 @@ func getPodIPs(pod *kapiv1.Pod) ([]*cnet.IPNet, error) {
+ 	} else if ips := pod.Annotations[AnnotationAWSPodIPs]; ips != "" {
+ 		logc.WithField("ips", ips).Debug("No PodStatus IPs, use AWS VPC annotation")
+ 		podIPs = append(podIPs, strings.Split(ips, ",")...)
++	} else if ips := pod.Annotations[AnnotationAliyunPodIPs]; ips != "" {
++		log.WithField("ip", ip).Debug("No PodStatus IPs, use aliyun plural annotation")
++		podIPs = append(podIPs, strings.Split(ips, ",")...)
+ 	} else {
+ 		logc.Debug("Pod has no IP")
+ 		return nil, nil
 -- 
-2.37.3
+2.40.0
 
