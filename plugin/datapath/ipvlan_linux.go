@@ -761,9 +761,6 @@ func ensureFQ(link netlink.Link) error {
 		if qd.Attrs().LinkIndex != link.Attrs().Index {
 			continue
 		}
-		if qd.Attrs().LinkIndex != link.Attrs().Index {
-			continue
-		}
 		if qd.Type() != fq.Type() {
 			continue
 		}
