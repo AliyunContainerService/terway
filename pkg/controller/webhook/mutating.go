@@ -109,7 +109,8 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		return webhook.Denied(fmt.Sprintf("unable parse annotation field %s, %s", types.PodNetworks, err))
 	}
 
-	zones := sets.NewString()
+	prevZone := sets.NewString()
+	vSwitchZone := sets.NewString()
 
 	if len(networks.PodNetworks) == 0 {
 		// get pn
@@ -133,10 +134,9 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 				VSwitchOptions:   podNetworking.Spec.VSwitchOptions,
 				SecurityGroupIDs: podNetworking.Spec.SecurityGroupIDs,
 			})
-			if previousZone == "" {
-				for _, vsw := range podNetworking.Status.VSwitches {
-					zones.Insert(vsw.Zone)
-				}
+
+			for _, vsw := range podNetworking.Status.VSwitches {
+				vSwitchZone.Insert(vsw.Zone)
 			}
 
 			allocBytes, err := json.Marshal(podNetworking.Spec.AllocationType)
@@ -148,6 +148,13 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 
 		}
 	}
+
+	alloc, err := controlplane.ParsePodIPType(pod.Annotations[types.PodAllocType])
+	if err != nil {
+		l.Error(err, "failed to parse alloc type")
+		return webhook.Denied("failed to parse alloc type")
+	}
+
 	// validate and set default
 	require := false
 	iF := sets.NewString()
@@ -166,8 +173,9 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		}
 		iF.Insert(n.Interface)
 
-		if needPreviousZoneForAnnotation(previousZone, n) {
-			zones.Insert(previousZone)
+		// only set prev zone for fixed ip
+		if alloc.Type == v1beta1.IPAllocTypeFixed && needPreviousZoneForAnnotation(previousZone, n) {
+			prevZone.Insert(previousZone)
 		}
 	}
 
@@ -206,7 +214,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 	}
 	setResourceRequest(pod, resName, len(networks.PodNetworks))
 
-	setNodeAffinityByZones(pod, zones.List())
+	setNodeAffinityByZones(pod, prevZone.List(), vSwitchZone.List())
 
 	podPatched, err := json.Marshal(pod)
 	if err != nil {
@@ -337,6 +345,9 @@ func getPreviousZone(ctx context.Context, client client.Client, pod *corev1.Pod)
 		}
 		return "", err
 	}
+	if !podENI.DeletionTimestamp.IsZero() {
+		return "", nil
+	}
 	if len(podENI.Spec.Allocations) == 0 {
 		return "", nil
 	}
@@ -364,7 +375,7 @@ func setResourceRequest(pod *corev1.Pod, resName string, count int) {
 	pod.Spec.Containers[index].Resources.Limits[corev1.ResourceName(resName)] = resource.MustParse(strconv.Itoa(count))
 }
 
-func setNodeAffinityByZones(pod *corev1.Pod, zones []string) {
+func setNodeAffinityByZones(pod *corev1.Pod, zones ...[]string) {
 	if utils.IsDaemonSetPod(pod) || len(zones) == 0 {
 		return
 	}
@@ -382,11 +393,16 @@ func setNodeAffinityByZones(pod *corev1.Pod, zones []string) {
 		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms, corev1.NodeSelectorTerm{})
 	}
 	for i := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions = append(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions, corev1.NodeSelectorRequirement{
-			Key:      corev1.LabelTopologyZone,
-			Operator: corev1.NodeSelectorOpIn,
-			Values:   zones,
-		})
+		for _, zone := range zones {
+			if len(zone) == 0 {
+				continue
+			}
+			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions = append(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions, corev1.NodeSelectorRequirement{
+				Key:      corev1.LabelTopologyZone,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   zone,
+			})
+		}
 	}
 }
 

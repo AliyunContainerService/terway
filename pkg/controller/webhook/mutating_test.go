@@ -76,8 +76,9 @@ func Test_setResourceRequest(t *testing.T) {
 
 func Test_setNodeAffinityByZones(t *testing.T) {
 	type args struct {
-		pod   *corev1.Pod
-		zones []string
+		pod       *corev1.Pod
+		zones     []string
+		prevZones []string
 	}
 	tests := []struct {
 		name string
@@ -203,11 +204,97 @@ func Test_setNodeAffinityByZones(t *testing.T) {
 					},
 				},
 			}}}}},
+		}, {
+			name: "pod with multi zone set",
+			args: args{
+				pod: &corev1.Pod{Spec: corev1.PodSpec{Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1.NodeSelectorRequirement{
+								{
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"exist"},
+								},
+							},
+							MatchFields: []corev1.NodeSelectorRequirement{
+								{
+									Key:      "metadata.name",
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"foo"},
+								},
+							},
+						},
+						{
+							MatchFields: []corev1.NodeSelectorRequirement{
+								{
+									Key:      "metadata.name",
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"foo"},
+								},
+							},
+						},
+					},
+				}}}}},
+				zones:     []string{"foo", "bar"},
+				prevZones: []string{"foo", "bar"},
+			},
+			want: &corev1.Pod{Spec: corev1.PodSpec{Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{
+					{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      corev1.LabelTopologyZone,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"exist"},
+							},
+							{
+								Key:      corev1.LabelTopologyZone,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"foo", "bar"},
+							},
+							{
+								Key:      corev1.LabelTopologyZone,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"foo", "bar"},
+							},
+						},
+						MatchFields: []corev1.NodeSelectorRequirement{
+							{
+								Key:      "metadata.name",
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"foo"},
+							},
+						},
+					},
+					{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      corev1.LabelTopologyZone,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"foo", "bar"},
+							},
+							{
+								Key:      corev1.LabelTopologyZone,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"foo", "bar"},
+							},
+						},
+						MatchFields: []corev1.NodeSelectorRequirement{
+							{
+								Key:      "metadata.name",
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"foo"},
+							},
+						},
+					},
+				},
+			}}}}},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setNodeAffinityByZones(tt.args.pod, tt.args.zones)
+			setNodeAffinityByZones(tt.args.pod, tt.args.zones, tt.args.prevZones)
 			if !reflect.DeepEqual(tt.args.pod, tt.want) {
 				t.Errorf("setNodeAffinityByZones() = %v, want %v", tt.args.pod, tt.want)
 			}
