@@ -48,13 +48,17 @@ func ParsePodNetworksFromAnnotation(pod *corev1.Pod) (*PodNetworksAnnotation, er
 
 // ParsePodIPTypeFromAnnotation parse annotation and convert to v1beta1.AllocationType
 func ParsePodIPTypeFromAnnotation(pod *corev1.Pod) (*v1beta1.AllocationType, error) {
-	v, ok := pod.GetAnnotations()[terwayTypes.PodAllocType]
-	if !ok {
+	return ParsePodIPType(pod.GetAnnotations()[terwayTypes.PodAllocType])
+}
+
+func ParsePodIPType(str string) (*v1beta1.AllocationType, error) {
+	if str == "" {
 		return defaultAllocType(), nil
 	}
+
 	// will not be nil
 	var annoConf v1beta1.AllocationType
-	err := json.Unmarshal([]byte(v), &annoConf)
+	err := json.Unmarshal([]byte(str), &annoConf)
 	if err != nil {
 		return nil, err
 	}
