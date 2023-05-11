@@ -1,0 +1,275 @@
+From 9103d81a30c52e329a3a9054645b03df9ae95505 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=B8=85=E5=BC=A6?= <libokang.lbk@alibaba-inc.com>
+Date: Thu, 11 May 2023 13:36:50 +0800
+Subject: [PATCH] Revert "bpf: drop SVC traffic if no backend is available"
+
+This reverts commit a8813d5fac614897055991d95499d9790f518be3.
+---
+ bpf/bpf_lxc.c             | 10 ++--------
+ bpf/bpf_sock.c            | 16 ++++++++--------
+ bpf/lib/lb.h              | 20 +++++++++-----------
+ bpf/lib/nodeport.h        | 10 ++--------
+ bpf/sockops/bpf_sockops.c |  2 +-
+ 5 files changed, 22 insertions(+), 36 deletions(-)
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index 7eab9fa3fa..137b3853ac 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -673,7 +673,7 @@ static __always_inline int __tail_handle_ipv6(struct __ctx_buff *ctx)
+ 		 * the CT entry for destination endpoints where we can't encode the
+ 		 * state in the address.
+ 		 */
+-		svc = lb6_lookup_service(&key, is_defined(ENABLE_NODEPORT), false);
++		svc = lb6_lookup_service(&key, is_defined(ENABLE_NODEPORT));
+ 		if (svc) {
+ #if defined(ENABLE_L7_LB)
+ 			if (lb6_svc_is_l7loadbalancer(svc)) {
+@@ -681,9 +681,6 @@ static __always_inline int __tail_handle_ipv6(struct __ctx_buff *ctx)
+ 				goto skip_service_lookup;
+ 			}
+ #endif /* ENABLE_L7_LB */
+-			if (unlikely(svc->count == 0))
+-				return DROP_NO_SERVICE;
+-
+ 			ret = lb6_local(get_ct_map6(&tuple), ctx, ETH_HLEN, l4_off,
+ 					&csum_off, &key, &tuple, svc, &ct_state_new,
+ 					false);
+@@ -1247,7 +1244,7 @@ static __always_inline int __tail_handle_ipv4(struct __ctx_buff *ctx)
+ 				return ret;
+ 		}
+ 
+-		svc = lb4_lookup_service(&key, is_defined(ENABLE_NODEPORT), false);
++		svc = lb4_lookup_service(&key, is_defined(ENABLE_NODEPORT));
+ 		if (svc) {
+ #if defined(ENABLE_L7_LB)
+ 			if (lb4_svc_is_l7loadbalancer(svc)) {
+@@ -1255,9 +1252,6 @@ static __always_inline int __tail_handle_ipv4(struct __ctx_buff *ctx)
+ 				goto skip_service_lookup;
+ 			}
+ #endif /* ENABLE_L7_LB */
+-			if (unlikely(svc->count == 0))
+-				return DROP_NO_SERVICE;
+-
+ 			ret = lb4_local(get_ct_map4(&tuple), ctx, ETH_HLEN, l4_off,
+ 					&csum_off, &key, &tuple, svc, &ct_state_new,
+ 					ip4->saddr, has_l4_header, false);
+diff --git a/bpf/bpf_sock.c b/bpf/bpf_sock.c
+index 135e1a95c0..02b8a69cf0 100644
+--- a/bpf/bpf_sock.c
++++ b/bpf/bpf_sock.c
+@@ -247,7 +247,7 @@ sock4_wildcard_lookup(struct lb4_key *key __maybe_unused,
+ 	return NULL;
+ wildcard_lookup:
+ 	key->address = 0;
+-	return lb4_lookup_service(key, true, true);
++	return lb4_lookup_service(key, true);
+ }
+ #endif /* ENABLE_NODEPORT */
+ 
+@@ -349,7 +349,7 @@ static __always_inline int __sock4_xlate_fwd(struct bpf_sock_addr *ctx,
+ 	 * service entries via wildcarded lookup for NodePort and
+ 	 * HostPort services.
+ 	 */
+-	svc = lb4_lookup_service(&key, true, true);
++	svc = lb4_lookup_service(&key, true);
+ 	if (!svc)
+ 		svc = sock4_wildcard_lookup_full(&key, in_hostns);
+ 	if (!svc)
+@@ -499,7 +499,7 @@ static __always_inline int __sock4_post_bind(struct bpf_sock *ctx,
+ 	    !ctx_in_hostns(ctx_full, NULL))
+ 		return 0;
+ 
+-	svc = lb4_lookup_service(&key, true, true);
++	svc = lb4_lookup_service(&key, true);
+ 	if (!svc)
+ 		/* Perform a wildcard lookup for the case where the caller
+ 		 * tries to bind to loopback or an address with host identity
+@@ -592,7 +592,7 @@ static __always_inline int __sock4_xlate_rev(struct bpf_sock_addr *ctx,
+ 			.dport		= val->port,
+ 		};
+ 
+-		svc = lb4_lookup_service(&svc_key, true, true);
++		svc = lb4_lookup_service(&svc_key, true);
+ 		if (!svc)
+ 			svc = sock4_wildcard_lookup_full(&svc_key,
+ 						ctx_in_hostns(ctx_full, NULL));
+@@ -768,7 +768,7 @@ sock6_wildcard_lookup(struct lb6_key *key __maybe_unused,
+ 	return NULL;
+ wildcard_lookup:
+ 	memset(&key->address, 0, sizeof(key->address));
+-	return lb6_lookup_service(key, true, true);
++	return lb6_lookup_service(key, true);
+ }
+ #endif /* ENABLE_NODEPORT */
+ 
+@@ -858,7 +858,7 @@ static __always_inline int __sock6_post_bind(struct bpf_sock *ctx)
+ 
+ 	ctx_get_v6_src_address(ctx, &key.address);
+ 
+-	svc = lb6_lookup_service(&key, true, true);
++	svc = lb6_lookup_service(&key, true);
+ 	if (!svc) {
+ 		svc = sock6_wildcard_lookup(&key, false, false, true);
+ 		if (!svc)
+@@ -985,7 +985,7 @@ static __always_inline int __sock6_xlate_fwd(struct bpf_sock_addr *ctx,
+ 	ctx_get_v6_address(ctx, &key.address);
+ 	memcpy(&orig_key, &key, sizeof(key));
+ 
+-	svc = lb6_lookup_service(&key, true, true);
++	svc = lb6_lookup_service(&key, true);
+ 	if (!svc)
+ 		svc = sock6_wildcard_lookup_full(&key, in_hostns);
+ 	if (!svc)
+@@ -1147,7 +1147,7 @@ static __always_inline int __sock6_xlate_rev(struct bpf_sock_addr *ctx)
+ 			.dport		= val->port,
+ 		};
+ 
+-		svc = lb6_lookup_service(&svc_key, true, true);
++		svc = lb6_lookup_service(&svc_key, true);
+ 		if (!svc)
+ 			svc = sock6_wildcard_lookup_full(&svc_key,
+ 						ctx_in_hostns(ctx, NULL));
+diff --git a/bpf/lib/lb.h b/bpf/lib/lb.h
+index 1038b14d88..e465a6fc45 100644
+--- a/bpf/lib/lb.h
++++ b/bpf/lib/lb.h
+@@ -552,7 +552,7 @@ lb6_to_lb4_service(const struct lb6_service *svc __maybe_unused)
+ 
+ static __always_inline
+ struct lb6_service *lb6_lookup_service(struct lb6_key *key,
+-	   const bool scope_switch, const bool check_svc_backends)
++				       const bool scope_switch)
+ {
+ 	struct lb6_service *svc;
+ 
+@@ -562,11 +562,10 @@ struct lb6_service *lb6_lookup_service(struct lb6_key *key,
+ 	if (svc) {
+ 		if (!scope_switch || !lb6_svc_is_local_scope(svc))
+ 			/* Packets for L7 LB are redirected even when there are no backends. */
+-			return (svc->count || !check_svc_backends ||
+-				lb6_svc_is_l7loadbalancer(svc)) ? svc : NULL;
++			return (svc->count || lb6_svc_is_l7loadbalancer(svc)) ? svc : NULL;
+ 		key->scope = LB_LOOKUP_SCOPE_INT;
+ 		svc = map_lookup_elem(&LB6_SERVICES_MAP_V2, key);
+-		if (svc && (svc->count || !check_svc_backends || lb6_svc_is_l7loadbalancer(svc)))
++		if (svc && (svc->count || lb6_svc_is_l7loadbalancer(svc)))
+ 			return svc;
+ 	}
+ 
+@@ -896,7 +895,7 @@ static __always_inline int lb6_local(const void *map, struct __ctx_buff *ctx,
+ 		if (backend && !state->syn)
+ 			goto update_state;
+ 		key->backend_slot = 0;
+-		svc = lb6_lookup_service(key, false, true);
++		svc = lb6_lookup_service(key, false);
+ 		if (!svc)
+ 			goto drop_no_service;
+ 		backend_id = lb6_select_backend_id(ctx, key, tuple, svc);
+@@ -973,7 +972,7 @@ static __always_inline void lb6_ctx_restore_state(struct __ctx_buff *ctx,
+  */
+ static __always_inline
+ struct lb6_service *lb6_lookup_service(struct lb6_key *key __maybe_unused,
+-	   const bool scope_switch __maybe_unused, const bool check_svc_backends __maybe_unused)
++				       const bool scope_switch __maybe_unused)
+ {
+ 	return NULL;
+ }
+@@ -1177,7 +1176,7 @@ lb4_to_lb6_service(const struct lb4_service *svc __maybe_unused)
+ 
+ static __always_inline
+ struct lb4_service *lb4_lookup_service(struct lb4_key *key,
+-				  const bool scope_switch, const bool check_svc_backends)
++				       const bool scope_switch)
+ {
+ 	struct lb4_service *svc;
+ 
+@@ -1187,11 +1186,11 @@ struct lb4_service *lb4_lookup_service(struct lb4_key *key,
+ 	if (svc) {
+ 		if (!scope_switch || !lb4_svc_is_local_scope(svc))
+ 			/* Packets for L7 LB are redirected even when there are no backends. */
+-			return (svc->count || !check_svc_backends || lb4_to_lb6_service(svc) ||
++			return (svc->count || lb4_to_lb6_service(svc) ||
+ 				lb4_svc_is_l7loadbalancer(svc)) ? svc : NULL;
+ 		key->scope = LB_LOOKUP_SCOPE_INT;
+ 		svc = map_lookup_elem(&LB4_SERVICES_MAP_V2, key);
+-		if (svc && (svc->count || !check_svc_backends || lb4_svc_is_l7loadbalancer(svc)))
++		if (svc && (svc->count || lb4_svc_is_l7loadbalancer(svc)))
+ 			return svc;
+ 	}
+ 
+@@ -1469,7 +1468,6 @@ static __always_inline int lb4_local(const void *map, struct __ctx_buff *ctx,
+ 		.client_ip = saddr,
+ 	};
+ #endif
+-
+ 	ret = ct_lookup4(map, tuple, ctx, l4_off, CT_SERVICE, state, &monitor);
+ 	switch (ret) {
+ 	case CT_NEW:
+@@ -1556,7 +1554,7 @@ static __always_inline int lb4_local(const void *map, struct __ctx_buff *ctx,
+ 		if (backend && !state->syn)
+ 			goto update_state;
+ 		key->backend_slot = 0;
+-		svc = lb4_lookup_service(key, false, true);
++		svc = lb4_lookup_service(key, false);
+ 		if (!svc)
+ 			goto drop_no_service;
+ 		backend_id = lb4_select_backend_id(ctx, key, tuple, svc);
+diff --git a/bpf/lib/nodeport.h b/bpf/lib/nodeport.h
+index 412956047c..152cbb068f 100644
+--- a/bpf/lib/nodeport.h
++++ b/bpf/lib/nodeport.h
+@@ -744,7 +744,7 @@ static __always_inline int nodeport_lb6(struct __ctx_buff *ctx,
+ 			return ret;
+ 	}
+ 
+-	svc = lb6_lookup_service(&key, false, false);
++	svc = lb6_lookup_service(&key, false);
+ 	if (svc) {
+ 		const bool skip_l3_xlate = DSR_ENCAP_MODE == DSR_ENCAP_IPIP;
+ 
+@@ -763,9 +763,6 @@ static __always_inline int nodeport_lb6(struct __ctx_buff *ctx,
+ 								  (__be16)svc->l7_lb_proxy_port);
+ 		}
+ #endif
+-		if (unlikely(svc->count == 0))
+-			return DROP_NO_SERVICE;
+-
+ 		ret = lb6_local(get_ct_map6(&tuple), ctx, l3_off, l4_off,
+ 				&csum_off, &key, &tuple, svc, &ct_state_new,
+ 				skip_l3_xlate);
+@@ -1643,7 +1640,7 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
+ 			return ret;
+ 	}
+ 
+-	svc = lb4_lookup_service(&key, false, false);
++	svc = lb4_lookup_service(&key, false);
+ 	if (svc) {
+ 		const bool skip_l3_xlate = DSR_ENCAP_MODE == DSR_ENCAP_IPIP;
+ 
+@@ -1670,9 +1667,6 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
+ 			if (!ret)
+ 				return NAT_46X64_RECIRC;
+ 		} else {
+-			if (unlikely(svc->count == 0))
+-				return DROP_NO_SERVICE;
+-
+ 			ret = lb4_local(get_ct_map4(&tuple), ctx, l3_off, l4_off,
+ 					&csum_off, &key, &tuple, svc, &ct_state_new,
+ 					ip4->saddr, ipv4_has_l4_header(ip4),
+diff --git a/bpf/sockops/bpf_sockops.c b/bpf/sockops/bpf_sockops.c
+index eac7bb50b2..278324f6cc 100644
+--- a/bpf/sockops/bpf_sockops.c
++++ b/bpf/sockops/bpf_sockops.c
+@@ -67,7 +67,7 @@ static inline void bpf_sock_ops_ipv4(struct bpf_sock_ops *skops)
+ 	 * pulled in as needed.
+ 	 */
+ 	sk_lb4_key(&lb4_key, &key);
+-	svc = lb4_lookup_service(&lb4_key, true, true);
++	svc = lb4_lookup_service(&lb4_key, true);
+ 	if (svc)
+ 		return;
+ 
+-- 
+2.40.1
+
