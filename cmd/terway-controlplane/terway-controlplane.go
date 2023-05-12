@@ -94,9 +94,23 @@ func main() {
 		panic(err)
 	}
 
-	err = cert.SyncCert(cfg.ControllerNamespace, cfg.ControllerName, cfg.ClusterDomain, cfg.CertDir)
-	if err != nil {
-		panic(err)
+	options := ctrl.Options{
+		Scheme:                     scheme,
+		HealthProbeBindAddress:     cfg.HealthzBindAddress,
+		Port:                       cfg.WebhookPort,
+		CertDir:                    cfg.CertDir,
+		LeaderElection:             cfg.LeaderElection,
+		LeaderElectionID:           cfg.ControllerName,
+		LeaderElectionNamespace:    cfg.ControllerNamespace,
+		LeaderElectionResourceLock: "leases",
+		MetricsBindAddress:         cfg.MetricsBindAddress,
+	}
+
+	if !cfg.DisableWebhook {
+		err = cert.SyncCert(cfg.ControllerNamespace, cfg.ControllerName, cfg.ClusterDomain, cfg.CertDir)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	clientSet, err := credential.NewClientSet(string(cfg.Credential.AccessKey), string(cfg.Credential.AccessSecret), cfg.RegionID, cfg.CredentialPath, cfg.SecretNamespace, cfg.SecretName)
@@ -109,18 +123,7 @@ func main() {
 		panic(err)
 	}
 
-	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
-		Scheme:                     scheme,
-		HealthProbeBindAddress:     cfg.HealthzBindAddress,
-		Host:                       "0.0.0.0",
-		Port:                       cfg.WebhookPort,
-		CertDir:                    cfg.CertDir,
-		LeaderElection:             cfg.LeaderElection,
-		LeaderElectionID:           cfg.ControllerName,
-		LeaderElectionNamespace:    cfg.ControllerNamespace,
-		LeaderElectionResourceLock: "leases",
-		MetricsBindAddress:         cfg.MetricsBindAddress,
-	})
+	mgr, err := ctrl.NewManager(restConfig, options)
 	if err != nil {
 		panic(err)
 	}
@@ -134,8 +137,10 @@ func main() {
 		panic(err)
 	}
 
-	mgr.GetWebhookServer().Register("/mutating", webhook.MutatingHook(mgr.GetClient()))
-	mgr.GetWebhookServer().Register("/validate", webhook.ValidateHook())
+	if !cfg.DisableWebhook {
+		mgr.GetWebhookServer().Register("/mutating", webhook.MutatingHook(mgr.GetClient()))
+		mgr.GetWebhookServer().Register("/validate", webhook.ValidateHook())
+	}
 
 	vSwitchCtrl, err := vswitch.NewSwitchPool(cfg.VSwitchPoolSize, cfg.VSwitchCacheTTL)
 	if err != nil {
