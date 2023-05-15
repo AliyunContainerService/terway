@@ -18,6 +18,7 @@ package node
 
 import (
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/types"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -33,6 +34,11 @@ func (p *predicateForNodeEvent) Create(e event.CreateEvent) bool {
 	if !ok {
 		return false
 	}
+
+	if types.IgnoredByTerway(node.Labels) {
+		return false
+	}
+
 	return !utils.ISVKNode(node)
 }
 
@@ -41,6 +47,11 @@ func (p *predicateForNodeEvent) Update(e event.UpdateEvent) bool {
 	if !ok {
 		return false
 	}
+
+	if types.IgnoredByTerway(node.Labels) {
+		return false
+	}
+
 	return !utils.ISVKNode(node)
 }
 
@@ -49,5 +60,10 @@ func (p *predicateForNodeEvent) Delete(e event.DeleteEvent) bool {
 	if !ok {
 		return false
 	}
+
+	if types.IgnoredByTerway(node.Labels) {
+		return false
+	}
+
 	return !utils.ISVKNode(node)
 }
