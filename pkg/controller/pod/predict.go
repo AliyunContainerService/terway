@@ -43,6 +43,10 @@ func (p *predicateForPodEvent) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
+	if types.IgnoredByTerway(newPod.Labels) {
+		return false
+	}
+
 	if !types.PodUseENI(oldPod) {
 		return false
 	}
@@ -80,6 +84,10 @@ func OKToProcess(obj interface{}) bool {
 		return false
 	}
 	if pod.Spec.NodeName == "" {
+		return false
+	}
+
+	if types.IgnoredByTerway(pod.Labels) {
 		return false
 	}
 	// 1. process pods only enable trunk

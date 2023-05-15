@@ -177,6 +177,11 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("error get node %s, %w", node.Name, err)
 	}
+
+	if types.IgnoredByTerway(node.Labels) {
+		return reconcile.Result{}, nil
+	}
+
 	if utils.ISVKNode(node) {
 		return reconcile.Result{}, nil
 	}

@@ -24,6 +24,7 @@ import (
 
 // AnnotationPrefix is the annotation prefix
 const AnnotationPrefix = "k8s.aliyun.com/"
+const LabelPrefix = "k8s.aliyun.com/"
 
 // annotations used by terway
 const (
@@ -56,6 +57,9 @@ const (
 	ENIRelatedNodeName = AnnotationPrefix + "node"
 
 	PodIPs = AnnotationPrefix + "pod-ips"
+
+	// IgnoreByTerway if the label exist , terway will not handle this kind of res
+	IgnoreByTerway = LabelPrefix + "ignore-by-terway"
 )
 
 // FinalizerPodENI finalizer for podENI resource
@@ -90,6 +94,14 @@ func PodUseENI(pod *corev1.Pod) bool {
 		return false
 	}
 	return v
+}
+
+// IgnoredByTerway for both pods and nodes
+func IgnoredByTerway(labels map[string]string) bool {
+	if labels[IgnoreByTerway] == "true" {
+		return true
+	}
+	return false
 }
 
 // NetworkPrio network priority for pod

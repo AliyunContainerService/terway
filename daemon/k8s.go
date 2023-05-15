@@ -735,6 +735,10 @@ func (k *k8s) GetLocalPods() ([]*types.PodInfo, error) {
 	}
 	var ret []*types.PodInfo
 	for _, pod := range list.Items {
+		if types.IgnoredByTerway(pod.Labels) {
+			continue
+		}
+
 		podInfo := convertPod(k.mode, k.statefulWorkloadKindSet, &pod)
 		ret = append(ret, podInfo)
 	}
