@@ -172,6 +172,9 @@ func (m *ReconcilePod) NeedLeaderElection() bool {
 func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	l := log.FromContext(ctx)
 
+	if pod.Spec.NodeName == "" {
+		return reconcile.Result{}, nil
+	}
 	// ignore all create for eci pod
 	node, err := m.getNode(ctx, pod.Spec.NodeName)
 	if err != nil {

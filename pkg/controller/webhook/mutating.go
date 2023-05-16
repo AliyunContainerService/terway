@@ -84,6 +84,10 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		return webhook.Allowed("pod do not have containers")
 	}
 
+	if types.IgnoredByTerway(pod.Labels) {
+		return webhook.Allowed("pod is not managed by terway")
+	}
+
 	if pod.Annotations == nil {
 		pod.Annotations = map[string]string{}
 	}
