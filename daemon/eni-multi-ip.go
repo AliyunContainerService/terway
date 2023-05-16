@@ -957,7 +957,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 						trunkENI = eni
 					}
 				}
-				if factory.trunkOnEni == "" && len(enis) < adapters {
+				if factory.trunkOnEni == "" && len(enis) < adapters-1 {
 					trunkENIRes, err := factory.eniFactory.CreateWithIPCount(1, true)
 					if err != nil {
 						return errors.Wrapf(err, "error init trunk eni")
