@@ -15,7 +15,7 @@ type TrafficShapingRule struct {
 }
 
 func burst(rate uint64, mtu int) uint32 {
-	return uint32(math.Ceil(math.Max(float64(rate)/netlink.Hz(), float64(mtu))))
+	return uint32(math.Ceil(math.Max(float64(rate)/milliSeconds, float64(mtu))))
 }
 
 func time2Tick(time uint32) uint32 {
@@ -36,6 +36,7 @@ func latencyInUsec(latencyInMillis float64) float64 {
 
 const latencyInMillis = 25
 const hardwareHeaderLen = 1500
+const milliSeconds = 1000
 
 // SetRule set the traffic rule on interface
 func SetRule(dev netlink.Link, rule *TrafficShapingRule) error {
@@ -55,9 +56,10 @@ func SetRule(dev netlink.Link, rule *TrafficShapingRule) error {
 			Handle:    netlink.MakeHandle(1, 0),
 			Parent:    netlink.HANDLE_ROOT,
 		},
-		Rate:   rule.Rate,
-		Limit:  uint32(limit),
-		Buffer: uint32(buffer),
+		Rate:     rule.Rate,
+		Limit:    uint32(limit),
+		Buffer:   uint32(buffer),
+		Minburst: uint32(dev.Attrs().MTU),
 	}
 
 	if err := netlink.QdiscReplace(tbf); err != nil {
