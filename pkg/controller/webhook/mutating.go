@@ -383,6 +383,17 @@ func setNodeAffinityByZones(pod *corev1.Pod, zones ...[]string) {
 	if utils.IsDaemonSetPod(pod) || len(zones) == 0 {
 		return
 	}
+	contain := false
+	for _, zone := range zones {
+		if len(zone) == 0 {
+			continue
+		}
+		contain = true
+	}
+	if !contain {
+		return
+	}
+
 	if pod.Spec.Affinity == nil {
 		pod.Spec.Affinity = &corev1.Affinity{}
 	}
