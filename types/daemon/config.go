@@ -42,6 +42,7 @@ type Config struct {
 	ExtraRoutes                 []route.Route           `json:"extra_routes,omitempty"`
 	DisableDevicePlugin         bool                    `json:"disable_device_plugin"`
 	WaitTrunkENI                bool                    `json:"wait_trunk_eni"` // true for don't create trunk eni
+	ENITagFilter                map[string]string       `json:"eni_tag_filter"` // if set , only enis match filter, will be managed
 	DisableSecurityGroupCheck   bool                    `json:"disable_security_group_check"`
 	KubeClientQPS               float32                 `json:"kube_client_qps"`
 	KubeClientBurst             int                     `json:"kube_client_burst"`
