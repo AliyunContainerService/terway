@@ -1410,7 +1410,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		}
 	}
 
-	ecs := aliyun.NewAliyunImpl(aliyunClient, config.EnableENITrunking && !config.WaitTrunkENI, ipFamily)
+	ecs := aliyun.NewAliyunImpl(aliyunClient, config.EnableENITrunking && !config.WaitTrunkENI, ipFamily, config.ENITagFilter)
 
 	netSrv.enableTrunk = config.EnableENITrunking
 

@@ -41,16 +41,19 @@ type Impl struct {
 
 	ipFamily *types.IPFamily
 
+	tagFilter map[string]string // eg.      "TagKey": "creator", "TagValue": "terway"
+
 	*client.OpenAPI
 }
 
 // NewAliyunImpl return new API implement object
-func NewAliyunImpl(openAPI *client.OpenAPI, needENITypeAttr bool, ipFamily *types.IPFamily) ipam.API {
+func NewAliyunImpl(openAPI *client.OpenAPI, needENITypeAttr bool, ipFamily *types.IPFamily, tagFilter map[string]string) ipam.API {
 	return &Impl{
 		metadata:    NewENIMetadata(ipFamily),
 		ipFamily:    ipFamily,
 		eniTypeAttr: needENITypeAttr,
 		OpenAPI:     openAPI,
+		tagFilter:   tagFilter,
 	}
 }
 
@@ -195,18 +198,31 @@ func (e *Impl) GetAttachedENIs(ctx context.Context, containsMainENI bool, trunkE
 			eni.Trunk = true
 		}
 	}
-	if e.eniTypeAttr && len(eniIDs) > 0 {
-		if trunkENIID == "" {
-			eniSet, err := e.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", nil)
+
+	var result []*types.ENI
+	if (e.eniTypeAttr || len(e.tagFilter) > 0) && len(eniIDs) > 0 {
+		if trunkENIID == "" || len(e.tagFilter) > 0 {
+			eniSet, err := e.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", e.tagFilter)
 			if err != nil {
 				return nil, err
 			}
 			for _, eni := range eniSet {
-				enisMap[eni.NetworkInterfaceID].Trunk = eni.Type == client.ENITypeTrunk
+				e, ok := enisMap[eni.NetworkInterfaceID]
+				if !ok {
+					continue
+				}
+				e.Trunk = eni.Type == client.ENITypeTrunk
+
+				// take to intersect
+				result = append(result, e)
 			}
+		} else {
+			result = enis
 		}
+	} else {
+		result = enis
 	}
-	return enis, nil
+	return result, nil
 }
 
 func (e *Impl) GetSecondaryENIMACs(ctx context.Context) ([]string, error) {
