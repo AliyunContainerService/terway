@@ -66,6 +66,7 @@ type Kubernetes interface {
 	SetNodeAllocatablePod(count int) error
 	PatchEipInfo(info *types.PodInfo) error
 	PatchTrunkInfo(trunkEni string) error
+	PatchAvailableIPs(ipType types.PodIPTypeIPs, count int) error
 	PatchPodIPInfo(info *types.PodInfo, ips string) error
 	WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
 	GetPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
@@ -96,7 +97,15 @@ type k8s struct {
 	sync.Locker
 }
 
+func (k *k8s) PatchAvailableIPs(ipType types.PodIPTypeIPs, count int) error {
+	return k.patchNodeAnno(string(ipType), strconv.Itoa(count))
+}
+
 func (k *k8s) PatchTrunkInfo(trunkEni string) error {
+	return k.patchNodeAnno(types.TrunkOn, trunkEni)
+}
+
+func (k *k8s) patchNodeAnno(key, val string) error {
 	node, err := k.client.CoreV1().Nodes().Get(context.TODO(), k.nodeName, metav1.GetOptions{
 		ResourceVersion: "0",
 	})
@@ -106,15 +115,15 @@ func (k *k8s) PatchTrunkInfo(trunkEni string) error {
 	}
 
 	if node.GetAnnotations() != nil {
-		if eni, ok := node.GetAnnotations()[types.TrunkOn]; ok {
-			if eni == trunkEni {
+		if preVal, ok := node.GetAnnotations()[key]; ok {
+			if preVal == val {
 				return nil
 			}
 		}
 	}
-	node.Annotations[types.TrunkOn] = trunkEni
+	node.Annotations[key] = val
 
-	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, types.TrunkOn, trunkEni)
+	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, key, val)
 	_, err = k.client.CoreV1().Nodes().Patch(context.TODO(), k.nodeName, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
 	if err != nil {
 		k.reconnectOnTimeoutError(err)

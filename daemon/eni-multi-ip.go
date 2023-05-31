@@ -1100,6 +1100,19 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 		}
 	}
 
+	if capacity > 0 {
+		err = k8s.PatchAvailableIPs(types.NormalIPTypeIPs, capacity)
+		if err != nil {
+			return nil, errors.Wrapf(err, "error patch available ips")
+		}
+	}
+	if memberENIPod > 0 && factory.trunkOnEni != "" && poolConfig.EnableENITrunking {
+		err = k8s.PatchAvailableIPs(types.MemberENIIPTypeIPs, memberENIPod)
+		if err != nil {
+			return nil, errors.Wrapf(err, "error patch available ips")
+		}
+	}
+
 	_ = tracing.Register(tracing.ResourceTypeFactory, factory.name, factory)
 	return mgr, nil
 }

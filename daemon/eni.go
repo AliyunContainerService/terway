@@ -183,6 +183,14 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 			return nil, errors.Wrapf(err, "error patch trunk info on node")
 		}
 	}
+
+	if capacity > 0 {
+		err = k8s.PatchAvailableIPs(types.NormalIPTypeIPs, capacity)
+		if err != nil {
+			return nil, errors.Wrapf(err, "error patch available ips")
+		}
+	}
+
 	logger.DefaultLogger.Infof("set deviceplugin cap %d", realCap)
 	dp := deviceplugin.NewENIDevicePlugin(realCap, eniType)
 	err = dp.Serve()

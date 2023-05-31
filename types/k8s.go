@@ -110,3 +110,13 @@ const (
 	NetworkPrioBurstable  NetworkPrio = "burstable"
 	NetworkPrioGuaranteed NetworkPrio = "guaranteed"
 )
+
+// PodIPTypeIPs Pod IP address type
+type PodIPTypeIPs string
+
+// PodIPTypeIPs val
+const (
+	NormalIPTypeIPs    PodIPTypeIPs = AnnotationPrefix + "max-available-ip"
+	MemberENIIPTypeIPs PodIPTypeIPs = AnnotationPrefix + "max-member-eni-ip"
+	ERDMAIPTypeIPs     PodIPTypeIPs = AnnotationPrefix + "max-erdma-ip"
+)
