@@ -73,6 +73,7 @@ type eniIPFactory struct {
 	enis         []*ENI
 	maxENI       chan struct{}
 	eniMaxIP     int
+	nodeMaxENI   int
 	eniOperChan  chan struct{}
 	ipResultChan chan *ENIIP
 	sync.RWMutex
@@ -190,13 +191,13 @@ func (f *eniIPFactory) getEnis(ctx *AllocCtx) ([]*ENI, error) {
 		eniIPLog.Errorf("error to get vswitch slice: %v, instead use original eni slice in eniIPFactory: %v", err, f.enis)
 		return f.enis, err
 	}
-	for _, vswitch := range vSwitches {
+	for _, vsw := range vSwitches {
 		for _, eni := range f.enis {
 			if eni.ENI == nil {
 				pendingEnis = append(pendingEnis, eni)
 				continue
 			}
-			if vswitch == eni.VSwitchID {
+			if vsw.id == eni.VSwitchID {
 				enis = append(enis, eni)
 			}
 		}
@@ -254,6 +255,48 @@ func (f *eniIPFactory) submit(ctx *AllocCtx) error {
 	return errors.Errorf("trigger ENIIP throttle, max operating concurrent: %v", maxIPBacklog)
 }
 
+func (f *eniIPFactory) ipExhaustErrorLocked(apiErr error) *types.IPInsufficientError {
+	// apiErr already be Insufficient error, should be return by eniFactory
+	if err, ok := apiErr.(*types.IPInsufficientError); ok {
+		return err
+	}
+	// ordered policy has vswitches ip count
+	if f.eniFactory.vswitchSelectionPolicy == types.VSwitchSelectionPolicyOrdered {
+		vswitches, err := f.eniFactory.GetVSwitches()
+		if err != nil {
+			eniIPLog.Warnf("cannot get vswitches %v on judging error type", err)
+			return nil
+		}
+		// node already has free eni slot, should retry in eniFactory
+		if len(f.enis) < f.nodeMaxENI {
+			return nil
+		}
+		var allEniIDs []string
+		var allEniVswitches = map[string]int{}
+		for _, eni := range f.enis {
+			if eni.ENI == nil {
+				// node still has pending eni maybe can allocate eniip
+				return nil
+			}
+			for _, vsw := range vswitches {
+				if eni.VSwitchID == vsw.id {
+					// the node still has some eni can allocate eniip
+					if eni.getIPCountLocked() < f.eniMaxIP && vsw.ipCount >= 0 && !strings.Contains(apiErr.Error(), vsw.id) {
+						return nil
+					}
+					allEniIDs = append(allEniIDs, eni.ID)
+					allEniVswitches[vsw.id] = 0
+				}
+			}
+		}
+		return &types.IPInsufficientError{
+			Err:    apiErr,
+			Reason: fmt.Sprintf("ENI: %v on vswitches: %v \n all has no available ips to allocate", strings.Join(allEniIDs, ","), allEniVswitches),
+		}
+	}
+	return nil
+}
+
 func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 	result := <-f.ipResultChan
 	eniIPLog.Debugf("pop result from resultChan: %+v", result)
@@ -276,9 +319,22 @@ func (f *eniIPFactory) popResult() (ip *types.ENIIP, err error) {
 						eni.ipAllocInhibitExpireAt = time.Now().Add(eniIPAllocInhibitTimeout)
 						eniIPLog.Infof("eni's associated vswitch %s has no available IP, set eni ipAllocInhibitExpireAt = %s",
 							eni.VSwitchID, eni.ipAllocInhibitExpireAt.Format(timeFormat))
+						ipExhaustErr := f.ipExhaustErrorLocked(result.err)
+						if ipExhaustErr != nil {
+							result.err = ipExhaustErr
+						}
 					}
 				}
 			}
+		}
+		if strings.Contains(result.err.Error(), apiErr.ErrSecurityGroupInstanceLimitExceed) {
+			return nil, &types.IPInsufficientError{
+				Err:    err,
+				Reason: "security group of eni exceeded max ip limit",
+			}
+		}
+		if _, ok := result.err.(*types.IPInsufficientError); ok {
+			return nil, result.err
 		}
 		return nil, errors.Errorf("error allocate ip from eni: %v", result.err)
 	}
@@ -356,6 +412,9 @@ func (f *eniIPFactory) Create(count int) ([]types.NetworkResource, error) {
 		}
 	}
 	if len(ipResult) == 0 {
+		if _, ok := err.(*types.IPInsufficientError); ok {
+			return nil, err
+		}
 		return ipResult, errors.Errorf("error allocate ip address: %v", err)
 	}
 
@@ -637,12 +696,16 @@ func (f *eniIPFactory) initialENI(eni *ENI, ipCount int) {
 		eni.lock.Lock()
 		//failed all pending on this initial eni
 		for i := 0; i < eni.pending; i++ {
-			f.ipResultChan <- &ENIIP{
+			eniip := &ENIIP{
 				ENIIP: &types.ENIIP{
 					ENI: nil,
 				},
 				err: fmt.Errorf("error initial ENI: %w", err),
 			}
+			if _, ok := err.(*types.IPInsufficientError); ok {
+				eniip.err = err
+			}
+			f.ipResultChan <- eniip
 		}
 		// disable eni for submit
 		eni.pending = f.eniMaxIP
@@ -706,7 +769,10 @@ func (f *eniIPFactory) createENIAsync(initIPs int) (*ENI, error) {
 		}
 		go f.initialENI(eni, eni.pending)
 	default:
-		return nil, fmt.Errorf("max ENI exceeded")
+		return nil, &types.IPInsufficientError{
+			Err:    fmt.Errorf("max ENI exceeded"),
+			Reason: "all ENIs bind on host can not allocate ip address, and node has no slot to allocate ENI",
+		}
 	}
 	f.Lock()
 	f.enis = append(f.enis, eni)
@@ -876,6 +942,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 			ipPerENI--
 		}
 		factory.eniMaxIP = ipPerENI
+		factory.nodeMaxENI = maxEni
 
 		if poolConfig.MaxENI != 0 && poolConfig.MaxENI < maxEni {
 			maxEni = poolConfig.MaxENI
@@ -932,12 +999,13 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 	factory.metricENICount = metric.ENIIPFactoryENICount.WithLabelValues(factory.name, fmt.Sprint(maxEni))
 	var trunkENI *types.ENI
 	poolCfg := pool.Config{
-		Name:     poolNameENIIP,
-		Type:     typeNameENIIP,
-		MaxIdle:  poolConfig.MaxPoolSize,
-		MinIdle:  poolConfig.MinPoolSize,
-		Factory:  factory,
-		Capacity: capacity,
+		Name:               poolNameENIIP,
+		Type:               typeNameENIIP,
+		MaxIdle:            poolConfig.MaxPoolSize,
+		MinIdle:            poolConfig.MinPoolSize,
+		Factory:            factory,
+		Capacity:           capacity,
+		IPConditionHandler: k8s.PatchNodeIPResCondition,
 		Initializer: func(holder pool.ResourceHolder) error {
 			ctx := context.Background()
 			// not use main ENI for ENI multiple ip allocate

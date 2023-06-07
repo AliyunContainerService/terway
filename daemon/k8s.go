@@ -68,6 +68,7 @@ type Kubernetes interface {
 	PatchTrunkInfo(trunkEni string) error
 	PatchAvailableIPs(ipType types.PodIPTypeIPs, count int) error
 	PatchPodIPInfo(info *types.PodInfo, ips string) error
+	PatchNodeIPResCondition(status corev1.ConditionStatus, reason, message string) error
 	WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
 	GetPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
 	RecordNodeEvent(eventType, reason, message string)
@@ -95,6 +96,44 @@ type k8s struct {
 	apiConnTime             time.Time
 	statefulWorkloadKindSet sets.String
 	sync.Locker
+}
+
+func (k *k8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, message string) error {
+	node, err := k.client.CoreV1().Nodes().Get(context.TODO(), k.nodeName, metav1.GetOptions{
+		ResourceVersion: "0",
+	})
+	if err != nil || node == nil {
+		k.reconnectOnTimeoutError(err)
+		return err
+	}
+
+	for _, cond := range node.Status.Conditions {
+		if cond.Type == types.SufficientIPCondition && cond.Status == status &&
+			cond.Reason == reason && cond.Message == message {
+			return nil
+		}
+	}
+	now := metav1.Now()
+	ipResCondition := corev1.NodeCondition{
+		Type:               types.SufficientIPCondition,
+		Status:             status,
+		LastHeartbeatTime:  now,
+		LastTransitionTime: now,
+		Reason:             reason,
+		Message:            message,
+	}
+
+	raw, err := json.Marshal(&[]corev1.NodeCondition{ipResCondition})
+	if err != nil {
+		return err
+	}
+	patch := []byte(fmt.Sprintf(`{"status":{"conditions":%s}}`, raw))
+	_, err = k.client.CoreV1().Nodes().PatchStatus(context.TODO(), node.Name, patch)
+	if err != nil {
+		k.reconnectOnTimeoutError(err)
+		return err
+	}
+	return nil
 }
 
 func (k *k8s) PatchAvailableIPs(ipType types.PodIPTypeIPs, count int) error {

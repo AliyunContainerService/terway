@@ -11,6 +11,14 @@ const (
 	// Reference: https://help.aliyun.com/document_detail/85917.html
 	InvalidVSwitchIDIPNotEnough = "InvalidVSwitchId.IpNotEnough"
 
+	// ErrEniPerInstanceLimitExceeded CreateNetworkInterfaces const error message
+	// Reference: https://help.aliyun.com/document_detail/85917.html
+	ErrEniPerInstanceLimitExceeded = "EniPerInstanceLimitExceeded"
+
+	// ErrSecurityGroupInstanceLimitExceed CreateNetworkInterfaces const error message
+	// Reference: https://help.aliyun.com/document_detail/85917.html
+	ErrSecurityGroupInstanceLimitExceed = "SecurityGroupInstanceLimitExceed"
+
 	// ErrInvalidIPIPUnassigned see https://help.aliyun.com/document_detail/85919.html
 	// for API UnassignPrivateIpAddresses
 	ErrInvalidIPIPUnassigned = "InvalidIp.IpUnassigned"

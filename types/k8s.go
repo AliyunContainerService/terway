@@ -17,6 +17,7 @@ limitations under the License.
 package types
 
 import (
+	"fmt"
 	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
@@ -120,3 +121,19 @@ const (
 	MemberENIIPTypeIPs PodIPTypeIPs = AnnotationPrefix + "max-member-eni-ip"
 	ERDMAIPTypeIPs     PodIPTypeIPs = AnnotationPrefix + "max-erdma-ip"
 )
+
+// SufficientIPCondition definitions
+const (
+	SufficientIPCondition   corev1.NodeConditionType = "SufficientIP"
+	IPResInsufficientReason string                   = "InsufficientIP"
+	IPResSufficientReason   string                   = "SufficientIP"
+)
+
+type IPInsufficientError struct {
+	Err    error
+	Reason string
+}
+
+func (e *IPInsufficientError) Error() string {
+	return fmt.Sprintf("ip insufficient error: %v with reason: %s", e.Err, e.Reason)
+}
