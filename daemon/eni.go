@@ -3,13 +3,14 @@ package daemon
 import (
 	"context"
 	"fmt"
-	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
-	"github.com/samber/lo"
 	"math/rand"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
+	"github.com/samber/lo"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
@@ -426,8 +427,8 @@ func (f *eniFactory) Trace() []tracing.MapKeyValueEntry {
 		{Key: tracingKeyCacheExpireAt, Value: fmt.Sprint(f.tsExpireAt)},
 	}
 
-	for vs, cnt := range f.vswitchCnt {
-		key := fmt.Sprintf("vswitch/%s/ip_count", vs)
+	for _, cnt := range f.vswitchCnt {
+		key := fmt.Sprintf("vswitch/%s/ip_count", cnt.id)
 		trace = append(trace, tracing.MapKeyValueEntry{
 			Key:   key,
 			Value: fmt.Sprint(cnt),

@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.uber.org/atomic"
-	corev1 "k8s.io/api/core/v1"
 	"strings"
 	"sync"
 	"time"
+
+	"go.uber.org/atomic"
+	corev1 "k8s.io/api/core/v1"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/logger"
@@ -434,6 +435,10 @@ func (p *simpleObjectPool) getOneLocked(resID string) *poolItem {
 }
 
 func (p *simpleObjectPool) Acquire(ctx context.Context, resID, idempotentKey string) (types.NetworkResource, error) {
+	if p.factoryIPExhaustive.Load() {
+		// slowdown ip allocation on ip exhaustive
+		time.Sleep(10 * time.Second)
+	}
 	p.lock.Lock()
 	if resItem, ok := p.inuse[resID]; ok && resItem.idempotentKey == idempotentKey {
 		p.lock.Unlock()
