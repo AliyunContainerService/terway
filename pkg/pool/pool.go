@@ -251,11 +251,11 @@ func (p *simpleObjectPool) setIPExhaustive(err *types.IPInsufficientError) {
 	if p.IPConditionHandler == nil {
 		return
 	}
+	if err := p.IPConditionHandler(corev1.ConditionFalse, types.IPResInsufficientReason,
+		fmt.Sprintf("node has insufficient IP, error: %v", err.Reason)); err != nil {
+		log.Errorf("set IPExhaustive condition failed: %v", err)
+	}
 	if !p.factoryIPExhaustive.Load() {
-		if err := p.IPConditionHandler(corev1.ConditionFalse, types.IPResInsufficientReason,
-			fmt.Sprintf("node has insufficient IP, error: %v", err.Reason)); err != nil {
-			log.Errorf("set IPExhaustive condition failed: %v", err)
-		}
 		p.factoryIPExhaustive.Store(true)
 	}
 	p.factoryIPExhaustiveTimer.Reset(ipExhaustiveConditionPeriod)

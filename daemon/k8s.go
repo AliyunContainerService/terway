@@ -107,10 +107,15 @@ func (k *k8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, mes
 		return err
 	}
 
+	transitionTime := metav1.Now()
 	for _, cond := range node.Status.Conditions {
 		if cond.Type == types.SufficientIPCondition && cond.Status == status &&
 			cond.Reason == reason && cond.Message == message {
-			return nil
+			if cond.LastHeartbeatTime.Add(5 * time.Minute).After(time.Now()) {
+				// refresh condition period 5min
+				return nil
+			}
+			transitionTime = cond.LastTransitionTime
 		}
 	}
 	now := metav1.Now()
@@ -118,7 +123,7 @@ func (k *k8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, mes
 		Type:               types.SufficientIPCondition,
 		Status:             status,
 		LastHeartbeatTime:  now,
-		LastTransitionTime: now,
+		LastTransitionTime: transitionTime,
 		Reason:             reason,
 		Message:            message,
 	}
