@@ -125,20 +125,20 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitc
 // DescribeNetworkInterface list eni
 func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error) {
 	var result []*NetworkInterface
-
 	nextToken := ""
+
+	var ecsTags []ecs.DescribeNetworkInterfacesTag
+	for k, v := range tags {
+		ecsTags = append(ecsTags, ecs.DescribeNetworkInterfacesTag{
+			Key:   k,
+			Value: v,
+		})
+	}
+
 	for {
 		req := ecs.CreateDescribeNetworkInterfacesRequest()
 		req.NextToken = nextToken
 		req.VpcId = vpcID
-
-		var ecsTags []ecs.DescribeNetworkInterfacesTag
-		for k, v := range tags {
-			ecsTags = append(ecsTags, ecs.DescribeNetworkInterfacesTag{
-				Key:   k,
-				Value: v,
-			})
-		}
 		if len(ecsTags) > 0 {
 			req.Tag = &ecsTags
 		}
@@ -146,7 +146,6 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 		req.InstanceId = instanceID
 		req.Type = string(instanceType)
 		req.Status = string(status)
-
 		req.MaxResults = requests.NewInteger(maxSinglePageSize)
 
 		l := log.WithFields(map[string]interface{}{
