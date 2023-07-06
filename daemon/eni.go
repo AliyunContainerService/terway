@@ -43,7 +43,7 @@ type eniResourceManager struct {
 	trunkENI *types.ENI
 }
 
-func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocatedResources map[string]resourceManagerInitItem, ipFamily *types.IPFamily, k8s Kubernetes) (ResourceManager, error) {
+func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocatedResources map[string]resourceManagerInitItem, ipFamily *types.IPFamily, k8s Kubernetes, ipamType types.IPAMType) (ResourceManager, error) {
 	eniLog.Debugf("new ENI Resource Manager, pool config: %+v, allocated resources: %+v", poolConfig, allocatedResources)
 	factory, err := newENIFactory(poolConfig, ecs)
 	if err != nil {
@@ -105,6 +105,9 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 		Capacity: capacity,
 		Factory:  factory,
 		Initializer: func(holder pool.ResourceHolder) error {
+			if ipamType == types.IPAMTypeCRD {
+				return nil
+			}
 			ctx := context.Background()
 			enis, err := ecs.GetAttachedENIs(ctx, false, factory.trunkOnEni)
 			if err != nil {
