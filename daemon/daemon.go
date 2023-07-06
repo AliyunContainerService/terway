@@ -1479,7 +1479,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	switch daemonMode {
 	case daemonModeVPC:
 		//init ENI
-		netSrv.eniResMgr, err = newENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI], ipFamily, netSrv.k8s)
+		netSrv.eniResMgr, err = newENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI], ipFamily, netSrv.k8s, netSrv.ipamType)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init ENI resource manager")
 		}
@@ -1509,7 +1509,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		}
 	case daemonModeENIOnly:
 		//init eni
-		netSrv.eniResMgr, err = newENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI], ipFamily, netSrv.k8s)
+		netSrv.eniResMgr, err = newENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI], ipFamily, netSrv.k8s, netSrv.ipamType)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init eni resource manager")
 		}
