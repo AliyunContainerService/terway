@@ -92,7 +92,7 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(listCmd, showCmd, mappingCmd, executeCmd, metadataCmd)
+	rootCmd.AddCommand(listCmd, showCmd, mappingCmd, executeCmd, metadataCmd, cniCmd)
 }
 
 func main() {
