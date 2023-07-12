@@ -30,6 +30,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
@@ -200,6 +201,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		Name:      pod.Name,
 	}, prePodENI)
 	if err == nil {
+		l.V(5).Info("podENI", "phase", prePodENI.Status.Phase)
 		// for podENI is deleting , wait it down
 		if !prePodENI.DeletionTimestamp.IsZero() {
 			return reconcile.Result{Requeue: true}, nil
@@ -220,6 +222,8 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 				return reconcile.Result{RequeueAfter: 5 * time.Second}, err
 			}
 			return reconcile.Result{RequeueAfter: 5 * time.Second}, m.client.Delete(ctx, prePodENI)
+		case v1beta1.ENIPhaseBinding, v1beta1.ENIPhaseDetaching:
+			return reconcile.Result{RequeueAfter: time.Second}, nil
 		}
 		return reconcile.Result{Requeue: true}, nil
 	}
@@ -277,6 +281,20 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("error create cr, %s", err)
 	}
+
+	// 2.4 wait cr created
+	_ = wait.PollWithContext(ctx, 500*time.Millisecond, 2*time.Second, func(ctx context.Context) (bool, error) {
+		podENI := &v1beta1.PodENI{}
+		err := m.client.Get(ctx, k8stypes.NamespacedName{
+			Namespace: pod.Namespace,
+			Name:      pod.Name,
+		}, podENI)
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+
 	return reconcile.Result{}, nil
 }
 
