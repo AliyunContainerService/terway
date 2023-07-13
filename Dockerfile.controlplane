@@ -14,10 +14,14 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags default_build
     -X \"github.com/AliyunContainerService/terway/pkg/version.buildDate=`date -u +'%Y-%m-%dT%H:%M:%SZ'`\"" \
     -o terway-controlplane  cmd/terway-controlplane/terway-controlplane.go
 
-FROM --platform=$TARGETPLATFORM ubuntu:20.04
-RUN apt-get update && apt-get install -y curl jq && \
-    apt-get purge --auto-remove && apt-get clean && rm -rf /var/lib/apt/lists/*
+FROM --platform=$TARGETPLATFORM debian:stable-slim as cert
+RUN apt-get update && apt-get -uy upgrade
+RUN apt-get -y install ca-certificates && update-ca-certificates
+
+FROM --platform=$TARGETPLATFORM scratch
+WORKDIR /
+COPY --from=cert /etc/ssl/certs /etc/ssl/certs
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terway-controlplane /usr/bin/terway-controlplane
-RUN useradd -U -u 1000 nonroot
-USER 1000
-ENTRYPOINT ["/usr/bin/terway-controlplane"]
+USER 1000:1000
+
+ENTRYPOINT  ["/usr/bin/terway-controlplane"]
