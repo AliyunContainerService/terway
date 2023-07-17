@@ -164,13 +164,8 @@ func (k *k8s) PatchEipInfo(info *types.PodInfo) error {
 		return err
 	}
 
-	if pod.GetAnnotations() != nil {
-		if eip, ok := pod.GetAnnotations()[podEipAddress]; ok {
-			if eip == info.EipInfo.PodEipIP {
-				return nil
-			}
-			return errors.Errorf("Pod already have eip annotation: %v", eip)
-		}
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
 	}
 	pod.Annotations[podEipAddress] = info.EipInfo.PodEipIP
 
