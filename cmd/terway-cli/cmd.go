@@ -8,7 +8,9 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 	"github.com/AliyunContainerService/terway/rpc"
+
 	"github.com/pterm/pterm"
+	"github.com/pterm/pterm/putils"
 	"github.com/spf13/cobra"
 )
 
@@ -328,7 +330,7 @@ func runMetadata(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	tree := pterm.NewTreeFromLeveledList(leveledList)
+	tree := putils.TreeFromLeveledList(leveledList)
 	return pterm.DefaultTree.
 		WithTextStyle(&pterm.ThemeDefault.BarLabelStyle).
 		WithRoot(tree).

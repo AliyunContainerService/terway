@@ -155,6 +155,7 @@ func (d *Delegate) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips 
 	panic("implement me")
 }
 
+//nolint:unused
 func (d *Delegate) nodeExist(nodeName string) (bool, error) {
 	in := &corev1.Node{}
 	err := d.client.Get(context.Background(), types.NamespacedName{Name: nodeName}, in)

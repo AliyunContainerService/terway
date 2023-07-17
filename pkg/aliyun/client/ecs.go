@@ -144,8 +144,8 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 		}
 		req.NetworkInterfaceId = &eniID
 		req.InstanceId = instanceID
-		req.Type = string(instanceType)
-		req.Status = string(status)
+		req.Type = instanceType
+		req.Status = status
 
 		req.MaxResults = requests.NewInteger(maxSinglePageSize)
 
@@ -262,7 +262,7 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 				return true, apiErr.ErrNotFound
 			}
 			if len(eni) == 1 {
-				if string(status) != "" && string(status) != eni[0].Status {
+				if string(status) != "" && status != eni[0].Status {
 					return false, nil
 				}
 
@@ -431,9 +431,7 @@ func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]
 			return nil, err
 		}
 
-		for _, r := range resp.InstanceTypes.InstanceType {
-			result = append(result, r)
-		}
+		result = append(result, resp.InstanceTypes.InstanceType...)
 
 		if resp.NextToken == "" {
 			break

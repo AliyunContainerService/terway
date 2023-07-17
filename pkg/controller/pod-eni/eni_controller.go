@@ -231,7 +231,7 @@ func (m *ReconcilePodENI) recordPodENIDeleteErr(podEni *v1beta1.PodENI, startTim
 		return
 	}
 	m.record.Eventf(pod, corev1.EventTypeWarning,
-		"CniPodENIDeleteErr", fmt.Sprintf("CniPodENIDeleteErr: %s, elapsedTime: %s", err, time.Now().Sub(startTime)))
+		"CniPodENIDeleteErr", fmt.Sprintf("CniPodENIDeleteErr: %s, elapsedTime: %s", err, time.Since(startTime)))
 }
 
 func (m *ReconcilePodENI) recordPodENICreateErr(podEni *v1beta1.PodENI, startTime time.Time, err error) {
@@ -243,7 +243,7 @@ func (m *ReconcilePodENI) recordPodENICreateErr(podEni *v1beta1.PodENI, startTim
 		return
 	}
 	m.record.Eventf(pod, corev1.EventTypeWarning,
-		"CniCreateENIError", fmt.Sprintf("CniCreateENIError: %s, elapsedTime: %s", err, time.Now().Sub(startTime)))
+		"CniCreateENIError", fmt.Sprintf("CniCreateENIError: %s, elapsedTime: %s", err, time.Since(startTime)))
 }
 
 // NeedLeaderElection need election
@@ -428,7 +428,7 @@ func (m *ReconcilePodENI) gcSecondaryENI(ctx context.Context) {
 			}
 		}
 
-		networkInterfaces = append(networkInterfaces)
+		networkInterfaces = append(networkInterfaces, networkInterface)
 	}
 
 	err = m.gcENIs(ctx, networkInterfaces)
@@ -462,7 +462,7 @@ func (m *ReconcilePodENI) gcMemberENI(ctx context.Context) {
 			}
 		}
 
-		networkInterfaces = append(networkInterfaces)
+		networkInterfaces = append(networkInterfaces, networkInterface)
 	}
 
 	err = m.gcENIs(ctx, networkInterfaces)

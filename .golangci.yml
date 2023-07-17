@@ -1,0 +1,32 @@
+run:
+  concurrency: 4
+  timeout: 5m
+  tests: false
+  build-tags:
+  - default_build
+  - privileged
+
+issues:
+  exclude-rules:
+  - path: _test\.go
+    linters:
+    - dupl
+    - goconst
+linters:
+  enable:
+  - goconst
+  - goimports
+  - govet
+  - errcheck
+  - ineffassign
+  - staticcheck
+  - goconst
+  - stylecheck
+  - misspell
+linters-settings:
+  errcheck:
+    check-blank: false
+  govet:
+    check-shadowing: false
+  maligned:
+    suggest-new: true

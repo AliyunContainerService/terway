@@ -303,7 +303,7 @@ func (m *ReconcilePod) recordPodCreate(pod *corev1.Pod, startTime time.Time, err
 		return
 	}
 	m.record.Eventf(pod, corev1.EventTypeWarning,
-		"CniPodCreateError", fmt.Sprintf("PodCreateError: %s, elapsedTime: %s", err, time.Now().Sub(startTime)))
+		"CniPodCreateError", fmt.Sprintf("PodCreateError: %s, elapsedTime: %s", err, time.Since(startTime)))
 }
 
 func (m *ReconcilePod) recordPodDelete(pod *corev1.Pod, startTime time.Time, err error) {
@@ -311,7 +311,7 @@ func (m *ReconcilePod) recordPodDelete(pod *corev1.Pod, startTime time.Time, err
 		return
 	}
 	m.record.Eventf(pod, corev1.EventTypeWarning,
-		"CniPodDeleteError", fmt.Sprintf("CniPodDeleteError: %s, elapsedTime: %s", err, time.Now().Sub(startTime)))
+		"CniPodDeleteError", fmt.Sprintf("CniPodDeleteError: %s, elapsedTime: %s", err, time.Since(startTime)))
 }
 
 // podDelete is proceed after pod is deleted

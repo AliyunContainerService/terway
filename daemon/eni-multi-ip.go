@@ -77,8 +77,7 @@ type eniIPFactory struct {
 	ipResultChan chan *ENIIP
 	sync.RWMutex
 	// metrics
-	metricENICount            prometheus.Gauge
-	disableSecurityGroupCheck bool
+	metricENICount prometheus.Gauge
 
 	ipFamily *types.IPFamily
 }
@@ -210,7 +209,6 @@ func (f *eniIPFactory) getEnis(ctx *AllocCtx) ([]*ENI, error) {
 	}
 
 	return enis, nil
-
 }
 
 func (f *eniIPFactory) submit(ctx *AllocCtx) error {
