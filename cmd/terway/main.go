@@ -12,7 +12,6 @@ import (
 )
 
 const defaultConfigPath = "/etc/eni/eni.json"
-const defaultPidPath = "/var/run/eni/eni.pid"
 const defaultSocketPath = "/var/run/eni/eni.socket"
 const debugSocketPath = "unix:///var/run/eni/eni_debug.socket"
 
@@ -40,7 +39,7 @@ func main() {
 	klog.SetOutput(os.Stderr)
 
 	logger.DefaultLogger.Info(version.Version)
-	if err := daemon.Run(utils.NormalizePath(defaultPidPath), utils.NormalizePath(defaultSocketPath), readonlyListen, utils.NormalizePath(defaultConfigPath), kubeconfig, master, daemonMode, logLevel); err != nil {
+	if err := daemon.Run(utils.NormalizePath(defaultSocketPath), readonlyListen, utils.NormalizePath(defaultConfigPath), kubeconfig, master, daemonMode, logLevel); err != nil {
 		logger.DefaultLogger.Fatal(err)
 	}
 }
