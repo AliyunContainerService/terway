@@ -30,7 +30,7 @@ apiVersion: v1
 data:
   10-terway.conf: |
     {
-      "cniVersion": "0.3.1",
+      "cniVersion": "0.4.0",
       "name": "terway",
       "capabilities": {"bandwidth": true}, # add 
       "type": "terway"
@@ -64,7 +64,7 @@ apiVersion: v1
 data:
   10-terway.conf: |
     {
-      "cniVersion": "0.3.1",
+      "cniVersion": "0.4.0",
       "name": "terway",
       "enable_network_priority": true, # add
       "type": "terway"

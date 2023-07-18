@@ -106,7 +106,7 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 	var err error
 
 	g := gabs.New()
-	_, err = g.Set("0.3.1", "cniVersion")
+	_, err = g.Set("0.4.0", "cniVersion")
 	if err != nil {
 		return "", err
 	}

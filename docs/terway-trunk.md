@@ -31,7 +31,7 @@ apiVersion: v1
 data:
   10-terway.conf: |
     {
-      "cniVersion": "0.3.1",
+      "cniVersion": "0.4.0",
       "name": "terway",
       "eniip_virtual_type": "IPVlan",
       "type": "terway"
