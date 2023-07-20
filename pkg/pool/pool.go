@@ -280,7 +280,7 @@ func (p *simpleObjectPool) peekOverfullIdle() *poolItem {
 	return p.idle.Pop()
 }
 
-//found resources that can be disposed, put them into dispose channel
+// found resources that can be disposed, put them into dispose channel
 func (p *simpleObjectPool) checkIdle() {
 	for {
 		item := p.peekOverfullIdle()
@@ -407,7 +407,7 @@ func (p *simpleObjectPool) Acquire(ctx context.Context, resID, idempotentKey str
 
 	select {
 	case <-p.tokenCh:
-		//should we pass ctx into factory.Create?
+		// should we pass ctx into factory.Create?
 		res, err := p.factory.Create(1)
 		if err != nil || len(res) == 0 {
 			p.tokenCh <- struct{}{}

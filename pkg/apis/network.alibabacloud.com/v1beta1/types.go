@@ -107,28 +107,32 @@ type AllocationType struct {
 
 type Phase string
 
-//            pod create
-//                |
-//                |   podENI create
-//                |
-//         ENIPhaseInitial
-//                |
-//                |   bind eni
-//          ENIPhaseBind        <-----   ENIPhaseBinding  <----- sts pod recreate
-//                |                               |
-//                |                               |
-//                |                               |              gc reserved resource for sts pods
-//                |                         ENIPhaseUnbind    ---------------
-//                |                               |                     |    |
-//                |   sts pod delete              |                     |    |
-//                |-----------------------> ENIPhaseDetaching           |    |
-//                |                                                     |    |
-//                |   stateless pod delete                              |    |
-//                |        <---------------------------------------------    |
-//                |                                                          |
-//         ENIPhaseDeleting <------------------------------------------------|
-//                |
-//          del podENI
+//	pod create
+//	    |
+//	    |   podENI create
+//	    |
+//
+// ENIPhaseInitial
+//
+//	      |
+//	      |   bind eni
+//	ENIPhaseBind        <-----   ENIPhaseBinding  <----- sts pod recreate
+//	      |                               |
+//	      |                               |
+//	      |                               |              gc reserved resource for sts pods
+//	      |                         ENIPhaseUnbind    ---------------
+//	      |                               |                     |    |
+//	      |   sts pod delete              |                     |    |
+//	      |-----------------------> ENIPhaseDetaching           |    |
+//	      |                                                     |    |
+//	      |   stateless pod delete                              |    |
+//	      |        <---------------------------------------------    |
+//	      |                                                          |
+//
+// ENIPhaseDeleting <------------------------------------------------|
+//
+//	      |
+//	del podENI
 const (
 	// ENIPhaseInitial the status when pod first created
 	ENIPhaseInitial = ""

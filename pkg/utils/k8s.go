@@ -58,10 +58,7 @@ func IsDaemonSetPod(pod *corev1.Pod) bool {
 
 // ISVKNode node is run by virtual kubelet
 func ISVKNode(n *corev1.Node) bool {
-	if n.Labels["type"] == "virtual-kubelet" {
-		return true
-	}
-	return false
+	return n.Labels["type"] == "virtual-kubelet"
 }
 
 // PodSandboxExited pod sandbox is exited

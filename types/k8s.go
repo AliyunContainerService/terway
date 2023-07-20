@@ -98,10 +98,7 @@ func PodUseENI(pod *corev1.Pod) bool {
 
 // IgnoredByTerway for both pods and nodes
 func IgnoredByTerway(labels map[string]string) bool {
-	if labels[IgnoreByTerway] == "true" {
-		return true
-	}
-	return false
+	return labels[IgnoreByTerway] == "true"
 }
 
 // NetworkPrio network priority for pod
