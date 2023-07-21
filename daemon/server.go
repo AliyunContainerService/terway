@@ -49,7 +49,7 @@ func stackTriger() {
 }
 
 // Run terway daemon
-func Run(pidFilePath, socketFilePath, debugSocketListen, configFilePath, kubeconfig, master, daemonMode, logLevel string) error {
+func Run(socketFilePath, debugSocketListen, configFilePath, kubeconfig, master, daemonMode, logLevel string) error {
 	level, err := log.ParseLevel(logLevel)
 	if err != nil {
 		return fmt.Errorf("error set log level: %s, %w", logLevel, err)
@@ -59,28 +59,14 @@ func Run(pidFilePath, socketFilePath, debugSocketListen, configFilePath, kubecon
 		// NB(thxCode): hcsshim lib introduces much noise.
 		log.SetLevel(level)
 	}
-	// Write the pidfile
-	if pidFilePath != "" {
-		if !filepath.IsAbs(pidFilePath) {
-			return fmt.Errorf("error writing pidfile %q: path not absolute", pidFilePath)
-		}
 
-		if _, err := os.Stat(filepath.Dir(pidFilePath)); err != nil && os.IsNotExist(err) {
-			if err = os.MkdirAll(filepath.Dir(pidFilePath), 0666); err != nil {
-				return fmt.Errorf("error create pid file: %+v", err)
-			}
-		}
-		if err := os.WriteFile(pidFilePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
-			return fmt.Errorf("error writing pidfile %q: %v", pidFilePath, err)
-		}
+	err = os.MkdirAll(filepath.Dir(socketFilePath), 0700)
+	if err != nil {
+		return fmt.Errorf("error create socket dir: %s, %w", filepath.Dir(socketFilePath), err)
 	}
-
-	if err := os.MkdirAll(filepath.Dir(socketFilePath), 0700); err != nil {
-		return err
-	}
-
-	if err := syscall.Unlink(socketFilePath); err != nil && !os.IsNotExist(err) {
-		return err
+	err = syscall.Unlink(socketFilePath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("error unlink socket file: %s, %w", socketFilePath, err)
 	}
 	mask := syscallUmask(0777)
 	defer syscallUmask(mask)

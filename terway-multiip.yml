@@ -149,7 +149,13 @@ spec:
           imagePullPolicy: IfNotPresent
           command: [ '/usr/bin/terwayd', '-log-level', 'debug', '-daemon-mode', 'ENIMultiIP' ]
           securityContext:
-            privileged: true
+            privileged: false
+            capabilities:
+              add:
+                - NET_ADMIN
+                - DAC_OVERRIDE
+              drop:
+                - ALL
           env:
             - name: NODE_NAME
               valueFrom:
@@ -190,7 +196,13 @@ spec:
                   key: disable_network_policy
                   optional: true
           securityContext:
-            privileged: true
+            privileged: false
+            capabilities:
+              add:
+                - NET_ADMIN
+                - DAC_OVERRIDE
+              drop:
+                - ALL
           resources:
             requests:
               cpu: 250m
