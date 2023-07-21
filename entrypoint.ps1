@@ -283,7 +283,7 @@ Log-Info "Transferred eni configuration"
 # generated cni config to host
 Log-Debug "Generating cni configuration"
 $cni_config = @{
-  cniVersion = "0.3.1"
+  cniVersion = "0.4.0"
   name = "terway"
   type = "terway"
 }
@@ -292,7 +292,7 @@ if (Test-File -Path "c:\etc\eni\10-terway.conf") {
 }
 # version
 if (-not $cni_config["cniVersion"]) {
-  $cni_config["cniVersion"] = "0.3.1"
+  $cni_config["cniVersion"] = "0.4.0"
 }
 # name
 if (-not $cni_config["name"]) {

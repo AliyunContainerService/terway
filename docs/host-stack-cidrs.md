@@ -23,7 +23,7 @@
     ```json
       10-terway.conf: |
       {
-        "cniVersion": "0.3.1",
+        "cniVersion": "0.4.0",
         "name": "terway",
         "eniip_virtual_type": "IPVlan",
         "host_stack_cidrs": ["169.254.0.0/16"], // 此处为您希望添加的主机网络栈路由
@@ -50,7 +50,7 @@
    ```bash
     cat /etc/cni/net.d/*
     {
-      "cniVersion": "0.3.1",
+      "cniVersion": "0.4.0",
       "name": "terway-chainer",
       "plugins": [
         {

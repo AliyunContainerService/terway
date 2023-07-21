@@ -6,7 +6,7 @@ Terway will set CNI config on the startup. The config (`/etc/cni/net.d/10-terway
 
 ```json
 {
-  "cniVersion": "0.3.1",
+  "cniVersion": "0.4.0",
   "name": "terway",
   "type": "terway",
   "eniip_virtual_type": "IPVlan"
@@ -46,7 +46,7 @@ data:
 
   10-terway.conf: |
     {
-      "cniVersion": "0.3.1",
+      "cniVersion": "0.4.0",
       "name": "terway",
       "type": "terway"
     }

@@ -7,7 +7,7 @@ import (
 
 	"github.com/containernetworking/cni/pkg/skel"
 	cniTypes "github.com/containernetworking/cni/pkg/types"
-	"github.com/containernetworking/cni/pkg/types/current"
+	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/plugins/pkg/ipam"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/sirupsen/logrus"
@@ -28,7 +28,7 @@ func getCmdArgs(args *skel.CmdArgs) (*cniCmdArgs, error) {
 
 	var conf types.CNIConf
 	if err = json.Unmarshal(args.StdinData, &conf); err != nil {
-		return nil, fmt.Errorf("error parse args, %w", err)
+		return nil, cniTypes.NewError(cniTypes.ErrDecodingFailure, "failed to parse network config", err.Error())
 	}
 	if conf.MTU == 0 {
 		conf.MTU = defaultMTU
@@ -36,7 +36,7 @@ func getCmdArgs(args *skel.CmdArgs) (*cniCmdArgs, error) {
 
 	var k8sArgs types.K8SArgs
 	if err = cniTypes.LoadArgs(args.Args, &k8sArgs); err != nil {
-		return nil, fmt.Errorf("error parse args, %w", err)
+		return nil, cniTypes.NewError(cniTypes.ErrDecodingFailure, "failed to parse args", err.Error())
 	}
 
 	return &cniCmdArgs{
