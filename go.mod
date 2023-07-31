@@ -12,7 +12,7 @@ require (
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.3.0
 	github.com/denverdino/aliyungo v0.0.0-20201215054313-f635de23c5e0
-	github.com/docker/docker v20.10.20+incompatible
+	github.com/docker/docker v24.0.5+incompatible
 	github.com/evanphx/json-patch v5.6.0+incompatible
 	github.com/go-playground/mold/v4 v4.2.0
 	github.com/go-playground/validator/v10 v10.11.1
