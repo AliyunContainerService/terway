@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -93,7 +94,7 @@ func GrabFileLock(lockfilePath string) (*Locker, error) {
 		return nil, fmt.Errorf("failed to open lock %s: %v", lockfilePath, err)
 	}
 
-	err = wait.PollImmediate(200*time.Millisecond, fileLockTimeOut, func() (bool, error) {
+	err = wait.PollUntilContextTimeout(context.Background(), 200*time.Millisecond, fileLockTimeOut, true, func(ctx context.Context) (bool, error) {
 		if err := m.Lock(); err != nil {
 			return false, nil
 		}

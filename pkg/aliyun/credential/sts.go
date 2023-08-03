@@ -148,3 +148,24 @@ func decrypt(s string, keyring []byte) ([]byte, error) {
 	origData = pks5UnPadding(origData)
 	return origData, nil
 }
+
+type StsTokenCredentialProvider struct {
+	StsTokenCredential *credentials.StsTokenCredential
+}
+
+func NewStsTokenCredentialProvider(ak, sk, token string) *StsTokenCredentialProvider {
+	return &StsTokenCredentialProvider{
+		StsTokenCredential: credentials.NewStsTokenCredential(ak, sk, token),
+	}
+}
+
+func (e *StsTokenCredentialProvider) Resolve() (*Credential, error) {
+	return &Credential{
+		Credential: e.StsTokenCredential,
+		Expiration: time.Now().AddDate(100, 0, 0),
+	}, nil
+}
+
+func (e *StsTokenCredentialProvider) Name() string {
+	return "StsTokenCredentialProvider"
+}

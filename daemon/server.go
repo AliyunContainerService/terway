@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -17,8 +18,8 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/rpc"
-	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -49,7 +50,7 @@ func stackTriger() {
 }
 
 // Run terway daemon
-func Run(socketFilePath, debugSocketListen, configFilePath, kubeconfig, master, daemonMode, logLevel string) error {
+func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath, daemonMode, logLevel string) error {
 	level, err := log.ParseLevel(logLevel)
 	if err != nil {
 		return fmt.Errorf("error set log level: %s, %w", logLevel, err)
@@ -76,7 +77,7 @@ func Run(socketFilePath, debugSocketListen, configFilePath, kubeconfig, master, 
 		return fmt.Errorf("error listen at %s: %v", socketFilePath, err)
 	}
 
-	networkService, err := newNetworkService(configFilePath, kubeconfig, master, daemonMode)
+	networkService, err := newNetworkService(ctx, configFilePath, daemonMode)
 	if err != nil {
 		return err
 	}
@@ -86,14 +87,6 @@ func Run(socketFilePath, debugSocketListen, configFilePath, kubeconfig, master, 
 	rpc.RegisterTerwayTracingServer(grpcServer, tracing.DefaultRPCServer())
 
 	stop := make(chan struct{})
-
-	go func() {
-		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-		sig := <-sigs
-		log.Infof("got system signal: %v, exiting", sig)
-		stop <- struct{}{}
-	}()
 
 	stackTriger()
 	err = runDebugServer(debugSocketListen)
@@ -105,11 +98,14 @@ func Run(socketFilePath, debugSocketListen, configFilePath, kubeconfig, master, 
 		err = grpcServer.Serve(l)
 		if err != nil {
 			log.Errorf("error start grpc server: %v", err)
-			stop <- struct{}{}
+			close(stop)
 		}
 	}()
 
-	<-stop
+	select {
+	case <-ctx.Done():
+	case <-stop:
+	}
 	grpcServer.Stop()
 	return nil
 }

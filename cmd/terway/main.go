@@ -2,13 +2,21 @@ package main
 
 import (
 	"flag"
+	"math/rand"
 	"os"
+	"time"
 
 	"github.com/AliyunContainerService/terway/daemon"
-	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/version"
+
 	"k8s.io/klog/v2"
+	"k8s.io/klog/v2/klogr"
+	ctrl "sigs.k8s.io/controller-runtime"
+)
+
+var (
+	log = ctrl.Log.WithName("setup")
 )
 
 const defaultConfigPath = "/etc/eni/eni.json"
@@ -19,27 +27,30 @@ var (
 	logLevel       string
 	daemonMode     string
 	readonlyListen string
-	kubeconfig     string
-	master         string
 )
 
 func main() {
+	rand.New(rand.NewSource(time.Now().UnixNano()))
+	klog.InitFlags(nil)
+	defer klog.Flush()
+
+	ctrl.SetLogger(klogr.New())
+	log.Info(version.Version)
+
 	fs := flag.NewFlagSet("terway", flag.ExitOnError)
 
 	fs.StringVar(&daemonMode, "daemon-mode", "VPC", "terway network mode")
 	fs.StringVar(&logLevel, "log-level", "info", "terway log level")
 	fs.StringVar(&readonlyListen, "readonly-listen", utils.NormalizePath(debugSocketPath), "terway readonly listen")
-	fs.StringVar(&master, "master", "", "The address of the Kubernetes API server (overrides any value in kubeconfig).")
-	fs.StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file with authorization and master location information.")
 	err := fs.Parse(os.Args[1:])
 	if err != nil {
 		panic(err)
 	}
 
-	klog.SetOutput(os.Stderr)
+	ctx := ctrl.SetupSignalHandler()
+	err = daemon.Run(ctx, utils.NormalizePath(defaultSocketPath), readonlyListen, utils.NormalizePath(defaultConfigPath), daemonMode, logLevel)
 
-	logger.DefaultLogger.Info(version.Version)
-	if err := daemon.Run(utils.NormalizePath(defaultSocketPath), readonlyListen, utils.NormalizePath(defaultConfigPath), kubeconfig, master, daemonMode, logLevel); err != nil {
-		logger.DefaultLogger.Fatal(err)
+	if err != nil {
+		klog.Fatal(err)
 	}
 }

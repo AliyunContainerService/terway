@@ -56,9 +56,7 @@ func init() {
 		}
 
 		return c.Watch(
-			&source.Kind{
-				Type: &v1beta1.PodNetworking{},
-			},
+			source.Kind(mgr.GetCache(), &v1beta1.PodNetworking{}),
 			&handler.EnqueueRequestForObject{},
 			&predicate.ResourceVersionChangedPredicate{},
 			&predicateForPodnetwokringEvent{},

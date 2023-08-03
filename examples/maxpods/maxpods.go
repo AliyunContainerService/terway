@@ -6,11 +6,13 @@ import (
 	"io"
 	"log"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	"github.com/AliyunContainerService/terway/types"
-	"github.com/sirupsen/logrus"
-
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
+	"github.com/AliyunContainerService/terway/types"
+
+	"github.com/sirupsen/logrus"
+	"k8s.io/client-go/util/flowcontrol"
 )
 
 var (
@@ -36,7 +38,21 @@ func main() {
 	log.SetOutput(io.Discard)
 	logrus.SetOutput(io.Discard)
 	ins := aliyun.GetInstanceMeta()
-	api, err := client.NewAliyun(accessKeyID, accessKeySecret, ins.RegionID, credentialPath, "", "")
+
+	providers := []credential.Interface{
+		credential.NewAKPairProvider(accessKeyID, accessKeySecret),
+		credential.NewEncryptedCredentialProvider(credentialPath, "", ""),
+		credential.NewMetadataProvider(),
+	}
+
+	c, err := credential.NewClientMgr(ins.RegionID, providers...)
+	if err != nil {
+		panic(err)
+	}
+
+	api, err := client.New(c,
+		flowcontrol.NewTokenBucketRateLimiter(8, 10),
+		flowcontrol.NewTokenBucketRateLimiter(4, 5))
 	if err != nil {
 		panic(err)
 	}

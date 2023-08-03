@@ -40,21 +40,6 @@ func New(c credential.Client, readOnly, mutating flowcontrol.RateLimiter) (*Open
 	}, nil
 }
 
-func NewAliyun(ak, sk, regionID, credentialPath, secretNamespace, secretName string) (*OpenAPI, error) {
-	if regionID == "" {
-		return nil, fmt.Errorf("regionID unset")
-	}
-	clientSet, err := credential.NewClientMgr(ak, sk, credentialPath, regionID, secretNamespace, secretName)
-	if err != nil {
-		return nil, fmt.Errorf("error get clientset, %w", err)
-	}
-	return &OpenAPI{
-		ClientSet:           clientSet,
-		ReadOnlyRateLimiter: flowcontrol.NewTokenBucketRateLimiter(8, 10),
-		MutatingRateLimiter: flowcontrol.NewTokenBucketRateLimiter(4, 5),
-	}, nil
-}
-
 // CreateNetworkInterface instanceType Secondary Trunk
 func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitch string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*NetworkInterface, error) {
 	req := ecs.CreateCreateNetworkInterfaceRequest()
@@ -94,7 +79,7 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitc
 		innerErr error
 		resp     *ecs.CreateNetworkInterfaceResponse
 	)
-	err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENICreate), func() (bool, error) {
+	err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENICreate), func(ctx context.Context) (bool, error) {
 		a.MutatingRateLimiter.Accept()
 		start := time.Now()
 		resp, innerErr = a.ClientSet.ECS().CreateNetworkInterface(req)

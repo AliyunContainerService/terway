@@ -12,8 +12,6 @@ type PoolConfig struct {
 	ENITags                   map[string]string
 	SecurityGroups            []string
 	InstanceID                string
-	AccessID                  string
-	AccessSecret              string
 	EniCapRatio               float64
 	EniCapShift               int
 	VSwitchSelectionPolicy    string
