@@ -17,6 +17,7 @@ limitations under the License.
 package types
 
 import (
+	"fmt"
 	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
@@ -110,3 +111,29 @@ const (
 	NetworkPrioBurstable  NetworkPrio = "burstable"
 	NetworkPrioGuaranteed NetworkPrio = "guaranteed"
 )
+
+// PodIPTypeIPs Pod IP address type
+type PodIPTypeIPs string
+
+// PodIPTypeIPs val
+const (
+	NormalIPTypeIPs    PodIPTypeIPs = AnnotationPrefix + "max-available-ip"
+	MemberENIIPTypeIPs PodIPTypeIPs = AnnotationPrefix + "max-member-eni-ip"
+	ERDMAIPTypeIPs     PodIPTypeIPs = AnnotationPrefix + "max-erdma-ip"
+)
+
+// SufficientIPCondition definitions
+const (
+	SufficientIPCondition   corev1.NodeConditionType = "SufficientIP"
+	IPResInsufficientReason string                   = "InsufficientIP"
+	IPResSufficientReason   string                   = "SufficientIP"
+)
+
+type IPInsufficientError struct {
+	Err    error
+	Reason string
+}
+
+func (e *IPInsufficientError) Error() string {
+	return fmt.Sprintf("ip insufficient error: %v with reason: %s", e.Err, e.Reason)
+}

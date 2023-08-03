@@ -8,6 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
+	corev1 "k8s.io/api/core/v1"
+
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -42,6 +45,8 @@ const (
 	tracingKeyInuse    = "inuse"
 
 	commandMapping = "mapping"
+
+	ipExhaustiveConditionPeriod = 10 * time.Minute
 )
 
 // ResUsage ResUsage
@@ -124,17 +129,22 @@ type simpleObjectPool struct {
 	metricIdle     prometheus.Gauge
 	metricTotal    prometheus.Gauge
 	metricDisposed prometheus.Counter
+	// node conditions
+	factoryIPExhaustive      *atomic.Bool
+	factoryIPExhaustiveTimer *time.Timer
+	IPConditionHandler       NodeConditionHandler
 }
 
 // Config configuration of pool
 type Config struct {
-	Name        string
-	Type        string
-	Factory     ObjectFactory
-	Initializer Initializer
-	MinIdle     int
-	MaxIdle     int
-	Capacity    int
+	Name               string
+	Type               string
+	Factory            ObjectFactory
+	Initializer        Initializer
+	MinIdle            int
+	MaxIdle            int
+	Capacity           int
+	IPConditionHandler NodeConditionHandler
 }
 
 type poolItem struct {
@@ -150,6 +160,8 @@ func (i *poolItem) lessThan(other *poolItem) bool {
 // Initializer of pool
 type Initializer func(holder ResourceHolder) error
 
+type NodeConditionHandler func(status corev1.ConditionStatus, reason, message string) error
+
 // NewSimpleObjectPool return an object pool implement
 func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 	if cfg.MinIdle > cfg.MaxIdle {
@@ -161,17 +173,20 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 	}
 
 	pool := &simpleObjectPool{
-		name:        cfg.Name,
-		factory:     cfg.Factory,
-		inuse:       make(map[string]poolItem),
-		idle:        newPriorityQueue(),
-		invalid:     make(map[string]poolItem),
-		maxIdle:     cfg.MaxIdle,
-		minIdle:     cfg.MinIdle,
-		capacity:    cfg.Capacity,
-		notifyCh:    make(chan interface{}, 1),
-		tokenCh:     make(chan struct{}, cfg.Capacity),
-		backoffTime: defaultPoolBackoff,
+		name:                     cfg.Name,
+		factory:                  cfg.Factory,
+		inuse:                    make(map[string]poolItem),
+		idle:                     newPriorityQueue(),
+		invalid:                  make(map[string]poolItem),
+		maxIdle:                  cfg.MaxIdle,
+		minIdle:                  cfg.MinIdle,
+		capacity:                 cfg.Capacity,
+		notifyCh:                 make(chan interface{}, 1),
+		tokenCh:                  make(chan struct{}, cfg.Capacity),
+		backoffTime:              defaultPoolBackoff,
+		factoryIPExhaustiveTimer: time.NewTimer(0),
+		factoryIPExhaustive:      atomic.NewBool(true),
+		IPConditionHandler:       cfg.IPConditionHandler,
 		// create metrics with labels in the pool struct
 		// and it will show in metrics even if it has not been triggered yet
 		metricIdle: metric.ResourcePoolIdle.WithLabelValues(cfg.Name, cfg.Type, fmt.Sprint(cfg.Capacity),
@@ -202,6 +217,7 @@ func NewSimpleObjectPool(cfg Config) (ObjectPool, error) {
 	}).Infof("pool initial state ,idle: %s, inuse: %s, invalid: %s", queueKeys(pool.idle), mapKeys(pool.inuse), mapKeys(pool.invalid))
 
 	go pool.startCheckIdleTicker()
+	go pool.checkIPExhaustive()
 
 	_ = tracing.Register(tracing.ResourceTypeResourcePool, pool.name, pool)
 	return pool, nil
@@ -227,6 +243,40 @@ func (p *simpleObjectPool) startCheckIdleTicker() {
 			p.checkInsufficient()
 		case <-reconcileTick:
 			p.factory.Reconcile()
+		}
+	}
+}
+
+func (p *simpleObjectPool) setIPExhaustive(err *types.IPInsufficientError) {
+	if p.IPConditionHandler == nil {
+		return
+	}
+	if err := p.IPConditionHandler(corev1.ConditionFalse, types.IPResInsufficientReason,
+		fmt.Sprintf("node has insufficient IP, error: %v", err.Reason)); err != nil {
+		log.Errorf("set IPExhaustive condition failed: %v", err)
+	}
+	if !p.factoryIPExhaustive.Load() {
+		p.factoryIPExhaustive.Store(true)
+	}
+	p.factoryIPExhaustiveTimer.Reset(ipExhaustiveConditionPeriod)
+}
+
+func (p *simpleObjectPool) unsetIPExhaustive() {
+	if p.factoryIPExhaustive.Load() {
+		p.factoryIPExhaustiveTimer.Reset(0)
+	}
+}
+
+func (p *simpleObjectPool) checkIPExhaustive() {
+	for range p.factoryIPExhaustiveTimer.C {
+		if p.factoryIPExhaustive.Load() {
+			if p.IPConditionHandler != nil {
+				if err := p.IPConditionHandler(corev1.ConditionTrue, types.IPResSufficientReason,
+					fmt.Sprintf("node has sufficient IP or pass the exhaustive period: %v", ipExhaustiveConditionPeriod)); err != nil {
+					log.Errorf("set IPExhaustive condition failed: %v", err)
+				}
+			}
+			p.factoryIPExhaustive.Store(false)
 		}
 	}
 }
@@ -329,6 +379,10 @@ func (p *simpleObjectPool) checkInsufficient() {
 	}
 	resList, err := p.factory.Create(tokenAcquired)
 	if err != nil {
+		inSufErr, ok := err.(*types.IPInsufficientError)
+		if ok {
+			p.setIPExhaustive(inSufErr)
+		}
 		log.Errorf("error add idle network resources: %v", err)
 	}
 	if tokenAcquired == len(resList) {
@@ -381,6 +435,10 @@ func (p *simpleObjectPool) getOneLocked(resID string) *poolItem {
 }
 
 func (p *simpleObjectPool) Acquire(ctx context.Context, resID, idempotentKey string) (types.NetworkResource, error) {
+	if p.factoryIPExhaustive.Load() {
+		// slowdown ip allocation on ip exhaustive
+		time.Sleep(10 * time.Second)
+	}
 	p.lock.Lock()
 	if resItem, ok := p.inuse[resID]; ok && resItem.idempotentKey == idempotentKey {
 		p.lock.Unlock()
@@ -399,6 +457,10 @@ func (p *simpleObjectPool) Acquire(ctx context.Context, resID, idempotentKey str
 	size := p.sizeLocked()
 	if size >= p.capacity {
 		p.lock.Unlock()
+		p.setIPExhaustive(&types.IPInsufficientError{
+			Err:    ErrNoAvailableResource,
+			Reason: fmt.Sprintf("exceed node ip resource capacity: %v", p.capacity),
+		})
 		log.Infof("acquire (expect %s), size %d, capacity %d: return err %v", resID, size, p.capacity, ErrNoAvailableResource)
 		return nil, ErrNoAvailableResource
 	}
@@ -411,6 +473,10 @@ func (p *simpleObjectPool) Acquire(ctx context.Context, resID, idempotentKey str
 		res, err := p.factory.Create(1)
 		if err != nil || len(res) == 0 {
 			p.tokenCh <- struct{}{}
+			inSufErr, ok := err.(*types.IPInsufficientError)
+			if ok {
+				p.setIPExhaustive(inSufErr)
+			}
 			return nil, fmt.Errorf("error create from factory: %v", err)
 		}
 		log.Infof("acquire (expect %s): return newly %s", resID, res[0].GetResourceID())
@@ -517,6 +583,7 @@ func (p *simpleObjectPool) ReleaseWithReservation(resID string, reservation time
 		reserveTo = reserveTo.Add(reservation)
 	}
 	p.idle.Push(&poolItem{res: res.res, reservation: reserveTo})
+	p.unsetIPExhaustive()
 	p.metricIdle.Inc()
 	p.notify()
 	return nil
