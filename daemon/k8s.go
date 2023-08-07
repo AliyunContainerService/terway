@@ -66,7 +66,9 @@ type Kubernetes interface {
 	SetNodeAllocatablePod(count int) error
 	PatchEipInfo(info *types.PodInfo) error
 	PatchTrunkInfo(trunkEni string) error
+	PatchAvailableIPs(ipType types.PodIPTypeIPs, count int) error
 	PatchPodIPInfo(info *types.PodInfo, ips string) error
+	PatchNodeIPResCondition(status corev1.ConditionStatus, reason, message string) error
 	WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
 	GetPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
 	RecordNodeEvent(eventType, reason, message string)
@@ -96,7 +98,58 @@ type k8s struct {
 	sync.Locker
 }
 
+func (k *k8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, message string) error {
+	node, err := k.client.CoreV1().Nodes().Get(context.TODO(), k.nodeName, metav1.GetOptions{
+		ResourceVersion: "0",
+	})
+	if err != nil || node == nil {
+		k.reconnectOnTimeoutError(err)
+		return err
+	}
+
+	transitionTime := metav1.Now()
+	for _, cond := range node.Status.Conditions {
+		if cond.Type == types.SufficientIPCondition && cond.Status == status &&
+			cond.Reason == reason && cond.Message == message {
+			if cond.LastHeartbeatTime.Add(5 * time.Minute).After(time.Now()) {
+				// refresh condition period 5min
+				return nil
+			}
+			transitionTime = cond.LastTransitionTime
+		}
+	}
+	now := metav1.Now()
+	ipResCondition := corev1.NodeCondition{
+		Type:               types.SufficientIPCondition,
+		Status:             status,
+		LastHeartbeatTime:  now,
+		LastTransitionTime: transitionTime,
+		Reason:             reason,
+		Message:            message,
+	}
+
+	raw, err := json.Marshal(&[]corev1.NodeCondition{ipResCondition})
+	if err != nil {
+		return err
+	}
+	patch := []byte(fmt.Sprintf(`{"status":{"conditions":%s}}`, raw))
+	_, err = k.client.CoreV1().Nodes().PatchStatus(context.TODO(), node.Name, patch)
+	if err != nil {
+		k.reconnectOnTimeoutError(err)
+		return err
+	}
+	return nil
+}
+
+func (k *k8s) PatchAvailableIPs(ipType types.PodIPTypeIPs, count int) error {
+	return k.patchNodeAnno(string(ipType), strconv.Itoa(count))
+}
+
 func (k *k8s) PatchTrunkInfo(trunkEni string) error {
+	return k.patchNodeAnno(types.TrunkOn, trunkEni)
+}
+
+func (k *k8s) patchNodeAnno(key, val string) error {
 	node, err := k.client.CoreV1().Nodes().Get(context.TODO(), k.nodeName, metav1.GetOptions{
 		ResourceVersion: "0",
 	})
@@ -106,15 +159,15 @@ func (k *k8s) PatchTrunkInfo(trunkEni string) error {
 	}
 
 	if node.GetAnnotations() != nil {
-		if eni, ok := node.GetAnnotations()[types.TrunkOn]; ok {
-			if eni == trunkEni {
+		if preVal, ok := node.GetAnnotations()[key]; ok {
+			if preVal == val {
 				return nil
 			}
 		}
 	}
-	node.Annotations[types.TrunkOn] = trunkEni
+	node.Annotations[key] = val
 
-	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, types.TrunkOn, trunkEni)
+	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, key, val)
 	_, err = k.client.CoreV1().Nodes().Patch(context.TODO(), k.nodeName, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
 	if err != nil {
 		k.reconnectOnTimeoutError(err)
@@ -164,13 +217,8 @@ func (k *k8s) PatchEipInfo(info *types.PodInfo) error {
 		return err
 	}
 
-	if pod.GetAnnotations() != nil {
-		if eip, ok := pod.GetAnnotations()[podEipAddress]; ok {
-			if eip == info.EipInfo.PodEipIP {
-				return nil
-			}
-			return errors.Errorf("Pod already have eip annotation: %v", eip)
-		}
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
 	}
 	pod.Annotations[podEipAddress] = info.EipInfo.PodEipIP
 

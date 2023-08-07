@@ -121,7 +121,7 @@ data:
     }
   10-terway.conf: |
     {
-      "cniVersion": "0.3.1",
+      "cniVersion": "0.4.0",
       "name": "terway",
       "type": "terway",
       "eniip_virtual_type": "IPVlan",
@@ -181,7 +181,13 @@ spec:
           imagePullPolicy: IfNotPresent
           command: [ '/usr/bin/terwayd', '-log-level', 'debug', '-daemon-mode', 'ENIMultiIP' ]
           securityContext:
-            privileged: true
+            privileged: false
+            capabilities:
+              add:
+              - NET_ADMIN
+              - DAC_OVERRIDE
+              drop:
+              - ALL
           env:
             - name: NODE_NAME
               valueFrom:
@@ -234,7 +240,23 @@ spec:
             - name: CILIUM_CNI_CHAINING_MODE
               value: terway-chainer
           securityContext:
-            privileged: true
+            privileged: false
+            capabilities:
+              add:
+              - CHOWN
+              - KILL
+              - NET_ADMIN
+              - NET_RAW
+              - IPC_LOCK
+              - SYS_MODULE
+              - SYS_ADMIN
+              - SYS_RESOURCE
+              - DAC_OVERRIDE
+              - FOWNER
+              - SETGID
+              - SETUID
+              drop:
+              - ALL
           resources:
             requests:
               cpu: 250m

@@ -9,6 +9,9 @@ import (
 	"sync"
 	"time"
 
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
+	"github.com/samber/lo"
+
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/ipam"
@@ -25,7 +28,7 @@ import (
 var eniLog = logger.DefaultLogger
 
 const (
-	// vSwitchIPCntTimeout is the duration for the vswitchIPCntMap content's effectiveness
+	// vSwitchIPCntTimeout is the duration for the vswitchCnt content's effectiveness
 	vSwitchIPCntTimeout = 10 * time.Minute
 
 	typeNameENI    = "eni"
@@ -43,7 +46,7 @@ type eniResourceManager struct {
 	trunkENI *types.ENI
 }
 
-func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocatedResources map[string]resourceManagerInitItem, ipFamily *types.IPFamily, k8s Kubernetes) (ResourceManager, error) {
+func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocatedResources map[string]resourceManagerInitItem, ipFamily *types.IPFamily, k8s Kubernetes, ipamType types.IPAMType) (ResourceManager, error) {
 	eniLog.Debugf("new ENI Resource Manager, pool config: %+v, allocated resources: %+v", poolConfig, allocatedResources)
 	factory, err := newENIFactory(poolConfig, ecs)
 	if err != nil {
@@ -98,13 +101,17 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 	}
 
 	poolCfg := pool.Config{
-		Name:     poolNameENI,
-		Type:     typeNameENI,
-		MaxIdle:  poolConfig.MaxPoolSize,
-		MinIdle:  poolConfig.MinPoolSize,
-		Capacity: capacity,
-		Factory:  factory,
+		Name:               poolNameENI,
+		Type:               typeNameENI,
+		MaxIdle:            poolConfig.MaxPoolSize,
+		MinIdle:            poolConfig.MinPoolSize,
+		Capacity:           capacity,
+		Factory:            factory,
+		IPConditionHandler: k8s.PatchNodeIPResCondition,
 		Initializer: func(holder pool.ResourceHolder) error {
+			if ipamType == types.IPAMTypeCRD {
+				return nil
+			}
 			ctx := context.Background()
 			enis, err := ecs.GetAttachedENIs(ctx, false, factory.trunkOnEni)
 			if err != nil {
@@ -180,6 +187,14 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 			return nil, errors.Wrapf(err, "error patch trunk info on node")
 		}
 	}
+
+	if capacity > 0 {
+		err = k8s.PatchAvailableIPs(types.NormalIPTypeIPs, capacity)
+		if err != nil {
+			return nil, errors.Wrapf(err, "error patch available ips")
+		}
+	}
+
 	logger.DefaultLogger.Infof("set deviceplugin cap %d", realCap)
 	dp := deviceplugin.NewENIDevicePlugin(realCap, eniType)
 	err = dp.Serve()
@@ -221,31 +236,13 @@ func (m *eniResourceManager) GetResourceMapping() (tracing.ResourcePoolStats, er
 	return m.pool.GetResourceMapping()
 }
 
-// MapSorter is a slice container for sorting
-type MapSorter []Item
-
-// Item is the element type of MapSorter, which contains the values for sorting
-type Item struct {
-	Key string
-	Val int
+type vswitch struct {
+	id      string
+	ipCount int
 }
 
-func newMapSorter(m map[string]int) MapSorter {
-	ms := make(MapSorter, 0, len(m))
-	for k, v := range m {
-		ms = append(ms, Item{k, v})
-	}
-	return ms
-}
-
-// SortInDescendingOrder is a bubble sort per element's value
-func (ms MapSorter) SortInDescendingOrder() {
-	eniLog.Debugf("before sorting, slice = %+v", ms)
-	sort.Slice(ms, func(i, j int) bool {
-		// reverse sorting
-		return ms[i].Val > ms[j].Val
-	})
-	eniLog.Debugf("after sorting, slice = %+v", ms)
+func (v *vswitch) String() string {
+	return fmt.Sprintf("%s(%d)", v.id, v.ipCount)
 }
 
 type eniFactory struct {
@@ -257,7 +254,7 @@ type eniFactory struct {
 	securityGroups            []string
 	instanceID                string
 	ecs                       ipam.API
-	vswitchIPCntMap           map[string]int
+	vswitchCnt                []vswitch
 	tsExpireAt                time.Time
 	vswitchSelectionPolicy    string
 	disableSecurityGroupCheck bool
@@ -280,26 +277,33 @@ func newENIFactory(poolConfig *types.PoolConfig, ecs ipam.API) (*eniFactory, err
 		enableTrunk:               poolConfig.EnableENITrunking,
 		instanceID:                poolConfig.InstanceID,
 		ecs:                       ecs,
-		vswitchIPCntMap:           make(map[string]int),
+		vswitchCnt:                make([]vswitch, 0),
 		vswitchSelectionPolicy:    poolConfig.VSwitchSelectionPolicy,
 		disableSecurityGroupCheck: poolConfig.DisableSecurityGroupCheck,
 	}, nil
 }
 
-func (f *eniFactory) GetVSwitches() ([]string, error) {
+func (f *eniFactory) GetVSwitches() ([]vswitch, error) {
 
-	var vSwitches []string
+	var vSwitches []vswitch
 
 	vswCnt := len(f.switches)
 	// If there is ONLY ONE vswitch, then there is no need for ordering per switches' available IP counts,
 	// return the slice with only this vswitch.
 	if vswCnt == 1 {
-		return f.switches, nil
+		return []vswitch{{
+			id:      f.switches[0],
+			ipCount: 0,
+		}}, nil
 	}
 
 	if f.vswitchSelectionPolicy == types.VSwitchSelectionPolicyRandom {
-		vSwitches = make([]string, vswCnt)
-		copy(vSwitches, f.switches)
+		vSwitches = lo.Map(f.switches, func(item string, index int) vswitch {
+			return vswitch{
+				id:      item,
+				ipCount: 0,
+			}
+		})
 		rand.Seed(time.Now().UnixNano())
 		rand.Shuffle(vswCnt, func(i, j int) { vSwitches[i], vSwitches[j] = vSwitches[j], vSwitches[i] })
 		return vSwitches, nil
@@ -308,22 +312,29 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 	if f.vswitchSelectionPolicy == types.VSwitchSelectionPolicyOrdered {
 		// If VSwitchSelectionPolicy is ordered, then call f.ecs.DescribeVSwitch API to get the switch's available IP count
 		// PS: this is only feasible for systems with RAM policy for VPC API permission.
-		// Use f.vswitchIPCntMap to track IP count + vswitch ID
+		// Use f.vswitchCnt to track IP count + vswitch ID
 		var (
 			start = time.Now()
 			err   error
 		)
-		// If f.vswitchIPCntMap is empty, then fill in the map with switch + switch's available IP count.
+		// If f.vswitchCnt is empty, then fill in the map with switch + switch's available IP count.
 		f.Lock()
-		if (len(f.vswitchIPCntMap) == 0 && f.tsExpireAt.IsZero()) || start.After(f.tsExpireAt) {
-			// Loop vswitch slice to get each vswitch's available IP count.
-			for _, vswitch := range f.switches {
+		if (len(f.vswitchCnt) == 0 && f.tsExpireAt.IsZero()) || start.After(f.tsExpireAt) {
+			f.vswitchCnt = make([]vswitch, 0)
+			// Loop vsw slice to get each vsw's available IP count.
+			for _, vswID := range f.switches {
 				var vsw *vpc.VSwitch
-				vsw, err = f.ecs.DescribeVSwitchByID(context.Background(), vswitch)
+				vsw, err = f.ecs.DescribeVSwitchByID(context.Background(), vswID)
 				if err != nil {
-					f.vswitchIPCntMap[vswitch] = 0
+					f.vswitchCnt = append(f.vswitchCnt, vswitch{
+						id:      vswID,
+						ipCount: 0,
+					})
 				} else {
-					f.vswitchIPCntMap[vswitch] = int(vsw.AvailableIpAddressCount)
+					f.vswitchCnt = append(f.vswitchCnt, vswitch{
+						id:      vswID,
+						ipCount: int(vsw.AvailableIpAddressCount),
+					})
 				}
 			}
 			if err == nil {
@@ -333,15 +344,17 @@ func (f *eniFactory) GetVSwitches() ([]string, error) {
 		}
 		f.Unlock()
 
-		if len(f.vswitchIPCntMap) > 0 {
-			m := newMapSorter(f.vswitchIPCntMap)
-			//sort.Sort(sort.Reverse(m))
-			m.SortInDescendingOrder()
-			for _, item := range m {
-				vSwitches = append(vSwitches, item.Key)
-			}
+		if len(f.vswitchCnt) > 0 {
+			sort.Slice(f.vswitchCnt, func(i, j int) bool {
+				return f.vswitchCnt[i].ipCount > f.vswitchCnt[j].ipCount
+			})
 		} else {
-			vSwitches = f.switches
+			vSwitches = lo.Map(f.switches, func(item string, index int) vswitch {
+				return vswitch{
+					id:      item,
+					ipCount: 0,
+				}
+			})
 		}
 	}
 
@@ -362,8 +375,30 @@ func (f *eniFactory) CreateWithIPCount(count int, trunk bool) ([]types.NetworkRe
 	for k, v := range f.eniTags {
 		tags[k] = v
 	}
-	eni, err := f.ecs.AllocateENI(context.Background(), vSwitches[0], f.securityGroups, f.instanceID, trunk, count, tags)
+	eni, err := f.ecs.AllocateENI(context.Background(), vSwitches[0].id, f.securityGroups, f.instanceID, trunk, count, tags)
 	if err != nil {
+		if strings.Contains(err.Error(), apiErr.InvalidVSwitchIDIPNotEnough) {
+			reportIPExhaustive := false
+			if len(vSwitches) == 1 {
+				reportIPExhaustive = true
+			}
+			if f.vswitchSelectionPolicy == types.VSwitchSelectionPolicyOrdered {
+				reportIPExhaustive = true
+			}
+			if reportIPExhaustive {
+				return nil, &types.IPInsufficientError{
+					Err:    err,
+					Reason: fmt.Sprintf("all configure vswitches: %v has no available ip address", vSwitches)}
+			}
+		} else if strings.Contains(err.Error(), apiErr.ErrEniPerInstanceLimitExceeded) {
+			return nil, &types.IPInsufficientError{
+				Err:    err,
+				Reason: fmt.Sprintf("instance %v exceeded max eni limit", f.instanceID)}
+		} else if strings.Contains(err.Error(), apiErr.ErrSecurityGroupInstanceLimitExceed) {
+			return nil, &types.IPInsufficientError{
+				Err:    err,
+				Reason: fmt.Sprintf("security group %v exceeded max ip limit", f.securityGroups)}
+		}
 		return nil, err
 	}
 	return []types.NetworkResource{eni}, nil
@@ -392,8 +427,8 @@ func (f *eniFactory) Trace() []tracing.MapKeyValueEntry {
 		{Key: tracingKeyCacheExpireAt, Value: fmt.Sprint(f.tsExpireAt)},
 	}
 
-	for vs, cnt := range f.vswitchIPCntMap {
-		key := fmt.Sprintf("vswitch/%s/ip_count", vs)
+	for _, cnt := range f.vswitchCnt {
+		key := fmt.Sprintf("vswitch/%s/ip_count", cnt.id)
 		trace = append(trace, tracing.MapKeyValueEntry{
 			Key:   key,
 			Value: fmt.Sprint(cnt),

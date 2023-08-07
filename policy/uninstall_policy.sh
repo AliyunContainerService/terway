@@ -9,16 +9,16 @@ cleanup_rules(){
   echo "Make sure calico-node DaemonSet is stopped before this gets executed."
 
   echo "Flushing all the calico iptables chains in the nat table..."
-  "$1"-save -t nat | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do "$1" -t nat -F "$line"; done
+  "$1"-save -t nat | grep -oP '(?<!^:)cali-[^ ]+' | while read -r line; do "$1" -t nat -F "$line"; done
 
   echo "Flushing all the calico iptables chains in the raw table..."
-  "$1"-save -t raw | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do "$1" -t raw -F "$line"; done
+  "$1"-save -t raw | grep -oP '(?<!^:)cali-[^ ]+' | while read -r line; do "$1" -t raw -F "$line"; done
 
   echo "Flushing all the calico iptables chains in the mangle table..."
-  "$1"-save -t mangle | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do "$1" -t mangle -F "$line"; done
+  "$1"-save -t mangle | grep -oP '(?<!^:)cali-[^ ]+' | while read -r line; do "$1" -t mangle -F "$line"; done
 
   echo "Flushing all the calico iptables chains in the filter table..."
-  "$1"-save -t filter | grep -oP '(?<!^:)cali-[^ ]+' | while read line; do "$1" -t filter -F "$line"; done
+  "$1"-save -t filter | grep -oP '(?<!^:)cali-[^ ]+' | while read -r line; do "$1" -t filter -F "$line"; done
 
   echo "Cleaning up calico rules from the nat table..."
   "$1"-save -t nat | grep -e '--comment "cali:' | cut -c 3- | sed 's/^ *//;s/ *$//' | xargs -l1 "$1" -t nat -D

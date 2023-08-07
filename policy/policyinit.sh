@@ -1,4 +1,7 @@
 #!/bin/bash
+
+mount -o remount rw /proc/sys
+
 export DATASTORE_TYPE=kubernetes
 if [ "$DATASTORE_TYPE" = "kubernetes" ]; then
     if [ -z "$KUBERNETES_SERVICE_HOST" ]; then

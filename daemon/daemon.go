@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,8 +28,6 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 
-	"github.com/containernetworking/cni/libcni"
-	containertypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
@@ -59,9 +56,6 @@ const (
 	commandMapping = "mapping"
 
 	cniDefaultPath = "/opt/cni/bin"
-	// this file is generated from configmap
-	terwayCNIConf  = "/etc/eni/10-terway.conf"
-	cniExecTimeout = 10 * time.Second
 
 	IfEth0 = "eth0"
 )
@@ -930,67 +924,6 @@ func (n *networkService) startPeriodCheck() {
 			}
 		}
 	}()
-	// call CNI CHECK, make sure all dev is ok
-	func() {
-		serviceLog.Debugf("call CNI CHECK")
-		defer func() {
-			serviceLog.Debugf("call CNI CHECK end")
-		}()
-		n.RLock()
-		podResList, err := n.resourceDB.List()
-		n.RUnlock()
-		if err != nil {
-			serviceLog.Error(err)
-			return
-		}
-		ff, err := os.ReadFile(utils.NormalizePath(terwayCNIConf))
-		if err != nil {
-			serviceLog.Error(err)
-			return
-		}
-		for _, v := range podResList {
-			res := v.(types.PodResources)
-			if res.NetNs == nil {
-				continue
-			}
-			serviceLog.Debugf("checking pod name %s", res.PodInfo.Name)
-			cniCfg := libcni.NewCNIConfig([]string{n.cniBinPath}, nil)
-			netNs := filepath.Join("/proc/1/root/", *res.NetNs)
-			if utils.IsWindowsOS() {
-				netNs = *res.NetNs
-			}
-			func() {
-				ctx, cancel := context.WithTimeout(context.Background(), cniExecTimeout)
-				defer cancel()
-
-				args := [][2]string{
-					{"K8S_POD_NAME", res.PodInfo.Name},
-					{"K8S_POD_NAMESPACE", res.PodInfo.Namespace},
-				}
-				if res.ContainerID != nil {
-					args = append(args, [2]string{"K8S_POD_INFRA_CONTAINER_ID", *res.ContainerID})
-				}
-
-				err := cniCfg.CheckNetwork(ctx, &libcni.NetworkConfig{
-					Network: &containertypes.NetConf{
-						CNIVersion: "0.4.0",
-						Name:       "terway",
-						Type:       "terway",
-					},
-					Bytes: ff,
-				}, &libcni.RuntimeConf{
-					ContainerID: "fake", // must provide
-					NetNS:       netNs,
-					IfName:      IfEth0,
-					Args:        args,
-				})
-				if err != nil {
-					serviceLog.Error(err)
-					return
-				}
-			}()
-		}
-	}()
 }
 
 // requestCRD get crd from api
@@ -1479,7 +1412,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	switch daemonMode {
 	case daemonModeVPC:
 		//init ENI
-		netSrv.eniResMgr, err = newENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI], ipFamily, netSrv.k8s)
+		netSrv.eniResMgr, err = newENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI], ipFamily, netSrv.k8s, netSrv.ipamType)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init ENI resource manager")
 		}
@@ -1509,7 +1442,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		}
 	case daemonModeENIOnly:
 		//init eni
-		netSrv.eniResMgr, err = newENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI], ipFamily, netSrv.k8s)
+		netSrv.eniResMgr, err = newENIResourceManager(poolConfig, ecs, localResource[types.ResourceTypeENI], ipFamily, netSrv.k8s, netSrv.ipamType)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init eni resource manager")
 		}

@@ -16,7 +16,7 @@ import (
 
 	"github.com/containernetworking/cni/pkg/skel"
 	cniTypes "github.com/containernetworking/cni/pkg/types"
-	"github.com/containernetworking/cni/pkg/types/current"
+	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/cni/pkg/version"
 	bv "github.com/containernetworking/plugins/pkg/utils/buildversion"
 	"google.golang.org/grpc"
@@ -32,7 +32,7 @@ const (
 	delegateConf        = `
 {
 	"name": "networks",
-    "cniVersion": "0.3.1",
+    "cniVersion": "0.4.0",
 	"ipam": {
 		"type": "host-local",
 		"subnet": "%s",
@@ -52,7 +52,7 @@ func init() {
 }
 
 func main() {
-	skel.PluginMain(cmdAdd, cmdCheck, cmdDel, version.PluginSupports("0.3.0", "0.3.1", "0.4.0"), bv.BuildString("terway"))
+	skel.PluginMain(cmdAdd, cmdCheck, cmdDel, version.PluginSupports("0.3.0", "0.3.1", "0.4.0", "1.0.0"), bv.BuildString("terway"))
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
@@ -82,7 +82,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	client, conn, err := getNetworkClient(ctx)
 	if err != nil {
-		return fmt.Errorf("error create grpc client, %w", err)
+		return err
 	}
 	defer conn.Close()
 
@@ -93,7 +93,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	containerIPNet, gatewayIPSet, err = doCmdAdd(ctx, logger, client, cmdArgs)
 	if err != nil {
 		logger.WithError(err).Error("error adding")
-		return err
+		return cniTypes.NewError(cniTypes.ErrTryAgainLater, "failed to do add", err.Error())
 	}
 
 	result := &current.Result{}
@@ -104,7 +104,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 	})
 	if containerIPNet.IPv4 != nil && gatewayIPSet.IPv4 != nil {
 		result.IPs = append(result.IPs, &current.IPConfig{
-			Version:   "4",
 			Address:   *containerIPNet.IPv4,
 			Gateway:   gatewayIPSet.IPv4,
 			Interface: current.Int(0),
@@ -112,7 +111,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	if containerIPNet.IPv6 != nil && gatewayIPSet.IPv6 != nil {
 		result.IPs = append(result.IPs, &current.IPConfig{
-			Version:   "6",
 			Address:   *containerIPNet.IPv6,
 			Gateway:   gatewayIPSet.IPv6,
 			Interface: current.Int(0),
@@ -159,7 +157,7 @@ func cmdDel(args *skel.CmdArgs) error {
 	err = doCmdDel(ctx, logger, client, cmdArgs)
 	if err != nil {
 		logger.WithError(err).Error("error deleting")
-		return err
+		return cniTypes.NewError(cniTypes.ErrTryAgainLater, "failed to do del", err.Error())
 	}
 
 	return cniTypes.PrintResult(&current.Result{
@@ -217,13 +215,14 @@ func getNetworkClient(ctx context.Context) (rpc.TerwayBackendClient, *grpc.Clien
 		func(ctx context.Context, s string) (net.Conn, error) {
 			unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
 			if err != nil {
-				return nil, fmt.Errorf("error resolve addr, %w", err)
+				return nil, err
 			}
 			d := net.Dialer{}
 			return d.DialContext(ctx, "unix", unixAddr.String())
 		}))
+
 	if err != nil {
-		return nil, nil, fmt.Errorf("error dial to terway %s, terway pod may staring, %w", defaultSocketPath, err)
+		return nil, nil, cniTypes.NewError(cniTypes.ErrTryAgainLater, "failed connect to daemon", err.Error())
 	}
 
 	client := rpc.NewTerwayBackendClient(conn)
