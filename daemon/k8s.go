@@ -416,23 +416,25 @@ func newK8S(master, kubeconfig string, daemonMode string, globalConfig *daemon.C
 
 func getNodeName(client kubernetes.Interface) (string, error) {
 	nodeName := os.Getenv("NODE_NAME")
-	if nodeName == "" {
-
-		podName := os.Getenv("POD_NAME")
-		podNamespace := os.Getenv("POD_NAMESPACE")
-		if podName == "" || podNamespace == "" {
-			return "", fmt.Errorf("env variables POD_NAME and POD_NAMESPACE must be set")
-		}
-
-		pod, err := client.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
-		if err != nil {
-			return "", fmt.Errorf("error retrieving pod spec for '%s/%s': %v", podNamespace, podName, err)
-		}
-		nodeName = pod.Spec.NodeName
-		if nodeName == "" {
-			return "", fmt.Errorf("node name not present in pod spec '%s/%s'", podNamespace, podName)
-		}
+	if nodeName != "" {
+		return nodeName, nil
 	}
+
+	podName := os.Getenv("POD_NAME")
+	podNamespace := os.Getenv("POD_NAMESPACE")
+	if podName == "" || podNamespace == "" {
+		return "", fmt.Errorf("env variables POD_NAME and POD_NAMESPACE must be set")
+	}
+
+	pod, err := client.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("error retrieving pod spec for '%s/%s': %v", podNamespace, podName, err)
+	}
+	nodeName = pod.Spec.NodeName
+	if nodeName == "" {
+		return "", fmt.Errorf("node name not present in pod spec '%s/%s'", podNamespace, podName)
+	}
+
 	return nodeName, nil
 }
 

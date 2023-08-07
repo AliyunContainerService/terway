@@ -314,7 +314,7 @@ func (m *Manager) cleanUP(ctx context.Context) {
 	}
 
 	// del
-	if (idle - m.cfg.MaxIdle) > 0 {
+	if idle > m.cfg.MaxIdle {
 		l.Info("dispose idle", "idle", idle, "maxIdle", m.cfg.MaxIdle)
 		for i := 0; i < (idle - m.cfg.MaxIdle); i++ {
 			m.allocations.ReleaseIdle()
@@ -329,51 +329,54 @@ func (m *Manager) cleanUP(ctx context.Context) {
 	if m.cfg.IPv6Enable {
 		v6 = 1
 	}
+
+	if m.cfg.MinIdle <= idle {
+		return
+	}
+
 	// add
-	if (m.cfg.MinIdle - idle) > 0 {
-		l.Info("add idle", "idle", idle, "minIdle", m.cfg.MinIdle)
-		for i := 0; i < (m.cfg.MinIdle - idle); i++ {
-			err := func() error {
-				if !m.allocations.RequireQuota() {
-					l.Info("add idle reach quota")
-					return nil
-				}
-				defer func() {
-					m.allocations.ReleaseQuota()
-				}()
-
-				vsw, err := m.vSwitchPool.GetOne(ctx, m.aliyun, m.cfg.ZoneID, m.cfg.VSwitchIDs)
-				if err != nil {
-					return err
-				}
-
-				networkInterface, err := m.aliyun.CreateNetworkInterface(ctx, false, vsw.ID, m.cfg.SecurityGroupIDs, "", v4, v6, m.cfg.ENITags)
-				if err != nil {
-					return err
-				}
-
-				alloc := &Allocation{
-					AllocType: AllocPolicyPreferPool,
-				}
-
-				defer func() {
-					m.allocations.Add(alloc)
-				}()
-
-				attachResp, err := attachNetworkInterface(ctx, m.aliyun, networkInterface.NetworkInterfaceID, m.cfg.InstanceID, m.cfg.TrunkENIID)
-				if err != nil {
-					alloc.Status = StatusDeleting
-					return err
-				}
-				alloc.NetworkInterface = attachResp
-				alloc.Status = StatusIdle
-
-				l.Info("add eni to pool", "id", networkInterface.NetworkInterfaceID)
+	l.Info("add idle", "idle", idle, "minIdle", m.cfg.MinIdle)
+	for i := 0; i < (m.cfg.MinIdle - idle); i++ {
+		err := func() error {
+			if !m.allocations.RequireQuota() {
+				l.Info("add idle reach quota")
 				return nil
-			}()
-			if err != nil {
-				l.Error(err, "failed to add eni")
 			}
+			defer func() {
+				m.allocations.ReleaseQuota()
+			}()
+
+			vsw, err := m.vSwitchPool.GetOne(ctx, m.aliyun, m.cfg.ZoneID, m.cfg.VSwitchIDs)
+			if err != nil {
+				return err
+			}
+
+			networkInterface, err := m.aliyun.CreateNetworkInterface(ctx, false, vsw.ID, m.cfg.SecurityGroupIDs, "", v4, v6, m.cfg.ENITags)
+			if err != nil {
+				return err
+			}
+
+			alloc := &Allocation{
+				AllocType: AllocPolicyPreferPool,
+			}
+
+			defer func() {
+				m.allocations.Add(alloc)
+			}()
+
+			attachResp, err := attachNetworkInterface(ctx, m.aliyun, networkInterface.NetworkInterfaceID, m.cfg.InstanceID, m.cfg.TrunkENIID)
+			if err != nil {
+				alloc.Status = StatusDeleting
+				return err
+			}
+			alloc.NetworkInterface = attachResp
+			alloc.Status = StatusIdle
+
+			l.Info("add eni to pool", "id", networkInterface.NetworkInterfaceID)
+			return nil
+		}()
+		if err != nil {
+			l.Error(err, "failed to add eni")
 		}
 	}
 }
