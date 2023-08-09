@@ -1158,10 +1158,8 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 	//init device plugin for ENI
 	if poolConfig.EnableENITrunking && factory.trunkOnEni != "" && !poolConfig.DisableDevicePlugin {
 		dp := deviceplugin.NewENIDevicePlugin(memberENIPod, deviceplugin.ENITypeMember)
-		err = dp.Serve()
-		if err != nil {
-			return nil, fmt.Errorf("error start device plugin on node, %w", err)
-		}
+		go dp.Serve()
+
 		err = k8s.PatchTrunkInfo(factory.trunkOnEni)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error patch trunk info on node")
