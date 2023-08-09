@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/AliyunContainerService/terway/pkg/link"
@@ -27,6 +28,7 @@ import (
 const (
 	defaultSocketPath   = "/var/run/eni/eni.socket"
 	defaultVethPrefix   = "cali"
+	defaultDialTimeout  = 10 * time.Second
 	defaultCniTimeout   = 120 * time.Second
 	defaultEventTimeout = 10 * time.Second
 	delegateIpam        = "host-local"
@@ -213,15 +215,26 @@ func cmdCheck(args *skel.CmdArgs) error {
 }
 
 func getNetworkClient(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
+	ctx, parent := context.WithTimeout(ctx, defaultDialTimeout)
+	defer parent()
 	conn, err := grpc.DialContext(ctx, defaultSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
 		func(ctx context.Context, s string) (net.Conn, error) {
-			unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
+			unixAddr, err := net.ResolveUnixAddr("unix", s)
 			if err != nil {
 				return nil, err
 			}
 			d := net.Dialer{}
 			return d.DialContext(ctx, "unix", unixAddr.String())
-		}))
+		}),
+		grpc.WithBlock(),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: backoff.Config{
+				BaseDelay:  time.Second,
+				Multiplier: 1,
+				MaxDelay:   time.Second,
+			},
+		}),
+	)
 
 	if err != nil {
 		return nil, nil, cniTypes.NewError(cniTypes.ErrTryAgainLater, "failed connect to daemon", err.Error())
