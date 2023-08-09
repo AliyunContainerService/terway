@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/samber/lo"
+
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
@@ -197,10 +198,7 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 
 	logger.DefaultLogger.Infof("set deviceplugin cap %d", realCap)
 	dp := deviceplugin.NewENIDevicePlugin(realCap, eniType)
-	err = dp.Serve()
-	if err != nil {
-		return nil, errors.Wrapf(err, "error set deviceplugin on node")
-	}
+	go dp.Serve()
 
 	return mgr, nil
 }

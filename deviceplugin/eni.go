@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"github.com/AliyunContainerService/terway/pkg/utils"
@@ -116,7 +116,7 @@ func (m *ENIDevicePlugin) Start() error {
 	go func() {
 		err := m.server.Serve(sock)
 		if err != nil {
-			log.Errorf("error start device plugin server, %+v", err)
+			klog.Errorf("error start device plugin server, %+v", err)
 		}
 	}()
 
@@ -183,10 +183,9 @@ func (m *ENIDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlu
 	for {
 		select {
 		case <-ticker.C:
-			log.Debugf("send list and watch res: %+v", devs)
 			err := s.Send(&pluginapi.ListAndWatchResponse{Devices: devs})
 			if err != nil {
-				log.Errorf("error send device informance: error: %v", err)
+				klog.Errorf("error send device informance: error: %v", err)
 			}
 		case <-m.stop:
 			return nil
@@ -204,7 +203,7 @@ func (m *ENIDevicePlugin) Allocate(ctx context.Context, r *pluginapi.AllocateReq
 		ContainerResponses: []*pluginapi.ContainerAllocateResponse{},
 	}
 
-	log.Infof("Request Containers: %v", r.GetContainerRequests())
+	klog.Infof("Request Containers: %v", r.GetContainerRequests())
 	for range r.GetContainerRequests() {
 		response.ContainerResponses = append(response.ContainerResponses,
 			&pluginapi.ContainerAllocateResponse{},
@@ -221,7 +220,7 @@ func (m *ENIDevicePlugin) cleanup() error {
 	}
 
 	for _, preSock := range preSocks {
-		log.Infof("device plugin file info: %+v", preSock)
+		klog.Infof("device plugin file info: %+v", preSock)
 		if m.eniRes.re.Match([]byte(preSock.Name())) {
 			if utils.IsWindowsOS() {
 				// NB(thxCode): treat the socket file as normal file
@@ -231,7 +230,7 @@ func (m *ENIDevicePlugin) cleanup() error {
 				err = syscall.Unlink(path.Join(pluginapi.DevicePluginPath, preSock.Name()))
 			}
 			if err != nil {
-				log.Errorf("error on clean up previous device plugin listens, %+v", err)
+				klog.Errorf("error on clean up previous device plugin listens, %+v", err)
 			}
 		}
 	}
@@ -253,14 +252,14 @@ func (m *ENIDevicePlugin) watchKubeletRestart() {
 			return
 		}
 		if os.IsNotExist(err) {
-			log.Infof("device plugin socket %s removed, restarting.", m.socket)
+			klog.Infof("device plugin socket %s removed, restarting.", m.socket)
 			err := m.Stop()
 			if err != nil {
-				log.Errorf("stop current device plugin server with error: %v", err)
+				klog.Errorf("stop current device plugin server with error: %v", err)
 			}
 			err = m.Start()
 			if err != nil {
-				log.Fatalf("error restart device plugin after kubelet restart %+v", err)
+				klog.Fatalf("error restart device plugin after kubelet restart %+v", err)
 			}
 			err = m.Register(
 				pluginapi.RegisterRequest{
@@ -270,23 +269,22 @@ func (m *ENIDevicePlugin) watchKubeletRestart() {
 				},
 			)
 			if err != nil {
-				log.Fatalf("error register device plugin after kubelet restart %+v", err)
+				klog.Fatalf("error register device plugin after kubelet restart %+v", err)
 			}
 			return
 		}
-		log.Fatalf("error stat socket: %+v", err)
+		klog.Fatalf("error stat socket: %+v", err)
 	}, time.Second*30, make(chan struct{}, 1))
 }
 
 // Serve starts the gRPC server and register the device plugin to Kubelet
-func (m *ENIDevicePlugin) Serve() error {
+func (m *ENIDevicePlugin) Serve() {
 	err := m.Start()
 	if err != nil {
-		log.Errorf("Could not start device plugin: %v", err)
-		return err
+		klog.Fatalf("Could not start device plugin: %v", err)
 	}
 	time.Sleep(5 * time.Second)
-	log.Infof("Starting to serve on %s", m.socket)
+	klog.Infof("Starting to serve on %s", m.socket)
 
 	err = m.Register(
 		pluginapi.RegisterRequest{
@@ -296,15 +294,12 @@ func (m *ENIDevicePlugin) Serve() error {
 		},
 	)
 	if err != nil {
-		log.Errorf("Could not register device plugin: %v", err)
+		klog.Errorf("Could not register device plugin: %v", err)
 		stopErr := m.Stop()
 		if stopErr != nil {
-			log.Errorf("stop current device plugin server with error: %v", stopErr)
+			klog.Fatalf("stop current device plugin server with error: %v", stopErr)
 		}
-		return err
 	}
-	log.Infof("Registered device plugin with Kubelet")
+	klog.Infof("Registered device plugin with Kubelet")
 	go m.watchKubeletRestart()
-
-	return nil
 }
