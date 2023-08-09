@@ -57,9 +57,7 @@ func init() {
 		}
 
 		return c.Watch(
-			&source.Kind{
-				Type: &corev1.Node{},
-			},
+			source.Kind(mgr.GetCache(), &corev1.Node{}),
 			&handler.EnqueueRequestForObject{},
 			&predicate.ResourceVersionChangedPredicate{},
 			&predicateForNodeEvent{},

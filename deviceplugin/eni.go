@@ -13,6 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/apimachinery/pkg/util/wait"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
@@ -75,7 +76,7 @@ func NewENIDevicePlugin(count int, eniType string) *ENIDevicePlugin {
 // dial establishes the gRPC communication with the registered device plugin.
 func dial(unixSocketPath string, timeout time.Duration) (*grpc.ClientConn, func(), error) {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	c, err := grpc.DialContext(timeoutCtx, unixSocketPath, grpc.WithInsecure(), grpc.WithBlock(),
+	c, err := grpc.DialContext(timeoutCtx, unixSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 			return net.DialTimeout("unix", addr, timeout)
 		}),

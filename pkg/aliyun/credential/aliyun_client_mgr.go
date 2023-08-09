@@ -4,7 +4,6 @@ package credential
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -44,17 +43,6 @@ func clientCfg() *sdk.Config {
 	}
 }
 
-func NewClientSet(ak, sk, regionID, credentialPath, secretNamespace, secretName string) (Client, error) {
-	if regionID == "" {
-		return nil, fmt.Errorf("regionID unset")
-	}
-	clientSet, err := NewClientMgr(ak, sk, credentialPath, regionID, secretNamespace, secretName)
-	if err != nil {
-		return nil, fmt.Errorf("error get clientset, %w", err)
-	}
-	return clientSet, nil
-}
-
 // ClientMgr manager of aliyun openapi clientset
 type ClientMgr struct {
 	regionID string
@@ -75,7 +63,7 @@ type ClientMgr struct {
 }
 
 // NewClientMgr return new aliyun client manager
-func NewClientMgr(key, secret, credentialPath, regionID, secretNamespace, secretName string) (*ClientMgr, error) {
+func NewClientMgr(regionID string, providers ...Interface) (*ClientMgr, error) {
 	mgr := &ClientMgr{
 		regionID: regionID,
 	}
@@ -90,11 +78,6 @@ func NewClientMgr(key, secret, credentialPath, regionID, secretNamespace, secret
 		return nil, err
 	}
 
-	providers := []Interface{
-		NewAKPairProvider(key, secret),
-		NewEncryptedCredentialProvider(credentialPath, secretNamespace, secretName),
-		NewMetadataProvider(),
-	}
 	for _, p := range providers {
 		c, err := p.Resolve()
 		if err != nil {
@@ -104,7 +87,6 @@ func NewClientMgr(key, secret, credentialPath, regionID, secretNamespace, secret
 			continue
 		}
 		mgr.auth = p
-		mgrLog.Infof("using %s provider", mgr.auth.Name())
 		break
 	}
 	if mgr.auth == nil {

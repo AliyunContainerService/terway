@@ -14,6 +14,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
@@ -32,6 +33,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/flowcontrol"
 )
 
 const (
@@ -45,17 +47,14 @@ const (
 	conditionFalse = "false"
 	conditionTrue  = "true"
 
-	networkServiceName         = "default"
-	tracingKeyName             = "name"
-	tracingKeyDaemonMode       = "daemon_mode"
-	tracingKeyConfigFilePath   = "config_file_path"
-	tracingKeyKubeConfig       = "kubeconfig"
-	tracingKeyMaster           = "master"
+	networkServiceName       = "default"
+	tracingKeyName           = "name"
+	tracingKeyDaemonMode     = "daemon_mode"
+	tracingKeyConfigFilePath = "config_file_path"
+
 	tracingKeyPendingPodsCount = "pending_pods_count"
 
 	commandMapping = "mapping"
-
-	cniDefaultPath = "/opt/cni/bin"
 
 	IfEth0 = "eth0"
 )
@@ -63,20 +62,17 @@ const (
 type networkService struct {
 	daemonMode     string
 	configFilePath string
-	kubeConfig     string
-	master         string
-	k8s            Kubernetes
-	resourceDB     storage.Storage
-	vethResMgr     ResourceManager
-	eniResMgr      ResourceManager
-	eniIPResMgr    ResourceManager
-	eipResMgr      ResourceManager
+
+	k8s         Kubernetes
+	resourceDB  storage.Storage
+	vethResMgr  ResourceManager
+	eniResMgr   ResourceManager
+	eniIPResMgr ResourceManager
+	eipResMgr   ResourceManager
 	//networkResourceMgr ResourceManager
 	mgrForResource map[string]ResourceManager
 	pendingPods    sync.Map
 	sync.RWMutex
-
-	cniBinPath string
 
 	enableTrunk bool
 
@@ -1108,8 +1104,6 @@ func (n *networkService) Config() []tracing.MapKeyValueEntry {
 		{Key: tracingKeyName, Value: networkServiceName}, // use a unique name?
 		{Key: tracingKeyDaemonMode, Value: n.daemonMode},
 		{Key: tracingKeyConfigFilePath, Value: n.configFilePath},
-		{Key: tracingKeyKubeConfig, Value: n.kubeConfig},
-		{Key: tracingKeyMaster, Value: n.master},
 	}
 
 	return config
@@ -1258,18 +1252,12 @@ func toResMapping(poolStats tracing.ResourcePoolStats, pods []interface{}) ([]*t
 	return mapping, nil
 }
 
-func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (rpc.TerwayBackendServer, error) {
+func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (rpc.TerwayBackendServer, error) {
 	serviceLog.Debugf("start network service with: %s, %s", configFilePath, daemonMode)
-	cniBinPath := os.Getenv("CNI_PATH")
-	if cniBinPath == "" {
-		cniBinPath = cniDefaultPath
-	}
+
 	netSrv := &networkService{
 		configFilePath: configFilePath,
-		kubeConfig:     kubeconfig,
-		master:         master,
 		pendingPods:    sync.Map{},
-		cniBinPath:     utils.NormalizePath(cniBinPath),
 	}
 	if daemonMode == daemonModeENIMultiIP || daemonMode == daemonModeVPC || daemonMode == daemonModeENIOnly {
 		netSrv.daemonMode = daemonMode
@@ -1284,9 +1272,9 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, err
 	}
 
-	netSrv.k8s, err = newK8S(master, kubeconfig, daemonMode, globalConfig)
+	netSrv.k8s, err = newK8S(daemonMode, globalConfig)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error init k8s service")
+		return nil, fmt.Errorf("error init k8s: %w", err)
 	}
 
 	// load dynamic config
@@ -1301,35 +1289,46 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, fmt.Errorf("failed parse config: %v", err)
 	}
 
-	backoff.OverrideBackoff(config.BackoffOverride)
-
 	if len(dynamicCfg) == 0 {
 		serviceLog.Infof("got config: %+v from: %+v", config, configFilePath)
 	} else {
 		serviceLog.Infof("got config: %+v from %+v, with dynamic config %+v", config, configFilePath, nodeLabel)
 	}
 
-	if err := validateConfig(config); err != nil {
+	config.Populate()
+	err = config.Validate()
+	if err != nil {
 		return nil, err
 	}
 
-	if err := setDefault(config); err != nil {
-		return nil, err
-	}
-
+	backoff.OverrideBackoff(config.BackoffOverride)
+	_ = netSrv.k8s.SetCustomStatefulWorkloadKinds(config.CustomStatefulWorkloadKinds)
 	netSrv.ipamType = config.IPAMType
 	netSrv.eniCapPolicy = config.ENICapPolicy
 
-	ins := aliyun.GetInstanceMeta()
 	ipFamily := types.NewIPFamilyFromIPStack(types.IPStack(config.IPStack))
 	netSrv.ipFamily = ipFamily
 
-	aliyunClient, err := client.NewAliyun(config.AccessID, config.AccessSecret, ins.RegionID, utils.NormalizePath(config.CredentialPath), "", "")
+	var providers []credential.Interface
+	if string(config.AccessID) != "" && string(config.AccessSecret) != "" {
+		providers = append(providers, credential.NewAKPairProvider(string(config.AccessID), string(config.AccessSecret)))
+	}
+	providers = append(providers, credential.NewEncryptedCredentialProvider(utils.NormalizePath(config.CredentialPath), "", ""))
+	providers = append(providers, credential.NewMetadataProvider())
+
+	clientSet, err := credential.NewClientMgr(config.RegionID, providers...)
+	if err != nil {
+		return nil, err
+	}
+
+	aliyunClient, err := client.New(clientSet,
+		flowcontrol.NewTokenBucketRateLimiter(8, 10),
+		flowcontrol.NewTokenBucketRateLimiter(4, 5))
 	if err != nil {
 		return nil, errors.Wrapf(err, "error create aliyun client")
 	}
 
-	limit, err := aliyun.GetLimit(aliyunClient, ins.InstanceType)
+	limit, err := aliyun.GetLimit(aliyunClient, config.InstanceType)
 	if err != nil {
 		return nil, fmt.Errorf("upable get instance limit, %w", err)
 	}
@@ -1339,7 +1338,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 			serviceLog.Warnf("instance %s is not support ipv6", aliyun.GetInstanceMeta().InstanceType)
 		} else if daemonMode == daemonModeENIMultiIP && !limit.SupportMultiIPIPv6() {
 			ipFamily.IPv6 = false
-			serviceLog.Warnf("instance %s is not support ipv6", aliyun.GetInstanceMeta().InstanceType)
+			serviceLog.Warnf("instance %s is not support ipv6", config.InstanceType)
 		}
 	}
 
@@ -1361,8 +1360,6 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 		return nil, errors.Wrapf(err, "error set k8s svcCidr")
 	}
 
-	_ = netSrv.k8s.SetCustomStatefulWorkloadKinds(config.CustomStatefulWorkloadKinds)
-
 	netSrv.resourceDB, err = storage.NewDiskStorage(
 		resDBName, utils.NormalizePath(resDBPath), json.Marshal, func(bytes []byte) (interface{}, error) {
 			resourceRel := &types.PodResources{}
@@ -1377,7 +1374,7 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	}
 
 	// get pool config
-	poolConfig, err := getPoolConfig(config, config.IPAMType)
+	poolConfig, err := getPoolConfig(config)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get pool config")
 	}
@@ -1476,42 +1473,12 @@ func newNetworkService(configFilePath, kubeconfig, master, daemonMode string) (r
 	return netSrv, nil
 }
 
-// setup default value
-func setDefault(cfg *daemon.Config) error {
-	if cfg.EniCapRatio == 0 {
-		cfg.EniCapRatio = 1
-	}
-
-	// Default policy for vswitch selection is random.
-	if cfg.VSwitchSelectionPolicy == "" {
-		cfg.VSwitchSelectionPolicy = types.VSwitchSelectionPolicyRandom
-	}
-
-	if cfg.IPStack == "" {
-		cfg.IPStack = string(types.IPStackIPv4)
-	}
-
-	return nil
-}
-
-func validateConfig(cfg *daemon.Config) error {
-	switch cfg.IPStack {
-	case "", string(types.IPStackIPv4), string(types.IPStackDual):
-	default:
-		return fmt.Errorf("unsupported ipStack %s in configMap", cfg.IPStack)
-	}
-
-	return nil
-}
-
-func getPoolConfig(cfg *daemon.Config, ipamType types.IPAMType) (*types.PoolConfig, error) {
+func getPoolConfig(cfg *daemon.Config) (*types.PoolConfig, error) {
 	poolConfig := &types.PoolConfig{
 		MaxPoolSize:               cfg.MaxPoolSize,
 		MinPoolSize:               cfg.MinPoolSize,
 		MaxENI:                    cfg.MaxENI,
 		MinENI:                    cfg.MinENI,
-		AccessID:                  cfg.AccessID,
-		AccessSecret:              cfg.AccessSecret,
 		EniCapRatio:               cfg.EniCapRatio,
 		EniCapShift:               cfg.EniCapShift,
 		SecurityGroups:            cfg.GetSecurityGroups(),
@@ -1540,7 +1507,7 @@ func getPoolConfig(cfg *daemon.Config, ipamType types.IPAMType) (*types.PoolConf
 	poolConfig.VPC = ins.VPCID
 	poolConfig.InstanceID = ins.InstanceID
 
-	if ipamType == types.IPAMTypeCRD {
+	if cfg.IPAMType == types.IPAMTypeCRD {
 		poolConfig.MaxPoolSize = 0
 		poolConfig.MinPoolSize = 0
 		poolConfig.MaxENI = 0

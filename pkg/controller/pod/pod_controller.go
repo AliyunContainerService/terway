@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
+
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
@@ -30,7 +32,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
-	"k8s.io/apimachinery/pkg/util/wait"
 
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
@@ -71,9 +72,7 @@ func init() {
 		}
 
 		return c.Watch(
-			&source.Kind{
-				Type: &corev1.Pod{},
-			},
+			source.Kind(mgr.GetCache(), &corev1.Pod{}),
 			&handler.EnqueueRequestForObject{},
 			&predicate.ResourceVersionChangedPredicate{},
 			&predicateForPodEvent{},
@@ -283,7 +282,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	}
 
 	// 2.4 wait cr created
-	_ = wait.PollWithContext(ctx, 500*time.Millisecond, 2*time.Second, func(ctx context.Context) (bool, error) {
+	_ = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
 		podENI := &v1beta1.PodENI{}
 		err := m.client.Get(ctx, k8stypes.NamespacedName{
 			Namespace: pod.Namespace,

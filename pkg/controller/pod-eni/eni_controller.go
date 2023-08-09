@@ -79,9 +79,7 @@ func init() {
 		}
 
 		return c.Watch(
-			&source.Kind{
-				Type: &v1beta1.PodENI{},
-			},
+			source.Kind(mgr.GetCache(), &v1beta1.PodENI{}),
 			&handler.EnqueueRequestForObject{},
 			&predicate.ResourceVersionChangedPredicate{},
 			&predicateForPodENIEvent{},

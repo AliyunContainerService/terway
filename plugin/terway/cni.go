@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"time"
 
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/plugin/datapath"
 	"github.com/AliyunContainerService/terway/plugin/driver/types"
@@ -211,7 +213,7 @@ func cmdCheck(args *skel.CmdArgs) error {
 }
 
 func getNetworkClient(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
-	conn, err := grpc.DialContext(ctx, defaultSocketPath, grpc.WithInsecure(), grpc.WithContextDialer(
+	conn, err := grpc.DialContext(ctx, defaultSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
 		func(ctx context.Context, s string) (net.Conn, error) {
 			unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
 			if err != nil {

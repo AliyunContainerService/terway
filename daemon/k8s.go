@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode"
 
+	ctrl "sigs.k8s.io/controller-runtime"
+
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
@@ -37,7 +39,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -47,9 +48,6 @@ const (
 	podNetworkTypeENIMultiIP = "ENIMultiIP"
 	dbPath                   = "/var/lib/cni/terway/pod.db"
 	dbName                   = "pods"
-
-	apiServerTimeout           = 70 * time.Second
-	apiServerReconnectThrottle = 2 * time.Minute
 
 	eventTypeNormal  = corev1.EventTypeNormal
 	eventTypeWarning = corev1.EventTypeWarning
@@ -92,9 +90,8 @@ type k8s struct {
 	nodeCidr                *types.IPNetSet
 	node                    *corev1.Node
 	svcCidr                 *types.IPNetSet
-	apiConn                 *connTracker
 	apiConnTime             time.Time
-	statefulWorkloadKindSet sets.String
+	statefulWorkloadKindSet sets.Set[string]
 	sync.Locker
 }
 
@@ -103,7 +100,6 @@ func (k *k8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, mes
 		ResourceVersion: "0",
 	})
 	if err != nil || node == nil {
-		k.reconnectOnTimeoutError(err)
 		return err
 	}
 
@@ -135,7 +131,6 @@ func (k *k8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, mes
 	patch := []byte(fmt.Sprintf(`{"status":{"conditions":%s}}`, raw))
 	_, err = k.client.CoreV1().Nodes().PatchStatus(context.TODO(), node.Name, patch)
 	if err != nil {
-		k.reconnectOnTimeoutError(err)
 		return err
 	}
 	return nil
@@ -154,7 +149,6 @@ func (k *k8s) patchNodeAnno(key, val string) error {
 		ResourceVersion: "0",
 	})
 	if err != nil || node == nil {
-		k.reconnectOnTimeoutError(err)
 		return err
 	}
 
@@ -170,7 +164,6 @@ func (k *k8s) patchNodeAnno(key, val string) error {
 	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, key, val)
 	_, err = k.client.CoreV1().Nodes().Patch(context.TODO(), k.nodeName, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
 	if err != nil {
-		k.reconnectOnTimeoutError(err)
 		return err
 	}
 	return nil
@@ -182,7 +175,7 @@ func (k *k8s) SetCustomStatefulWorkloadKinds(kinds []string) error {
 
 	// init kubernetes built-in stateful workload kind
 	if len(k.statefulWorkloadKindSet) == 0 {
-		k.statefulWorkloadKindSet = sets.NewString("statefulset")
+		k.statefulWorkloadKindSet = sets.New[string]("statefulset")
 	}
 
 	// uniform and merge all custom stateful workload kinds
@@ -213,7 +206,6 @@ func (k *k8s) PatchEipInfo(info *types.PodInfo) error {
 		ResourceVersion: "0",
 	})
 	if err != nil || pod == nil {
-		k.reconnectOnTimeoutError(err)
 		return err
 	}
 
@@ -226,7 +218,6 @@ func (k *k8s) PatchEipInfo(info *types.PodInfo) error {
 
 	_, err = k.client.CoreV1().Pods(info.Namespace).Patch(context.TODO(), info.Name, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
 	if err != nil {
-		k.reconnectOnTimeoutError(err)
 		return err
 	}
 	return nil
@@ -237,7 +228,6 @@ func (k *k8s) PatchPodIPInfo(info *types.PodInfo, ips string) error {
 		ResourceVersion: "0",
 	})
 	if err != nil || pod == nil {
-		k.reconnectOnTimeoutError(err)
 		return err
 	}
 	if pod.GetAnnotations()[types.PodIPs] == ips {
@@ -247,7 +237,6 @@ func (k *k8s) PatchPodIPInfo(info *types.PodInfo, ips string) error {
 
 	_, err = k.client.CoreV1().Pods(info.Namespace).Patch(context.TODO(), info.Name, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
 	if err != nil {
-		k.reconnectOnTimeoutError(err)
 		return err
 	}
 	return nil
@@ -318,26 +307,15 @@ func (k *k8s) WaitTrunkReady() (string, error) {
 }
 
 // newK8S return Kubernetes service by pod spec and daemon mode
-func newK8S(master, kubeconfig string, daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) {
+func newK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) {
+	restConfig := ctrl.GetConfigOrDie()
+	restConfig.QPS = globalConfig.KubeClientQPS
+	restConfig.Burst = globalConfig.KubeClientBurst
+	restConfig.UserAgent = version.UA
+	restConfig.AcceptContentTypes = strings.Join([]string{runtime.ContentTypeProtobuf, runtime.ContentTypeJSON}, ",")
+	restConfig.ContentType = runtime.ContentTypeProtobuf
 
-	k8sRestConfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-	k8sRestConfig.Timeout = apiServerTimeout
-	t := &connTracker{
-		dialer: &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second},
-		conns:  make(map[*closableConn]struct{}),
-	}
-	k8sRestConfig.Dial = t.DialContext
-	k8sRestConfig.AcceptContentTypes = strings.Join([]string{runtime.ContentTypeProtobuf, runtime.ContentTypeJSON}, ",")
-	k8sRestConfig.ContentType = runtime.ContentTypeProtobuf
-	k8sRestConfig.UserAgent = version.UA
-
-	k8sRestConfig.QPS = globalConfig.KubeClientQPS
-	k8sRestConfig.Burst = globalConfig.KubeClientBurst
-
-	client, err := kubernetes.NewForConfig(k8sRestConfig)
+	client, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -391,13 +369,12 @@ func newK8S(master, kubeconfig string, daemonMode string, globalConfig *daemon.C
 		nodeCidr:        nodeCidr,
 		daemonNamespace: daemonNamespace,
 		storage:         storage,
-		apiConn:         t,
 		broadcaster:     broadcaster,
 		recorder:        recorder,
 		apiConnTime:     time.Now(),
 		Locker:          &sync.RWMutex{},
 	}
-	podENICli, err := v1beta1.NewForConfig(k8sRestConfig)
+	podENICli, err := v1beta1.NewForConfig(restConfig)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error init pod ENI client")
 	}
@@ -550,7 +527,7 @@ func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 	panic(fmt.Errorf("unknown daemon mode %s", daemonMode))
 }
 
-func convertPod(daemonMode string, statefulWorkloadKindSet sets.String, pod *corev1.Pod) *types.PodInfo {
+func convertPod(daemonMode string, statefulWorkloadKindSet sets.Set[string], pod *corev1.Pod) *types.PodInfo {
 	pi := &types.PodInfo{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
@@ -755,7 +732,6 @@ func (k *k8s) GetPod(namespace, name string) (*types.PodInfo, error) {
 				return nil, err
 			}
 		}
-		k.reconnectOnTimeoutError(err)
 		return nil, err
 	}
 	podInfo := convertPod(k.mode, k.statefulWorkloadKindSet, pod)
@@ -780,7 +756,6 @@ func (k *k8s) GetLocalPods() ([]*types.PodInfo, error) {
 	}
 	list, err := k.client.CoreV1().Pods(corev1.NamespaceAll).List(context.TODO(), options)
 	if err != nil {
-		k.reconnectOnTimeoutError(err)
 		return nil, errors.Wrapf(err, "failed listting pods on %s from apiserver", k.nodeName)
 	}
 	var ret []*types.PodInfo
@@ -857,19 +832,6 @@ func (k *k8s) clean() error {
 	return nil
 }
 
-func (k *k8s) reconnectOnTimeoutError(err error) {
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "timeout") {
-		log.Warnf("apiserver connection timeout: [%v], last establish: [%v], reconnecting...", err, k.apiConnTime)
-		k.Lock()
-		// avoid connection boom
-		if k.apiConnTime.Add(apiServerReconnectThrottle).Before(time.Now()) {
-			k.apiConn.closeAllConns()
-			k.apiConnTime = time.Now()
-		}
-		k.Unlock()
-	}
-}
-
 func (k *k8s) RecordNodeEvent(eventType, reason, message string) {
 	ref := &corev1.ObjectReference{
 		Kind:      "Node",
@@ -887,7 +849,6 @@ func (k *k8s) RecordPodEvent(podName, podNamespace, eventType, reason, message s
 	})
 
 	if err != nil {
-		k.reconnectOnTimeoutError(err)
 		return err
 	}
 
@@ -930,63 +891,4 @@ func (k *k8s) GetDynamicConfigWithName(name string) (string, error) {
 	}
 
 	return "", errors.New("configmap not included eni_conf")
-}
-
-// connTracker is a dialer that tracks all open connections it creates.
-type connTracker struct {
-	dialer *net.Dialer
-
-	mu    sync.Mutex
-	conns map[*closableConn]struct{}
-}
-
-// closeAllConns forcibly closes all tracked connections.
-func (c *connTracker) closeAllConns() {
-	c.mu.Lock()
-	conns := c.conns
-	c.conns = make(map[*closableConn]struct{})
-	c.mu.Unlock()
-
-	for conn := range conns {
-		conn.Close()
-	}
-}
-
-func (c *connTracker) Dial(network, address string) (net.Conn, error) {
-	return c.DialContext(context.Background(), network, address)
-}
-
-func (c *connTracker) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	conn, err := c.dialer.DialContext(ctx, network, address)
-	if err != nil {
-		return nil, err
-	}
-
-	closable := &closableConn{Conn: conn}
-
-	// Start tracking the connection
-	c.mu.Lock()
-	c.conns[closable] = struct{}{}
-	c.mu.Unlock()
-
-	// When the connection is closed, remove it from the map. This will
-	// be no-op if the connection isn't in the map, e.g. if closeAllConns()
-	// is called.
-	closable.onClose = func() {
-		c.mu.Lock()
-		delete(c.conns, closable)
-		c.mu.Unlock()
-	}
-
-	return closable, nil
-}
-
-type closableConn struct {
-	onClose func()
-	net.Conn
-}
-
-func (c *closableConn) Close() error {
-	go c.onClose()
-	return c.Conn.Close()
 }
