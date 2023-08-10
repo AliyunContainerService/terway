@@ -263,15 +263,10 @@ spec:
           livenessProbe:
             tcpSocket:
               port: 9099
-              host: localhost
+              host: 127.0.0.1
             periodSeconds: 10
             initialDelaySeconds: 10
             failureThreshold: 6
-          readinessProbe:
-            tcpSocket:
-              port: 9099
-              host: localhost
-            periodSeconds: 10
           volumeMounts:
             - mountPath: /lib/modules
               name: lib-modules
