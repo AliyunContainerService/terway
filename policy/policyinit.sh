@@ -123,8 +123,10 @@ fi
       cleanup_felix
       # for health check
       if [ "$FELIX_HEALTHPORT" != "" ]; then
-          exec socat PIPE TCP-LISTEN:"$FELIX_HEALTHPORT",fork,reuseaddr
+          # shellcheck disable=SC2016
+          exec socat TCP-LISTEN:"$FELIX_HEALTHPORT",bind=127.0.0.1,fork,reuseaddr system:'sleep 2;kill -9 $SOCAT_PID 2>/dev/null'
       else
-          exec socat PIPE TCP-LISTEN:9099,fork,reuseaddr
+          # shellcheck disable=SC2016
+          exec socat TCP-LISTEN:9099,bind=127.0.0.1,fork,reuseaddr system:'sleep 2;kill -9 $SOCAT_PID 2>/dev/null'
       fi
   fi
