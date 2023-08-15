@@ -95,6 +95,7 @@ func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath,
 	}
 
 	go func() {
+		serviceLog.Infof("start serving on %s", socketFilePath)
 		err = grpcServer.Serve(l)
 		if err != nil {
 			log.Errorf("error start grpc server: %v", err)

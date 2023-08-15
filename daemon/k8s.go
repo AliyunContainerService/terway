@@ -63,8 +63,8 @@ type Kubernetes interface {
 	GetNodeCidr() *types.IPNetSet
 	SetNodeAllocatablePod(count int) error
 	PatchEipInfo(info *types.PodInfo) error
-	PatchTrunkInfo(trunkEni string) error
-	PatchAvailableIPs(ipType types.PodIPTypeIPs, count int) error
+
+	PatchNodeAnnotations(anno map[string]string) error
 	PatchPodIPInfo(info *types.PodInfo, ips string) error
 	PatchNodeIPResCondition(status corev1.ConditionStatus, reason, message string) error
 	WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error)
@@ -73,9 +73,10 @@ type Kubernetes interface {
 	RecordPodEvent(podName, podNamespace, eventType, reason, message string) error
 	GetNodeDynamicConfigLabel() string
 	GetDynamicConfigWithName(name string) (string, error)
-	SetSvcCidr(svcCidr *types.IPNetSet) error
 	SetCustomStatefulWorkloadKinds(kinds []string) error
 	WaitTrunkReady() (string, error)
+
+	GetTrunkID() string
 }
 
 type k8s struct {
@@ -136,15 +137,11 @@ func (k *k8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, mes
 	return nil
 }
 
-func (k *k8s) PatchAvailableIPs(ipType types.PodIPTypeIPs, count int) error {
-	return k.patchNodeAnno(string(ipType), strconv.Itoa(count))
-}
+func (k *k8s) PatchNodeAnnotations(anno map[string]string) error {
+	if len(anno) == 0 {
+		return nil
+	}
 
-func (k *k8s) PatchTrunkInfo(trunkEni string) error {
-	return k.patchNodeAnno(types.TrunkOn, trunkEni)
-}
-
-func (k *k8s) patchNodeAnno(key, val string) error {
 	node, err := k.client.CoreV1().Nodes().Get(context.TODO(), k.nodeName, metav1.GetOptions{
 		ResourceVersion: "0",
 	})
@@ -152,21 +149,31 @@ func (k *k8s) patchNodeAnno(key, val string) error {
 		return err
 	}
 
-	if node.GetAnnotations() != nil {
-		if preVal, ok := node.GetAnnotations()[key]; ok {
-			if preVal == val {
-				return nil
-			}
+	satisfy := true
+	for key, val := range anno {
+		vv, ok := node.Annotations[key]
+		if !ok {
+			satisfy = false
+			break
+		}
+		if vv != val {
+			satisfy = false
+			break
 		}
 	}
-	node.Annotations[key] = val
 
-	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, key, val)
-	_, err = k.client.CoreV1().Nodes().Patch(context.TODO(), k.nodeName, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
+	if satisfy {
+		return nil
+	}
+
+	out, err := json.Marshal(anno)
 	if err != nil {
 		return err
 	}
-	return nil
+
+	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":%s}}`, string(out))
+	_, err = k.client.CoreV1().Nodes().Patch(context.TODO(), k.nodeName, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
+	return err
 }
 
 func (k *k8s) SetCustomStatefulWorkloadKinds(kinds []string) error {
@@ -185,7 +192,7 @@ func (k *k8s) SetCustomStatefulWorkloadKinds(kinds []string) error {
 	return nil
 }
 
-func (k *k8s) SetSvcCidr(svcCidr *types.IPNetSet) error {
+func (k *k8s) setSvcCIDR(svcCidr *types.IPNetSet) error {
 	k.Lock()
 	defer k.Unlock()
 
@@ -306,6 +313,10 @@ func (k *k8s) WaitTrunkReady() (string, error) {
 	return id, err
 }
 
+func (k *k8s) GetTrunkID() string {
+	return k.node.Annotations[types.TrunkOn]
+}
+
 // newK8S return Kubernetes service by pod spec and daemon mode
 func newK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) {
 	restConfig := ctrl.GetConfigOrDie()
@@ -373,6 +384,17 @@ func newK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 		recorder:        recorder,
 		apiConnTime:     time.Now(),
 		Locker:          &sync.RWMutex{},
+	}
+
+	svcCIDR := &types.IPNetSet{}
+	cidrs := strings.Split(globalConfig.ServiceCIDR, ",")
+
+	for _, cidr := range cidrs {
+		svcCIDR.SetIPNet(cidr)
+	}
+	err = k8sObj.setSvcCIDR(svcCIDR)
+	if err != nil {
+		return nil, err
 	}
 	podENICli, err := v1beta1.NewForConfig(restConfig)
 	if err != nil {
