@@ -30,7 +30,7 @@ require (
 	go.uber.org/atomic v1.9.0
 	golang.org/x/net v0.10.0
 	golang.org/x/sync v0.2.0
-	golang.org/x/sys v0.8.0
+	golang.org/x/sys v0.10.0
 	gomodules.xyz/jsonpatch/v2 v2.3.0
 	google.golang.org/grpc v1.51.0
 	google.golang.org/protobuf v1.30.0
@@ -132,4 +132,4 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 )
 
-replace github.com/vishvananda/netlink => github.com/BSWANG/netlink v1.0.1-0.20220803105814-1f63f9d61229
+replace github.com/vishvananda/netlink => github.com/BSWANG/netlink v1.0.1-0.20230816083222-7cc38cad63d9
