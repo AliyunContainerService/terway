@@ -12,11 +12,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
+	vswpool "github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/pkg/logger"
@@ -1335,7 +1337,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	if ipFamily.IPv6 {
 		if !limit.SupportIPv6() {
 			ipFamily.IPv6 = false
-			serviceLog.Warnf("instance %s is not support ipv6", aliyun.GetInstanceMeta().InstanceType)
+			serviceLog.Warnf("instance %s is not support ipv6", config.InstanceType)
 		} else if daemonMode == daemonModeENIMultiIP && !limit.SupportMultiIPIPv6() {
 			ipFamily.IPv6 = false
 			serviceLog.Warnf("instance %s is not support ipv6", config.InstanceType)
@@ -1343,22 +1345,6 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	}
 
 	ecs := aliyun.NewAliyunImpl(aliyunClient, config.EnableENITrunking && !config.WaitTrunkENI, ipFamily, config.ENITagFilter)
-
-	netSrv.enableTrunk = config.EnableENITrunking
-
-	ipNetSet := &types.IPNetSet{}
-	if config.ServiceCIDR != "" {
-		cidrs := strings.Split(config.ServiceCIDR, ",")
-
-		for _, cidr := range cidrs {
-			ipNetSet.SetIPNet(cidr)
-		}
-	}
-
-	err = netSrv.k8s.SetSvcCidr(ipNetSet)
-	if err != nil {
-		return nil, errors.Wrapf(err, "error set k8s svcCidr")
-	}
 
 	netSrv.resourceDB, err = storage.NewDiskStorage(
 		resDBName, utils.NormalizePath(resDBPath), json.Marshal, func(bytes []byte) (interface{}, error) {
@@ -1373,12 +1359,107 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		return nil, errors.Wrapf(err, "error init resource manager storage")
 	}
 
+	nodeAnnotations := map[string]string{}
+
 	// get pool config
-	poolConfig, err := getPoolConfig(config)
+	poolConfig, err := getPoolConfig(config, daemonMode, limit)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get pool config")
 	}
 	serviceLog.Infof("init pool config: %+v", poolConfig)
+
+	vswPool, err := vswpool.NewSwitchPool(100, "10m")
+	if err != nil {
+		return nil, fmt.Errorf("error init vsw pool, %w", err)
+	}
+
+	// init trunk
+	if config.EnableENITrunking {
+		preferTrunkID := netSrv.k8s.GetTrunkID()
+		if preferTrunkID == "" && config.WaitTrunkENI {
+			preferTrunkID, err = netSrv.k8s.WaitTrunkReady()
+			if err != nil {
+				return nil, fmt.Errorf("error wait trunk ready, %w", err)
+			}
+		}
+
+		if !config.WaitTrunkENI {
+			enis, err := ecs.GetAttachedENIs(ctx, false, preferTrunkID)
+			if err != nil {
+				return nil, fmt.Errorf("error get attached eni, %w", err)
+			}
+			found := false
+			for _, eni := range enis {
+				if eni.Trunk && eni.ID == preferTrunkID {
+					found = true
+
+					poolConfig.TrunkENIID = preferTrunkID
+					netSrv.enableTrunk = true
+
+					nodeAnnotations[types.TrunkOn] = preferTrunkID
+					nodeAnnotations[string(types.MemberENIIPTypeIPs)] = strconv.Itoa(poolConfig.MaxMemberENI)
+					break
+				}
+			}
+			if !found {
+				if poolConfig.MaxENI > len(enis) {
+					vsw, err := vswPool.GetOne(ctx, ecs, poolConfig.ZoneID, poolConfig.VSwitchOptions, &vswpool.SelectOptions{
+						VSwitchSelectPolicy: vswpool.VSwitchSelectionPolicyMost,
+					})
+					if err != nil {
+						return nil, fmt.Errorf("error get vsw, %w", err)
+					}
+
+					eni, err := ecs.AllocateENI(ctx, vsw.ID, poolConfig.SecurityGroupIDs, poolConfig.InstanceID, true, 1, poolConfig.ENITags)
+					if err != nil {
+						return nil, fmt.Errorf("error allocate eni, %w", err)
+					}
+
+					poolConfig.TrunkENIID = eni.ID
+					netSrv.enableTrunk = true
+
+					nodeAnnotations[types.TrunkOn] = eni.ID
+					nodeAnnotations[string(types.MemberENIIPTypeIPs)] = strconv.Itoa(poolConfig.MaxMemberENI)
+				} else {
+					serviceLog.Warnf("no trunk eni found, fallback to non-trunk mode")
+
+					config.EnableENITrunking = false
+					config.DisableDevicePlugin = true
+				}
+			}
+		} else {
+			// WaitTrunkENI enabled, we believe what we got.
+			poolConfig.TrunkENIID = preferTrunkID
+			netSrv.enableTrunk = true
+
+			nodeAnnotations[types.TrunkOn] = preferTrunkID
+			nodeAnnotations[string(types.MemberENIIPTypeIPs)] = strconv.Itoa(poolConfig.MaxMemberENI)
+		}
+	}
+
+	if daemonMode != daemonModeVPC {
+		nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity)
+	}
+
+	if !(daemonMode == daemonModeENIMultiIP && !config.EnableENITrunking) {
+		if !config.DisableDevicePlugin {
+			res := deviceplugin.ENITypeENI
+			capacity := poolConfig.MaxENI
+			if config.EnableENITrunking {
+				res = deviceplugin.ENITypeMember
+				capacity = poolConfig.MaxMemberENI
+			}
+
+			dp := deviceplugin.NewENIDevicePlugin(capacity, res)
+			go dp.Serve()
+		}
+	}
+
+	// ensure node annotations
+	err = netSrv.k8s.PatchNodeAnnotations(nodeAnnotations)
+	if err != nil {
+		return nil, fmt.Errorf("error patch node annotations, %w", err)
+	}
 
 	localResource := make(map[string]map[string]resourceManagerInitItem)
 	resObjList, err := netSrv.resourceDB.List()
@@ -1454,16 +1535,18 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		panic("unsupported daemon mode" + daemonMode)
 	}
 
-	//start gc loop
-	netSrv.startGarbageCollectionLoop()
-	period := poolCheckPeriod
-	periodCfg := os.Getenv("POOL_CHECK_PERIOD_SECONDS")
-	periodSeconds, err := strconv.Atoi(periodCfg)
-	if err == nil {
-		period = time.Duration(periodSeconds) * time.Second
-	}
+	if config.IPAMType != types.IPAMTypeCRD {
+		//start gc loop
+		netSrv.startGarbageCollectionLoop()
+		period := poolCheckPeriod
+		periodCfg := os.Getenv("POOL_CHECK_PERIOD_SECONDS")
+		periodSeconds, err := strconv.Atoi(periodCfg)
+		if err == nil {
+			period = time.Duration(periodSeconds) * time.Second
+		}
 
-	go wait.JitterUntil(netSrv.startPeriodCheck, period, 1, true, wait.NeverStop)
+		go wait.JitterUntil(netSrv.startPeriodCheck, period, 1, true, wait.NeverStop)
+	}
 
 	// register for tracing
 	_ = tracing.Register(tracing.ResourceTypeNetworkService, "default", netSrv)
@@ -1471,49 +1554,6 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	tracing.RegisterEventRecorder(netSrv.k8s.RecordNodeEvent, netSrv.k8s.RecordPodEvent)
 
 	return netSrv, nil
-}
-
-func getPoolConfig(cfg *daemon.Config) (*types.PoolConfig, error) {
-	poolConfig := &types.PoolConfig{
-		MaxPoolSize:               cfg.MaxPoolSize,
-		MinPoolSize:               cfg.MinPoolSize,
-		MaxENI:                    cfg.MaxENI,
-		MinENI:                    cfg.MinENI,
-		EniCapRatio:               cfg.EniCapRatio,
-		EniCapShift:               cfg.EniCapShift,
-		SecurityGroups:            cfg.GetSecurityGroups(),
-		VSwitchSelectionPolicy:    cfg.VSwitchSelectionPolicy,
-		EnableENITrunking:         cfg.EnableENITrunking,
-		ENICapPolicy:              cfg.ENICapPolicy,
-		DisableDevicePlugin:       cfg.DisableDevicePlugin,
-		WaitTrunkENI:              cfg.WaitTrunkENI,
-		DisableSecurityGroupCheck: cfg.DisableSecurityGroupCheck,
-	}
-	if len(poolConfig.SecurityGroups) > 5 {
-		return nil, fmt.Errorf("security groups should not be more than 5, current %d", len(poolConfig.SecurityGroups))
-	}
-	ins := aliyun.GetInstanceMeta()
-	zone := ins.ZoneID
-	if cfg.VSwitches != nil {
-		zoneVswitchs, ok := cfg.VSwitches[zone]
-		if ok && len(zoneVswitchs) > 0 {
-			poolConfig.VSwitch = cfg.VSwitches[zone]
-		}
-	}
-	if len(poolConfig.VSwitch) == 0 {
-		poolConfig.VSwitch = []string{ins.VSwitchID}
-	}
-	poolConfig.ENITags = cfg.ENITags
-	poolConfig.VPC = ins.VPCID
-	poolConfig.InstanceID = ins.InstanceID
-
-	if cfg.IPAMType == types.IPAMTypeCRD {
-		poolConfig.MaxPoolSize = 0
-		poolConfig.MinPoolSize = 0
-		poolConfig.MaxENI = 0
-		poolConfig.MinENI = 0
-	}
-	return poolConfig, nil
 }
 
 func parseExtraRoute(routes []podENITypes.Route) []*rpc.Route {

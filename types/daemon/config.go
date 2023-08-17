@@ -109,6 +109,11 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("unsupported ipStack %s in configMap", c.IPStack)
 	}
+
+	if len(c.SecurityGroups) > 5 {
+		return fmt.Errorf("security groups should not be more than 5, current %d", len(c.SecurityGroups))
+	}
+
 	return nil
 }
 

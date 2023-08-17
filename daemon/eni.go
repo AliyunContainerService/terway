@@ -13,8 +13,6 @@ import (
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 
-	"github.com/AliyunContainerService/terway/deviceplugin"
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/ipam"
 	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/pool"
@@ -56,57 +54,14 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 
 	_ = tracing.Register(tracing.ResourceTypeFactory, factoryNameENI, factory)
 
-	var capacity, memberLimit int
-
-	if !poolConfig.DisableDevicePlugin {
-		limit, err := aliyun.GetLimit(ecs, aliyun.GetInstanceMeta().InstanceType)
-		if err != nil {
-			return nil, fmt.Errorf("error get max eni for eni factory, %w", err)
-		}
-		capacity = limit.Adapters
-		capacity = int(float64(capacity)*poolConfig.EniCapRatio) + poolConfig.EniCapShift - 1
-
-		if poolConfig.MaxENI != 0 && poolConfig.MaxENI < capacity {
-			capacity = poolConfig.MaxENI
-		}
-
-		if poolConfig.MaxPoolSize > capacity {
-			poolConfig.MaxPoolSize = capacity
-		}
-
-		if poolConfig.MinENI != 0 {
-			poolConfig.MinPoolSize = poolConfig.MinENI
-		}
-
-		memberLimit = limit.MemberAdapterLimit
-		if poolConfig.ENICapPolicy == types.ENICapPolicyPreferTrunk {
-			memberLimit = limit.MaxMemberAdapterLimit
-		}
-	} else {
-		// NB(l1b0k): adapt DisableDevicePlugin func, will refactor latter
-		capacity = 1
-		memberLimit = 0
-		poolConfig.MaxPoolSize = 1
-		poolConfig.MinPoolSize = 0
-	}
-
 	var trunkENI *types.ENI
-
-	if poolConfig.WaitTrunkENI {
-		logger.DefaultLogger.Infof("waitting trunk eni ready")
-		factory.trunkOnEni, err = k8s.WaitTrunkReady()
-		if err != nil {
-			return nil, err
-		}
-		logger.DefaultLogger.Infof("trunk eni found %s", factory.trunkOnEni)
-	}
 
 	poolCfg := pool.Config{
 		Name:               poolNameENI,
 		Type:               typeNameENI,
 		MaxIdle:            poolConfig.MaxPoolSize,
 		MinIdle:            poolConfig.MinPoolSize,
-		Capacity:           capacity,
+		Capacity:           poolConfig.Capacity,
 		Factory:            factory,
 		IPConditionHandler: k8s.PatchNodeIPResCondition,
 		Initializer: func(holder pool.ResourceHolder) error {
@@ -119,28 +74,20 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 				return fmt.Errorf("error get attach ENI on pool init, %w", err)
 			}
 
-			if factory.enableTrunk && memberLimit > 0 {
-				logger.DefaultLogger.Infof("lookup trunk eni")
+			if factory.trunkOnEni != "" {
+				found := false
 				for _, eni := range enis {
-					if eni.Trunk {
-						logger.DefaultLogger.Infof("find trunk eni %s", eni.ID)
-						factory.trunkOnEni = eni.ID
-					}
-					if eni.ID == factory.trunkOnEni {
+					if eni.Trunk && factory.trunkOnEni == eni.ID {
+						found = true
 						trunkENI = eni
-						eni.Trunk = true
+						break
 					}
 				}
-				if factory.trunkOnEni == "" && len(enis) < capacity-1 {
-					trunkENIRes, err := factory.CreateWithIPCount(1, true)
-					if err != nil {
-						return errors.Wrapf(err, "error init trunk eni")
-					}
-					trunkENI, _ = trunkENIRes[0].(*types.ENI)
-					factory.trunkOnEni = trunkENI.ID
-					enis = append(enis, trunkENI)
+				if !found {
+					return fmt.Errorf("trunk eni %s not found", factory.trunkOnEni)
 				}
 			}
+
 			for _, e := range enis {
 				if ipFamily.IPv6 {
 					_, ipv6, err := ecs.GetENIIPs(ctx, e.MAC)
@@ -168,37 +115,6 @@ func newENIResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, allocated
 		ecs:      ecs,
 		trunkENI: trunkENI,
 	}
-
-	if poolConfig.DisableDevicePlugin {
-		return mgr, nil
-	}
-	//init deviceplugin for ENI
-	realCap := 0
-	eniType := deviceplugin.ENITypeENI
-	if !poolConfig.EnableENITrunking {
-		realCap = capacity
-	}
-
-	// report only trunk is created
-	if poolConfig.EnableENITrunking && factory.trunkOnEni != "" {
-		eniType = deviceplugin.ENITypeMember
-		realCap = memberLimit
-		err = k8s.PatchTrunkInfo(factory.trunkOnEni)
-		if err != nil {
-			return nil, errors.Wrapf(err, "error patch trunk info on node")
-		}
-	}
-
-	if capacity > 0 {
-		err = k8s.PatchAvailableIPs(types.NormalIPTypeIPs, capacity)
-		if err != nil {
-			return nil, errors.Wrapf(err, "error patch available ips")
-		}
-	}
-
-	logger.DefaultLogger.Infof("set deviceplugin cap %d", realCap)
-	dp := deviceplugin.NewENIDevicePlugin(realCap, eniType)
-	go dp.Serve()
 
 	return mgr, nil
 }
@@ -247,9 +163,9 @@ type eniFactory struct {
 	name                      string
 	enableTrunk               bool
 	trunkOnEni                string
-	switches                  []string
+	vSwitchOptions            []string
 	eniTags                   map[string]string
-	securityGroups            []string
+	securityGroupIDs          []string
 	instanceID                string
 	ecs                       ipam.API
 	vswitchCnt                []vswitch
@@ -260,19 +176,19 @@ type eniFactory struct {
 }
 
 func newENIFactory(poolConfig *types.PoolConfig, ecs ipam.API) (*eniFactory, error) {
-	if len(poolConfig.SecurityGroups) == 0 {
+	if len(poolConfig.SecurityGroupIDs) == 0 {
 		securityGroups, err := ecs.GetAttachedSecurityGroups(context.Background(), poolConfig.InstanceID)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error get security group on factory init")
 		}
-		poolConfig.SecurityGroups = securityGroups
+		poolConfig.SecurityGroupIDs = securityGroups
 	}
 	return &eniFactory{
 		name:                      factoryNameENI,
-		switches:                  poolConfig.VSwitch,
+		vSwitchOptions:            poolConfig.VSwitchOptions,
 		eniTags:                   poolConfig.ENITags,
-		securityGroups:            poolConfig.SecurityGroups,
-		enableTrunk:               poolConfig.EnableENITrunking,
+		securityGroupIDs:          poolConfig.SecurityGroupIDs,
+		enableTrunk:               poolConfig.TrunkENIID != "",
 		instanceID:                poolConfig.InstanceID,
 		ecs:                       ecs,
 		vswitchCnt:                make([]vswitch, 0),
@@ -285,18 +201,18 @@ func (f *eniFactory) GetVSwitches() ([]vswitch, error) {
 
 	var vSwitches []vswitch
 
-	vswCnt := len(f.switches)
+	vswCnt := len(f.vSwitchOptions)
 	// If there is ONLY ONE vswitch, then there is no need for ordering per switches' available IP counts,
 	// return the slice with only this vswitch.
 	if vswCnt == 1 {
 		return []vswitch{{
-			id:      f.switches[0],
+			id:      f.vSwitchOptions[0],
 			ipCount: 0,
 		}}, nil
 	}
 
 	if f.vswitchSelectionPolicy == types.VSwitchSelectionPolicyRandom {
-		vSwitches = lo.Map(f.switches, func(item string, index int) vswitch {
+		vSwitches = lo.Map(f.vSwitchOptions, func(item string, index int) vswitch {
 			return vswitch{
 				id:      item,
 				ipCount: 0,
@@ -320,7 +236,7 @@ func (f *eniFactory) GetVSwitches() ([]vswitch, error) {
 		if (len(f.vswitchCnt) == 0 && f.tsExpireAt.IsZero()) || start.After(f.tsExpireAt) {
 			f.vswitchCnt = make([]vswitch, 0)
 			// Loop vsw slice to get each vsw's available IP count.
-			for _, vswID := range f.switches {
+			for _, vswID := range f.vSwitchOptions {
 				var vsw *vpc.VSwitch
 				vsw, err = f.ecs.DescribeVSwitchByID(context.Background(), vswID)
 				if err != nil {
@@ -347,7 +263,7 @@ func (f *eniFactory) GetVSwitches() ([]vswitch, error) {
 				return f.vswitchCnt[i].ipCount > f.vswitchCnt[j].ipCount
 			})
 		} else {
-			vSwitches = lo.Map(f.switches, func(item string, index int) vswitch {
+			vSwitches = lo.Map(f.vSwitchOptions, func(item string, index int) vswitch {
 				return vswitch{
 					id:      item,
 					ipCount: 0,
@@ -373,7 +289,7 @@ func (f *eniFactory) CreateWithIPCount(count int, trunk bool) ([]types.NetworkRe
 	for k, v := range f.eniTags {
 		tags[k] = v
 	}
-	eni, err := f.ecs.AllocateENI(context.Background(), vSwitches[0].id, f.securityGroups, f.instanceID, trunk, count, tags)
+	eni, err := f.ecs.AllocateENI(context.Background(), vSwitches[0].id, f.securityGroupIDs, f.instanceID, trunk, count, tags)
 	if err != nil {
 		if strings.Contains(err.Error(), apiErr.InvalidVSwitchIDIPNotEnough) {
 			reportIPExhaustive := false
@@ -395,7 +311,7 @@ func (f *eniFactory) CreateWithIPCount(count int, trunk bool) ([]types.NetworkRe
 		} else if strings.Contains(err.Error(), apiErr.ErrSecurityGroupInstanceLimitExceed) {
 			return nil, &types.IPInsufficientError{
 				Err:    err,
-				Reason: fmt.Sprintf("security group %v exceeded max ip limit", f.securityGroups)}
+				Reason: fmt.Sprintf("security group %v exceeded max ip limit", f.securityGroupIDs)}
 		}
 		return nil, err
 	}
@@ -413,7 +329,7 @@ func (f *eniFactory) Dispose(resource types.NetworkResource) error {
 func (f *eniFactory) Config() []tracing.MapKeyValueEntry {
 	config := []tracing.MapKeyValueEntry{
 		{Key: tracingKeyName, Value: f.name},
-		{Key: tracingKeyVSwitches, Value: strings.Join(f.switches, " ")},
+		{Key: tracingKeyVSwitches, Value: strings.Join(f.vSwitchOptions, " ")},
 		{Key: tracingKeyVSwitchSelectionPolicy, Value: f.vswitchSelectionPolicy},
 	}
 
@@ -476,7 +392,7 @@ func (f *eniFactory) Reconcile() {
 	if f.disableSecurityGroupCheck {
 		return
 	}
-	err := f.ecs.CheckEniSecurityGroup(context.Background(), f.securityGroups)
+	err := f.ecs.CheckEniSecurityGroup(context.Background(), f.securityGroupIDs)
 	if err != nil {
 		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, "ResourceInvalid", fmt.Sprintf("eni has misconfiged security group. %s", err.Error()))
 	}

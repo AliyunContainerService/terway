@@ -20,11 +20,13 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sort"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"k8s.io/apimachinery/pkg/util/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 )
 
 // Switch hole all switch info from both terway config and podNetworking
@@ -36,6 +38,12 @@ type Switch struct {
 	IPv4CIDR         string
 	IPv6CIDR         string
 }
+
+type ByAvailableIP []Switch
+
+func (a ByAvailableIP) Len() int           { return len(a) }
+func (a ByAvailableIP) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByAvailableIP) Less(i, j int) bool { return a[i].AvailableIPCount > a[j].AvailableIPCount }
 
 // SwitchPool contain all vSwitches
 type SwitchPool struct {
@@ -60,9 +68,37 @@ func (s *SwitchPool) GetOne(ctx context.Context, client client.VSwitch, zone str
 	selectOptions := &SelectOptions{}
 	selectOptions.ApplyOptions(opts)
 
-	if selectOptions.VSwitchSelectPolicy == VSwitchSelectionPolicyRandom {
-		rand.Seed(time.Now().UnixNano())
+	switch selectOptions.VSwitchSelectPolicy {
+	case VSwitchSelectionPolicyRandom:
 		rand.Shuffle(len(ids), func(i, j int) { ids[i], ids[j] = ids[j], ids[i] })
+	case VSwitchSelectionPolicyMost:
+		// lookup all vsw in cache and get one matched
+		// try sort the vsw
+
+		var byAvailableIP ByAvailableIP
+		for _, id := range ids {
+			vsw, err := s.GetByID(ctx, client, id)
+			if err != nil {
+				log.FromContext(ctx).Error(err, "get vSwitch", "id", id)
+				continue
+			}
+
+			if vsw.Zone != zone {
+				continue
+			}
+			if vsw.AvailableIPCount == 0 {
+				continue
+			}
+			byAvailableIP = append(byAvailableIP, *vsw)
+		}
+
+		sort.Sort(byAvailableIP)
+		// keep the below logic untouched
+		newOrder := make([]string, 0, len(byAvailableIP))
+		for _, vsw := range byAvailableIP {
+			newOrder = append(newOrder, vsw.ID)
+		}
+		ids = newOrder
 	}
 
 	// lookup all vsw in cache and get one matched
@@ -117,6 +153,16 @@ func (s *SwitchPool) GetByID(ctx context.Context, client client.VSwitch, id stri
 	return sw, nil
 }
 
+func (s *SwitchPool) Block(id string) {
+	v, ok := s.cache.Get(id)
+	if !ok {
+		return
+	}
+	vsw := *(v.(*Switch))
+	vsw.AvailableIPCount = 0
+	s.cache.Add(id, &vsw, s.ttl)
+}
+
 // Add Switch to cache. Test purpose.
 func (s *SwitchPool) Add(sw *Switch) {
 	s.cache.Add(sw.ID, sw, s.ttl)
@@ -133,6 +179,7 @@ type SelectionPolicy string
 const (
 	VSwitchSelectionPolicyOrdered SelectionPolicy = "ordered"
 	VSwitchSelectionPolicyRandom  SelectionPolicy = "random"
+	VSwitchSelectionPolicyMost    SelectionPolicy = "most"
 )
 
 type SelectOption interface {
