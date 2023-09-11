@@ -3,12 +3,13 @@ package utils
 import (
 	"time"
 
-	networkingclientset "github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	networkingclientset "github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned"
 )
 
 // K8sClient k8s client set

@@ -32,6 +32,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
+	"github.com/AliyunContainerService/terway/types/daemon"
 
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
@@ -55,8 +56,10 @@ const defaultInterface = "eth0"
 
 func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+		crdMode := controlplane.GetConfig().IPAMType == types.IPAMTypeCRD
+
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
-			Reconciler:              NewReconcilePod(mgr, ctrlCtx.DelegateClient, ctrlCtx.VSwitchPool),
+			Reconciler:              NewReconcilePod(mgr, ctrlCtx.DelegateClient, ctrlCtx.VSwitchPool, crdMode),
 			MaxConcurrentReconciles: controlplane.GetConfig().PodMaxConcurrent,
 		})
 		if err != nil {
@@ -75,7 +78,7 @@ func init() {
 			source.Kind(mgr.GetCache(), &corev1.Pod{}),
 			&handler.EnqueueRequestForObject{},
 			&predicate.ResourceVersionChangedPredicate{},
-			&predicateForPodEvent{},
+			&predicateForPodEvent{crdMode: crdMode},
 		)
 	}, true)
 }
@@ -93,6 +96,8 @@ type ReconcilePod struct {
 
 	//record event recorder
 	record record.EventRecorder
+
+	crdMode bool
 }
 
 type Wrapper struct {
@@ -116,13 +121,14 @@ func (w *Wrapper) NeedLeaderElection() bool {
 }
 
 // NewReconcilePod watch pod lifecycle events and sync to podENI resource
-func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool) *ReconcilePod {
+func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool, crdMode bool) *ReconcilePod {
 	r := &ReconcilePod{
-		client: mgr.GetClient(),
-		scheme: mgr.GetScheme(),
-		record: mgr.GetEventRecorderFor("TerwayPodController"),
-		aliyun: aliyunClient,
-		swPool: swPool,
+		client:  mgr.GetClient(),
+		scheme:  mgr.GetScheme(),
+		record:  mgr.GetEventRecorderFor("TerwayPodController"),
+		aliyun:  aliyunClient,
+		swPool:  swPool,
+		crdMode: crdMode,
 	}
 	return r
 }
@@ -400,6 +406,33 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 
 		podNetwokingName := pod.Annotations[types.PodNetworking]
 		if podNetwokingName == "" {
+			if m.crdMode {
+				// fall back policy , if webhook not enabled
+
+				cfg, err := daemon.ConfigFromConfigMap(ctx, m.client, "")
+				if err != nil {
+					return nil, nil, nil, err
+				}
+
+				vsw, err := m.swPool.GetOne(ctx, m.aliyun, nodeInfo.ZoneID, cfg.GetVSwitchIDs())
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.ZoneID, err)
+				}
+				allocs = append(allocs, &v1beta1.Allocation{
+					ENI: v1beta1.ENI{
+						SecurityGroupIDs: cfg.GetSecurityGroups(),
+						VSwitchID:        vsw.ID,
+					},
+					IPv4CIDR: vsw.IPv4CIDR,
+					IPv6CIDR: vsw.IPv6CIDR,
+				})
+				allocType, err = controlplane.ParsePodIPTypeFromAnnotation(pod)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+
+				return nodeInfo, allocType, allocs, nil
+			}
 			return nil, nil, nil, fmt.Errorf("podNetworking is empty")
 		}
 		var podNetworking v1beta1.PodNetworking

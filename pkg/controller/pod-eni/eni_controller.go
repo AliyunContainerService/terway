@@ -23,15 +23,6 @@ import (
 	"strings"
 	"time"
 
-	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
-	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/backoff"
-	register "github.com/AliyunContainerService/terway/pkg/controller"
-	"github.com/AliyunContainerService/terway/pkg/controller/common"
-	"github.com/AliyunContainerService/terway/pkg/utils"
-	"github.com/AliyunContainerService/terway/types"
-	"github.com/AliyunContainerService/terway/types/controlplane"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
@@ -51,6 +42,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
+	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
+	register "github.com/AliyunContainerService/terway/pkg/controller"
+	"github.com/AliyunContainerService/terway/pkg/controller/common"
+	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/controlplane"
 )
 
 var ctrlLog = ctrl.Log.WithName(controllerName)
@@ -105,6 +106,7 @@ type ReconcilePodENI struct {
 	record record.EventRecorder
 
 	trunkMode bool // use trunk mode or secondary eni mode
+	crdMode   bool
 }
 
 type Wrapper struct {
@@ -139,6 +141,7 @@ func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface) *Reco
 		record:    mgr.GetEventRecorderFor("TerwayPodENIController"),
 		aliyun:    aliyunClient,
 		trunkMode: *controlplane.GetConfig().EnableTrunk,
+		crdMode:   controlplane.GetConfig().IPAMType == types.IPAMTypeCRD,
 	}
 	return r
 }
@@ -578,7 +581,7 @@ func (m *ReconcilePodENI) gcCRPodENIs(ctx context.Context) {
 
 			// pod exist just update timestamp
 			if err == nil {
-				if !podRequirePodENI(p) {
+				if !podRequirePodENI(p, m.crdMode) {
 					err = m.deletePodENI(ctx, &podENI)
 					if err != nil {
 						ll.Error(err, "error set podENI to ENIPhaseDeleting")
@@ -855,12 +858,18 @@ func allocIDs(podENI *v1beta1.PodENI) []string {
 	return ids
 }
 
-func podRequirePodENI(pod *corev1.Pod) bool {
-	if !types.PodUseENI(pod) {
-		return false
-	}
+func podRequirePodENI(pod *corev1.Pod, ignore bool) bool {
 	if utils.PodSandboxExited(pod) {
 		return false
 	}
+
+	if ignore {
+		return true
+	}
+
+	if !types.PodUseENI(pod) {
+		return false
+	}
+
 	return true
 }
