@@ -918,6 +918,7 @@ func newENIIPResourceManager(poolConfig *types.PoolConfig, ecs ipam.API, k8s Kub
 	factory := &eniIPFactory{
 		name:         factoryNameENIIP,
 		eniFactory:   eniFactory,
+		trunkOnEni:   poolConfig.TrunkENIID,
 		enableTrunk:  poolConfig.TrunkENIID != "",
 		enis:         []*ENI{},
 		eniOperChan:  make(chan struct{}, maxEniOperating),
