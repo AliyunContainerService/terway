@@ -256,12 +256,12 @@ func (f *eniFactory) GetVSwitches() ([]vswitch, error) {
 				f.tsExpireAt = time.Now().Add(vSwitchIPCntTimeout)
 			}
 		}
-		f.Unlock()
 
 		if len(f.vswitchCnt) > 0 {
 			sort.Slice(f.vswitchCnt, func(i, j int) bool {
 				return f.vswitchCnt[i].ipCount > f.vswitchCnt[j].ipCount
 			})
+			vSwitches = f.vswitchCnt
 		} else {
 			vSwitches = lo.Map(f.vSwitchOptions, func(item string, index int) vswitch {
 				return vswitch{
@@ -270,6 +270,7 @@ func (f *eniFactory) GetVSwitches() ([]vswitch, error) {
 				}
 			})
 		}
+		f.Unlock()
 	}
 
 	return vSwitches, nil
