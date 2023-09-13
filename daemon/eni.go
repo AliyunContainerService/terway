@@ -188,6 +188,7 @@ func newENIFactory(poolConfig *types.PoolConfig, ecs ipam.API) (*eniFactory, err
 		vSwitchOptions:            poolConfig.VSwitchOptions,
 		eniTags:                   poolConfig.ENITags,
 		securityGroupIDs:          poolConfig.SecurityGroupIDs,
+		trunkOnEni:                poolConfig.TrunkENIID,
 		enableTrunk:               poolConfig.TrunkENIID != "",
 		instanceID:                poolConfig.InstanceID,
 		ecs:                       ecs,
