@@ -1511,7 +1511,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init ENI ip resource manager")
 		}
-		if config.EnableEIPPool == conditionTrue {
+		if config.EnableEIPPool == conditionTrue && !config.EnableEIPMigrate {
 			netSrv.eipResMgr = newEipResourceManager(ecs, netSrv.k8s, config.AllowEIPRob == conditionTrue)
 		}
 		netSrv.mgrForResource = map[string]ResourceManager{
@@ -1524,7 +1524,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		if err != nil {
 			return nil, errors.Wrapf(err, "error init eni resource manager")
 		}
-		if config.EnableEIPPool == conditionTrue && !config.EnableENITrunking {
+		if config.EnableEIPPool == conditionTrue && !config.EnableENITrunking && !config.EnableEIPMigrate {
 			netSrv.eipResMgr = newEipResourceManager(ecs, netSrv.k8s, config.AllowEIPRob == conditionTrue)
 		}
 		netSrv.mgrForResource = map[string]ResourceManager{
