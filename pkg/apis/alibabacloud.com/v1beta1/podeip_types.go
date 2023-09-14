@@ -76,7 +76,7 @@ type PodEIPStatus struct {
 	InternetChargeType    string `json:"internetChargeType,omitempty"`
 	ResourceGroupID       string `json:"resourceGroupID,omitempty"`
 	Name                  string `json:"name,omitempty"`
-	PublicIpAddressPoolID string `json:"publicIpAddressPoolID,omitempty"`
+	PublicIpAddressPoolID string `json:"publicIpAddressPoolID,omitempty"` // nolint
 	Status                string `json:"status,omitempty"`
 
 	// BandwidthPackageID

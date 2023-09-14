@@ -46,6 +46,8 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 		crdBytes = crdsPodENI
 	case CRDPodNetworking:
 		crdBytes = crdsPodNetworking
+	case CRDPodEIP:
+		crdBytes = crdsPodEIP
 	default:
 		panic(fmt.Sprintf("crd %s name not exist", name))
 	}

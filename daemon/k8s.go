@@ -12,19 +12,6 @@ import (
 	"time"
 	"unicode"
 
-	ctrl "sigs.k8s.io/controller-runtime"
-
-	"github.com/AliyunContainerService/terway/deviceplugin"
-	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/backoff"
-	"github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned/typed/network.alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/storage"
-	"github.com/AliyunContainerService/terway/pkg/tracing"
-	"github.com/AliyunContainerService/terway/pkg/utils"
-	"github.com/AliyunContainerService/terway/pkg/version"
-	"github.com/AliyunContainerService/terway/types"
-	"github.com/AliyunContainerService/terway/types/daemon"
-
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
@@ -32,14 +19,25 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/runtime"
-	apiTypes "k8s.io/apimachinery/pkg/types"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/AliyunContainerService/terway/deviceplugin"
+	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
+	"github.com/AliyunContainerService/terway/pkg/storage"
+	"github.com/AliyunContainerService/terway/pkg/tracing"
+	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/version"
+	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
 const (
@@ -77,11 +75,13 @@ type Kubernetes interface {
 	WaitTrunkReady() (string, error)
 
 	GetTrunkID() string
+
+	GetClient() client.Client
 }
 
 type k8s struct {
-	client                  kubernetes.Interface
-	podEniClient            v1beta1.NetworkV1beta1Interface
+	client client.Client
+
 	storage                 storage.Storage
 	broadcaster             record.EventBroadcaster
 	recorder                record.EventRecorder
@@ -93,13 +93,12 @@ type k8s struct {
 	svcCidr                 *types.IPNetSet
 	apiConnTime             time.Time
 	statefulWorkloadKindSet sets.Set[string]
+
 	sync.Locker
 }
 
 func (k *k8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, message string) error {
-	node, err := k.client.CoreV1().Nodes().Get(context.TODO(), k.nodeName, metav1.GetOptions{
-		ResourceVersion: "0",
-	})
+	node, err := getNode(context.Background(), k.client, k.nodeName)
 	if err != nil || node == nil {
 		return err
 	}
@@ -129,12 +128,9 @@ func (k *k8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, mes
 	if err != nil {
 		return err
 	}
+
 	patch := []byte(fmt.Sprintf(`{"status":{"conditions":%s}}`, raw))
-	_, err = k.client.CoreV1().Nodes().PatchStatus(context.TODO(), node.Name, patch)
-	if err != nil {
-		return err
-	}
-	return nil
+	return k.client.Status().Patch(context.Background(), node, client.RawPatch(k8stypes.MergePatchType, patch))
 }
 
 func (k *k8s) PatchNodeAnnotations(anno map[string]string) error {
@@ -142,9 +138,10 @@ func (k *k8s) PatchNodeAnnotations(anno map[string]string) error {
 		return nil
 	}
 
-	node, err := k.client.CoreV1().Nodes().Get(context.TODO(), k.nodeName, metav1.GetOptions{
-		ResourceVersion: "0",
-	})
+	node, err := getNode(context.Background(), k.client, k.nodeName)
+	if err != nil || node == nil {
+		return err
+	}
 	if err != nil || node == nil {
 		return err
 	}
@@ -172,8 +169,7 @@ func (k *k8s) PatchNodeAnnotations(anno map[string]string) error {
 	}
 
 	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":%s}}`, string(out))
-	_, err = k.client.CoreV1().Nodes().Patch(context.TODO(), k.nodeName, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
-	return err
+	return k.client.Patch(context.Background(), node, client.RawPatch(k8stypes.MergePatchType, []byte(annotationPatchStr)))
 }
 
 func (k *k8s) SetCustomStatefulWorkloadKinds(kinds []string) error {
@@ -209,9 +205,7 @@ func (k *k8s) setSvcCIDR(svcCidr *types.IPNetSet) error {
 }
 
 func (k *k8s) PatchEipInfo(info *types.PodInfo) error {
-	pod, err := k.client.CoreV1().Pods(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
-		ResourceVersion: "0",
-	})
+	pod, err := getPod(context.Background(), k.client, info.Namespace, info.Name)
 	if err != nil || pod == nil {
 		return err
 	}
@@ -222,38 +216,25 @@ func (k *k8s) PatchEipInfo(info *types.PodInfo) error {
 	pod.Annotations[podEipAddress] = info.EipInfo.PodEipIP
 
 	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, podEipAddress, info.EipInfo.PodEipIP)
-
-	_, err = k.client.CoreV1().Pods(info.Namespace).Patch(context.TODO(), info.Name, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
+	return k.client.Patch(context.Background(), pod, client.RawPatch(k8stypes.MergePatchType, []byte(annotationPatchStr)))
 }
 
 func (k *k8s) PatchPodIPInfo(info *types.PodInfo, ips string) error {
-	pod, err := k.client.CoreV1().Pods(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
-		ResourceVersion: "0",
-	})
+	pod, err := getPod(context.Background(), k.client, info.Namespace, info.Name)
 	if err != nil || pod == nil {
 		return err
 	}
 	if pod.GetAnnotations()[types.PodIPs] == ips {
 		return nil
 	}
-	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, types.PodIPs, ips)
 
-	_, err = k.client.CoreV1().Pods(info.Namespace).Patch(context.TODO(), info.Name, apiTypes.MergePatchType, []byte(annotationPatchStr), metav1.PatchOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
+	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, types.PodIPs, ips)
+	return k.client.Patch(context.Background(), pod, client.RawPatch(k8stypes.MergePatchType, []byte(annotationPatchStr)))
 }
 
 func (k *k8s) WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error) {
 	err = wait.ExponentialBackoff(backoff.Backoff(backoff.WaitPodENIStatus), func() (bool, error) {
-		podEni, err = k.podEniClient.PodENIs(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
-			ResourceVersion: "0",
-		})
+		podEni, err = getPodENI(context.Background(), k.client, info.Namespace, info.Name)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				// wait pod eni exist
@@ -281,9 +262,7 @@ func (k *k8s) WaitPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, e
 
 func (k *k8s) GetPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, err error) {
 	err = wait.ExponentialBackoff(backoff.Backoff(backoff.WaitPodENIStatus), func() (bool, error) {
-		podEni, err = k.podEniClient.PodENIs(info.Namespace).Get(context.TODO(), info.Name, metav1.GetOptions{
-			ResourceVersion: "0",
-		})
+		podEni, err = getPodENI(context.Background(), k.client, info.Namespace, info.Name)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				return true, err
@@ -298,9 +277,7 @@ func (k *k8s) GetPodENIInfo(info *types.PodInfo) (podEni *podENITypes.PodENI, er
 func (k *k8s) WaitTrunkReady() (string, error) {
 	id := ""
 	err := wait.ExponentialBackoff(backoff.Backoff(backoff.DefaultKey), func() (bool, error) {
-		node, err := k.client.CoreV1().Nodes().Get(context.TODO(), k.nodeName, metav1.GetOptions{
-			ResourceVersion: "0",
-		})
+		node, err := getNode(context.Background(), k.client, k.nodeName)
 		if err != nil {
 			return false, err
 		}
@@ -317,23 +294,29 @@ func (k *k8s) GetTrunkID() string {
 	return k.node.Annotations[types.TrunkOn]
 }
 
+func (k *k8s) GetClient() client.Client {
+	return k.client
+}
+
 // newK8S return Kubernetes service by pod spec and daemon mode
 func newK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) {
 	restConfig := ctrl.GetConfigOrDie()
 	restConfig.QPS = globalConfig.KubeClientQPS
 	restConfig.Burst = globalConfig.KubeClientBurst
 	restConfig.UserAgent = version.UA
-	restConfig.AcceptContentTypes = strings.Join([]string{runtime.ContentTypeProtobuf, runtime.ContentTypeJSON}, ",")
-	restConfig.ContentType = runtime.ContentTypeProtobuf
 
-	client, err := kubernetes.NewForConfig(restConfig)
+	c, err := client.New(restConfig, client.Options{
+		Scheme: types.Scheme,
+		Mapper: types.NewRESTMapper(),
+	})
 	if err != nil {
 		return nil, err
 	}
+	utils.RegisterClients(restConfig)
 
-	nodeName, err := getNodeName(client)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed getting node name")
+	nodeName := os.Getenv("NODE_NAME")
+	if nodeName == "" {
+		return nil, fmt.Errorf("failed to get NODE_NAME")
 	}
 
 	daemonNamespace := os.Getenv("POD_NAMESPACE")
@@ -342,9 +325,7 @@ func newK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 		log.Warnf("POD_NAMESPACE is not set in environment variables, use kube-system as default namespace")
 	}
 
-	node, err := client.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{
-		ResourceVersion: "0",
-	})
+	node, err := getNode(context.Background(), c, nodeName)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed getting node")
 	}
@@ -352,7 +333,7 @@ func newK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 	var nodeCidr *types.IPNetSet
 	if daemonMode == daemonModeVPC {
 		// vpc mode not support ipv6
-		nodeCidr, err = nodeCidrFromAPIServer(client, nodeName)
+		nodeCidr, err = nodeCidrFromAPIServer(utils.K8sClient, nodeName)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed getting node cidr")
 		}
@@ -368,12 +349,12 @@ func newK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 	recorder := broadcaster.NewRecorder(scheme.Scheme, source)
 
 	sink := &typedv1.EventSinkImpl{
-		Interface: typedv1.New(client.CoreV1().RESTClient()).Events(""),
+		Interface: typedv1.New(utils.K8sClient.CoreV1().RESTClient()).Events(""),
 	}
 	broadcaster.StartRecordingToSink(sink)
 
 	k8sObj := &k8s{
-		client:          client,
+		client:          c,
 		mode:            daemonMode,
 		node:            node,
 		nodeName:        nodeName,
@@ -396,11 +377,7 @@ func newK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 	if err != nil {
 		return nil, err
 	}
-	podENICli, err := v1beta1.NewForConfig(restConfig)
-	if err != nil {
-		return nil, errors.Wrapf(err, "error init pod ENI client")
-	}
-	k8sObj.podEniClient = podENICli
+
 	go func() {
 		for range time.Tick(storageCleanPeriod) {
 			err := k8sObj.clean()
@@ -410,31 +387,7 @@ func newK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 		}
 	}()
 
-	return k8sObj, nil
-}
-
-func getNodeName(client kubernetes.Interface) (string, error) {
-	nodeName := os.Getenv("NODE_NAME")
-	if nodeName != "" {
-		return nodeName, nil
-	}
-
-	podName := os.Getenv("POD_NAME")
-	podNamespace := os.Getenv("POD_NAMESPACE")
-	if podName == "" || podNamespace == "" {
-		return "", fmt.Errorf("env variables POD_NAME and POD_NAMESPACE must be set")
-	}
-
-	pod, err := client.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
-	if err != nil {
-		return "", fmt.Errorf("error retrieving pod spec for '%s/%s': %v", podNamespace, podName, err)
-	}
-	nodeName = pod.Spec.NodeName
-	if nodeName == "" {
-		return "", fmt.Errorf("node name not present in pod spec '%s/%s'", podNamespace, podName)
-	}
-
-	return nodeName, nil
+	return k8sObj, err
 }
 
 func nodeCidrFromAPIServer(client kubernetes.Interface, nodeName string) (*types.IPNetSet, error) {
@@ -459,8 +412,8 @@ func parseCidr(cidrString string) (*net.IPNet, error) {
 	return cidr, err
 }
 
-func serviceCidrFromAPIServer(client kubernetes.Interface) (*net.IPNet, error) {
-	kubeadmConfigMap, err := client.CoreV1().ConfigMaps(k8sSystemNamespace).Get(context.TODO(), k8sKubeadmConfigmap, metav1.GetOptions{})
+func serviceCidrFromAPIServer(c client.Client) (*net.IPNet, error) {
+	kubeadmConfigMap, err := getCM(context.Background(), c, k8sSystemNamespace, k8sKubeadmConfigmap)
 	if err != nil {
 		return nil, err
 	}
@@ -738,9 +691,7 @@ func deserialize(data []byte) (interface{}, error) {
 }
 
 func (k *k8s) GetPod(namespace, name string) (*types.PodInfo, error) {
-	pod, err := k.client.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{
-		ResourceVersion: "0",
-	})
+	pod, err := getPod(context.Background(), k.client, namespace, name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			key := podInfoKey(namespace, name)
@@ -776,12 +727,14 @@ func (k *k8s) GetLocalPods() ([]*types.PodInfo, error) {
 		FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", k.nodeName).String(),
 		ResourceVersion: "0",
 	}
-	list, err := k.client.CoreV1().Pods(corev1.NamespaceAll).List(context.TODO(), options)
+	podList := &corev1.PodList{}
+	err := k.client.List(context.Background(), podList, &client.ListOptions{Raw: &options})
+
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed listting pods on %s from apiserver", k.nodeName)
 	}
 	var ret []*types.PodInfo
-	for _, pod := range list.Items {
+	for _, pod := range podList.Items {
 		if types.IgnoredByTerway(pod.Labels) {
 			continue
 		}
@@ -866,10 +819,7 @@ func (k *k8s) RecordNodeEvent(eventType, reason, message string) {
 }
 
 func (k *k8s) RecordPodEvent(podName, podNamespace, eventType, reason, message string) error {
-	pod, err := k.client.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{
-		ResourceVersion: "0",
-	})
-
+	pod, err := getPod(context.Background(), k.client, podNamespace, podName)
 	if err != nil {
 		return err
 	}
@@ -898,11 +848,7 @@ func (k *k8s) GetNodeDynamicConfigLabel() string {
 
 // GetDynamicConfigWithName gets the Dynamic Config's content with its ConfigMap name
 func (k *k8s) GetDynamicConfigWithName(name string) (string, error) {
-	cfgMap, err := k.client.CoreV1().ConfigMaps(k.daemonNamespace).Get(context.TODO(), name, metav1.GetOptions{
-		TypeMeta:        metav1.TypeMeta{},
-		ResourceVersion: "0",
-	})
-
+	cfgMap, err := getCM(context.Background(), k.client, k.daemonNamespace, name)
 	if err != nil {
 		return "", err
 	}
@@ -913,4 +859,36 @@ func (k *k8s) GetDynamicConfigWithName(name string) (string, error) {
 	}
 
 	return "", errors.New("configmap not included eni_conf")
+}
+
+func getNode(ctx context.Context, c client.Client, nodeName string) (*corev1.Node, error) {
+	obj := &corev1.Node{}
+	err := c.Get(ctx, k8stypes.NamespacedName{Name: nodeName}, obj, &client.GetOptions{Raw: &metav1.GetOptions{
+		ResourceVersion: "0",
+	}})
+	return obj, err
+}
+
+func getPod(ctx context.Context, c client.Client, namespace, name string) (*corev1.Pod, error) {
+	obj := &corev1.Pod{}
+	err := c.Get(ctx, k8stypes.NamespacedName{Namespace: namespace, Name: name}, obj, &client.GetOptions{Raw: &metav1.GetOptions{
+		ResourceVersion: "0",
+	}})
+	return obj, err
+}
+
+func getCM(ctx context.Context, c client.Client, namespace, name string) (*corev1.ConfigMap, error) {
+	obj := &corev1.ConfigMap{}
+	err := c.Get(ctx, k8stypes.NamespacedName{Namespace: namespace, Name: name}, obj, &client.GetOptions{Raw: &metav1.GetOptions{
+		ResourceVersion: "0",
+	}})
+	return obj, err
+}
+
+func getPodENI(ctx context.Context, c client.Client, namespace, name string) (*podENITypes.PodENI, error) {
+	obj := &podENITypes.PodENI{}
+	err := c.Get(ctx, k8stypes.NamespacedName{Namespace: namespace, Name: name}, obj, &client.GetOptions{Raw: &metav1.GetOptions{
+		ResourceVersion: "0",
+	}})
+	return obj, err
 }
