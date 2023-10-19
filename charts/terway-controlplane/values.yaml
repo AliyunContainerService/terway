@@ -5,9 +5,9 @@
 replicaCount: 2
 
 image:
-  repository: l1b0k/terway-controlplane
-  pullPolicy: Always
-  tag: "latest"
+  repository: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway-controlplane
+  pullPolicy: IfNotPresent
+  tag: "v1.6.0"
 
 nameOverride: ""
 fullnameOverride: ""
