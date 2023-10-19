@@ -21,9 +21,13 @@
 
 ## 使用流程
 
-- 安装支持 `Cilium` 的 `Terway` 版本(修改并应用仓库目录下的 `terway-cilium.yml` )
+- 安装支持 `Cilium` 的 `Terway` 版本(修改并应用仓库目录下的 `charts/terway` )
 
-- 在 `ConfigMap` **`eni-config`** 中( `namespace` 一般为 `kube-system` )，修改 `10-terway.conf` 配置，将 `eniip_virtual_type` 字段(如果没有则创建)修改为 `IPVlan` 或 `Veth`
+```shell
+helm package charts/terway -d charts
+
+helm install terway charts/terway --namespace kube-system --set enableIPvlan=true
+```
 
 - 重启节点以应用配置
 

@@ -1,0 +1,32 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: eni-config
+data:
+  eni_conf: |
+    {
+      "version": "1",
+      "max_pool_size": 5,
+      "min_pool_size": 0,
+      "enable_eni_trunking": false,
+      "access_key": "{{.Values.accessKey}}",
+      "access_secret": "{{.Values.accessSecret}}",
+      "vswitches": {{- toJson .Values.vSwitchIDs }},
+      "service_cidr": "{{.Values.serviceCIDR}}",
+      "security_groups": {{- toJson .Values.securityGroupIDs }},
+      "ip_stack": "{{.Values.ipStack}}",
+      "vswitch_selection_policy": "ordered"
+    }
+  10-terway.conf: |
+    {
+      "cniVersion": "0.4.0",
+      "name": "terway",
+      "capabilities": {"bandwidth": true},
+{{- if .Values.enableIPvlan }}
+      "eniip_virtual_type": "IPVlan",
+      "host_stack_cidrs": ["169.254.20.10/32"],
+{{- end}}
+      "type": "terway"
+    }
+  disable_network_policy: "false"
+  in_cluster_loadbalance: "true"

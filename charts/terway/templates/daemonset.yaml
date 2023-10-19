@@ -1,156 +1,97 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: terway
-  namespace: kube-system
-
 ---
-
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1
+{{if .Values.enableIPvlan }}
+apiVersion: batch/v1
+kind: Job
 metadata:
-  name: terway-pod-reader
-  namespace: kube-system
-rules:
-  - apiGroups: [ "" ]
-    resources: [ "pods", "nodes", "namespaces", "configmaps", "serviceaccounts" ]
-    verbs: [ "get", "watch", "list", "update" ]
-  - apiGroups: [ "" ]
-    resources:
-      - events
-    verbs:
-      - create
-  - apiGroups: [ "networking.k8s.io" ]
-    resources:
-      - networkpolicies
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups: [ "coordination.k8s.io" ]
-    resources: [ "leases" ]
-    verbs: [ "get", "watch", "update", "create" ]
-  - apiGroups: [ "extensions" ]
-    resources:
-      - networkpolicies
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups: [ "" ]
-    resources:
-      - pods/status
-    verbs:
-      - update
-  - apiGroups: [ "crd.projectcalico.org" ]
-    resources: [ "*" ]
-    verbs: [ "*" ]
-  - apiGroups: [ "discovery.k8s.io" ]
-    resources:
-      - endpointslices
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups: [ "" ]
-    resources:
-      - endpoints
-      - services
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups: [ "" ]
-    resources:
-      - nodes
-      - nodes/status
-    verbs:
-      - patch
-  - apiGroups:
-      - apiextensions.k8s.io
-    resources:
-      - customresourcedefinitions
-    verbs:
-      - create
-      - get
-      - list
-      - watch
-      - update
-  - apiGroups:
-      - cilium.io
-    resources:
-      - '*'
-    verbs:
-      - '*'
----
-
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: terway-binding
-  namespace: kube-system
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: terway-pod-reader
-subjects:
-  - kind: ServiceAccount
-    name: terway
-    namespace: kube-system
-
----
-
-kind: ConfigMap
-apiVersion: v1
-metadata:
-  name: eni-config
-  namespace: kube-system
-data:
-  eni_conf: |
-    {
-      "version": "1",
-      "access_key": "ak",
-      "access_secret": "ak",
-      "security_group": "sg-xxx",
-      "service_cidr": "10.96.0.0/12",
-      "vswitches": {
-        "cn-hongkong-b": ["vsw-xxx"]
-      },
-      "max_pool_size": 5,
-      "min_pool_size": 0
-    }
-  10-terway.conf: |
-    {
-      "cniVersion": "0.4.0",
-      "name": "terway",
-      "type": "terway",
-      "eniip_virtual_type": "IPVlan",
-      "host_stack_cidrs": ["169.254.0.0/16"]
-    }
-  # eniip_virtual_type: virtual type for eni multi ip "Veth" || "IPVlan"
-  disable_network_policy: "false"
-
+  name: terway-preflight
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 10
+  template:
+    spec:
+      hostNetwork: true
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: "Exists"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: type
+                    operator: NotIn
+                    values:
+                      - virtual-kubelet
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                      - amd64
+                      - arm64
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+      containers:
+        - name: preflight
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          command:
+            - sh
+            - "-ce"
+            - "if grep -q IPVlan /etc/eni/10-terway.conf ; then cilium preflight register-crd ;fi;"
+          volumeMounts:
+            - name: configvolume
+              mountPath: /etc/eni
+      restartPolicy: OnFailure
+      serviceAccountName: terway
+      volumes:
+        - name: configvolume
+          configMap:
+            name: eni-config
+            items:
+              - key: eni_conf
+                path: eni.json
+              - key: 10-terway.conf
+                path: 10-terway.conf
+{{end}}
 ---
 
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: terway
-  namespace: kube-system
+  name: terway-eniip
 spec:
   selector:
     matchLabels:
-      app: terway
+      app: terway-eniip
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 10%
+    type: RollingUpdate
   template:
     metadata:
       labels:
-        app: terway
-      annotations:
-        priorityClassName: ''
+        app: terway-eniip
     spec:
       hostPID: true
-      nodeSelector:
-        kubernetes.io/arch: amd64
+      priorityClassName: system-node-critical
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: type
+                    operator: NotIn
+                    values:
+                      - virtual-kubelet
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                      - amd64
+                      - arm64
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
       tolerations:
         - operator: "Exists"
       terminationGracePeriodSeconds: 0
@@ -158,15 +99,17 @@ spec:
       hostNetwork: true
       initContainers:
         - name: terway-init
-          image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.2.3
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
           command:
-            - '/bin/init.sh'
+            - /bin/init.sh
           volumeMounts:
-            - name: configvolume
+            - name: config
               mountPath: /etc/eni
+            - name: configvolume
+              mountPath: /tmp/eni
             - name: cni-bin
               mountPath: /opt/cni/bin/
             - name: cni
@@ -177,17 +120,23 @@ spec:
               name: host-root
       containers:
         - name: terway
-          image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.2.3
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
-          command: [ '/usr/bin/terwayd', '-log-level', 'debug', '-daemon-mode', 'ENIMultiIP' ]
+          command: ["/usr/bin/terwayd", "-log-level", "info", "-daemon-mode", "ENIMultiIP"]
           securityContext:
-            privileged: false
             capabilities:
               add:
-              - NET_ADMIN
-              - DAC_OVERRIDE
+                - NET_ADMIN
+                - DAC_OVERRIDE
               drop:
-              - ALL
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 100m
+              memory: 256Mi
           env:
             - name: NODE_NAME
               valueFrom:
@@ -198,12 +147,11 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
           volumeMounts:
-            - name: configvolume
+            - name: config
               mountPath: /etc/eni
+              readOnly: true
             - mountPath: /var/run/
               name: eni-run
-            - mountPath: /opt/cni/bin/
-              name: cni-bin
             - mountPath: /lib/modules
               name: lib-modules
             - mountPath: /var/lib/cni/networks
@@ -212,10 +160,13 @@ spec:
               name: cni-terway
             - mountPath: /var/lib/kubelet/device-plugins
               name: device-plugin-path
+            - name: addon-token
+              mountPath: "/var/addon"
+              readOnly: true
         - name: policy
-          image: registry.cn-hangzhou.aliyuncs.com/acs/terway:v1.2.3
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
-          command: [ "/bin/policyinit.sh" ]
+          command: ["/bin/policyinit.sh"]
           env:
             - name: NODENAME
               valueFrom:
@@ -226,6 +177,12 @@ spec:
                 configMapKeyRef:
                   name: eni-config
                   key: disable_network_policy
+                  optional: true
+            - name: FELIX_TYPHAK8SSERVICENAME
+              valueFrom:
+                configMapKeyRef:
+                  name: eni-config
+                  key: felix_relay_service
                   optional: true
             - name: K8S_NODE_NAME
               valueFrom:
@@ -239,62 +196,71 @@ spec:
                   fieldPath: metadata.namespace
             - name: CILIUM_CNI_CHAINING_MODE
               value: terway-chainer
+            - name: IN_CLUSTER_LOADBALANCE
+              valueFrom:
+                configMapKeyRef:
+                  name: eni-config
+                  key: in_cluster_loadbalance
+                  optional: true
           securityContext:
             privileged: false
             capabilities:
               add:
-              - CHOWN
-              - KILL
-              - NET_ADMIN
-              - NET_RAW
-              - IPC_LOCK
-              - SYS_MODULE
-              - SYS_ADMIN
-              - SYS_RESOURCE
-              - DAC_OVERRIDE
-              - FOWNER
-              - SETGID
-              - SETUID
-              drop:
-              - ALL
+                - NET_ADMIN
+                - DAC_OVERRIDE
+                - SYS_ADMIN
+                - NET_RAW
+                - SYS_MODULE
+{{if .Values.enableIPvlan }}
+                - CHOWN
+                - KILL
+                - IPC_LOCK
+                - SYS_RESOURCE
+                - FOWNER
+                - SETGID
+                - SETUID
+{{- end }}
           resources:
             requests:
               cpu: 250m
+              memory: 100Mi
+            limits:
+              cpu: "1"
           livenessProbe:
+            httpGet: null
             tcpSocket:
               port: 9099
               host: 127.0.0.1
             periodSeconds: 10
             initialDelaySeconds: 10
             failureThreshold: 6
+          readinessProbe:
+            httpGet: null
+            tcpSocket:
+              port: 9099
+              host: 127.0.0.1
+            periodSeconds: 10
           volumeMounts:
             - mountPath: /lib/modules
               name: lib-modules
             - mountPath: /etc/cni/net.d
               name: cni
-            - mountPath: /etc/eni
-              name: configvolume
+              readOnly: true
             # volumes use by cilium
-            - mountPath: /sys/fs/bpf
-              name: bpf-maps
+            - mountPath: /sys/fs
+              name: sys-fs
             - mountPath: /var/run/cilium
               name: cilium-run
-            - mountPath: /host/opt/cni/bin
-              name: cni-bin
-            - mountPath: /host/etc/cni/net.d
-              name: cni
               # Needed to be able to load kernel modules
             - mountPath: /run/xtables.lock
               name: xtables-lock
       volumes:
+        - name: config
+          emptyDir: {}
         - name: configvolume
           configMap:
             name: eni-config
-            items:
-              - key: eni_conf
-                path: eni.json
-              - key: 10-terway.conf
-                path: 10-terway.conf
+            items: null
         - name: cni-bin
           hostPath:
             path: /opt/cni/bin
@@ -323,24 +289,29 @@ spec:
           hostPath:
             path: /
             type: "Directory"
+        - name: addon-token
+          secret:
+            secretName: addon.network.token
+            items:
+              - key: addon.token.config
+                path: token-config
+            optional: true
         # used by cilium
         # To keep state between restarts / upgrades
         - hostPath:
             path: /var/run/cilium
             type: DirectoryOrCreate
           name: cilium-run
-          # To keep state between restarts / upgrades for bpf maps
+        # To keep state between restarts / upgrades for bpf maps
         - hostPath:
-            path: /sys/fs/bpf
+            path: /sys/fs/
             type: DirectoryOrCreate
-          name: bpf-maps
+          name: sys-fs
           # To access iptables concurrently with other processes (e.g. kube-proxy)
         - hostPath:
             path: /run/xtables.lock
             type: FileOrCreate
           name: xtables-lock
-
-
 
 ---
 
@@ -359,9 +330,7 @@ spec:
         openAPIV3Schema:
           type: object
           properties:
-            host:
-              type: string
-            port:
+            apiVersion:
               type: string
   names:
     kind: FelixConfiguration
@@ -385,9 +354,7 @@ spec:
         openAPIV3Schema:
           type: object
           properties:
-            host:
-              type: string
-            port:
+            apiVersion:
               type: string
   names:
     kind: BGPConfiguration
@@ -411,9 +378,7 @@ spec:
         openAPIV3Schema:
           type: object
           properties:
-            host:
-              type: string
-            port:
+            apiVersion:
               type: string
   names:
     kind: IPPool
@@ -437,9 +402,7 @@ spec:
         openAPIV3Schema:
           type: object
           properties:
-            host:
-              type: string
-            port:
+            apiVersion:
               type: string
   names:
     kind: HostEndpoint
@@ -463,9 +426,7 @@ spec:
         openAPIV3Schema:
           type: object
           properties:
-            host:
-              type: string
-            port:
+            apiVersion:
               type: string
   names:
     kind: ClusterInformation
@@ -489,9 +450,7 @@ spec:
         openAPIV3Schema:
           type: object
           properties:
-            host:
-              type: string
-            port:
+            apiVersion:
               type: string
   names:
     kind: GlobalNetworkPolicy
@@ -515,9 +474,7 @@ spec:
         openAPIV3Schema:
           type: object
           properties:
-            host:
-              type: string
-            port:
+            apiVersion:
               type: string
   names:
     kind: GlobalNetworkSet
@@ -541,9 +498,7 @@ spec:
         openAPIV3Schema:
           type: object
           properties:
-            host:
-              type: string
-            port:
+            apiVersion:
               type: string
   names:
     kind: NetworkPolicy
