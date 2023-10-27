@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Wed, 25 Oct 2023 11:05:48 +0800
+Subject: service: track backend state with kubernetes
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ pkg/service/service.go | 21 ++++-----------------
+ 1 file changed, 4 insertions(+), 17 deletions(-)
+
+diff --git a/pkg/service/service.go b/pkg/service/service.go
+index 428317168f..d29d6dc75f 100644
+--- a/pkg/service/service.go
++++ b/pkg/service/service.go
+@@ -1610,23 +1610,10 @@ func (s *Service) updateBackendsCacheLocked(svc *svcInfo, backends []lb.Backend)
+ 				// Toggle the flag as the backend is now restored.
+ 				b.RestoredFromDatapath = false
+ 			} else {
+-				// Backend state can either be updated via kubernetes events,
+-				// or service API. If the state update is coming via kubernetes events,
+-				// then we need to update the internal state. Currently, the only state
+-				// update in this case is for the terminating state. All other state
+-				// updates happen via the API (UpdateBackendState) in which case we need
+-				// to set the backend state to the saved state.
+-				if backends[i].State == lb.BackendStateTerminating &&
+-					b.State != lb.BackendStateTerminating {
+-					b.State = backends[i].State
+-					// Update the persisted backend state in BPF maps.
+-					if err := s.lbmap.UpdateBackendWithState(backends[i]); err != nil {
+-						return nil, nil, nil, fmt.Errorf("failed to update backend %+v %w",
+-							backends[i], err)
+-					}
+-				} else {
+-					// Set the backend state to the saved state.
+-					backends[i].State = b.State
++				// Update the persisted backend state in BPF maps.
++				if err := s.lbmap.UpdateBackendWithState(backends[i]); err != nil {
++					return nil, nil, nil, fmt.Errorf("failed to update backend %+v %w",
++						backends[i], err)
+ 				}
+ 			}
+ 		}
+-- 
+2.42.0
+
