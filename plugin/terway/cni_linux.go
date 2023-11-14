@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	cniTypes "github.com/containernetworking/cni/pkg/types"
@@ -100,6 +101,7 @@ func isNSPathNotExist(err error) bool {
 func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) (containerIPNet *terwayTypes.IPNetSet, gatewayIPSet *terwayTypes.IPSet, err error) {
 	var conf, cniNetns, k8sConfig, args = cmdArgs.conf, cmdArgs.netNS, cmdArgs.k8sArgs, cmdArgs.inputArgs
 
+	start := time.Now()
 	defer func() {
 		eventCtx, cancel := context.WithTimeout(context.Background(), defaultEventTimeout)
 		defer cancel()
@@ -119,7 +121,7 @@ func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 				K8SPodNamespace: string(k8sConfig.K8S_POD_NAMESPACE),
 				EventType:       rpc.EventType_EventTypeNormal,
 				Reason:          "AllocIPSucceed",
-				Message:         fmt.Sprintf("Alloc IP %s", containerIPNet.String()),
+				Message:         fmt.Sprintf("Alloc IP %s took %s", containerIPNet.String(), time.Since(start).String()),
 			})
 		}
 	}()
