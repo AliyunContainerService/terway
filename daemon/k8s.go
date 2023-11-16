@@ -56,7 +56,7 @@ const (
 // Kubernetes operation set
 type Kubernetes interface {
 	GetLocalPods() ([]*types.PodInfo, error)
-	GetPod(namespace, name string) (*types.PodInfo, error)
+	GetPod(namespace, name string, cache bool) (*types.PodInfo, error)
 	GetServiceCIDR() *types.IPNetSet
 	GetNodeCidr() *types.IPNetSet
 	SetNodeAllocatablePod(count int) error
@@ -205,7 +205,7 @@ func (k *k8s) setSvcCIDR(svcCidr *types.IPNetSet) error {
 }
 
 func (k *k8s) PatchEipInfo(info *types.PodInfo) error {
-	pod, err := getPod(context.Background(), k.client, info.Namespace, info.Name)
+	pod, err := getPod(context.Background(), k.client, info.Namespace, info.Name, true)
 	if err != nil || pod == nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func (k *k8s) PatchEipInfo(info *types.PodInfo) error {
 }
 
 func (k *k8s) PatchPodIPInfo(info *types.PodInfo, ips string) error {
-	pod, err := getPod(context.Background(), k.client, info.Namespace, info.Name)
+	pod, err := getPod(context.Background(), k.client, info.Namespace, info.Name, true)
 	if err != nil || pod == nil {
 		return err
 	}
@@ -690,8 +690,8 @@ func deserialize(data []byte) (interface{}, error) {
 	return item, nil
 }
 
-func (k *k8s) GetPod(namespace, name string) (*types.PodInfo, error) {
-	pod, err := getPod(context.Background(), k.client, namespace, name)
+func (k *k8s) GetPod(namespace, name string, cache bool) (*types.PodInfo, error) {
+	pod, err := getPod(context.Background(), k.client, namespace, name, cache)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			key := podInfoKey(namespace, name)
@@ -819,7 +819,7 @@ func (k *k8s) RecordNodeEvent(eventType, reason, message string) {
 }
 
 func (k *k8s) RecordPodEvent(podName, podNamespace, eventType, reason, message string) error {
-	pod, err := getPod(context.Background(), k.client, podNamespace, podName)
+	pod, err := getPod(context.Background(), k.client, podNamespace, podName, true)
 	if err != nil {
 		return err
 	}
@@ -869,11 +869,13 @@ func getNode(ctx context.Context, c client.Client, nodeName string) (*corev1.Nod
 	return obj, err
 }
 
-func getPod(ctx context.Context, c client.Client, namespace, name string) (*corev1.Pod, error) {
+func getPod(ctx context.Context, c client.Client, namespace, name string, cache bool) (*corev1.Pod, error) {
+	opt := &metav1.GetOptions{}
+	if cache {
+		opt.ResourceVersion = "0"
+	}
 	obj := &corev1.Pod{}
-	err := c.Get(ctx, k8stypes.NamespacedName{Namespace: namespace, Name: name}, obj, &client.GetOptions{Raw: &metav1.GetOptions{
-		ResourceVersion: "0",
-	}})
+	err := c.Get(ctx, k8stypes.NamespacedName{Namespace: namespace, Name: name}, obj, &client.GetOptions{Raw: opt})
 	return obj, err
 }
 

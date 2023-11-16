@@ -224,7 +224,7 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 	}()
 
 	// 0. Get pod Info
-	podinfo, err := n.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName)
+	podinfo, err := n.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName, true)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get pod info for: %+v", r)
 	}
@@ -510,7 +510,7 @@ func (n *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest)
 	}()
 
 	// 0. Get pod Info
-	podinfo, err := n.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName)
+	podinfo, err := n.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName, true)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get pod info for: %+v", r)
 	}
@@ -580,7 +580,7 @@ func (n *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest)
 func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (*rpc.GetInfoReply, error) {
 	serviceLog.Debugf("GetIPInfo request: %+v", r)
 	// 0. Get pod Info
-	podinfo, err := n.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName)
+	podinfo, err := n.k8s.GetPod(r.K8SPodNamespace, r.K8SPodName, true)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error get pod info for: %+v", r)
 	}
@@ -820,6 +820,13 @@ func (n *networkService) startGarbageCollectionLoop() {
 				resRelate := resRelateObj.(types.PodResources)
 				_, podExist := podKeyMap[podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name)]
 				if !podExist {
+					// check kbe-api again
+					_, err := n.k8s.GetPod(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name, false)
+					if !k8sErr.IsNotFound(err) {
+						continue
+					}
+					serviceLog.Infof("found pod %s not exist, will cleanup related resource", podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name))
+
 					if resRelate.PodInfo.IPStickTime != 0 {
 						// delay resource garbage collection for sticky ip
 						resRelate.PodInfo.IPStickTime = 0
