@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/vishvananda/netlink/nl"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -56,6 +57,7 @@ func init() {
 }
 
 func main() {
+	nl.EnableErrorMessageReporting = true
 	skel.PluginMain(cmdAdd, cmdCheck, cmdDel, version.PluginSupports("0.3.0", "0.3.1", "0.4.0", "1.0.0"), bv.BuildString("terway"))
 }
 
