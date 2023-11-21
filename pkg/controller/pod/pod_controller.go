@@ -194,10 +194,6 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	if utils.ISVKNode(node) {
 		return reconcile.Result{}, nil
 	}
-	nodeInfo, allocType, allocs, err := m.parse(ctx, pod, node)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("error parse config, %w", err)
-	}
 
 	// 1. check podENI is existed
 	prePodENI := &v1beta1.PodENI{}
@@ -234,8 +230,13 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	}
 
 	// 2. cr is not found , so we will create new
+	nodeInfo, allocType, allocs, err := m.parse(ctx, pod, node)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("error parse config, %w", err)
+	}
 
 	l.Info("creating eni")
+
 	podENI := &v1beta1.PodENI{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pod.Name,
