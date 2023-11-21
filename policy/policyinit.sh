@@ -29,13 +29,15 @@ if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = 
   # kernel version equal and above 4.19
   if { [ "$KERNEL_MAJOR_VERSION" -eq 4 ] && [ "$KERNEL_MINOR_VERSION" -ge 19 ]; } ||
      [ "$KERNEL_MAJOR_VERSION" -gt 4 ]; then
+
+    extra_args=$(terway_config_val 'cilium_args')
     if [ -z "$DISABLE_POLICY" ] || [ "$DISABLE_POLICY" = "false" ] || [ "$DISABLE_POLICY" = "0" ]; then
       ENABLE_POLICY="default"
     else
       ENABLE_POLICY="never"
+      extra_args="${extra_args} --labels=k8s:io\\.kubernetes\\.pod\\.namespace "
     fi
 
-    extra_args=$(terway_config_val 'cilium_args')
     if [[ $extra_args != *"bpf-map-dynamic-size-ratio"* ]]; then
       extra_args="${extra_args} --bpf-map-dynamic-size-ratio=0.0025"
     fi
