@@ -11,7 +11,7 @@ FROM --platform=$TARGETPLATFORM ${CILIUM_BPFTOOL_IMAGE} as bpftool-dist
 FROM --platform=$TARGETPLATFORM ${CILIUM_IPROUTE2_IMAGE} as iproute2-dist
 FROM --platform=$TARGETPLATFORM ${CILIUM_IPTABLES_IMAGE} as iptables-dist
 
-FROM --platform=$BUILDPLATFORM golang:1.20.6 as builder
+FROM --platform=$BUILDPLATFORM golang:1.21.3 as builder
 ARG GOPROXY
 ARG TARGETOS
 ARG TARGETARCH
