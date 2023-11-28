@@ -10,6 +10,24 @@ import (
 	"github.com/Jeffail/gabs/v2"
 	"github.com/docker/docker/pkg/parsers/kernel"
 	"github.com/spf13/cobra"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	cliflag "k8s.io/component-base/cli/flag"
+
+	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
+)
+
+type checkKernelVersionFunc func(int, int, int) bool
+
+var _checkKernelVersion checkKernelVersionFunc
+
+type switchDataPathV2Func func() bool
+
+var _switchDataPathV2 switchDataPathV2Func
+
+const (
+	dataPathIPvlan         = "ipvlan"
+	dataPathV2             = "datapathv2"
+	nodeCapabilityDatapath = "datapath"
 )
 
 type feature struct {
@@ -17,11 +35,17 @@ type feature struct {
 	EDT  bool
 }
 
-var outPutPath string
+var (
+	outPutPath string
+
+	featureGates map[string]bool
+)
 
 func init() {
 	fs := cniCmd.Flags()
 	fs.StringVar(&outPutPath, "output", "", "output path")
+	fs.Var(cliflag.NewMapStringBool(&featureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features. "+
+		"Options are:\n"+strings.Join(utilfeature.DefaultFeatureGate.KnownFeatures(), "\n"))
 }
 
 var cniCmd = &cobra.Command{
@@ -40,9 +64,36 @@ var cniCmd = &cobra.Command{
 func processCNIConfig(cmd *cobra.Command, args []string) error {
 	flag.Parse()
 
-	err := processInput(args)
+	_checkKernelVersion = kernel.CheckKernelVersion
+
+	_switchDataPathV2 = switchDataPathV2
+
+	err := utilfeature.DefaultMutableFeatureGate.SetFromMap(featureGates)
+	if err != nil {
+		return fmt.Errorf("failed to set feature gates: %v", err)
+	}
+
+	err = processInput(args)
 	if err != nil {
 		return fmt.Errorf("failed process input: %v", err)
+	}
+
+	// mount bpf fs if needed
+	cni, err := os.ReadFile(outPutPath)
+	if err != nil {
+		return err
+	}
+	cniJSON, err := gabs.ParseJSON(cni)
+	if err != nil {
+		return err
+	}
+	for _, plugin := range cniJSON.Path("plugins").Children() {
+		if plugin.Path("type").Data().(string) == "cilium-cni" {
+			err = mountHostBpf()
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -74,7 +125,7 @@ func processInput(files []string) error {
 
 	var err error
 	f := feature{}
-	f.EBPF = kernel.CheckKernelVersion(4, 19, 0)
+	f.EBPF = _checkKernelVersion(4, 19, 0)
 
 	if f.EBPF {
 		f.EDT, err = checkBpfFeature("bpf_skb_ecn_set_ce")
@@ -115,8 +166,9 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 		return "", err
 	}
 
-	hasIPvlan := false
-	requireIPvlan := false
+	requireEBPFChainer := false
+	ebpfChainerExist := false
+	datapath := ""
 
 	for _, config := range configs {
 		plugin, err := gabs.ParseJSON(config)
@@ -134,25 +186,61 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 		switch pluginType {
 		case "cilium-cni":
 			// make sure cilium-cni is behind terway
-			if !ebpfSupport || !requireIPvlan {
+			if !ebpfSupport {
 				continue
 			}
-			hasIPvlan = true
+			requireEBPFChainer = true
+			ebpfChainerExist = true
+
+			_, err = plugin.Set(datapath, "datapath")
+			if err != nil {
+				return "", err
+			}
+
 		case "terway":
 			if plugin.Exists("eniip_virtual_type") {
 				virtualType, ok := plugin.Path("eniip_virtual_type").Data().(string)
 				if !ok {
 					return "", fmt.Errorf("eniip_virtual_type not found")
 				}
-				if strings.ToLower(virtualType) == "ipvlan" {
-					requireIPvlan = true
+				if !ebpfSupport {
+					err = plugin.Delete("eniip_virtual_type")
+					if err != nil {
+						return "", err
+					}
+				} else {
+					requireIPvlan := false
 
-					if !ebpfSupport {
-						err = plugin.Delete("eniip_virtual_type")
-						if err != nil {
-							return "", err
+					switch strings.ToLower(virtualType) {
+					case dataPathIPvlan:
+						requireIPvlan = true
+						datapath = dataPathIPvlan
+
+						fallthrough
+					case dataPathV2:
+						requireEBPFChainer = true
+
+						if requireIPvlan && !_switchDataPathV2() {
+							fmt.Printf("keep ipvlan mode %v %v\n", requireIPvlan, !_switchDataPathV2())
+							_, err = plugin.Set("IPVlan", "eniip_virtual_type")
+							if err != nil {
+								return "", err
+							}
+						} else {
+							fmt.Printf("datapathv2 enabled\n")
+							_, err = plugin.Set(dataPathV2, "eniip_virtual_type")
+							if err != nil {
+								return "", err
+							}
+
+							datapath = dataPathV2
+
+							err = nodecap.WriteNodeCapabilities(nodeCapabilityDatapath, dataPathV2)
+							if err != nil {
+								return "", err
+							}
 						}
-					} else {
+
 						if edtSupport {
 							_, err = plugin.Set("edt", "bandwidth_mode")
 						} else {
@@ -172,12 +260,30 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 		}
 	}
 
-	if ebpfSupport && requireIPvlan && !hasIPvlan {
-		err = g.ArrayAppend(map[string]string{"type": "cilium-cni"}, "plugins")
+	if ebpfSupport && requireEBPFChainer && !ebpfChainerExist {
+		err = g.ArrayAppend(map[string]any{"type": "cilium-cni", "enable-debug": true, "log-file": "/var/run/cilium/cilium-cni.log", "data-path": datapath}, "plugins")
 		if err != nil {
 			return "", err
 		}
 	}
 
 	return g.StringIndent("", "  "), nil
+}
+
+const moundCmd = `nsenter -t 1 -m -- bash -c '
+		mount | grep "/sys/fs/bpf type bpf" || {
+		# Mount the filesystem until next reboot
+		echo "Mounting BPF filesystem..."
+		mount bpffs /sys/fs/bpf -t bpf
+
+		echo "Node initialization complete"
+	}'`
+
+func mountHostBpf() error {
+	out, err := exec.Command("/bin/sh", "-c", moundCmd).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("mount bpf failed: %v, %s", err, out)
+	}
+	_, _ = fmt.Fprint(os.Stdout, string(out))
+	return nil
 }
