@@ -35,8 +35,11 @@ func SetStsKinds(kids []string) {
 	stsKinds = append(stsKinds, kids...)
 }
 
-// IsStsPod pod is sts
-func IsStsPod(pod *corev1.Pod) bool {
+// IsFixedNamePod pod is sts
+func IsFixedNamePod(pod *corev1.Pod) bool {
+	if len(pod.GetObjectMeta().GetOwnerReferences()) == 0 {
+		return true
+	}
 	for _, own := range pod.GetObjectMeta().GetOwnerReferences() {
 		for _, kind := range stsKinds {
 			if own.Kind == kind {

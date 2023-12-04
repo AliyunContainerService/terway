@@ -298,7 +298,7 @@ func matchOnePodNetworking(ctx context.Context, namespace string, client client.
 		if podNetworking.Status.Status != v1beta1.NetworkingStatusReady {
 			continue
 		}
-		if !utils.IsStsPod(pod) {
+		if !utils.IsFixedNamePod(pod) {
 			// for fixed ip , only match sts pod
 			if podNetworking.Spec.AllocationType.Type == v1beta1.IPAllocTypeFixed {
 				continue
@@ -334,7 +334,7 @@ func matchOnePodNetworking(ctx context.Context, namespace string, client client.
 }
 
 func getPreviousZone(ctx context.Context, client client.Client, pod *corev1.Pod) (string, error) {
-	if !utils.IsStsPod(pod) {
+	if !utils.IsFixedNamePod(pod) {
 		return "", nil
 	}
 
