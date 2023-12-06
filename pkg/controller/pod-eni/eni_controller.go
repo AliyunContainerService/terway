@@ -332,7 +332,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		if podENI.Status.Phase == "" {
 			needAttach = true
 		} else {
-			if utils.IsStsPod(pod) {
+			if utils.IsFixedNamePod(pod) {
 				for _, alloc := range podENI.Spec.Allocations {
 					if alloc.AllocationType.Type == v1beta1.IPAllocTypeFixed {
 						needAttach = true

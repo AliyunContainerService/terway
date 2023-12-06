@@ -22,14 +22,15 @@ import (
 	"net/http"
 	"strconv"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 	"github.com/AliyunContainerService/terway/types/daemon"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 
 	"gomodules.xyz/jsonpatch/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -124,9 +125,12 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 			return webhook.Errored(1, err)
 		}
 		if podNetworking == nil {
-			if !types.PodUseENI(pod) && controlplane.GetConfig().IPAMType != types.IPAMTypeCRD {
-				l.V(5).Info("no selector is matched or CRD is not ready")
-				return webhook.Allowed("not match")
+			if controlplane.GetConfig().IPAMType != types.IPAMTypeCRD {
+				if !types.PodUseENI(pod) {
+					l.V(5).Info("no selector is matched or CRD is not ready")
+					return webhook.Allowed("not match")
+				}
+				// allow use default config if in CRD mode
 			}
 
 			networks.PodNetworks = append(networks.PodNetworks, controlplane.PodNetworks{Interface: eth0})
@@ -298,7 +302,7 @@ func matchOnePodNetworking(ctx context.Context, namespace string, client client.
 		if podNetworking.Status.Status != v1beta1.NetworkingStatusReady {
 			continue
 		}
-		if !utils.IsStsPod(pod) {
+		if !utils.IsFixedNamePod(pod) {
 			// for fixed ip , only match sts pod
 			if podNetworking.Spec.AllocationType.Type == v1beta1.IPAllocTypeFixed {
 				continue
@@ -334,7 +338,7 @@ func matchOnePodNetworking(ctx context.Context, namespace string, client client.
 }
 
 func getPreviousZone(ctx context.Context, client client.Client, pod *corev1.Pod) (string, error) {
-	if !utils.IsStsPod(pod) {
+	if !utils.IsFixedNamePod(pod) {
 		return "", nil
 	}
 

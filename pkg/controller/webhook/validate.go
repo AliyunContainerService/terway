@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 
@@ -44,6 +45,15 @@ func ValidateHook() *webhook.Admission {
 			}
 			if len(podNetworking.Spec.SecurityGroupIDs) > 5 {
 				return admission.Denied("security group can not more than 5")
+			}
+
+			if podNetworking.Spec.AllocationType.ReleaseStrategy == v1beta1.IPAllocTypeFixed {
+				if podNetworking.Spec.AllocationType.ReleaseStrategy == v1beta1.ReleaseStrategyTTL {
+					_, err = time.ParseDuration(podNetworking.Spec.AllocationType.ReleaseAfter)
+					if err != nil {
+						return webhook.Denied(fmt.Sprintf("invalid releaseAfter %s", podNetworking.Spec.AllocationType.ReleaseAfter))
+					}
+				}
 			}
 			return webhook.Allowed("checked")
 		}),
