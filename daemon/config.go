@@ -56,6 +56,8 @@ func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *aliyun.Limits) 
 			poolConfig.MaxPoolSize = cfg.MaxPoolSize
 		}
 
+		poolConfig.MinPoolSize = cfg.MinPoolSize
+
 		if cfg.MinENI > 0 {
 			poolConfig.MinPoolSize = cfg.MinENI
 		}
@@ -91,6 +93,8 @@ func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *aliyun.Limits) 
 		} else {
 			poolConfig.MaxPoolSize = cfg.MaxPoolSize
 		}
+
+		poolConfig.MinPoolSize = cfg.MinPoolSize
 
 		if cfg.MinENI > 0 {
 			poolConfig.MinPoolSize = cfg.MinENI * ipPerENI

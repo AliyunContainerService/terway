@@ -14,6 +14,7 @@ import (
 var defaultIns *Instance
 var once sync.Once
 var logIns = logger.DefaultLogger
+var Test = false
 
 type Instance struct {
 	RegionID   string
@@ -27,6 +28,9 @@ type Instance struct {
 }
 
 func GetInstanceMeta() *Instance {
+	if Test {
+		return &Instance{}
+	}
 	once.Do(func() {
 		regionID, err := metadata.GetLocalRegion()
 		if err != nil || regionID == "" {
