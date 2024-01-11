@@ -33,7 +33,7 @@ type Config struct {
 
 	HealthzBindAddress string `json:"healthzBindAddress" validate:"required,tcp_addr" mod:"default=0.0.0.0:80"`
 	MetricsBindAddress string `json:"metricsBindAddress" validate:"required" mod:"default=0"`
-	ClusterDomain      string `json:"clusterDomain" validate:"required,fqdn" mod:"default=cluster.local"`
+	ClusterDomain      string `json:"clusterDomain" validate:"required" mod:"default=cluster.local"`
 	DisableWebhook     bool   `json:"disableWebhook"`
 	WebhookPort        int    `json:"webhookPort" validate:"gt=0,lte=65535" mod:"default=4443"`
 	CertDir            string `json:"certDir" validate:"required" mod:"default=/var/run/webhook-cert"`
