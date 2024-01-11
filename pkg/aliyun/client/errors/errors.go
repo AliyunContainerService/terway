@@ -2,11 +2,14 @@ package errors
 
 import (
 	"errors"
+	"fmt"
 
 	apiErr "github.com/aliyun/alibaba-cloud-sdk-go/sdk/errors"
 )
 
 const (
+	ErrForbidden = "Forbidden.RAM"
+
 	// InvalidVSwitchIDIPNotEnough AssignPrivateIpAddresses const error message
 	// Reference: https://help.aliyun.com/document_detail/85917.html
 	InvalidVSwitchIDIPNotEnough = "InvalidVSwitchId.IpNotEnough"
@@ -59,7 +62,8 @@ var (
 
 // ErrAssert check err is match errCode
 func ErrAssert(errCode string, err error) bool {
-	respErr, ok := err.(apiErr.Error)
+	var respErr apiErr.Error
+	ok := errors.As(err, &respErr)
 	if ok {
 		return respErr.ErrorCode() == errCode
 	}
@@ -68,7 +72,8 @@ func ErrAssert(errCode string, err error) bool {
 
 // ErrStatusCodeAssert check err is match errCode
 func ErrStatusCodeAssert(code int, err error) bool {
-	respErr, ok := err.(apiErr.Error)
+	var respErr apiErr.Error
+	ok := errors.As(err, &respErr)
 	if ok {
 		return respErr.HttpStatus() == code
 	}
@@ -77,9 +82,39 @@ func ErrStatusCodeAssert(code int, err error) bool {
 
 // ErrRequestID try to get requestID
 func ErrRequestID(err error) string {
-	respErr, ok := err.(*apiErr.ServerError)
+	var respErr *apiErr.ServerError
+	ok := errors.As(err, &respErr)
 	if ok {
 		return respErr.RequestId()
 	}
 	return ""
+}
+
+type E struct {
+	e apiErr.Error
+}
+
+func (e *E) Error() string {
+	if e.e == nil {
+		return ""
+	}
+
+	return fmt.Sprintf("errCode: %s, msg: %s, requestID: %s", e.e.ErrorCode(), e.e.Message(), ErrRequestID(e.e))
+}
+
+func (e *E) Unwrap() error {
+	return e.e
+}
+
+func WarpError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var respErr apiErr.Error
+	ok := errors.As(err, &respErr)
+	if !ok {
+		return err
+	}
+
+	return &E{e: respErr}
 }

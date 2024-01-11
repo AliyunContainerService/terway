@@ -1,4 +1,4 @@
-package aliyun
+package instance
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 	"github.com/AliyunContainerService/terway/pkg/logger"
-	"github.com/AliyunContainerService/terway/pkg/utils"
 )
 
 var defaultIns *Instance
@@ -168,10 +167,10 @@ func GetLimit(client client.ECS, instanceType string) (*Limits, error) {
 		limits.Store(instanceType, &Limits{
 			Adapters:              adapterLimit,
 			TotalAdapters:         instanceTypeInfo.EniTotalQuantity,
-			IPv4PerAdapter:        utils.Minimal(ipv4PerAdapter),
-			IPv6PerAdapter:        utils.Minimal(ipv6PerAdapter),
-			MemberAdapterLimit:    utils.Minimal(memberAdapterLimit),
-			MaxMemberAdapterLimit: utils.Minimal(maxMemberAdapterLimit),
+			IPv4PerAdapter:        max(ipv4PerAdapter, 0),
+			IPv6PerAdapter:        max(ipv6PerAdapter, 0),
+			MemberAdapterLimit:    max(memberAdapterLimit, 0),
+			MaxMemberAdapterLimit: max(maxMemberAdapterLimit, 0),
 			InstanceBandwidthRx:   instanceTypeInfo.InstanceBandwidthRx,
 			InstanceBandwidthTx:   instanceTypeInfo.InstanceBandwidthTx,
 		})

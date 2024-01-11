@@ -8,8 +8,8 @@ import (
 	"os"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	"k8s.io/klog/v2"
 )
 
 // GetDeviceNumber get interface device number by mac address
@@ -43,7 +43,7 @@ func DeleteIPRulesByIP(addr *net.IPNet) error {
 	}
 	for _, r := range rules {
 		if ipNetEqual(addr, r.Src) || ipNetEqual(addr, r.Dst) {
-			log.Infof("del ip rule %s", r.String())
+			klog.Infof("del ip rule %s", r.String())
 			err := netlink.RuleDel(&r)
 			if err == nil {
 				continue
@@ -71,7 +71,7 @@ func DeleteRouteByIP(addr *net.IPNet) error {
 	}
 	for _, r := range routes {
 		if r.Dst != nil && r.Dst.IP.Equal(addr.IP) {
-			log.Infof("del route %s", r.String())
+			klog.Infof("del route %s", r.String())
 			err := netlink.RouteDel(&r)
 			if err != nil {
 				return err

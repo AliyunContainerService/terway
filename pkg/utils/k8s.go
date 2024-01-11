@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -73,6 +74,10 @@ func PodSandboxExited(p *corev1.Pod) bool {
 	default:
 		return false
 	}
+}
+
+func PodInfoKey(namespace, name string) string {
+	return fmt.Sprintf("%s/%s", namespace, name)
 }
 
 var (

@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -263,19 +263,19 @@ func (m *Manager) DescribeInstanceTypes(ctx context.Context, types []string) ([]
 	panic("implement me")
 }
 
-func (m *Manager) AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
+func (m *Manager) AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotent string) ([]netip.Addr, error) {
 	panic("implement me")
 }
 
-func (m *Manager) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []net.IP) error {
+func (m *Manager) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []netip.Addr) error {
 	panic("implement me")
 }
 
-func (m *Manager) AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
+func (m *Manager) AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]netip.Addr, error) {
 	panic("implement me")
 }
 
-func (m *Manager) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []net.IP) error {
+func (m *Manager) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []netip.Addr) error {
 	//TODO implement me
 	panic("implement me")
 }

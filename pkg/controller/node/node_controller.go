@@ -6,8 +6,10 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"k8s.io/client-go/util/retry"
+
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
@@ -16,7 +18,6 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 	"github.com/AliyunContainerService/terway/types/daemon"
-	"k8s.io/client-go/util/retry"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	corev1 "k8s.io/api/core/v1"
@@ -37,7 +38,7 @@ const controllerName = "node"
 
 func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
-		_, err := aliyun.GetLimit(ctrlCtx.AliyunClient, "")
+		_, err := instance.GetLimit(ctrlCtx.AliyunClient, "")
 		if err != nil {
 			return err
 		}
@@ -248,7 +249,7 @@ func (m *ReconcileNode) ensureResourceLimit(ctx context.Context, node *corev1.No
 	if instanceType == "" {
 		return fmt.Errorf("get label %s is empty", corev1.LabelInstanceTypeStable)
 	}
-	l, err := aliyun.GetLimit(m.aliyun, instanceType)
+	l, err := instance.GetLimit(m.aliyun, instanceType)
 	if err != nil {
 		return err
 	}
@@ -278,7 +279,7 @@ func (m *ReconcileNode) initENIManagerForNode(ctx context.Context, node *corev1.
 	if instanceType == "" {
 		return fmt.Errorf("get label %s is empty", corev1.LabelInstanceTypeStable)
 	}
-	limit, err := aliyun.GetLimit(m.aliyun, instanceType)
+	limit, err := instance.GetLimit(m.aliyun, instanceType)
 	if err != nil {
 		return err
 	}

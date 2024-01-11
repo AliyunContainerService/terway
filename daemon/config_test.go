@@ -5,12 +5,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
 func init() {
-	aliyun.Test = true
+	instance.Test = true
 }
 
 func TestGetPoolConfigWithVPCMode(t *testing.T) {
@@ -20,7 +20,7 @@ func TestGetPoolConfigWithVPCMode(t *testing.T) {
 		EniCapRatio: 1,
 		RegionID:    "foo",
 	}
-	limit := &aliyun.Limits{
+	limit := &instance.Limits{
 		Adapters:           10,
 		MemberAdapterLimit: 5,
 	}
@@ -37,7 +37,7 @@ func TestGetPoolConfigWithENIOnlyMode(t *testing.T) {
 		EniCapRatio: 1,
 		RegionID:    "foo",
 	}
-	limit := &aliyun.Limits{
+	limit := &instance.Limits{
 		Adapters:           10,
 		MemberAdapterLimit: 5,
 	}
@@ -54,7 +54,7 @@ func TestGetPoolConfigWithENIMultiIPMode(t *testing.T) {
 		EniCapRatio: 1,
 		RegionID:    "foo",
 	}
-	limit := &aliyun.Limits{
+	limit := &instance.Limits{
 		Adapters:           10,
 		IPv4PerAdapter:     5,
 		MemberAdapterLimit: 5,

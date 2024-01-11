@@ -1,7 +1,10 @@
 package daemon
 
 import (
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
+	"context"
+
+	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
+	"github.com/AliyunContainerService/terway/pkg/k8s"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
@@ -9,24 +12,27 @@ import (
 
 // getDynamicConfig returns (config, label, error) specified in node
 // ("", "", nil) for no dynamic config for this node
-func getDynamicConfig(k8s Kubernetes) (string, string, error) {
+func getDynamicConfig(ctx context.Context, k8s k8s.Kubernetes) (string, string, error) {
 	label := k8s.GetNodeDynamicConfigLabel()
 	if label == "" {
 		return "", "", nil
 	}
 
-	cfg, err := k8s.GetDynamicConfigWithName(label)
+	cfg, err := k8s.GetDynamicConfigWithName(ctx, label)
 
 	return cfg, label, err
 }
 
 // the actual size for pool is minIdle and maxIdle
-func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *aliyun.Limits) (*types.PoolConfig, error) {
+func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *instance.Limits) (*types.PoolConfig, error) {
+
 	poolConfig := &types.PoolConfig{
 		SecurityGroupIDs:          cfg.GetSecurityGroups(),
 		VSwitchSelectionPolicy:    cfg.VSwitchSelectionPolicy,
 		DisableSecurityGroupCheck: cfg.DisableSecurityGroupCheck,
+		BatchSize:                 10,
 	}
+
 	if cfg.ENITags == nil {
 		cfg.ENITags = make(map[string]string)
 	}
@@ -39,7 +45,7 @@ func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *aliyun.Limits) 
 	maxMemberENI := 0
 
 	switch daemonMode {
-	case daemonModeVPC, daemonModeENIOnly:
+	case daemon.ModeVPC, daemon.ModeENIOnly:
 		maxENI = limit.Adapters
 		maxENI = int(float64(maxENI)*cfg.EniCapRatio) + cfg.EniCapShift - 1
 
@@ -67,12 +73,12 @@ func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *aliyun.Limits) 
 		}
 
 		maxMemberENI = limit.MemberAdapterLimit
-		if cfg.ENICapPolicy == types.ENICapPolicyPreferTrunk {
+		if cfg.ENICapPolicy == daemon.ENICapPolicyPreferTrunk {
 			maxMemberENI = limit.MaxMemberAdapterLimit
 		}
 
 		poolConfig.MaxIPPerENI = 1
-	case daemonModeENIMultiIP:
+	case daemon.ModeENIMultiIP:
 		maxENI = limit.Adapters
 		maxENI = int(float64(maxENI)*cfg.EniCapRatio) + cfg.EniCapShift - 1
 
@@ -121,7 +127,7 @@ func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *aliyun.Limits) 
 	}
 
 	if requireMeta {
-		ins := aliyun.GetInstanceMeta()
+		ins := instance.GetInstanceMeta()
 		zone := ins.ZoneID
 		if cfg.VSwitches != nil {
 			zoneVswitchs, ok := cfg.VSwitches[zone]

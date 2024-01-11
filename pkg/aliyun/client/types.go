@@ -5,11 +5,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 )
-
-var log = logger.DefaultLogger.WithField("subSys", "openAPI")
 
 // log fields
 const (
@@ -18,6 +15,7 @@ const (
 	LogFieldInstanceID       = "instanceID"
 	LogFieldSecondaryIPCount = "secondaryIPCount"
 	LogFieldENIID            = "eni"
+	LogFieldIPs              = "ips"
 	LogFieldEIPID            = "eip"
 	LogFieldPrivateIP        = "privateIP"
 	LogFieldVSwitchID        = "vSwitchID"
@@ -33,8 +31,7 @@ const (
 
 func generateEniName() string {
 	b := make([]byte, 3)
-	rand.Seed(time.Now().UnixNano())
-	_, err := rand.Read(b)
+	_, err := rand.New(rand.NewSource(time.Now().UnixNano())).Read(b)
 	if err != nil {
 		panic(err)
 	}

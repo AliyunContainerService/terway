@@ -1,7 +1,6 @@
-package daemon
+package eni
 
 import (
-	"context"
 	"strings"
 	"time"
 
@@ -10,10 +9,10 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/windows/apis"
 	"github.com/AliyunContainerService/terway/pkg/windows/iface"
-	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
-func (f *eniIPFactory) setupENICompartment(eni *types.ENI) (err error) {
+func setupENICompartment(eni *daemon.ENI) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -47,7 +46,7 @@ func (f *eniIPFactory) setupENICompartment(eni *types.ENI) (err error) {
 	return
 }
 
-func (f *eniIPFactory) destroyENICompartment(eni *types.ENI) (err error) {
+func destroyENICompartment(eni *daemon.ENI) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

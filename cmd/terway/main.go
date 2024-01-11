@@ -4,6 +4,7 @@ import (
 	"flag"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/AliyunContainerService/terway/daemon"
@@ -42,13 +43,19 @@ func main() {
 	fs.StringVar(&daemonMode, "daemon-mode", "VPC", "terway network mode")
 	fs.StringVar(&logLevel, "log-level", "info", "terway log level")
 	fs.StringVar(&readonlyListen, "readonly-listen", utils.NormalizePath(debugSocketPath), "terway readonly listen")
+	ctrl.RegisterFlags(fs)
+	klog.InitFlags(fs)
+
 	err := fs.Parse(os.Args[1:])
 	if err != nil {
 		panic(err)
 	}
+	if strings.ToLower(logLevel) == "debug" {
+		_ = fs.Set("v", "5")
+	}
 
 	ctx := ctrl.SetupSignalHandler()
-	err = daemon.Run(ctx, utils.NormalizePath(defaultSocketPath), readonlyListen, utils.NormalizePath(defaultConfigPath), daemonMode, logLevel)
+	err = daemon.Run(ctx, utils.NormalizePath(defaultSocketPath), readonlyListen, utils.NormalizePath(defaultConfigPath), daemonMode)
 
 	if err != nil {
 		klog.Fatal(err)

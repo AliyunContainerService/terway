@@ -2,16 +2,17 @@ package delegate
 
 import (
 	"context"
-	"net"
+	"net/netip"
+
+	corev1 "k8s.io/api/core/v1"
+	k8sErr "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/controller/node"
-	corev1 "k8s.io/api/core/v1"
-	k8sErr "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
@@ -135,22 +136,22 @@ func (d *Delegate) DescribeInstanceTypes(ctx context.Context, types []string) ([
 	return d.defaultClient.DescribeInstanceTypes(ctx, types)
 }
 
-func (d *Delegate) AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
+func (d *Delegate) AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotent string) ([]netip.Addr, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (d *Delegate) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []net.IP) error {
+func (d *Delegate) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []netip.Addr) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (d *Delegate) AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
+func (d *Delegate) AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]netip.Addr, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (d *Delegate) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []net.IP) error {
+func (d *Delegate) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []netip.Addr) error {
 	//TODO implement me
 	panic("implement me")
 }

@@ -1,12 +1,15 @@
-package types
+package daemon
 
 import (
 	"net"
 	"time"
+
+	"github.com/AliyunContainerService/terway/types"
 )
 
 // PodEipInfo store pod eip info
 // NOTE: this is the type store in db
+// DEPRECATED
 type PodEipInfo struct {
 	PodEip                   bool
 	PodEipID                 string
@@ -27,10 +30,10 @@ type PodInfo struct {
 	TcIngress       uint64
 	TcEgress        uint64
 	PodNetworkType  string
-	PodIP           string // used for eip and mip
-	PodIPs          IPSet  // used for eip and mip
+	PodIP           string      // used for eip and mip
+	PodIPs          types.IPSet // used for eip and mip
 	SandboxExited   bool
-	EipInfo         PodEipInfo
+	EipInfo         PodEipInfo // deprecated
 	IPStickTime     time.Duration
 	PodENI          bool
 	PodUID          string
@@ -63,6 +66,8 @@ type PodResources struct {
 	PodInfo     *PodInfo
 	NetNs       *string
 	ContainerID *string
+
+	NetConf string
 }
 
 // GetResourceItemByType get pod resource by resource type

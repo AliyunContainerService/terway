@@ -12,6 +12,10 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
+
+	"github.com/go-logr/logr"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -21,9 +25,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
+
+const daemonRPCTimeout = 118 * time.Second
 
 // stackTriger print golang stack trace to log
 func stackTriger() {
@@ -42,7 +47,7 @@ func stackTriger() {
 				bufferLen *= 2
 			}
 			buf = buf[:stackSize]
-			log.Printf("dump stacks: %s\n", string(buf))
+			logger.DefaultLogger.Printf("dump stacks: %s\n", string(buf))
 		}
 	}(sigchain)
 
@@ -50,18 +55,8 @@ func stackTriger() {
 }
 
 // Run terway daemon
-func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath, daemonMode, logLevel string) error {
-	level, err := log.ParseLevel(logLevel)
-	if err != nil {
-		return fmt.Errorf("error set log level: %s, %w", logLevel, err)
-	}
-	logger.DefaultLogger.SetLevel(level)
-	if !utils.IsWindowsOS() {
-		// NB(thxCode): hcsshim lib introduces much noise.
-		log.SetLevel(level)
-	}
-
-	err = os.MkdirAll(filepath.Dir(socketFilePath), 0700)
+func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath, daemonMode string) error {
+	err := os.MkdirAll(filepath.Dir(socketFilePath), 0700)
 	if err != nil {
 		return fmt.Errorf("error create socket dir: %s, %w", filepath.Dir(socketFilePath), err)
 	}
@@ -77,13 +72,15 @@ func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath,
 		return fmt.Errorf("error listen at %s: %v", socketFilePath, err)
 	}
 
-	networkService, err := newNetworkService(ctx, configFilePath, daemonMode)
+	svc, err := newNetworkService(ctx, configFilePath, daemonMode)
 	if err != nil {
 		return err
 	}
 
-	grpcServer := grpc.NewServer()
-	rpc.RegisterTerwayBackendServer(grpcServer, networkService)
+	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
+		cniInterceptor,
+	))
+	rpc.RegisterTerwayBackendServer(grpcServer, svc)
 	rpc.RegisterTerwayTracingServer(grpcServer, tracing.DefaultRPCServer())
 
 	stop := make(chan struct{})
@@ -95,10 +92,10 @@ func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath,
 	}
 
 	go func() {
-		serviceLog.Infof("start serving on %s", socketFilePath)
+		serviceLog.Info("start serving", "path", socketFilePath)
 		err = grpcServer.Serve(l)
 		if err != nil {
-			log.Errorf("error start grpc server: %v", err)
+			logger.DefaultLogger.Errorf("error start grpc server: %v", err)
 			close(stop)
 		}
 	}()
@@ -108,6 +105,9 @@ func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath,
 	case <-stop:
 	}
 	grpcServer.Stop()
+
+	svc.wg.Wait()
+
 	return nil
 }
 
@@ -143,7 +143,7 @@ func runDebugServer(debugSocketListen string) error {
 	go func() {
 		err := http.Serve(l, http.DefaultServeMux)
 		if err != nil {
-			log.Errorf("error start debug server: %v", err)
+			logger.DefaultLogger.Errorf("error start debug server: %v", err)
 		}
 	}()
 
@@ -163,4 +163,23 @@ func registerPrometheus() {
 	prometheus.MustRegister(metric.ENIIPFactoryIPCount)
 	prometheus.MustRegister(metric.ENIIPFactoryENICount)
 	prometheus.MustRegister(metric.ENIIPFactoryIPAllocCount)
+}
+
+func cniInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	ctx, cancel := context.WithTimeout(ctx, daemonRPCTimeout)
+	defer cancel()
+
+	switch r := req.(type) {
+	case *rpc.AllocIPRequest:
+		l := logf.FromContext(ctx, "pod", utils.PodInfoKey(r.K8SPodNamespace, r.K8SPodName), "containerID", r.K8SPodInfraContainerId)
+		ctx = logr.NewContext(ctx, l)
+	case *rpc.ReleaseIPRequest:
+		l := logf.FromContext(ctx, "pod", utils.PodInfoKey(r.K8SPodNamespace, r.K8SPodName), "containerID", r.K8SPodInfraContainerId)
+		ctx = logr.NewContext(ctx, l)
+	case *rpc.GetInfoRequest:
+		l := logf.FromContext(ctx, "pod", utils.PodInfoKey(r.K8SPodNamespace, r.K8SPodName), "containerID", r.K8SPodInfraContainerId)
+		ctx = logr.NewContext(ctx, l)
+	default:
+	}
+	return handler(ctx, req)
 }
