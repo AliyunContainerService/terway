@@ -8,7 +8,7 @@ service TerwayTracing {
   rpc GetResourceConfig(ResourceTypeNameRequest) returns (ResourceConfigReply);
   rpc GetResourceTrace(ResourceTypeNameRequest) returns (ResourceTraceReply);
   rpc ResourceExecute(ResourceExecuteRequest) returns (stream ResourceExecuteReply);
-  rpc GetResourceMapping(Placeholder) returns (PodResourceMappingReply);
+  rpc GetResourceMapping(Placeholder) returns (ResourceMappingReply);
 }
 
 message Placeholder {}
@@ -53,19 +53,15 @@ message ResourceTraceReply {
   repeated MapKeyValueEntry Trace = 1;
 }
 
-enum ResourceMappingType {
-  MappingTypeNormal = 0; // Pod -> Resource -> Factory
-  MappingTypeIdle = 1; // x -> Resource -> Factory
-  MappingTypeError = 2; // x -> x -> Factory
+message ResourceMapping {
+  string NetworkInterfaceID = 1;
+  string MAC = 2;
+  string Type = 3;
+  string AllocInhibitExpireAt = 4 ;
+  string Status = 5;
+  repeated string Info = 6;
 }
 
-message PodResourceMapping {
-  ResourceMappingType type = 1;
-  string PodName = 2;
-  string ResourceName = 3;
-  string FactoryResourceName = 4;
-}
-
-message PodResourceMappingReply {
-  repeated PodResourceMapping info = 1;
+message ResourceMappingReply {
+  repeated ResourceMapping info = 1;
 }

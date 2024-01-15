@@ -83,34 +83,15 @@ func (t *tracingRPC) ResourceExecute(request *rpc.ResourceExecuteRequest, server
 	return nil
 }
 
-func (t *tracingRPC) GetResourceMapping(_ context.Context, _ *rpc.Placeholder) (*rpc.PodResourceMappingReply, error) {
+func (t *tracingRPC) GetResourceMapping(_ context.Context, _ *rpc.Placeholder) (*rpc.ResourceMappingReply, error) {
 	mapping, err := t.tracer.GetResourceMapping()
 	if err != nil {
 		return nil, err
 	}
 
-	var info []*rpc.PodResourceMapping
-	for _, m := range mapping {
-		info = append(info, toRPCMapping(*m))
-	}
-
-	return &rpc.PodResourceMappingReply{
-		Info: info,
+	return &rpc.ResourceMappingReply{
+		Info: mapping,
 	}, nil
-}
-
-func toRPCMapping(res PodMapping) *rpc.PodResourceMapping {
-	rMapping := rpc.PodResourceMapping{
-		Type:                rpc.ResourceMappingType_MappingTypeNormal,
-		PodName:             res.Name,
-		ResourceName:        res.LocalResID,
-		FactoryResourceName: res.RemoteResID,
-	}
-	if !res.Valid {
-		rMapping.Type = rpc.ResourceMappingType_MappingTypeError
-	}
-
-	return &rMapping
 }
 
 func toRPCEntry(entry MapKeyValueEntry) *rpc.MapKeyValueEntry {

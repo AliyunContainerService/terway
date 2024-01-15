@@ -18,6 +18,7 @@ package vswitch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -28,6 +29,8 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 )
+
+var ErrNoAvailableVSwitch = errors.New("no available vSwitch")
 
 // Switch hole all switch info from both terway config and podNetworking
 type Switch struct {
@@ -128,7 +131,7 @@ func (s *SwitchPool) GetOne(ctx context.Context, client client.VSwitch, zone str
 		return vsw, nil
 	}
 
-	return nil, fmt.Errorf("no available vSwitch for zone %s, vswList %v", zone, ids)
+	return nil, fmt.Errorf("no available vSwitch for zone %s, vswList %v, %w", zone, ids, ErrNoAvailableVSwitch)
 }
 
 // GetByID will get vSwitch info from local store or openAPI

@@ -122,7 +122,7 @@ spec:
         - name: terway
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
-          command: ["/usr/bin/terwayd", "-log-level", "info", "-daemon-mode", "ENIMultiIP"]
+          command: [ "/usr/bin/terwayd", "-log-level", "info", "-daemon-mode", "{{.Values.daemonMode}}" ]
           securityContext:
             capabilities:
               add:
@@ -166,7 +166,7 @@ spec:
         - name: policy
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
-          command: ["/bin/policyinit.sh"]
+          command: [ "/bin/policyinit.sh" ]
           env:
             - name: NODENAME
               valueFrom:
@@ -256,7 +256,7 @@ spec:
               name: xtables-lock
       volumes:
         - name: config
-          emptyDir: {}
+          emptyDir: { }
         - name: configvolume
           configMap:
             name: eni-config

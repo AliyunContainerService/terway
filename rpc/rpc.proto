@@ -42,7 +42,6 @@ message AllocIPReply {
   bool IPv4 = 3;
   bool IPv6 = 4;
   repeated NetConf NetConfs = 5;
-  bool EnableTrunking = 6;
 }
 
 message BasicInfo {
@@ -106,7 +105,6 @@ message GetInfoReply {
   bool IPv4 = 3;
   bool IPv6 = 4;
   repeated NetConf NetConfs = 5;
-  bool EnableTrunking = 6;
   Error Error = 7;
 }
 

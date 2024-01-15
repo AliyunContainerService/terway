@@ -1,34 +1,40 @@
-package aliyun
+package eni
 
 import (
 	"fmt"
 	"net"
+	"net/netip"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
 // ENIInfoGetter interface to get eni information
 type ENIInfoGetter interface {
-	GetENIByMac(mac string) (*types.ENI, error)
-	GetENIPrivateAddressesByMAC(mac string) ([]net.IP, error)
-	GetENIPrivateIPv6AddressesByMAC(mac string) ([]net.IP, error)
-	GetENIs(containsMainENI bool) ([]*types.ENI, error)
+	GetENIByMac(mac string) (*daemon.ENI, error)
+
+	GetENIPrivateAddressesByMACv2(mac string) ([]netip.Addr, error)
+	GetENIPrivateIPv6AddressesByMACv2(mac string) ([]netip.Addr, error)
+
+	GetENIs(containsMainENI bool) ([]*daemon.ENI, error)
 	GetSecondaryENIMACs() ([]string, error)
 }
 
 type ENIMetadata struct {
-	ipFamily *types.IPFamily
+	ipv4, ipv6 bool
 }
 
-func NewENIMetadata(ipFamily *types.IPFamily) *ENIMetadata {
+func NewENIMetadata(ipv4, ipv6 bool) *ENIMetadata {
 	return &ENIMetadata{
-		ipFamily: ipFamily,
+		ipv4: ipv4,
+		ipv6: ipv6,
 	}
 }
 
-func (e *ENIMetadata) GetENIByMac(mac string) (*types.ENI, error) {
-	eni := types.ENI{
+func (e *ENIMetadata) GetENIByMac(mac string) (*daemon.ENI, error) {
+	eni := daemon.ENI{
 		MAC: mac,
 	}
 	var err error
@@ -58,7 +64,7 @@ func (e *ENIMetadata) GetENIByMac(mac string) (*types.ENI, error) {
 
 	var v6gw net.IP
 	var vSwitchIPv6CIDR *net.IPNet
-	if e.ipFamily.IPv6 {
+	if e.ipv6 {
 		v6gw, err = metadata.GetENIV6Gateway(mac)
 		if err != nil {
 			return nil, fmt.Errorf("error get eni ipv6 gateway from metaserver, mac: %s, %w", mac, err)
@@ -89,18 +95,18 @@ func (e *ENIMetadata) GetENIByMac(mac string) (*types.ENI, error) {
 	return &eni, nil
 }
 
-func (e *ENIMetadata) GetENIPrivateAddressesByMAC(mac string) ([]net.IP, error) {
-	return metadata.GetENIPrivateIPs(mac)
+func (e *ENIMetadata) GetENIPrivateAddressesByMACv2(mac string) ([]netip.Addr, error) {
+	return metadata.GetIPv4ByMac(mac)
 }
 
-func (e *ENIMetadata) GetENIPrivateIPv6AddressesByMAC(mac string) ([]net.IP, error) {
-	return metadata.GetENIPrivateIPv6IPs(mac)
+func (e *ENIMetadata) GetENIPrivateIPv6AddressesByMACv2(mac string) ([]netip.Addr, error) {
+	return metadata.GetIPv6ByMac(mac)
 }
 
-func (e *ENIMetadata) GetENIs(containsMainENI bool) ([]*types.ENI, error) {
-	var enis []*types.ENI
+func (e *ENIMetadata) GetENIs(containsMainENI bool) ([]*daemon.ENI, error) {
+	var enis []*daemon.ENI
 
-	mainENIMac := GetInstanceMeta().PrimaryMAC
+	mainENIMac := instance.GetInstanceMeta().PrimaryMAC
 
 	macs, err := metadata.GetENIsMAC()
 	if err != nil {
@@ -114,7 +120,7 @@ func (e *ENIMetadata) GetENIs(containsMainENI bool) ([]*types.ENI, error) {
 		}
 		eni, err := e.GetENIByMac(mac)
 		if err != nil {
-			return nil, fmt.Errorf("error get eni info by mac: %s from metadata, %w", mac, err)
+			return nil, err
 		}
 		enis = append(enis, eni)
 	}
@@ -125,7 +131,7 @@ func (e *ENIMetadata) GetENIs(containsMainENI bool) ([]*types.ENI, error) {
 func (e *ENIMetadata) GetSecondaryENIMACs() ([]string, error) {
 	var result []string
 
-	mainENIMac := GetInstanceMeta().PrimaryMAC
+	mainENIMac := instance.GetInstanceMeta().PrimaryMAC
 
 	macs, err := metadata.GetENIsMAC()
 	if err != nil {

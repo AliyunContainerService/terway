@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	"github.com/AliyunContainerService/terway/types/secret"
 
 	jsonpatch "github.com/evanphx/json-patch"
@@ -11,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/route"
 )
@@ -45,7 +45,7 @@ type Config struct {
 	EnableENITrunking           bool                    `yaml:"enable_eni_trunking" json:"enable_eni_trunking"`
 	CustomStatefulWorkloadKinds []string                `yaml:"custom_stateful_workload_kinds" json:"custom_stateful_workload_kinds"`
 	IPAMType                    types.IPAMType          `yaml:"ipam_type" json:"ipam_type"`           // crd or default
-	ENICapPolicy                types.ENICapPolicy      `yaml:"eni_cap_policy" json:"eni_cap_policy"` // prefer trunk or secondary
+	ENICapPolicy                ENICapPolicy            `yaml:"eni_cap_policy" json:"eni_cap_policy"` // prefer trunk or secondary
 	BackoffOverride             map[string]wait.Backoff `json:"backoff_override,omitempty"`
 	ExtraRoutes                 []route.Route           `json:"extra_routes,omitempty"`
 	DisableDevicePlugin         bool                    `json:"disable_device_plugin"`
@@ -83,12 +83,12 @@ func (c *Config) GetExtraRoutes() []string {
 
 func (c *Config) Populate() {
 	if c.RegionID == "" {
-		c.RegionID = aliyun.GetInstanceMeta().RegionID
+		c.RegionID = instance.GetInstanceMeta().RegionID
 	}
 
 	if c.InstanceType == "" {
 		// TODO support retreat from node label
-		c.InstanceType = aliyun.GetInstanceMeta().InstanceType
+		c.InstanceType = instance.GetInstanceMeta().InstanceType
 	}
 
 	if c.EniCapRatio == 0 {
@@ -96,7 +96,7 @@ func (c *Config) Populate() {
 	}
 
 	if c.VSwitchSelectionPolicy == "" {
-		c.VSwitchSelectionPolicy = types.VSwitchSelectionPolicyRandom
+		c.VSwitchSelectionPolicy = VSwitchSelectionPolicyRandom
 	}
 
 	if c.IPStack == "" {

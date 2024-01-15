@@ -6,13 +6,12 @@ import (
 	"io"
 	"log"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun"
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
-	"github.com/AliyunContainerService/terway/types"
-
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/util/flowcontrol"
+
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 )
 
 var (
@@ -37,7 +36,7 @@ func main() {
 	flag.Parse()
 	log.SetOutput(io.Discard)
 	logrus.SetOutput(io.Discard)
-	ins := aliyun.GetInstanceMeta()
+	ins := instance.GetInstanceMeta()
 
 	providers := []credential.Interface{
 		credential.NewAKPairProvider(accessKeyID, accessKeySecret),
@@ -57,22 +56,14 @@ func main() {
 		panic(err)
 	}
 
-	f := &types.IPFamily{}
-	if ipStack == "ipv4" || ipStack == "dual" {
-		f.IPv4 = true
-	}
-	if ipStack == "dual" || ipStack == "ipv6" {
-		f.IPv6 = true
-	}
-
 	if mode == "terway-eniip" {
-		limit, err := aliyun.GetLimit(api, aliyun.GetInstanceMeta().InstanceType)
+		limit, err := instance.GetLimit(api, instance.GetInstanceMeta().InstanceType)
 		if err != nil {
 			panic(err)
 		}
 		fmt.Println(limit.IPv4PerAdapter * (limit.Adapters - 1))
 	} else if mode == "terway-eni" {
-		limit, err := aliyun.GetLimit(api, aliyun.GetInstanceMeta().InstanceType)
+		limit, err := instance.GetLimit(api, instance.GetInstanceMeta().InstanceType)
 		if err != nil {
 			panic(err)
 		}

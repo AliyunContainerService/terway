@@ -4,17 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
+	"net/netip"
 	"sync"
-
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
-	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
+
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 )
 
 var _ client.VSwitch = &OpenAPI{}
@@ -26,8 +25,8 @@ type OpenAPI struct {
 	VSwitches map[string]vpc.VSwitch
 	ENIs      map[string]*client.NetworkInterface
 
-	IPAM   map[string]net.IP // index by vSwitch id
-	IPAMV6 map[string]net.IP // index by vSwitch id
+	IPAM   map[string]netip.Addr // index by vSwitch id
+	IPAMV6 map[string]netip.Addr // index by vSwitch id
 }
 
 func New() *OpenAPI {
@@ -35,8 +34,8 @@ func New() *OpenAPI {
 		Mutex:     sync.Mutex{},
 		VSwitches: map[string]vpc.VSwitch{},
 		ENIs:      map[string]*client.NetworkInterface{},
-		IPAM:      map[string]net.IP{},
-		IPAMV6:    map[string]net.IP{},
+		IPAM:      map[string]netip.Addr{},
+		IPAMV6:    map[string]netip.Addr{},
 	}
 }
 
@@ -189,7 +188,7 @@ func (o *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 	return nil, apiErr.ErrNotFound
 }
 
-func (o *OpenAPI) AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
+func (o *OpenAPI) AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotent string) ([]netip.Addr, error) {
 	o.Lock()
 	defer o.Unlock()
 
@@ -197,7 +196,7 @@ func (o *OpenAPI) AssignPrivateIPAddress(ctx context.Context, eniID string, coun
 	if !ok {
 		return nil, apiErr.ErrNotFound
 	}
-	var ips []net.IP
+	var ips []netip.Addr
 	for i := 0; i < count; i++ {
 		ip := o.nextIP(eni.VSwitchID)
 		ips = append(ips, ip)
@@ -210,16 +209,16 @@ func (o *OpenAPI) AssignPrivateIPAddress(ctx context.Context, eniID string, coun
 	return ips, nil
 }
 
-func (o *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []net.IP) error {
+func (o *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []netip.Addr) error {
 	return nil
 }
 
-func (o *OpenAPI) AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error) {
+func (o *OpenAPI) AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]netip.Addr, error) {
 	eni, ok := o.ENIs[eniID]
 	if !ok {
 		return nil, apiErr.ErrNotFound
 	}
-	var ips []net.IP
+	var ips []netip.Addr
 	for i := 0; i < count; i++ {
 		ip := o.nextIPV6(eni.VSwitchID)
 		ips = append(ips, ip)
@@ -232,7 +231,7 @@ func (o *OpenAPI) AssignIpv6Addresses(ctx context.Context, eniID string, count i
 	return ips, nil
 }
 
-func (o *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []net.IP) error {
+func (o *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []netip.Addr) error {
 	return nil
 }
 
@@ -258,38 +257,39 @@ func (o *OpenAPI) ModifyNetworkInterfaceAttribute(ctx context.Context, eniID str
 	return nil
 }
 
-func (o *OpenAPI) nextIP(vSwitchID string) net.IP {
+func (o *OpenAPI) nextIP(vSwitchID string) netip.Addr {
 	pre, ok := o.IPAM[vSwitchID]
 	if ok {
-		o.IPAM[vSwitchID] = terwayIP.GetNextIP(pre)
+		o.IPAM[vSwitchID] = pre.Next()
 		return o.IPAM[vSwitchID]
 	}
 	vsw, ok := o.VSwitches[vSwitchID]
 	if !ok {
-		return nil
+		return netip.Addr{}
 	}
-	ip, _, err := net.ParseCIDR(vsw.CidrBlock)
+	prefix, err := netip.ParsePrefix(vsw.CidrBlock)
 	if err != nil {
-		return nil
+		return netip.Addr{}
 	}
-	o.IPAM[vSwitchID] = terwayIP.GetNextIP(ip)
+	o.IPAM[vSwitchID] = prefix.Addr().Next()
 	return o.IPAM[vSwitchID]
 }
 
-func (o *OpenAPI) nextIPV6(vSwitchID string) net.IP {
+func (o *OpenAPI) nextIPV6(vSwitchID string) netip.Addr {
 	pre, ok := o.IPAMV6[vSwitchID]
 	if ok {
-		o.IPAMV6[vSwitchID] = terwayIP.GetNextIP(pre)
+		o.IPAMV6[vSwitchID] = pre.Next()
 		return o.IPAMV6[vSwitchID]
 	}
 	vsw, ok := o.VSwitches[vSwitchID]
 	if !ok {
-		return nil
+		return netip.Addr{}
 	}
-	ip, _, err := net.ParseCIDR(vsw.Ipv6CidrBlock)
+
+	prefix, err := netip.ParsePrefix(vsw.Ipv6CidrBlock)
 	if err != nil {
-		return nil
+		return netip.Addr{}
 	}
-	o.IPAMV6[vSwitchID] = terwayIP.GetNextIP(ip)
+	o.IPAMV6[vSwitchID] = prefix.Addr().Next()
 	return o.IPAMV6[vSwitchID]
 }

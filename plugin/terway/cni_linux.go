@@ -158,6 +158,11 @@ func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 
 	ipv4, ipv6 := allocResult.IPv4, allocResult.IPv6
 
+	if !ipv4 && !ipv6 {
+		err = fmt.Errorf("cmdAdd: alloc ip no valid ip type")
+		return
+	}
+
 	hostIPSet, err := utils.GetHostIP(ipv4, ipv6)
 	if err != nil {
 		return
@@ -421,6 +426,9 @@ func doCmdCheck(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBack
 	}
 
 	ipv4, ipv6 := getResult.IPv4, getResult.IPv6
+	if !ipv4 && !ipv6 {
+		return fmt.Errorf("cmdCheck: no valid ip type")
+	}
 
 	hostIPSet, err := utils.GetHostIP(ipv4, ipv6)
 	if err != nil {

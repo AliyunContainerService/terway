@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/rpc"
+	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
 const (
@@ -21,17 +22,6 @@ const (
 	// AllocResourceFailed AllocResourceFailed
 	AllocResourceFailed = "AllocResourceFailed"
 )
-
-// PodMapping PodMapping
-type PodMapping struct {
-	Name      string
-	Namespace string
-	Valid     bool
-
-	PodBindResID string
-	LocalResID   string
-	RemoteResID  string
-}
 
 var (
 	defaultTracer Tracer
@@ -56,23 +46,23 @@ type TraceHandler interface {
 
 // ResourcePoolStats define two pool lo and remote
 type ResourcePoolStats interface {
-	GetLocal() map[string]types.Res
-	GetRemote() map[string]types.Res
+	GetLocal() map[string]daemon.Res
+	GetRemote() map[string]daemon.Res
 }
 
 // FakeResourcePoolStats for test
 type FakeResourcePoolStats struct {
-	Local  map[string]types.Res
-	Remote map[string]types.Res
+	Local  map[string]daemon.Res
+	Remote map[string]daemon.Res
 }
 
 // GetLocal GetLocal
-func (f *FakeResourcePoolStats) GetLocal() map[string]types.Res {
+func (f *FakeResourcePoolStats) GetLocal() map[string]daemon.Res {
 	return f.Local
 }
 
 // GetRemote GetRemote
-func (f *FakeResourcePoolStats) GetRemote() map[string]types.Res {
+func (f *FakeResourcePoolStats) GetRemote() map[string]daemon.Res {
 	return f.Remote
 }
 
@@ -83,7 +73,7 @@ type ResourceMappingHandler interface {
 
 // ResMapping ResMapping
 type ResMapping interface {
-	GetResourceMapping() ([]*PodMapping, error)
+	GetResourceMapping() ([]*rpc.ResourceMapping, error)
 }
 
 // PodEventRecorder records event on pod
@@ -256,7 +246,7 @@ func (t *Tracer) RecordNodeEvent(eventType, reason, message string) error {
 
 // GetResourceMapping gives the resource mapping from the handler
 // if the handler has not been registered, there will be error
-func (t *Tracer) GetResourceMapping() ([]*PodMapping, error) {
+func (t *Tracer) GetResourceMapping() ([]*rpc.ResourceMapping, error) {
 	if t.resourceMapping == nil {
 		return nil, errors.New("no resource mapping handler registered")
 	}

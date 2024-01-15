@@ -62,13 +62,3 @@ func NewDefaultLogger() *logrus.Logger {
 	l.SetFormatter(&Format{})
 	return l
 }
-
-func SetLevel(level string) error {
-	l, err := logrus.ParseLevel(level)
-	if err != nil {
-		return err
-	}
-	DefaultLogger.Infof("set log level %s", level)
-	DefaultLogger.SetLevel(l)
-	return nil
-}

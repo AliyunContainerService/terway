@@ -12,6 +12,7 @@ const (
 	ENICreate             = "eni_create"
 	ENIOps                = "eni_ops"
 	ENIRelease            = "eni_release"
+	ENIIPOps              = "eni_ip_ops"
 	WaitENIStatus         = "wait_eni_status"
 	WaitPodENIStatus      = "wait_podeni_status"
 	MetaAssignPrivateIP   = "meta_assign_private_ip"
@@ -43,6 +44,12 @@ var backoffMap = map[string]wait.Backoff{
 		Factor:   2,
 		Jitter:   0.5,
 		Steps:    8,
+	},
+	ENIIPOps: {
+		Duration: time.Second * 5,
+		Factor:   1,
+		Jitter:   1.3,
+		Steps:    6,
 	},
 	WaitENIStatus: {
 		Duration: time.Second * 5,

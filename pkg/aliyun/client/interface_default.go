@@ -4,7 +4,7 @@ package client
 
 import (
 	"context"
-	"net"
+	"net/netip"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -17,10 +17,10 @@ type ENI interface {
 	DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
 	DeleteNetworkInterface(ctx context.Context, eniID string) error
 	WaitForNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error)
-	AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotent string) ([]net.IP, error)
-	UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []net.IP) error
-	AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]net.IP, error)
-	UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []net.IP) error
+	AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotent string) ([]netip.Addr, error)
+	UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []netip.Addr) error
+	AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]netip.Addr, error)
+	UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []netip.Addr) error
 	ModifyNetworkInterfaceAttribute(ctx context.Context, eniID string, securityGroupIDs []string) error
 }
 

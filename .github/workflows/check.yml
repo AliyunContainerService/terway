@@ -12,21 +12,16 @@ jobs:
   go-test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-go@v3
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
       with:
-        go-version: 1.20.6
-    - uses: actions/cache@v3
-      with:
-        path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
+        go-version: 1.21.3
     - name: Test
       run: |
-        sudo go test -tags default_build,privileged -v ./...
-        sudo go test -tags default_build,privileged -race -v ./...
-        sudo go test -tags default_build,privileged -coverpkg=./... -race -coverprofile=coverage.txt -covermode=atomic ./...
+        go=$(which go)
+        sudo $go test -tags default_build,privileged -v ./...
+        sudo $go test -tags default_build,privileged -race -v ./...
+        sudo $go test -tags default_build,privileged -coverpkg=./... -race -coverprofile=coverage.txt -covermode=atomic ./...
     - uses: codecov/codecov-action@v3
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -39,16 +34,10 @@ jobs:
   go-mod:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-go@v3
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
       with:
-        go-version: 1.20.6
-    - uses: actions/cache@v3
-      with:
-        path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
+        go-version: 1.21.3
     - name: Check module vendoring
       run: |
         go mod tidy
@@ -59,20 +48,20 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-go@v3
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
       with:
-        go-version: 1.20.6
+        go-version: 1.21.3
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v3
       with:
-        version: v1.53
+        version: v1.55
         args: --config=.golangci.yml
 
   super-linter:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Lint Code Base
       uses: super-linter/super-linter@v5.1.1
       env:
