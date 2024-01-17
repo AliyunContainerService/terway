@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
+
 	"github.com/AliyunContainerService/terway/pkg/logger"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk"
@@ -21,6 +23,8 @@ import (
 type Client interface {
 	ECS() *ecs.Client
 	VPC() *vpc.Client
+
+	EFLO() *eflo.Client
 }
 
 var (
@@ -75,11 +79,13 @@ type ClientMgr struct {
 	expireAt time.Time
 	updateAt time.Time
 
-	ecs *ecs.Client
-	vpc *vpc.Client
+	ecs  *ecs.Client
+	vpc  *vpc.Client
+	eflo *eflo.Client
 
-	ecsDomainOverride string
-	vpcDomainOverride string
+	ecsDomainOverride  string
+	vpcDomainOverride  string
+	efloDomainOverride string
 }
 
 // NewClientMgr return new aliyun client manager
@@ -97,7 +103,10 @@ func NewClientMgr(regionID string, providers ...Interface) (*ClientMgr, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	mgr.efloDomainOverride, err = parseURL(os.Getenv("EFLO_ENDPOINT"))
+	if err != nil {
+		return nil, err
+	}
 	for _, p := range providers {
 		c, err := p.Resolve()
 		if err != nil {
@@ -142,6 +151,19 @@ func (c *ClientMgr) ECS() *ecs.Client {
 	return c.ecs
 }
 
+func (c *ClientMgr) EFLO() *eflo.Client {
+	c.Lock()
+	defer c.Unlock()
+	ok, err := c.refreshToken()
+	if err != nil {
+		mgrLog.Error(err)
+	}
+	if ok {
+		mgrLog.WithFields(map[string]interface{}{"updateAt": c.updateAt, "expireAt": c.expireAt}).Infof("credential update")
+	}
+	return c.eflo
+}
+
 func (c *ClientMgr) refreshToken() (bool, error) {
 	if c.updateAt.IsZero() || c.expireAt.Before(time.Now()) || time.Since(c.updateAt) > tokenReSyncPeriod {
 		var err error
@@ -174,6 +196,16 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 
 		if c.vpcDomainOverride != "" {
 			c.vpc.Domain = c.vpcDomainOverride
+		}
+
+		c.eflo, err = eflo.NewClientWithOptions(c.regionID, clientCfg(), cc.Credential)
+		if err != nil {
+			return false, err
+		}
+		c.eflo.SetEndpointRules(c.eflo.EndpointMap, "regional", "vpc")
+
+		if c.efloDomainOverride != "" {
+			c.eflo.Domain = c.efloDomainOverride
 		}
 
 		c.expireAt = cc.Expiration

@@ -21,8 +21,8 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/metric"
 )
 
-var _ VSwitch = &OpenAPI{}
-var _ ENI = &OpenAPI{}
+var _ VPC = &OpenAPI{}
+var _ ECS = &OpenAPI{}
 
 type OpenAPI struct {
 	ClientSet credential.Client
@@ -456,4 +456,74 @@ func (a *OpenAPI) ModifyNetworkInterfaceAttribute(ctx context.Context, eniID str
 	}
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("modify securityGroup", "ids", strings.Join(securityGroupIDs, ","))
 	return nil
+}
+
+// DefaultGetLimit returns the instance limits of a particular instance type. // https://www.alibabacloud.com/help/doc-detail/25620.htm
+// if instanceType is empty will list all instanceType and warm the cache, no error and Limits will return
+func DefaultGetLimit(client interface{}, instanceType string) (*Limits, error) {
+	a, ok := client.(*OpenAPI)
+	if !ok {
+		return nil, fmt.Errorf("unsupported client")
+	}
+
+	v, ok := limits.Load(instanceType)
+	if ok {
+		return v.(*Limits), nil
+	}
+	var req []string
+	if instanceType != "" {
+		req = append(req, instanceType)
+	}
+	ins, err := a.DescribeInstanceTypes(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, instanceTypeInfo := range ins {
+		instanceTypeID := instanceTypeInfo.InstanceTypeId
+		adapterLimit := instanceTypeInfo.EniQuantity
+		ipv4PerAdapter := instanceTypeInfo.EniPrivateIpAddressQuantity
+		ipv6PerAdapter := instanceTypeInfo.EniIpv6AddressQuantity
+		memberAdapterLimit := instanceTypeInfo.EniTotalQuantity - instanceTypeInfo.EniQuantity
+		eRdmaLimit := instanceTypeInfo.EriQuantity
+		// exclude eth0 eth1
+		maxMemberAdapterLimit := instanceTypeInfo.EniTotalQuantity - 2
+		if !instanceTypeInfo.EniTrunkSupported {
+			memberAdapterLimit = 0
+			maxMemberAdapterLimit = 0
+		}
+		limits.Store(instanceTypeID, &Limits{
+			Adapters:              adapterLimit,
+			TotalAdapters:         instanceTypeInfo.EniTotalQuantity,
+			IPv4PerAdapter:        max(ipv4PerAdapter, 0),
+			IPv6PerAdapter:        max(ipv6PerAdapter, 0),
+			MemberAdapterLimit:    max(memberAdapterLimit, 0),
+			MaxMemberAdapterLimit: max(maxMemberAdapterLimit, 0),
+			ERdmaAdapters:         max(eRdmaLimit, 0),
+			InstanceBandwidthRx:   instanceTypeInfo.InstanceBandwidthRx,
+			InstanceBandwidthTx:   instanceTypeInfo.InstanceBandwidthTx,
+		})
+		logf.Log.WithValues(
+			"instance-type", instanceType,
+			"adapters", adapterLimit,
+			"total-adapters", instanceTypeInfo.EniTotalQuantity,
+			"ipv4", ipv4PerAdapter,
+			"ipv6", ipv6PerAdapter,
+			"member-adapters", memberAdapterLimit,
+			"erdma-adapters", eRdmaLimit,
+			"max-member-adapters", maxMemberAdapterLimit,
+			"bandwidth-rx", instanceTypeInfo.InstanceBandwidthRx,
+			"bandwidth-tx", instanceTypeInfo.InstanceBandwidthTx,
+		).Info("instance limit")
+
+	}
+	if instanceType == "" {
+		return nil, nil
+	}
+	v, ok = limits.Load(instanceType)
+	if !ok {
+		return nil, fmt.Errorf("unexpected error")
+	}
+
+	return v.(*Limits), nil
 }

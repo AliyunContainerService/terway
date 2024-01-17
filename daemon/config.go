@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	"github.com/AliyunContainerService/terway/pkg/k8s"
 	"github.com/AliyunContainerService/terway/pkg/utils"
@@ -23,22 +24,50 @@ func getDynamicConfig(ctx context.Context, k8s k8s.Kubernetes) (string, string, 
 	return cfg, label, err
 }
 
+func getENIConfig(cfg *daemon.Config) *types.ENIConfig {
+	eniConfig := &types.ENIConfig{
+		ZoneID:                 instance.GetInstanceMeta().ZoneID,
+		VSwitchOptions:         nil,
+		ENITags:                cfg.ENITags,
+		SecurityGroupIDs:       cfg.GetSecurityGroups(),
+		InstanceID:             instance.GetInstanceMeta().InstanceID,
+		VSwitchSelectionPolicy: cfg.VSwitchSelectionPolicy,
+		ResourceGroupID:        cfg.ResourceGroupID,
+		EniTypeAttr:            0,
+	}
+
+	if cfg.VSwitches != nil {
+		zoneVswitchs, ok := cfg.VSwitches[eniConfig.ZoneID]
+		if ok && len(zoneVswitchs) > 0 {
+			eniConfig.VSwitchOptions = cfg.VSwitches[eniConfig.ZoneID]
+		}
+	}
+
+	if len(eniConfig.VSwitchOptions) == 0 {
+		eniConfig.VSwitchOptions = []string{instance.GetInstanceMeta().VSwitchID}
+	}
+
+	if cfg.EnableENITrunking {
+		types.EnableFeature(&eniConfig.EniTypeAttr, types.FeatTrunk)
+	}
+	if cfg.EnableERDMA {
+		types.EnableFeature(&eniConfig.EniTypeAttr, types.FeatERDMA)
+	}
+
+	return eniConfig
+}
+
 // the actual size for pool is minIdle and maxIdle
-func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *instance.Limits) (*types.PoolConfig, error) {
+func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *client.Limits) (*types.PoolConfig, error) {
 
 	poolConfig := &types.PoolConfig{
-		SecurityGroupIDs:          cfg.GetSecurityGroups(),
-		VSwitchSelectionPolicy:    cfg.VSwitchSelectionPolicy,
-		DisableSecurityGroupCheck: cfg.DisableSecurityGroupCheck,
-		BatchSize:                 10,
+		BatchSize: 10,
 	}
 
 	if cfg.ENITags == nil {
 		cfg.ENITags = make(map[string]string)
 	}
 	cfg.ENITags[types.NetworkInterfaceTagCreatorKey] = types.NetworkInterfaceTagCreatorValue
-
-	poolConfig.ENITags = cfg.ENITags
 
 	capacity := 0
 	maxENI := 0
@@ -121,32 +150,9 @@ func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *instance.Limits
 		}
 	}
 
-	poolConfig.ENITags = cfg.ENITags
-
-	requireMeta := true
 	if cfg.IPAMType == types.IPAMTypeCRD {
 		poolConfig.MaxPoolSize = 0
 		poolConfig.MinPoolSize = 0
-
-		if cfg.DisableDevicePlugin {
-			requireMeta = false
-		}
-	}
-
-	if requireMeta {
-		ins := instance.GetInstanceMeta()
-		zone := ins.ZoneID
-		if cfg.VSwitches != nil {
-			zoneVswitchs, ok := cfg.VSwitches[zone]
-			if ok && len(zoneVswitchs) > 0 {
-				poolConfig.VSwitchOptions = cfg.VSwitches[zone]
-			}
-		}
-		if len(poolConfig.VSwitchOptions) == 0 {
-			poolConfig.VSwitchOptions = []string{ins.VSwitchID}
-		}
-		poolConfig.ZoneID = zone
-		poolConfig.InstanceID = ins.InstanceID
 	}
 
 	poolConfig.Capacity = capacity

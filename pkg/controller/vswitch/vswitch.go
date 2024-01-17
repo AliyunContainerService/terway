@@ -65,7 +65,7 @@ func NewSwitchPool(size int, ttl string) (*SwitchPool, error) {
 }
 
 // GetOne get one vSwitch by zone and limit in ids
-func (s *SwitchPool) GetOne(ctx context.Context, client client.VSwitch, zone string, ids []string, opts ...SelectOption) (*Switch, error) {
+func (s *SwitchPool) GetOne(ctx context.Context, client client.VPC, zone string, ids []string, opts ...SelectOption) (*Switch, error) {
 	var fallBackSwitches []*Switch
 
 	selectOptions := &SelectOptions{}
@@ -135,7 +135,7 @@ func (s *SwitchPool) GetOne(ctx context.Context, client client.VSwitch, zone str
 }
 
 // GetByID will get vSwitch info from local store or openAPI
-func (s *SwitchPool) GetByID(ctx context.Context, client client.VSwitch, id string) (*Switch, error) {
+func (s *SwitchPool) GetByID(ctx context.Context, client client.VPC, id string) (*Switch, error) {
 	v, ok := s.cache.Get(id)
 	if !ok {
 		resp, err := client.DescribeVSwitchByID(ctx, id)
