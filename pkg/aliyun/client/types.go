@@ -51,6 +51,10 @@ const (
 	ENITypeMember    string = "Member"
 )
 
+const (
+	ENITrafficModeRDMA string = "HighPerformance"
+)
+
 const EIPInstanceTypeNetworkInterface = "NetworkInterface"
 
 // NetworkInterface openAPI result for ecs.CreateNetworkInterfaceResponse and ecs.NetworkInterfaceSet
@@ -68,11 +72,12 @@ type NetworkInterface struct {
 	Tags               []ecs.Tag          `json:"tags,omitempty"`
 
 	// fields for DescribeNetworkInterface
-	Type                    string `json:"type,omitempty"`
-	InstanceID              string `json:"instance_id,omitempty"`
-	TrunkNetworkInterfaceID string `json:"trunk_network_interface_id,omitempty"`
-	DeviceIndex             int    `json:"device_index,omitempty"`
-	CreationTime            string `json:"creation_time,omitempty"`
+	Type                        string `json:"type,omitempty"`
+	InstanceID                  string `json:"instance_id,omitempty"`
+	TrunkNetworkInterfaceID     string `json:"trunk_network_interface_id,omitempty"`
+	NetworkInterfaceTrafficMode string `json:"network_interface_traffic_mode"`
+	DeviceIndex                 int    `json:"device_index,omitempty"`
+	CreationTime                string `json:"creation_time,omitempty"`
 }
 
 func FromCreateResp(in *ecs.CreateNetworkInterfaceResponse) *NetworkInterface {
@@ -99,20 +104,21 @@ func FromDescribeResp(in *ecs.NetworkInterfaceSet) *NetworkInterface {
 	}
 
 	return &NetworkInterface{
-		Status:                  in.Status,
-		MacAddress:              in.MacAddress,
-		NetworkInterfaceID:      in.NetworkInterfaceId,
-		InstanceID:              ins,
-		VSwitchID:               in.VSwitchId,
-		PrivateIPAddress:        in.PrivateIpAddress,
-		ZoneID:                  in.ZoneId,
-		SecurityGroupIDs:        in.SecurityGroupIds.SecurityGroupId,
-		IPv6Set:                 in.Ipv6Sets.Ipv6Set,
-		PrivateIPSets:           in.PrivateIpSets.PrivateIpSet,
-		Tags:                    in.Tags.Tag,
-		TrunkNetworkInterfaceID: in.Attachment.TrunkNetworkInterfaceId,
-		DeviceIndex:             in.Attachment.DeviceIndex,
-		Type:                    in.Type,
-		CreationTime:            in.CreationTime,
+		Status:                      in.Status,
+		MacAddress:                  in.MacAddress,
+		NetworkInterfaceID:          in.NetworkInterfaceId,
+		InstanceID:                  ins,
+		VSwitchID:                   in.VSwitchId,
+		PrivateIPAddress:            in.PrivateIpAddress,
+		ZoneID:                      in.ZoneId,
+		SecurityGroupIDs:            in.SecurityGroupIds.SecurityGroupId,
+		IPv6Set:                     in.Ipv6Sets.Ipv6Set,
+		PrivateIPSets:               in.PrivateIpSets.PrivateIpSet,
+		Tags:                        in.Tags.Tag,
+		TrunkNetworkInterfaceID:     in.Attachment.TrunkNetworkInterfaceId,
+		NetworkInterfaceTrafficMode: in.NetworkInterfaceTrafficMode,
+		DeviceIndex:                 in.Attachment.DeviceIndex,
+		Type:                        in.Type,
+		CreationTime:                in.CreationTime,
 	}
 }

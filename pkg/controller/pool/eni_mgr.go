@@ -90,7 +90,7 @@ func (m *Manager) Run() {
 	l.Info("pool manage exited", "node", m.cfg.NodeName)
 }
 
-func (m *Manager) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitchID string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*aliyunClient.NetworkInterface, error) {
+func (m *Manager) CreateNetworkInterface(ctx context.Context, trunk, erdma bool, vSwitchID string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*aliyunClient.NetworkInterface, error) {
 	realClient, play, err := common.Became(ctx, m.aliyun)
 	if err != nil {
 		return nil, err
@@ -150,7 +150,7 @@ func (m *Manager) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitc
 	defer m.allocations.ReleaseQuota()
 
 	// create new
-	result, err := realClient.CreateNetworkInterface(ctx, trunk, vSwitchID, securityGroups, resourceGroupID, ipCount, ipv6Count, eniTags)
+	result, err := realClient.CreateNetworkInterface(ctx, trunk, false, vSwitchID, securityGroups, resourceGroupID, ipCount, ipv6Count, eniTags)
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +351,7 @@ func (m *Manager) cleanUP(ctx context.Context) {
 				return err
 			}
 
-			networkInterface, err := m.aliyun.CreateNetworkInterface(ctx, false, vsw.ID, m.cfg.SecurityGroupIDs, "", v4, v6, m.cfg.ENITags)
+			networkInterface, err := m.aliyun.CreateNetworkInterface(ctx, false, false, vsw.ID, m.cfg.SecurityGroupIDs, "", v4, v6, m.cfg.ENITags)
 			if err != nil {
 				return err
 			}

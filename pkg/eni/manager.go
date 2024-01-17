@@ -75,7 +75,7 @@ type ReportStatus interface {
 }
 type NetworkInterface interface {
 	Allocate(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace)
-	Release(ctx context.Context, cni *daemon.CNI, request ResourceRequest) bool
+	Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool
 	Priority() int
 	Dispose(n int) int
 	Run(ctx context.Context, podResources []daemon.PodResources, wg *sync.WaitGroup) error

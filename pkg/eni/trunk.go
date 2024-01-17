@@ -47,7 +47,7 @@ func (r *Trunk) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 	}
 }
 
-func (r *Trunk) Release(ctx context.Context, cni *daemon.CNI, request ResourceRequest) bool {
+func (r *Trunk) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool {
 	switch request.ResourceType() {
 	case ResourceTypeLocalIP:
 		return r.local.Release(ctx, cni, request)

@@ -53,6 +53,7 @@ type Aliyun struct {
 
 	eniTypeAttr  bool
 	eniTagFilter map[string]string
+	enableERDMA  bool
 }
 
 func NewAliyun(ctx context.Context, openAPI *client.OpenAPI, getter eni.ENIInfoGetter, vsw *vswpool.SwitchPool, cfg *types.PoolConfig) *Aliyun {
@@ -70,6 +71,7 @@ func NewAliyun(ctx context.Context, openAPI *client.OpenAPI, getter eni.ENIInfoG
 		securityGroupIDs: cfg.SecurityGroupIDs,
 		resourceGroupID:  cfg.ResourceGroupID,
 		eniTags:          cfg.ENITags,
+		enableERDMA:      cfg.ERdmaCapacity > 0,
 	}
 }
 
@@ -88,11 +90,17 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		}
 		vswID = vsw.ID
 
-		trunk := false
+		var (
+			trunk bool
+			erdma bool
+		)
 		if eniType == "trunk" {
 			trunk = true
 		}
-		eni, innerErr = a.openAPI.CreateNetworkInterface(ctx, trunk, vswID, a.securityGroupIDs, a.resourceGroupID, ipv4, ipv6, a.eniTags)
+		if eniType == "erdma" {
+			erdma = true
+		}
+		eni, innerErr = a.openAPI.CreateNetworkInterface(ctx, trunk, erdma, vswID, a.securityGroupIDs, a.resourceGroupID, ipv4, ipv6, a.eniTags)
 		if innerErr != nil {
 			if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
 				return true, innerErr
@@ -414,12 +422,15 @@ func (a *Aliyun) GetAttachedNetworkInterface(trunkENIID string) ([]*daemon.ENI, 
 
 	var result []*daemon.ENI
 
-	if a.eniTypeAttr || len(a.eniTagFilter) > 0 {
-		if !trunkFound || len(a.eniTagFilter) > 0 {
+	if a.eniTypeAttr || len(a.eniTagFilter) > 0 || a.enableERDMA {
+		if !trunkFound || len(a.eniTagFilter) > 0 || a.enableERDMA {
 			var innerErr error
 			var eniSet []*client.NetworkInterface
 			err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
 				eniSet, innerErr = a.openAPI.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", a.eniTagFilter)
+				if innerErr == nil {
+					return true, nil
+				}
 				if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
 					return true, innerErr
 				}
@@ -437,6 +448,7 @@ func (a *Aliyun) GetAttachedNetworkInterface(trunkENIID string) ([]*daemon.ENI, 
 					continue
 				}
 				e.Trunk = eni.Type == client.ENITypeTrunk
+				e.ERdma = eni.NetworkInterfaceTrafficMode == client.ENITrafficModeRDMA
 
 				// take to intersect
 				result = append(result, e)

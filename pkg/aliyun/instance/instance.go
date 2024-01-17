@@ -105,6 +105,9 @@ type Limits struct {
 	// MaxMemberAdapterLimit is the limit to use member
 	MaxMemberAdapterLimit int
 
+	// ERdmaAdapters specifies the maximum number of erdma interfaces
+	ERdmaAdapters int
+
 	InstanceBandwidthRx int
 
 	InstanceBandwidthTx int
@@ -128,6 +131,14 @@ func (l *Limits) MaximumTrunkPod() int {
 
 func (l *Limits) MultiIPPod() int {
 	return (l.Adapters - 1) * l.IPv4PerAdapter
+}
+
+func (l *Limits) ExclusiveERDMARes() int {
+	return l.ERdmaAdapters
+}
+
+func (l *Limits) ERDMARes() int {
+	return l.ERdmaAdapters * l.IPv4PerAdapter
 }
 
 func (l *Limits) ExclusiveENIPod() int {
@@ -158,6 +169,7 @@ func GetLimit(client client.ECS, instanceType string) (*Limits, error) {
 		ipv4PerAdapter := instanceTypeInfo.EniPrivateIpAddressQuantity
 		ipv6PerAdapter := instanceTypeInfo.EniIpv6AddressQuantity
 		memberAdapterLimit := instanceTypeInfo.EniTotalQuantity - instanceTypeInfo.EniQuantity
+		eRdmaLimit := instanceTypeInfo.EriQuantity
 		// exclude eth0 eth1
 		maxMemberAdapterLimit := instanceTypeInfo.EniTotalQuantity - 2
 		if !instanceTypeInfo.EniTrunkSupported {
@@ -171,6 +183,7 @@ func GetLimit(client client.ECS, instanceType string) (*Limits, error) {
 			IPv6PerAdapter:        max(ipv6PerAdapter, 0),
 			MemberAdapterLimit:    max(memberAdapterLimit, 0),
 			MaxMemberAdapterLimit: max(maxMemberAdapterLimit, 0),
+			ERdmaAdapters:         max(eRdmaLimit, 0),
 			InstanceBandwidthRx:   instanceTypeInfo.InstanceBandwidthRx,
 			InstanceBandwidthTx:   instanceTypeInfo.InstanceBandwidthTx,
 		})
@@ -182,6 +195,7 @@ func GetLimit(client client.ECS, instanceType string) (*Limits, error) {
 			"ipv4":                ipv4PerAdapter,
 			"ipv6":                ipv6PerAdapter,
 			"member-adapters":     memberAdapterLimit,
+			"erdma-adapters":      eRdmaLimit,
 			"max-member-adapters": maxMemberAdapterLimit,
 			"bandwidth-rx":        instanceTypeInfo.InstanceBandwidthRx,
 			"bandwidth-tx":        instanceTypeInfo.InstanceBandwidthTx,

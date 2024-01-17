@@ -45,7 +45,7 @@ func TestManager_CreateNetworkInterface(t *testing.T) {
 		TrunkENIID:       "foo",
 	}, nil, vswpool, api)
 
-	resp, err := mgr.CreateNetworkInterface(ctx, false, "vsw-1", []string{"sg-1"}, "", 1, 1, map[string]string{"foo": "bar"})
+	resp, err := mgr.CreateNetworkInterface(ctx, false, false, "vsw-1", []string{"sg-1"}, "", 1, 1, map[string]string{"foo": "bar"})
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(resp.Tags))
@@ -113,7 +113,7 @@ func TestManager_CreateNetworkInterfaceWithCached(t *testing.T) {
 		TrunkENIID:       "foo",
 	}, nil, vswpool, api)
 
-	resp, err := mgr.CreateNetworkInterface(ctx, false, "vsw-1", []string{"sg-1"}, "", 1, 1, map[string]string{"foo": "bar"})
+	resp, err := mgr.CreateNetworkInterface(ctx, false, false, "vsw-1", []string{"sg-1"}, "", 1, 1, map[string]string{"foo": "bar"})
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(resp.PrivateIPSets))
@@ -144,7 +144,7 @@ func TestManager_CreateNetworkInterfaceWithCached(t *testing.T) {
 
 	prevENIID := resp.NetworkInterfaceID
 	// re alloc, should use same eni
-	resp, err = mgr.CreateNetworkInterface(ctx, false, "vsw-1", []string{"sg-1", "sg-2"}, "", 1, 1, map[string]string{"foo": "bar"})
+	resp, err = mgr.CreateNetworkInterface(ctx, false, false, "vsw-1", []string{"sg-1", "sg-2"}, "", 1, 1, map[string]string{"foo": "bar"})
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(resp.SecurityGroupIDs))
 	assert.Equal(t, 2, len(resp.SecurityGroupIDs))
@@ -218,7 +218,7 @@ func TestManager_CreateNetworkInterfaceWithRob(t *testing.T) {
 		TrunkENIID:       "foo",
 	}, nil, vswpool, api)
 
-	resp, err := mgr.CreateNetworkInterface(ctx, false, "vsw-1", []string{"sg-1"}, "", 1, 1, map[string]string{"foo": "bar"})
+	resp, err := mgr.CreateNetworkInterface(ctx, false, false, "vsw-1", []string{"sg-1"}, "", 1, 1, map[string]string{"foo": "bar"})
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(resp.PrivateIPSets))
@@ -230,7 +230,7 @@ func TestManager_CreateNetworkInterfaceWithRob(t *testing.T) {
 	// release this
 	v.SetStatus(StatusIdle)
 
-	resp2, err := mgr.CreateNetworkInterface(context.Background(), false, "vsw-1", []string{"sg-1"}, "", 1, 1, map[string]string{"foo": "bar"})
+	resp2, err := mgr.CreateNetworkInterface(context.Background(), false, false, "vsw-1", []string{"sg-1"}, "", 1, 1, map[string]string{"foo": "bar"})
 	assert.NoError(t, err)
 
 	v = mgr.allocations.Load(resp.NetworkInterfaceID)

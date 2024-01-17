@@ -23,7 +23,7 @@ func (o *timeOut) Allocate(ctx context.Context, cni *daemon.CNI, request Resourc
 	return make(chan *AllocResp), nil
 }
 
-func (o *timeOut) Release(ctx context.Context, cni *daemon.CNI, request ResourceRequest) bool {
+func (o *timeOut) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool {
 	return true
 }
 
@@ -59,7 +59,7 @@ func (s *success) Allocate(ctx context.Context, cni *daemon.CNI, request Resourc
 	return ch, nil
 }
 
-func (s *success) Release(ctx context.Context, cni *daemon.CNI, request ResourceRequest) bool {
+func (s *success) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool {
 	return true
 }
 

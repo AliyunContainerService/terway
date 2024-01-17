@@ -79,7 +79,7 @@ func (r *Veth) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceRe
 	return ch, nil
 }
 
-func (r *Veth) Release(ctx context.Context, cni *daemon.CNI, request ResourceRequest) bool {
+func (r *Veth) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool {
 	return request.ResourceType() == ResourceTypeVeth
 }
 

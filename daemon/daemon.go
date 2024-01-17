@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
@@ -31,6 +33,7 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,7 +41,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/client-go/util/retry"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -185,7 +187,9 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 			resourceRequests = append(resourceRequests, &eni.RemoteIPRequest{})
 		} else {
 			req := &eni.LocalIPRequest{}
-
+			if pod.ERdma {
+				req.LocalIPType = eni.LocalIPTypeERDMA
+			}
 			if len(oldRes.GetResourceItemByType(daemon.ResourceTypeENIIP)) == 1 {
 				old := oldRes.GetResourceItemByType(daemon.ResourceTypeENIIP)[0]
 
@@ -839,6 +843,22 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		config.EnableENITrunking = false
 	}
 
+	if config.EnableERDMA {
+		if limit.ERDMARes() <= 0 {
+			serviceLog.Info("instance is not support erdma", "instanceType", config.InstanceType)
+			config.EnableERDMA = false
+		} else {
+			ok, err := utils.OSSupportERDMA()
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				config.EnableERDMA = false
+				serviceLog.Info("os is not support erdma")
+			}
+		}
+	}
+
 	netSrv.resourceDB, err = storage.NewDiskStorage(
 		resDBName, utils.NormalizePath(resDBPath), json.Marshal, func(bytes []byte) (interface{}, error) {
 			resourceRel := &daemon.PodResources{}
@@ -904,6 +924,10 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 			found := false
 			for _, eni := range enis {
 				if eni.Trunk && eni.ID == preferTrunkID {
+					if eni.ERdma {
+						serviceLog.Info("erdma eni on trunk mode, disable erdma")
+						config.EnableERDMA = false
+					}
 					found = true
 
 					poolConfig.TrunkENIID = preferTrunkID
@@ -955,6 +979,30 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity)
 	}
 
+	attached, err := factory.GetAttachedNetworkInterface(poolConfig.TrunkENIID)
+	if err != nil {
+		return nil, err
+	}
+	if len(attached) >= limit.Adapters-limit.ERdmaAdapters {
+		if attachedERdma := lo.Filter(attached, func(ni *daemon.ENI, idx int) bool { return ni.ERdma }); len(attachedERdma)+limit.Adapters-len(attached) < limit.ERDMARes() {
+			serviceLog.Info("node has no enough free eni slot to attach more erdma to achieve erdma res: ", limit.ERDMARes())
+			config.EnableERDMA = false
+		}
+	}
+
+	if config.EnableERDMA {
+		if daemonMode == daemon.ModeENIMultiIP {
+			nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity - limit.ERDMARes())
+			nodeAnnotations[string(types.ERDMAIPTypeIPs)] = strconv.Itoa(limit.ERDMARes())
+			poolConfig.ERdmaCapacity = limit.ERDMARes()
+		} else if daemonMode == daemon.ModeENIOnly {
+			nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity - limit.ExclusiveERDMARes())
+			nodeAnnotations[string(types.ERDMAIPTypeIPs)] = strconv.Itoa(limit.ExclusiveERDMARes())
+			poolConfig.ERdmaCapacity = limit.ExclusiveERDMARes()
+		}
+
+	}
+
 	if !(daemonMode == daemon.ModeENIMultiIP && !config.EnableENITrunking) {
 		if !config.DisableDevicePlugin {
 			res := deviceplugin.ENITypeENI
@@ -966,6 +1014,17 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 
 			dp := deviceplugin.NewENIDevicePlugin(capacity, res)
 			go dp.Serve()
+		}
+	}
+
+	if config.EnableERDMA {
+		if !config.DisableDevicePlugin {
+			res := deviceplugin.ENITypeERDMA
+			capacity := poolConfig.ERdmaCapacity
+			if capacity > 0 {
+				dp := deviceplugin.NewENIDevicePlugin(capacity, res)
+				go dp.Serve()
+			}
 		}
 	}
 
@@ -1013,11 +1072,6 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 
 	var eniList []eni.NetworkInterface
 
-	attached, err := factory.GetAttachedNetworkInterface(poolConfig.TrunkENIID)
-	if err != nil {
-		return nil, err
-	}
-
 	if daemonMode == daemon.ModeVPC {
 		eniList = append(eniList, &eni.Veth{})
 	}
@@ -1036,26 +1090,59 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 				}
 			}
 		} else {
+			var (
+				normalENICount int
+				erdmaENICount  int
+			)
 			// the legacy mode
 			for _, ni := range attached {
-				eniList = append(eniList, eni.NewLocal(ni, "secondary", factory, poolConfig))
+				if config.EnableERDMA && ni.ERdma {
+					erdmaENICount++
+					eniList = append(eniList, eni.NewLocal(ni, "erdma", factory, poolConfig))
+				} else {
+					normalENICount++
+					eniList = append(eniList, eni.NewLocal(ni, "secondary", factory, poolConfig))
+				}
+			}
+			normalENINeeded := poolConfig.MaxENI - normalENICount
+			if config.EnableERDMA {
+				normalENINeeded = poolConfig.MaxENI - limit.ERdmaAdapters - normalENICount
+				for i := 0; i < limit.ERdmaAdapters-erdmaENICount; i++ {
+					eniList = append(eniList, eni.NewLocal(nil, "erdma", factory, poolConfig))
+				}
 			}
 
-			for i := 0; i < (poolConfig.MaxENI - len(attached)); i++ {
+			for i := 0; i < normalENINeeded; i++ {
 				eniList = append(eniList, eni.NewLocal(nil, "secondary", factory, poolConfig))
 			}
 		}
 	} else {
+		var (
+			normalENICount int
+			erdmaENICount  int
+		)
 		for _, ni := range attached {
+			serviceLog.V(5).Info("found attached eni", "eni", ni)
 			if config.EnableENITrunking && ni.Trunk && poolConfig.TrunkENIID == ni.ID {
 				lo := eni.NewLocal(ni, "trunk", factory, poolConfig)
 				eniList = append(eniList, eni.NewTrunk(netSrv.k8s.GetClient(), lo))
+			} else if config.EnableERDMA && ni.ERdma {
+				erdmaENICount++
+				eniList = append(eniList, eni.NewLocal(ni, "erdma", factory, poolConfig))
 			} else {
+				normalENICount++
 				eniList = append(eniList, eni.NewLocal(ni, "secondary", factory, poolConfig))
 			}
 		}
+		normalENINeeded := poolConfig.MaxENI - normalENICount
+		if config.EnableERDMA {
+			normalENINeeded = poolConfig.MaxENI - limit.ERdmaAdapters - normalENICount
+			for i := 0; i < limit.ERdmaAdapters-erdmaENICount; i++ {
+				eniList = append(eniList, eni.NewLocal(nil, "erdma", factory, poolConfig))
+			}
+		}
 
-		for i := 0; i < (poolConfig.MaxENI - len(attached)); i++ {
+		for i := 0; i < normalENINeeded; i++ {
 			eniList = append(eniList, eni.NewLocal(nil, "secondary", factory, poolConfig))
 		}
 	}
