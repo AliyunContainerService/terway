@@ -821,8 +821,8 @@ func (n *networkService) startGarbageCollectionLoop() {
 				_, podExist := podKeyMap[podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name)]
 				if !podExist {
 					// check kbe-api again
-					_, err := n.k8s.GetPod(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name, false)
-					if !k8sErr.IsNotFound(err) {
+					exist, err := n.k8s.PodExist(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name)
+					if err != nil || exist {
 						continue
 					}
 					serviceLog.Infof("found pod %s not exist, will cleanup related resource", podInfoKey(resRelate.PodInfo.Namespace, resRelate.PodInfo.Name))

@@ -57,6 +57,7 @@ const (
 type Kubernetes interface {
 	GetLocalPods() ([]*types.PodInfo, error)
 	GetPod(namespace, name string, cache bool) (*types.PodInfo, error)
+	PodExist(namespace, name string) (bool, error)
 	GetServiceCIDR() *types.IPNetSet
 	GetNodeCidr() *types.IPNetSet
 	SetNodeAllocatablePod(count int) error
@@ -859,6 +860,21 @@ func (k *k8s) GetDynamicConfigWithName(name string) (string, error) {
 	}
 
 	return "", errors.New("configmap not included eni_conf")
+}
+
+func (k *k8s) PodExist(namespace, name string) (bool, error) {
+	pod, err := getPod(context.Background(), k.client, namespace, name, false)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if pod.Spec.NodeName != k.nodeName {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func getNode(ctx context.Context, c client.Client, nodeName string) (*corev1.Node, error) {
