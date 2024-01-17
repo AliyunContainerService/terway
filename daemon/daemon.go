@@ -517,6 +517,12 @@ func (n *networkService) gcPods(ctx context.Context) error {
 		if _, ok := exist[podID]; ok {
 			continue
 		}
+		// check kube-api again
+		ok, err := n.k8s.PodExist(podRes.PodInfo.Namespace, podRes.PodInfo.Name)
+		if err != nil || ok {
+			continue
+		}
+
 		// that is old logic ... keep it
 		if podRes.PodInfo.IPStickTime != 0 {
 			podRes.PodInfo.IPStickTime = 0

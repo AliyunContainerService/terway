@@ -190,3 +190,7 @@ func (f *FakeK8s) GetClient() client.Client {
 	//TODO implement me
 	panic("implement me")
 }
+
+func (f *FakeK8s) PodExist(namespace, name string) (bool, error) {
+	panic("implement me")
+}
