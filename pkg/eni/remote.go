@@ -160,7 +160,7 @@ func (r *Remote) Allocate(ctx context.Context, cni *daemon.CNI, request Resource
 					return false, nil
 				}
 			}
-			if podENI.Status.TrunkENIID != r.trunkENI.ID {
+			if r.trunkENI != nil && podENI.Status.TrunkENIID != r.trunkENI.ID {
 				innerErr = &types.Error{
 					Code: types.ErrPodENINotReady,
 					Msg:  fmt.Sprintf("PodENI used a different trunk %s", podENI.Status.TrunkENIID),
