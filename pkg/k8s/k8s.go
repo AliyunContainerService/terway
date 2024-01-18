@@ -81,6 +81,8 @@ var (
 type Kubernetes interface {
 	GetLocalPods() ([]*daemon.PodInfo, error)
 	GetPod(ctx context.Context, namespace, name string, cache bool) (*daemon.PodInfo, error)
+	PodExist(namespace, name string) (bool, error)
+
 	GetServiceCIDR() *types.IPNetSet
 	GetNodeCidr() *types.IPNetSet
 	SetNodeAllocatablePod(count int) error
@@ -378,6 +380,21 @@ func (k *k8s) GetPod(ctx context.Context, namespace, name string, cache bool) (*
 		return nil, err
 	}
 	return podInfo, nil
+}
+
+func (k *k8s) PodExist(namespace, name string) (bool, error) {
+	pod, err := getPod(context.Background(), k.client, namespace, name, false)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if pod.Spec.NodeName != k.nodeName {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func (k *k8s) GetNodeCidr() *types.IPNetSet {
