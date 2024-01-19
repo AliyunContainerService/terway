@@ -131,7 +131,7 @@ func (k *k8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, mes
 	}
 
 	patch := []byte(fmt.Sprintf(`{"status":{"conditions":%s}}`, raw))
-	return k.client.Status().Patch(context.Background(), node, client.RawPatch(k8stypes.MergePatchType, patch))
+	return k.client.Status().Patch(context.Background(), node, client.RawPatch(k8stypes.StrategicMergePatchType, patch))
 }
 
 func (k *k8s) PatchNodeAnnotations(anno map[string]string) error {
