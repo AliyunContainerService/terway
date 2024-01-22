@@ -1,5 +1,6 @@
 FROM --platform=$TARGETPLATFORM calico/go-build:v0.90 as felix-builder
 ARG GOPROXY
+ARG GIT_VERSION
 ENV GOPROXY $GOPROXY
 ENV GIT_BRANCH=v3.24.5
 ENV GIT_COMMIT=f1a1611acb98d9187f48bbbe2227301aa69f0499
@@ -13,8 +14,8 @@ RUN cd /go/src/github.com/projectcalico/calico && \
     CGO_ENABLED=0 go build -o bin/calico-felix -ldflags \
     "-s -w -X github.com/projectcalico/calico/felix/buildinfo.GitVersion=${GIT_BRANCH} \
     -X github.com/projectcalico/calico/felix/buildinfo.BuildDate=$(date -u +'%FT%T%z') \
-    -X github.com/projectcalico/calico/felix/buildinfo.GitRevision=${GIT_COMMIT} \
-    -B 0x${GIT_COMMIT}" "github.com/projectcalico/calico/felix/cmd/calico-felix" && \
+    -X github.com/projectcalico/calico/felix/buildinfo.GitRevision=${GIT_VERSION} \
+    -B 0x${GIT_VERSION}" "github.com/projectcalico/calico/felix/cmd/calico-felix" && \
     ( ! $(readelf -d bin/calico-felix | grep -q NEEDED) || ( echo "Error: bin/calico-felix was not statically linked"; false )) \
     && chmod +x /go/src/github.com/projectcalico/calico/bin/calico-felix
 
@@ -22,6 +23,7 @@ FROM --platform=$TARGETPLATFORM quay.io/cilium/cilium-builder:1d3ec0f0b74a32048a
 ARG GOPROXY
 ENV GOPROXY $GOPROXY
 ARG CILIUM_SHA=""
+ARG GIT_VERSION=""
 LABEL cilium-sha=${CILIUM_SHA}
 LABEL maintainer="maintainer@cilium.io"
 WORKDIR /go/src/github.com/cilium
@@ -41,7 +43,7 @@ ARG LIBNETWORK_PLUGIN
 # Please do not add any dependency updates before the 'make install' here,
 # as that will mess with caching for incremental builds!
 #
-RUN cd cilium && make NOSTRIP=$NOSTRIP LOCKDEBUG=$LOCKDEBUG PKG_BUILD=1 V=$V LIBNETWORK_PLUGIN=$LIBNETWORK_PLUGIN \
+RUN cd cilium && make NOSTRIP=$NOSTRIP LOCKDEBUG=$LOCKDEBUG PKG_BUILD=1 GIT_VERSION=${GIT_VERSION} V=$V LIBNETWORK_PLUGIN=$LIBNETWORK_PLUGIN \
     SKIP_DOCS=true DESTDIR=/tmp/install clean-container build-container install-container
 RUN cp /tmp/install/opt/cni/bin/cilium-cni /tmp/install/usr/bin/
 
