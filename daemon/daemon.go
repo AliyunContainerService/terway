@@ -268,6 +268,11 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 		}
 	}
 
+	ips := getPodIPs(netConf)
+	if len(ips) > 0 {
+		_ = n.k8s.PatchPodIPInfo(pod, strings.Join(ips, ","))
+	}
+
 	// 4. Record resource info
 	newRes := daemon.PodResources{
 		PodInfo:     pod,
@@ -1270,4 +1275,23 @@ func defaultIf(name string) bool {
 		return true
 	}
 	return false
+}
+
+func getPodIPs(netConfs []*rpc.NetConf) []string {
+	var ips []string
+	for _, netConf := range netConfs {
+		if !defaultIf(netConf.IfName) {
+			continue
+		}
+		if netConf.BasicInfo == nil || netConf.BasicInfo.PodIP == nil {
+			continue
+		}
+		if netConf.BasicInfo.PodIP.IPv4 != "" {
+			ips = append(ips, netConf.BasicInfo.PodIP.IPv4)
+		}
+		if netConf.BasicInfo.PodIP.IPv6 != "" {
+			ips = append(ips, netConf.BasicInfo.PodIP.IPv6)
+		}
+	}
+	return ips
 }
