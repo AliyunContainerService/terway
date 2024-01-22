@@ -62,7 +62,7 @@ func (o *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]
 	}, nil
 }
 
-func (o *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitch string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*client.NetworkInterface, error) {
+func (o *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk, erdma bool, vSwitch string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*client.NetworkInterface, error) {
 	o.Lock()
 	defer o.Unlock()
 
@@ -106,6 +106,9 @@ func (o *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitc
 
 	if trunk {
 		eni.Type = "Trunk"
+	}
+	if erdma {
+		eni.NetworkInterfaceTrafficMode = client.ENITrafficModeRDMA
 	}
 	if o.ENIs == nil {
 		o.ENIs = make(map[string]*client.NetworkInterface)

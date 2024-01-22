@@ -623,6 +623,8 @@ func convertPod(daemonMode string, statefulWorkloadKindSet sets.Set[string], pod
 		}
 	}
 
+	pi.ERdma = isERDMA(pod)
+
 	// determine whether pod's IP will stick 5 minutes for a reuse, priorities as below,
 	// 1. pod has a positive pod-ip-reservation annotation
 	// 2. pod is owned by a known stateful workload
@@ -770,6 +772,15 @@ func parseBandwidth(s string) (uint64, error) {
 	default:
 		return 0, fmt.Errorf("invalid bandwidth %s", s)
 	}
+}
+
+func isERDMA(p *corev1.Pod) bool {
+	for _, c := range append(p.Spec.InitContainers, p.Spec.Containers...) {
+		if res, ok := c.Resources.Limits[deviceplugin.ERDMAResName]; ok && !res.IsZero() {
+			return true
+		}
+	}
+	return false
 }
 
 type storageItem struct {

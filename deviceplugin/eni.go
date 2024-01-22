@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/samber/lo"
+
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -24,10 +26,12 @@ import (
 const (
 	ENITypeENI    = "eni"
 	ENITypeMember = "member"
+	ENITypeERDMA  = "erdma"
 
 	// ENIResName aliyun eni resource name in kubernetes container resource
 	ENIResName       = "aliyun/eni"
 	MemberENIResName = "aliyun/member-eni"
+	ERDMAResName     = "aliyun/erdma"
 )
 
 type eniRes struct {
@@ -39,23 +43,29 @@ type eniRes struct {
 var eniMap = map[string]eniRes{
 	ENITypeENI: {
 		resName: ENIResName,
-		re:      regexp.MustCompile("^.*" + "-eni.sock"),
-		sock:    pluginapi.DevicePluginPath + "%d-" + "eni.sock",
+		re:      regexp.MustCompile("^.*-eni.sock"),
+		sock:    pluginapi.DevicePluginPath + "%d-eni.sock",
 	},
 	ENITypeMember: {
 		resName: MemberENIResName,
-		re:      regexp.MustCompile("^.*" + "-member-eni.sock"),
-		sock:    pluginapi.DevicePluginPath + "%d-" + "member-eni.sock",
+		re:      regexp.MustCompile("^.*-member-eni.sock"),
+		sock:    pluginapi.DevicePluginPath + "%d-member-eni.sock",
+	},
+	ENITypeERDMA: {
+		resName: ERDMAResName,
+		re:      regexp.MustCompile("^.*-erdma-eni.sock"),
+		sock:    pluginapi.DevicePluginPath + "%d-erdma-eni.sock",
 	},
 }
 
 // ENIDevicePlugin implements the Kubernetes device plugin API
 type ENIDevicePlugin struct {
-	socket string
-	server *grpc.Server
-	count  int
-	stop   chan struct{}
-	eniRes eniRes
+	socket  string
+	server  *grpc.Server
+	count   int
+	stop    chan struct{}
+	eniRes  eniRes
+	eniType string
 	sync.Locker
 }
 
@@ -67,9 +77,10 @@ func NewENIDevicePlugin(count int, eniType string) *ENIDevicePlugin {
 	}
 	pluginEndpoint := fmt.Sprintf(res.sock, time.Now().Unix())
 	return &ENIDevicePlugin{
-		socket: pluginEndpoint,
-		count:  count,
-		eniRes: res,
+		socket:  pluginEndpoint,
+		count:   count,
+		eniRes:  res,
+		eniType: eniType,
 	}
 }
 
@@ -203,11 +214,51 @@ func (m *ENIDevicePlugin) Allocate(ctx context.Context, r *pluginapi.AllocateReq
 		ContainerResponses: []*pluginapi.ContainerAllocateResponse{},
 	}
 
-	klog.Infof("Request Containers: %v", r.GetContainerRequests())
+	klog.Infof("Request Containers: %v, eniType: %v", r.GetContainerRequests(), m.eniType)
 	for range r.GetContainerRequests() {
-		response.ContainerResponses = append(response.ContainerResponses,
-			&pluginapi.ContainerAllocateResponse{},
-		)
+		var devices []*pluginapi.DeviceSpec
+		if m.eniType == ENITypeERDMA {
+			infinibandDevs, err := os.ReadDir("/dev/infiniband/")
+			if err != nil || len(infinibandDevs) == 0 {
+				if os.IsNotExist(err) {
+					// maybe first erdma to attach, there is no infiniband dev on device plugin allocate
+					devices = []*pluginapi.DeviceSpec{
+						{
+							ContainerPath: "/dev/infiniband/uverbs0",
+							HostPath:      "/dev/infiniband/uverbs0",
+							Permissions:   "rw",
+						},
+						{
+							ContainerPath: "/dev/infiniband/rdma_cm",
+							HostPath:      "/dev/infiniband/rdma_cm",
+							Permissions:   "rw",
+						},
+					}
+				} else {
+					return nil, fmt.Errorf("error read infiniband dir: %+v, please check the erdma driver", err)
+				}
+			} else {
+				devices = lo.FilterMap(infinibandDevs, func(v os.DirEntry, _ int) (*pluginapi.DeviceSpec, bool) {
+					if v.Type()&os.ModeDevice != 0 {
+						return &pluginapi.DeviceSpec{
+							ContainerPath: "/dev/infiniband/" + v.Name(),
+							HostPath:      "/dev/infiniband/" + v.Name(),
+							Permissions:   "rw",
+						}, true
+					}
+					return nil, false
+				})
+			}
+
+			response.ContainerResponses = append(response.ContainerResponses,
+				&pluginapi.ContainerAllocateResponse{
+					Devices: devices,
+				},
+			)
+		} else {
+			response.ContainerResponses = append(response.ContainerResponses,
+				&pluginapi.ContainerAllocateResponse{})
+		}
 	}
 
 	return &response, nil

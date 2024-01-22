@@ -38,6 +38,7 @@ type PodInfo struct {
 	PodENI          bool
 	PodUID          string
 	NetworkPriority string
+	ERdma           bool
 }
 
 // ExtraEipInfo store extra eip info

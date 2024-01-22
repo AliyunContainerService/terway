@@ -56,6 +56,7 @@ type ENI struct {
 	SecurityGroupIDs []string
 
 	Trunk bool
+	ERdma bool
 
 	PrimaryIP types.IPSet
 	GatewayIP types.IPSet

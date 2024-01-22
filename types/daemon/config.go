@@ -43,6 +43,7 @@ type Config struct {
 	// rob the eip instance even the eip already bound to other resource
 	AllowEIPRob                 string                  `yaml:"allow_eip_rob" json:"allow_eip_rob"`
 	EnableENITrunking           bool                    `yaml:"enable_eni_trunking" json:"enable_eni_trunking"`
+	EnableERDMA                 bool                    `yaml:"enable_erdma" json:"enable_erdma"`
 	CustomStatefulWorkloadKinds []string                `yaml:"custom_stateful_workload_kinds" json:"custom_stateful_workload_kinds"`
 	IPAMType                    types.IPAMType          `yaml:"ipam_type" json:"ipam_type"`           // crd or default
 	ENICapPolicy                ENICapPolicy            `yaml:"eni_cap_policy" json:"eni_cap_policy"` // prefer trunk or secondary

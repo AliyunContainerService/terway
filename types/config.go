@@ -5,11 +5,12 @@ type PoolConfig struct {
 	EnableIPv4 bool
 	EnableIPv6 bool
 
-	Capacity     int // the max res can hold in the pool
-	MaxENI       int // the max eni terway can be created (already exclude main eni)
-	MaxMemberENI int // the max member eni can be created
-	MaxIPPerENI  int
-	BatchSize    int
+	Capacity      int // the max res can hold in the pool
+	MaxENI        int // the max eni terway can be created (already exclude main eni)
+	MaxMemberENI  int // the max member eni can be created
+	ERdmaCapacity int // the max erdma res can be created
+	MaxIPPerENI   int
+	BatchSize     int
 
 	MaxPoolSize int
 	MinPoolSize int

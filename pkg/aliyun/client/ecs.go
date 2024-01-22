@@ -40,7 +40,7 @@ func New(c credential.Client, readOnly, mutating flowcontrol.RateLimiter) (*Open
 }
 
 // CreateNetworkInterface instanceType Secondary Trunk
-func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitch string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*NetworkInterface, error) {
+func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk, erdma bool, vSwitch string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*NetworkInterface, error) {
 	l := logf.FromContext(ctx).WithValues(
 		LogFieldAPI, "CreateNetworkInterface",
 		LogFieldVSwitchID, vSwitch,
@@ -53,6 +53,9 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk bool, vSwitc
 	req.InstanceType = ENITypeSecondary
 	if trunk {
 		req.InstanceType = ENITypeTrunk
+	}
+	if erdma {
+		req.NetworkInterfaceTrafficMode = ENITrafficModeRDMA
 	}
 	req.SecurityGroupIds = &securityGroups
 	req.NetworkInterfaceName = generateEniName()

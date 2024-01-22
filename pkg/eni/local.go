@@ -37,12 +37,17 @@ const (
 	statusDeleting
 )
 
+const (
+	LocalIPTypeERDMA = "ERDMA"
+)
+
 var rateLimit = rate.Every(1 * time.Minute / 10)
 
 var _ ResourceRequest = &LocalIPRequest{}
 
 type LocalIPRequest struct {
 	NetworkInterfaceID string
+	LocalIPType        string
 	IPv4               netip.Addr
 	IPv6               netip.Addr
 }
@@ -292,7 +297,11 @@ func (l *Local) sync() {
 }
 
 func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace) {
+
 	if request.ResourceType() != ResourceTypeLocalIP {
+		return nil, []Trace{{Condition: ResourceTypeMismatch}}
+	}
+	if request.(*LocalIPRequest).LocalIPType == LocalIPTypeERDMA && l.eniType != "erdma" {
 		return nil, []Trace{{Condition: ResourceTypeMismatch}}
 	}
 
@@ -361,7 +370,7 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 }
 
 // Release take the cni Del request and release resource to pool
-func (l *Local) Release(ctx context.Context, cni *daemon.CNI, request ResourceRequest) bool {
+func (l *Local) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool {
 	if request.ResourceType() != ResourceTypeLocalIP {
 		return false
 	}

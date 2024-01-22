@@ -640,7 +640,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 			alloc := (*allocs)[ii]
 			ctx := common.WithCtx(ctx, alloc)
 
-			eni, err := m.aliyun.CreateNetworkInterface(ctx, false, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, alloc.ENI.ResourceGroupID, 1, ipv6Count, map[string]string{
+			eni, err := m.aliyun.CreateNetworkInterface(ctx, false, false, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, alloc.ENI.ResourceGroupID, 1, ipv6Count, map[string]string{
 				types.TagKeyClusterID:               clusterID,
 				types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
 			})
