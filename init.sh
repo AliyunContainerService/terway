@@ -43,6 +43,25 @@ if [ "$ENIIP_VIRTUAL_TYPE" = "ipvlan" ]; then
       init_node_bpf
 fi
 
+node_capabilities=/var/run/eni/node_capabilities
+if [ ! -f "$node_capabilities" ]; then
+  echo "Init node capabilities"
+  mkdir -p /var/run/eni
+  touch "$node_capabilities"
+fi
+
+require_erdma=$(jq '.enable_erdma' -r < /etc/eni/eni.json)
+if [ "$require_erdma" = "true" ]; then
+  echo "Init erdma driver"
+  if modprobe erdma; then
+    echo "node support erdma"
+    echo "erdma=true" >> "$node_capabilities"
+  else
+    echo "node not support erdma, pls install the latest erdma driver"
+  fi
+fi
+
+
 sysctl -w net.ipv4.conf.eth0.rp_filter=0
 modprobe sch_htb || true
 chroot /host sh -c "systemctl disable eni.service; rm -f /etc/udev/rules.d/75-persistent-net-generator.rules /lib/udev/rules.d/60-net.rules /lib/udev/rules.d/61-eni.rules /lib/udev/write_net_rules"

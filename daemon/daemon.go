@@ -853,11 +853,8 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 			serviceLog.Info("instance is not support erdma", "instanceType", config.InstanceType)
 			config.EnableERDMA = false
 		} else {
-			ok, err := utils.OSSupportERDMA()
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
+			ok := utils.GetNodeCapabilities(utils.NodeCapabilityERDMA)
+			if ok == "" {
 				config.EnableERDMA = false
 				serviceLog.Info("os is not support erdma")
 			}
