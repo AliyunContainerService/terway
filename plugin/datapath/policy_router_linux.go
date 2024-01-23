@@ -405,45 +405,44 @@ func (d *PolicyRoute) Check(cfg *types.CheckConfig) error {
 }
 
 func (d *PolicyRoute) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
-	if cfg.ContainerIPNet != nil {
-		extender := utils.NewIPNet(cfg.ContainerIPNet)
-		// delete ip rule by ip
-		exec := func(rule *netlink.Rule) error {
-			rules, err := utils.FindIPRule(rule)
-			if err != nil {
-				return err
-			}
-			for _, r := range rules {
-				err = utils.RuleDel(&r)
-				if err != nil {
-					return err
-				}
-			}
-			return nil
+	if cfg.ContainerIPNet == nil {
+		return nil
+	}
+
+	extender := utils.NewIPNet(cfg.ContainerIPNet)
+	// delete ip rule by ip
+	exec := func(rule *netlink.Rule) error {
+		rules, err := utils.FindIPRule(rule)
+		if err != nil {
+			return err
 		}
-		if extender.IPv4 != nil {
-			err := exec(&netlink.Rule{Priority: fromContainerPriority, Src: extender.IPv4})
-			if err != nil {
-				return err
-			}
-			err = exec(&netlink.Rule{Priority: toContainerPriority, Dst: extender.IPv4})
+		for _, r := range rules {
+			err = utils.RuleDel(&r)
 			if err != nil {
 				return err
 			}
 		}
-		if extender.IPv6 != nil {
-			err := exec(&netlink.Rule{Priority: fromContainerPriority, Src: extender.IPv6})
-			if err != nil {
-				return err
-			}
-			err = exec(&netlink.Rule{Priority: toContainerPriority, Dst: extender.IPv6})
-			if err != nil {
-				return err
-			}
+		return nil
+	}
+	if extender.IPv4 != nil {
+		err := exec(&netlink.Rule{Priority: fromContainerPriority, Src: extender.IPv4})
+		if err != nil {
+			return err
+		}
+		err = exec(&netlink.Rule{Priority: toContainerPriority, Dst: extender.IPv4})
+		if err != nil {
+			return err
 		}
 	}
-	if !cfg.EnableNetworkPriority {
-		return nil
+	if extender.IPv6 != nil {
+		err := exec(&netlink.Rule{Priority: fromContainerPriority, Src: extender.IPv6})
+		if err != nil {
+			return err
+		}
+		err = exec(&netlink.Rule{Priority: toContainerPriority, Dst: extender.IPv6})
+		if err != nil {
+			return err
+		}
 	}
 
 	link, err := netlink.LinkByIndex(cfg.ENIIndex)
@@ -453,18 +452,14 @@ func (d *PolicyRoute) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
 		}
 		return nil
 	}
-	err = func() error {
-		link, err := netlink.LinkByIndex(cfg.ENIIndex)
-		if err != nil {
-			if _, ok := err.(netlink.LinkNotFoundError); !ok {
-				return err
-			}
-			return nil
-		}
-		return utils.DelFilter(link, netlink.HANDLE_MIN_EGRESS, cfg.ContainerIPNet)
-	}()
+
+	err = utils.DelFilter(link, netlink.HANDLE_MIN_EGRESS, cfg.ContainerIPNet)
 	if err != nil {
 		return err
+	}
+
+	if !cfg.EnableNetworkPriority {
+		return nil
 	}
 
 	return utils.DelEgressPriority(link, cfg.ContainerIPNet)
