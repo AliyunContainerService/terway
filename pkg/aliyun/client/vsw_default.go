@@ -28,6 +28,7 @@ func (a *OpenAPI) DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*v
 	resp, err := a.ClientSet.VPC().DescribeVSwitches(req)
 	metric.OpenAPILatency.WithLabelValues("DescribeVSwitches", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
+		err = apiErr.WarpError(err)
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "DescribeVSwitches failed")
 		return nil, err
 	}

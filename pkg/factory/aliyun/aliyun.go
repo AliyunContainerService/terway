@@ -192,6 +192,17 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 	r.GatewayIP.SetIP(gw.String())
 
 	if ipv6 > 0 {
+		err = validateIPInMetadata(ctx, v6Set, func() []netip.Addr {
+			exists, err := metadata.GetIPv6ByMac(r.MAC)
+			if err != nil {
+				klog.Errorf("metadata: error get eni private ip: %v", err)
+			}
+			return exists
+		})
+		if err != nil {
+			return r, nil, nil, err
+		}
+
 		prefix, err = metadata.GetVSwitchIPv6CIDR(eni.MacAddress)
 		if err != nil {
 			return r, nil, nil, err
@@ -203,17 +214,6 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 			return r, nil, nil, err
 		}
 		r.GatewayIP.SetIP(gw.String())
-
-		err = validateIPInMetadata(ctx, v6Set, func() []netip.Addr {
-			exists, err := metadata.GetIPv4ByMac(r.MAC)
-			if err != nil {
-				klog.Errorf("metadata: error get eni private ip: %v", err)
-			}
-			return exists
-		})
-		if err != nil {
-			return r, nil, nil, err
-		}
 	}
 
 	return r, v4Set, v6Set, nil
