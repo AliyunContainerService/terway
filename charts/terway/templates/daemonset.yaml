@@ -118,6 +118,8 @@ spec:
               name: lib-modules
             - mountPath: /host
               name: host-root
+            - mountPath: /var/run/
+              name: eni-run
       containers:
         - name: terway
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
