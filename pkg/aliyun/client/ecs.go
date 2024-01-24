@@ -156,6 +156,9 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 			result = append(result, FromDescribeResp(&r))
 		}
 
+		if len(resp.NetworkInterfaceSets.NetworkInterfaceSet) < maxSinglePageSize {
+			break
+		}
 		if resp.NextToken == "" {
 			break
 		}
