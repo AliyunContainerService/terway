@@ -30,17 +30,37 @@ var (
 	tokenReSyncPeriod = 5 * time.Minute
 )
 
+type headerTransport struct {
+	headers map[string]string
+}
+
+func (m *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	for k, v := range m.headers {
+		req.Header.Set(k, v)
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}
+
 func clientCfg() *sdk.Config {
 	scheme := "HTTPS"
 	if os.Getenv("ALICLOUD_CLIENT_SCHEME") == "HTTP" {
 		scheme = "HTTP"
 	}
-	return &sdk.Config{
+	s := &sdk.Config{
 		Timeout:   20 * time.Second,
 		Transport: http.DefaultTransport,
 		UserAgent: kubernetesAlicloudIdentity,
 		Scheme:    scheme,
 	}
+	if os.Getenv("X-ACSPROXY-ASCM-CONTEXT") != "" {
+		s.Transport = &headerTransport{
+			headers: map[string]string{
+				"x-acsproxy-ascm-context": os.Getenv("X-ACSPROXY-ASCM-CONTEXT"),
+			},
+		}
+	}
+
+	return s
 }
 
 // ClientMgr manager of aliyun openapi clientset
