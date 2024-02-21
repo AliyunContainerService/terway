@@ -55,8 +55,12 @@ if [ "$require_erdma" = "true" ]; then
   echo "Init erdma driver"
   if modprobe erdma; then
     echo "node support erdma"
-    echo "erdma=true" >> "$node_capabilities"
+    if ! grep -q "erdma=true" "$node_capabilities"; then
+      sed -i '/erdma=/d' "$node_capabilities"
+      echo "erdma=true" >> "$node_capabilities"
+    fi
   else
+    sed -i '/erdma=true/d' "$node_capabilities"
     echo "node not support erdma, pls install the latest erdma driver"
   fi
 fi
