@@ -7,7 +7,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 
-	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -110,7 +110,7 @@ func createOrUpdateCRD(cs apiextensionsclient.Interface, name string) error {
 func RegisterCRDs() error {
 	crds := []string{CRDPodENI, CRDPodNetworking}
 	for _, crd := range crds {
-		err := createOrUpdateCRD(utils.APIExtensionsClient, crd)
+		err := createOrUpdateCRD(k8sclient.APIExtensionsClient, crd)
 		if err != nil {
 			return err
 		}
@@ -121,7 +121,7 @@ func RegisterCRDs() error {
 
 func RegisterCRD(crds []string) error {
 	for _, crd := range crds {
-		err := createCRD(utils.APIExtensionsClient, crd)
+		err := createCRD(k8sclient.APIExtensionsClient, crd)
 		if err != nil {
 			return err
 		}

@@ -34,6 +34,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
 	"github.com/AliyunContainerService/terway/pkg/version"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
@@ -116,7 +117,7 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 	if err != nil {
 		return nil, err
 	}
-	utils.RegisterClients(restConfig)
+	k8sclient.RegisterClients(restConfig)
 
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
@@ -137,7 +138,7 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 	var nodeCidr *types.IPNetSet
 	if daemonMode == daemon.ModeVPC {
 		// vpc mode not support ipv6
-		nodeCidr, err = nodeCidrFromAPIServer(utils.K8sClient, nodeName)
+		nodeCidr, err = nodeCidrFromAPIServer(k8sclient.K8sClient, nodeName)
 		if err != nil {
 			return nil, fmt.Errorf("error retrieving node cidr for '%s': %w", nodeName, err)
 		}
@@ -153,7 +154,7 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 	recorder := broadcaster.NewRecorder(scheme.Scheme, source)
 
 	sink := &typedv1.EventSinkImpl{
-		Interface: typedv1.New(utils.K8sClient.CoreV1().RESTClient()).Events(""),
+		Interface: typedv1.New(k8sclient.K8sClient.CoreV1().RESTClient()).Events(""),
 	}
 	broadcaster.StartRecordingToSink(sink)
 

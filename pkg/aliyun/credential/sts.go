@@ -18,6 +18,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
 )
 
 type EncryptedCredentialInfo struct {
@@ -74,7 +75,7 @@ func (e *EncryptedCredentialProvider) Resolve() (*Credential, error) {
 			}
 			return false
 		}, func() error {
-			secret, err = utils.K8sClient.CoreV1().Secrets(e.secretNamespace).Get(context.Background(), e.secretName, metav1.GetOptions{})
+			secret, err = k8sclient.K8sClient.CoreV1().Secrets(e.secretNamespace).Get(context.Background(), e.secretName, metav1.GetOptions{})
 			if err != nil {
 				return err
 			}
