@@ -126,9 +126,9 @@ func (s Set) Allocatable() []*IP {
 	return result
 }
 
-func (s Set) PeekAvailable(podID string, prefer netip.Addr) *IP {
-	if podID != "" && prefer.IsValid() {
-		if v, ok := s[prefer]; ok {
+func (s Set) PeekAvailable(podID string) *IP {
+	if podID != "" {
+		for _, v := range s {
 			if v.podID == podID {
 				return v
 			}
