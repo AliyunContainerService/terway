@@ -323,12 +323,13 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 	}
 
 	log := logf.FromContext(ctx)
+	log.Info(fmt.Sprintf("local request %v", lo))
 
 	expectV4 := 0
 	expectV6 := 0
 
 	if l.enableIPv4 {
-		ipv4 := l.ipv4.PeekAvailable(cni.PodID, lo.IPv4)
+		ipv4 := l.ipv4.PeekAvailable(cni.PodID)
 		if ipv4 == nil && len(l.ipv4)+l.allocatingV4 >= l.cap {
 			return nil, []Trace{{Condition: Full}}
 		} else if ipv4 == nil {
@@ -337,7 +338,7 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 	}
 
 	if l.enableIPv6 {
-		ipv6 := l.ipv6.PeekAvailable(cni.PodID, lo.IPv6)
+		ipv6 := l.ipv6.PeekAvailable(cni.PodID)
 		if ipv6 == nil && len(l.ipv6)+l.allocatingV6 >= l.cap {
 			return nil, []Trace{{Condition: Full}}
 		} else if ipv6 == nil {
@@ -452,7 +453,7 @@ func (l *Local) allocWorker(ctx context.Context, cni *daemon.CNI, request *Local
 		var ip types.IPSet2
 		var ipv4, ipv6 *IP
 		if l.enableIPv4 {
-			ipv4 = l.ipv4.PeekAvailable(cni.PodID, request.IPv4)
+			ipv4 = l.ipv4.PeekAvailable(cni.PodID)
 			if ipv4 == nil {
 				l.cond.Wait()
 				continue
@@ -460,7 +461,7 @@ func (l *Local) allocWorker(ctx context.Context, cni *daemon.CNI, request *Local
 			ip.IPv4 = ipv4.ip
 		}
 		if l.enableIPv6 {
-			ipv6 = l.ipv6.PeekAvailable(cni.PodID, request.IPv6)
+			ipv6 = l.ipv6.PeekAvailable(cni.PodID)
 			if ipv6 == nil {
 				l.cond.Wait()
 				continue

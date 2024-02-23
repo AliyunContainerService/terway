@@ -1052,6 +1052,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	}
 
 	podResources := getPodResources(objList)
+	serviceLog.Info(fmt.Sprintf("loaded pod res, %v", podResources))
 
 	if config.EnableEIPMigrate {
 		err = netSrv.migrateEIP(ctx, objList)

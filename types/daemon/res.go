@@ -76,7 +76,7 @@ func (p PodResources) GetResourceItemByType(resType string) []ResourceItem {
 	var ret []ResourceItem
 	for _, r := range p.Resources {
 		if resType == r.Type {
-			ret = append(ret, ResourceItem{Type: resType, ID: r.ID})
+			ret = append(ret, ResourceItem{Type: resType, ID: r.ID, ENIID: r.ENIID, ENIMAC: r.ENIMAC, IPv4: r.IPv4, IPv6: r.IPv6})
 		}
 	}
 	return ret
