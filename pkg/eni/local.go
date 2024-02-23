@@ -50,6 +50,8 @@ type LocalIPRequest struct {
 	LocalIPType        string
 	IPv4               netip.Addr
 	IPv6               netip.Addr
+
+	NoCache bool // do not use cached ip
 }
 
 func (l *LocalIPRequest) ResourceType() ResourceType {
@@ -329,20 +331,28 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 	expectV6 := 0
 
 	if l.enableIPv4 {
-		ipv4 := l.ipv4.PeekAvailable(cni.PodID)
-		if ipv4 == nil && len(l.ipv4)+l.allocatingV4 >= l.cap {
-			return nil, []Trace{{Condition: Full}}
-		} else if ipv4 == nil {
+		if lo.NoCache {
 			expectV4 = 1
+		} else {
+			ipv4 := l.ipv4.PeekAvailable(cni.PodID)
+			if ipv4 == nil && len(l.ipv4)+l.allocatingV4 >= l.cap {
+				return nil, []Trace{{Condition: Full}}
+			} else if ipv4 == nil {
+				expectV4 = 1
+			}
 		}
 	}
 
 	if l.enableIPv6 {
-		ipv6 := l.ipv6.PeekAvailable(cni.PodID)
-		if ipv6 == nil && len(l.ipv6)+l.allocatingV6 >= l.cap {
-			return nil, []Trace{{Condition: Full}}
-		} else if ipv6 == nil {
+		if lo.NoCache {
 			expectV6 = 1
+		} else {
+			ipv6 := l.ipv6.PeekAvailable(cni.PodID)
+			if ipv6 == nil && len(l.ipv6)+l.allocatingV6 >= l.cap {
+				return nil, []Trace{{Condition: Full}}
+			} else if ipv6 == nil {
+				expectV6 = 1
+			}
 		}
 	}
 
