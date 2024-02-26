@@ -83,3 +83,26 @@ func TestLocal_Release_DifferentENIID(t *testing.T) {
 
 	assert.False(t, local.Release(context.Background(), cni, request))
 }
+
+func TestLocal_Release_ValidIPv4_ReleaseIPv6(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{})
+	request := &LocalIPResource{
+		ENI: daemon.ENI{ID: "eni-1"},
+		IP:  types.IPSet2{IPv4: netip.MustParseAddr("192.0.2.1"), IPv6: netip.MustParseAddr("fd00:46dd:e::1")},
+	}
+	cni := &daemon.CNI{PodID: "pod-1"}
+
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
+	local.ipv4[netip.MustParseAddr("192.0.2.1")].Allocate("pod-1")
+
+	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00:46dd:e::1"), false))
+	local.ipv6[netip.MustParseAddr("fd00:46dd:e::1")].Allocate("pod-1")
+
+	assert.True(t, local.Release(context.Background(), cni, request))
+
+	assert.Equal(t, ipStatusValid, local.ipv4[netip.MustParseAddr("192.0.2.1")].status)
+	assert.Equal(t, "", local.ipv4[netip.MustParseAddr("192.0.2.1")].podID)
+
+	assert.Equal(t, ipStatusValid, local.ipv6[netip.MustParseAddr("fd00:46dd:e::1")].status)
+	assert.Equal(t, "", local.ipv6[netip.MustParseAddr("fd00:46dd:e::1")].podID)
+}
