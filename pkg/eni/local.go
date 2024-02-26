@@ -403,7 +403,7 @@ func (l *Local) Release(ctx context.Context, cni *daemon.CNI, request NetworkRes
 		log.Info("release ipv4", "ipv4", res.IP.IPv4)
 	}
 	if res.IP.IPv6.IsValid() {
-		l.ipv4.Release(cni.PodID, res.IP.IPv6)
+		l.ipv6.Release(cni.PodID, res.IP.IPv6)
 
 		log.Info("release ipv6", "ipv6", res.IP.IPv6)
 	}
