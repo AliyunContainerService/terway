@@ -196,11 +196,14 @@ func (m *Manager) Allocate(ctx context.Context, cni *daemon.CNI, req *AllocReque
 			select {
 			case <-ctx.Done():
 				break
-			case resp := <-ch:
-				// if any err happen, cancel the context
+			case resp, ok := <-ch:
+				if !ok {
+					err = fmt.Errorf("ctx done")
+					cancel()
+					break
+				}
 				if resp.Err != nil {
 					err = resp.Err
-
 					cancel()
 					break
 				}

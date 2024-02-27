@@ -458,6 +458,16 @@ func (l *Local) allocWorker(ctx context.Context, cni *daemon.CNI, request *Local
 
 	log := logf.FromContext(ctx)
 	for {
+		select {
+		case <-ctx.Done():
+			// parent cancel the context, so close the ch
+			onErrLocked()
+
+			close(respCh)
+			return
+		default:
+		}
+
 		resp := &AllocResp{}
 
 		var ip types.IPSet2
@@ -488,9 +498,7 @@ func (l *Local) allocWorker(ctx context.Context, cni *daemon.CNI, request *Local
 
 		select {
 		case <-ctx.Done():
-			// parent cancel the context, so no need to send the chain
-			onErrLocked()
-
+			continue
 		case respCh <- resp:
 			// mark the ip as allocated
 			if ipv4 != nil {
@@ -628,7 +636,7 @@ func (l *Local) factoryAllocWorker(ctx context.Context) {
 					continue
 				}
 
-				l.allocatingV4 -= v4Count
+				l.allocatingV4 -= len(ipv4Set)
 				l.allocatingV4 = max(l.allocatingV4, 0)
 
 				l.ipv4.PutValid(ipv4Set...)
@@ -657,7 +665,7 @@ func (l *Local) factoryAllocWorker(ctx context.Context) {
 					continue
 				}
 
-				l.allocatingV6 -= v6Count
+				l.allocatingV6 -= len(ipv6Set)
 				l.allocatingV6 = max(l.allocatingV6, 0)
 
 				l.ipv6.PutValid(ipv6Set...)
@@ -678,12 +686,13 @@ func (l *Local) Dispose(n int) int {
 
 	log := logf.Log.WithValues("eni", l.eni.ID, "mac", l.eni.MAC)
 
+	defer l.cond.Broadcast()
+
 	// 1. check if can dispose the eni
 	if n >= max(len(l.ipv4), len(l.ipv6)) {
 		if l.eni.Type != "trunk" && len(l.ipv4.InUse()) == 0 && len(l.ipv6.InUse()) == 0 {
 			log.Info("dispose eni")
 			l.status = statusDeleting
-			l.cond.Broadcast()
 			return max(len(l.ipv4), len(l.ipv6))
 		}
 	}
