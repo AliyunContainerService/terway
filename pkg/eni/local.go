@@ -678,12 +678,13 @@ func (l *Local) Dispose(n int) int {
 
 	log := logf.Log.WithValues("eni", l.eni.ID, "mac", l.eni.MAC)
 
+	defer l.cond.Broadcast()
+
 	// 1. check if can dispose the eni
 	if n >= max(len(l.ipv4), len(l.ipv6)) {
 		if l.eni.Type != "trunk" && len(l.ipv4.InUse()) == 0 && len(l.ipv6.InUse()) == 0 {
 			log.Info("dispose eni")
 			l.status = statusDeleting
-			l.cond.Broadcast()
 			return max(len(l.ipv4), len(l.ipv6))
 		}
 	}
