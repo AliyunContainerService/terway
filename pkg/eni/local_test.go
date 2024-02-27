@@ -106,3 +106,97 @@ func TestLocal_Release_ValidIPv4_ReleaseIPv6(t *testing.T) {
 	assert.Equal(t, ipStatusValid, local.ipv6[netip.MustParseAddr("fd00:46dd:e::1")].status)
 	assert.Equal(t, "", local.ipv6[netip.MustParseAddr("fd00:46dd:e::1")].podID)
 }
+
+func TestLocal_AllocWorker_EnableIPv4(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{
+		EnableIPv4: true,
+	})
+	cni := &daemon.CNI{PodID: "pod-1"}
+
+	respCh := make(chan *AllocResp)
+	go local.allocWorker(context.Background(), cni, nil, respCh, func() {})
+
+	go func() {
+		local.cond.L.Lock()
+		local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
+		local.cond.Broadcast()
+		local.cond.L.Unlock()
+	}()
+
+	resp := <-respCh
+	assert.Len(t, resp.NetworkConfigs, 1)
+
+	lo := resp.NetworkConfigs[0].(*LocalIPResource)
+	assert.Equal(t, "192.0.2.1", lo.IP.IPv4.String())
+	assert.False(t, lo.IP.IPv6.IsValid())
+	assert.Equal(t, "eni-1", lo.ENI.ID)
+}
+
+func TestLocal_AllocWorker_EnableIPv6(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{
+		EnableIPv6: true,
+	})
+	cni := &daemon.CNI{PodID: "pod-1"}
+
+	respCh := make(chan *AllocResp)
+	go local.allocWorker(context.Background(), cni, nil, respCh, func() {})
+
+	go func() {
+		local.cond.L.Lock()
+		local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00:46dd:e::1"), false))
+		local.cond.Broadcast()
+		local.cond.L.Unlock()
+	}()
+
+	resp := <-respCh
+	assert.Len(t, resp.NetworkConfigs, 1)
+
+	lo := resp.NetworkConfigs[0].(*LocalIPResource)
+	assert.Equal(t, netip.MustParseAddr("fd00:46dd:e::1"), lo.IP.IPv6)
+	assert.False(t, lo.IP.IPv4.IsValid())
+	assert.Equal(t, "eni-1", lo.ENI.ID)
+}
+
+func TestLocal_AllocWorker_ParentCancelContext(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{
+		EnableIPv4: true,
+	})
+	cni := &daemon.CNI{PodID: "pod-1"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	respCh := make(chan *AllocResp)
+	go local.allocWorker(ctx, cni, nil, respCh, func() {})
+
+	cancel()
+
+	_, ok := <-respCh
+	assert.False(t, ok)
+}
+
+func TestLocal_Dispose(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{})
+	local.status = statusInUse
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
+	local.ipv4[netip.MustParseAddr("192.0.2.1")].Allocate("pod-1")
+	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00:46dd:e::1"), false))
+	local.ipv6[netip.MustParseAddr("fd00:46dd:e::1")].Allocate("pod-1")
+
+	n := local.Dispose(10)
+
+	assert.Equal(t, 0, n)
+	assert.Equal(t, statusInUse, local.status)
+	assert.Equal(t, 1, len(local.ipv4))
+	assert.Equal(t, 1, len(local.ipv6))
+}
+
+func TestLocal_DisposeWholeENI(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{})
+	local.status = statusInUse
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), true))
+	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00:46dd:e::1"), false))
+
+	n := local.Dispose(1)
+
+	assert.Equal(t, 1, n)
+	assert.Equal(t, statusDeleting, local.status)
+}
