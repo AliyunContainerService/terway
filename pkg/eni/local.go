@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -195,7 +196,7 @@ func (l *Local) load(podResources []daemon.PodResources) error {
 		return err
 	}
 
-	logf.Log.Info("load eni", "eni", l.eni.ID, "mac", l.eni.MAC, "ipv4", ipv4, "ipv6", ipv6)
+	logf.Log.Info("load eni", "eni", l.eni.ID, "type", l.eniType, "mac", l.eni.MAC, "ipv4", ipv4, "ipv6", ipv6)
 
 	primary, err := netip.ParseAddr(l.eni.PrimaryIP.IPv4.String())
 	if err != nil {
@@ -690,7 +691,7 @@ func (l *Local) Dispose(n int) int {
 
 	// 1. check if can dispose the eni
 	if n >= max(len(l.ipv4), len(l.ipv6)) {
-		if l.eni.Type != "trunk" && len(l.ipv4.InUse()) == 0 && len(l.ipv6.InUse()) == 0 {
+		if strings.ToLower(l.eniType) != "trunk" && !l.eni.Trunk && len(l.ipv4.InUse()) == 0 && len(l.ipv6.InUse()) == 0 {
 			log.Info("dispose eni")
 			l.status = statusDeleting
 			return max(len(l.ipv4), len(l.ipv6))

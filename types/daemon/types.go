@@ -64,8 +64,6 @@ type ENI struct {
 	VSwitchCIDR types.IPNetSet
 
 	VSwitchID string
-
-	Type string
 }
 
 // GetResourceID return mac address of eni

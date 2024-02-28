@@ -3,6 +3,7 @@ package aliyun
 import (
 	"context"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -82,7 +83,16 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 	// 1. create eni
 	var eni *client.NetworkInterface
 	var vswID string
-
+	var (
+		trunk bool
+		erdma bool
+	)
+	if strings.ToLower(eniType) == "trunk" {
+		trunk = true
+	}
+	if strings.ToLower(eniType) == "erdma" {
+		erdma = true
+	}
 	err := wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENICreate), func(ctx context.Context) (bool, error) {
 		vsw, innerErr := a.vsw.GetOne(ctx, a.openAPI, a.zoneID, a.vSwitchOptions)
 		if innerErr != nil {
@@ -90,16 +100,6 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		}
 		vswID = vsw.ID
 
-		var (
-			trunk bool
-			erdma bool
-		)
-		if eniType == "trunk" {
-			trunk = true
-		}
-		if eniType == "erdma" {
-			erdma = true
-		}
 		eni, innerErr = a.openAPI.CreateNetworkInterface(ctx, trunk, erdma, vswID, a.securityGroupIDs, a.resourceGroupID, ipv4, ipv6, a.eniTags)
 		if innerErr != nil {
 			if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
@@ -126,7 +126,8 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		ID:        eni.NetworkInterfaceID,
 		MAC:       eni.MacAddress,
 		VSwitchID: eni.VSwitchID,
-		Type:      eni.Type,
+		Trunk:     trunk,
+		ERdma:     erdma,
 	}
 
 	r.PrimaryIP.SetIP(eni.PrivateIPAddress)
