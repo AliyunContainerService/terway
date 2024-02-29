@@ -8,7 +8,8 @@ import (
 	"time"
 
 	register "github.com/AliyunContainerService/terway/pkg/controller"
-	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -86,12 +87,12 @@ func (m *Endpoint) RegisterEndpoints() error {
 			},
 		}}
 	ctx := context.Background()
-	oldEP, err := utils.K8sClient.CoreV1().Endpoints(m.Namespace).Get(ctx, m.Name, metav1.GetOptions{})
+	oldEP, err := k8sclient.K8sClient.CoreV1().Endpoints(m.Namespace).Get(ctx, m.Name, metav1.GetOptions{})
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			return err
 		}
-		_, err = utils.K8sClient.CoreV1().Endpoints(m.Namespace).Create(ctx, &v1.Endpoints{
+		_, err = k8sclient.K8sClient.CoreV1().Endpoints(m.Namespace).Create(ctx, &v1.Endpoints{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: m.Namespace,
 				Name:      m.Name,
@@ -107,7 +108,7 @@ func (m *Endpoint) RegisterEndpoints() error {
 	}
 	copyEP := oldEP.DeepCopy()
 	copyEP.Subsets = newEPSubnet
-	_, err = utils.K8sClient.CoreV1().Endpoints(m.Namespace).Update(ctx, copyEP, metav1.UpdateOptions{})
+	_, err = k8sclient.K8sClient.CoreV1().Endpoints(m.Namespace).Update(ctx, copyEP, metav1.UpdateOptions{})
 	log.Info("register endpoint", "ip", m.PodIP)
 	return err
 }

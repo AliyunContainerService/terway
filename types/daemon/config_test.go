@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,4 +88,20 @@ func Test_MergeConfigAndUnmarshal(t *testing.T) {
 	assert.Equal(t, "sg-10000", cfg.SecurityGroup)
 	assert.Equal(t, "ordered", cfg.VSwitchSelectionPolicy)
 	t.Logf("%+v", cfg)
+}
+
+func TestGetAddonSecret(t *testing.T) {
+	dir, err := os.MkdirTemp("", "")
+	assert.NoError(t, err)
+
+	defer os.RemoveAll(dir)
+
+	_ = os.WriteFile(filepath.Join(dir, addonSecretKeyID), []byte("key"), 0700)
+	_ = os.WriteFile(filepath.Join(dir, addonSecretKeySecret), []byte("secret"), 0700)
+	addonSecretRootPath = dir
+
+	ak, sk, err := GetAddonSecret()
+	assert.NoError(t, err)
+	assert.Equal(t, "key", ak)
+	assert.Equal(t, "secret", sk)
 }

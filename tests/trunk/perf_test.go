@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 
 	"github.com/google/uuid"
@@ -20,20 +20,20 @@ import (
 func Test_10KPod(t *testing.T) {
 	restConf := ctrl.GetConfigOrDie()
 	ns := "perf"
-	utils.RegisterClients(restConf)
+	k8sclient.RegisterClients(restConf)
 	ctx := context.Background()
 
-	_, _ = utils.K8sClient.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+	_, _ = k8sclient.K8sClient.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{"trunk": "trunk", "perf": "perf"}},
 	}, metav1.CreateOptions{})
 
 	pn := newPodNetworking("pn", nil, nil, nil,
 		&metav1.LabelSelector{MatchLabels: map[string]string{"trunk": "trunk"}})
-	_, _ = utils.NetworkClient.NetworkV1beta1().PodNetworkings().Create(ctx, pn, metav1.CreateOptions{})
+	_, _ = k8sclient.NetworkClient.NetworkV1beta1().PodNetworkings().Create(ctx, pn, metav1.CreateOptions{})
 
 	for i := 0; i < 10000; i++ {
 		name := uuid.NewString()
-		peni, err := utils.NetworkClient.NetworkV1beta1().PodENIs(ns).Create(ctx, &v1beta1.PodENI{
+		peni, err := k8sclient.NetworkClient.NetworkV1beta1().PodENIs(ns).Create(ctx, &v1beta1.PodENI{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: map[string]string{
 				terwayTypes.PodNetworking: "pn",
 				terwayTypes.PodENI:        "true",
@@ -68,9 +68,9 @@ func Test_10KPod(t *testing.T) {
 		update := peni.DeepCopy()
 		update.Status.Phase = v1beta1.ENIPhaseBind
 		update.Status.PodLastSeen = metav1.NewTime(time.Now().Add(time.Hour))
-		_, _ = utils.NetworkClient.NetworkV1beta1().PodENIs(update.Namespace).UpdateStatus(ctx, update, metav1.UpdateOptions{})
+		_, _ = k8sclient.NetworkClient.NetworkV1beta1().PodENIs(update.Namespace).UpdateStatus(ctx, update, metav1.UpdateOptions{})
 
-		_, _ = utils.K8sClient.CoreV1().Pods(ns).Create(ctx, &corev1.Pod{
+		_, _ = k8sclient.K8sClient.CoreV1().Pods(ns).Create(ctx, &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{

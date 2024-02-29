@@ -20,7 +20,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned"
-	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
 )
 
 func TestConnectionTestSuite(t *testing.T) {
@@ -40,8 +40,8 @@ type ConnectionTestSuite struct {
 
 func (s *ConnectionTestSuite) SetupSuite() {
 	s.RestConf = ctrl.GetConfigOrDie()
-	utils.RegisterClients(s.RestConf)
-	s.ClientSet = utils.K8sClient
+	k8sclient.RegisterClients(s.RestConf)
+	s.ClientSet = k8sclient.K8sClient
 	s.PodNetworkingClientSet, _ = versioned.NewForConfig(s.RestConf)
 
 	ctx := context.Background()

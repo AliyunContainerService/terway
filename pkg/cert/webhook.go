@@ -17,6 +17,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -37,7 +38,7 @@ const (
 // SyncCert sync cert for webhook
 func SyncCert(ns, name, domain, certDir string) error {
 	secretName := fmt.Sprintf("%s-webhook-cert", name)
-	cs := utils.K8sClient
+	cs := k8sclient.K8sClient
 	// check secret
 	var serverCertBytes, serverKeyBytes, caCertBytes []byte
 

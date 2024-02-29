@@ -3,6 +3,7 @@ package daemon
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	"github.com/AliyunContainerService/terway/types/secret"
@@ -15,6 +16,14 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/route"
 )
+
+const (
+	addonSecretPath      = "/var/addon/alibaba-addon-secret"
+	addonSecretKeyID     = "access-key-id"
+	addonSecretKeySecret = "access-key-secret"
+)
+
+var addonSecretRootPath = addonSecretPath
 
 // Config configuration of terway daemon
 type Config struct {
@@ -126,7 +135,21 @@ func GetConfigFromFileWithMerge(filePath string, cfg []byte) (*Config, error) {
 		return nil, err
 	}
 
-	return MergeConfigAndUnmarshal(cfg, data)
+	config, err := MergeConfigAndUnmarshal(cfg, data)
+	if err != nil {
+		return nil, err
+	}
+
+	ak, sk, err := GetAddonSecret()
+	if err != nil {
+		return nil, err
+	}
+	if ak != "" && sk != "" {
+		config.AccessID = secret.Secret(ak)
+		config.AccessSecret = secret.Secret(sk)
+	}
+
+	return config, nil
 }
 
 func MergeConfigAndUnmarshal(topCfg, baseCfg []byte) (*Config, error) {
@@ -146,4 +169,23 @@ func MergeConfigAndUnmarshal(topCfg, baseCfg []byte) (*Config, error) {
 	err = json.Unmarshal(jsonBytes, config)
 
 	return config, err
+}
+
+// GetAddonSecret return ak/sk from file, return nil if not present.
+func GetAddonSecret() (string, string, error) {
+	keyID, err := os.ReadFile(filepath.Join(addonSecretRootPath, addonSecretKeyID))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	keySecret, err := os.ReadFile(filepath.Join(addonSecretRootPath, addonSecretKeySecret))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	return string(keyID), string(keySecret), nil
 }
