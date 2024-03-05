@@ -16,8 +16,7 @@ import (
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 )
 
-var _ client.VSwitch = &OpenAPI{}
-var _ client.ENI = &OpenAPI{}
+var _ client.VPC = &OpenAPI{}
 var _ client.ECS = &OpenAPI{}
 
 type OpenAPI struct {

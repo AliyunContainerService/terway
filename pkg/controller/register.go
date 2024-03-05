@@ -26,8 +26,7 @@ import (
 
 // Interface aliyun client for terway-controlplane
 type Interface interface {
-	client.VSwitch
-	client.ENI
+	client.VPC
 	client.ECS
 }
 

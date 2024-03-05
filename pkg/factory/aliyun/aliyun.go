@@ -39,8 +39,8 @@ type Aliyun struct {
 	zoneID     string
 
 	openAPI interface {
-		client.ENI
-		client.VSwitch
+		client.ECS
+		client.VPC
 	}
 	getter eni.ENIInfoGetter
 
@@ -52,12 +52,11 @@ type Aliyun struct {
 
 	eniTags map[string]string
 
-	eniTypeAttr  bool
+	eniTypeAttr  types.Feat
 	eniTagFilter map[string]string
-	enableERDMA  bool
 }
 
-func NewAliyun(ctx context.Context, openAPI *client.OpenAPI, getter eni.ENIInfoGetter, vsw *vswpool.SwitchPool, cfg *types.PoolConfig) *Aliyun {
+func NewAliyun(ctx context.Context, openAPI *client.OpenAPI, getter eni.ENIInfoGetter, vsw *vswpool.SwitchPool, cfg *types.ENIConfig) *Aliyun {
 
 	return &Aliyun{
 		ctx:              ctx,
@@ -72,7 +71,7 @@ func NewAliyun(ctx context.Context, openAPI *client.OpenAPI, getter eni.ENIInfoG
 		securityGroupIDs: cfg.SecurityGroupIDs,
 		resourceGroupID:  cfg.ResourceGroupID,
 		eniTags:          cfg.ENITags,
-		enableERDMA:      cfg.ERdmaCapacity > 0,
+		eniTypeAttr:      cfg.EniTypeAttr,
 	}
 }
 
@@ -407,8 +406,9 @@ func (a *Aliyun) GetAttachedNetworkInterface(trunkENIID string) ([]*daemon.ENI, 
 		return nil, err
 	}
 
+	feat := a.eniTypeAttr
+
 	var eniIDs []string
-	var trunkFound bool
 	idMap := map[string]*daemon.ENI{}
 	for _, eni := range enis {
 		eniIDs = append(eniIDs, eni.ID)
@@ -417,46 +417,43 @@ func (a *Aliyun) GetAttachedNetworkInterface(trunkENIID string) ([]*daemon.ENI, 
 		if trunkENIID == eni.ID {
 			eni.Trunk = true
 
-			trunkFound = true
+			types.DisableFeature(&feat, types.FeatTrunk)
 		}
 	}
 
 	var result []*daemon.ENI
 
-	if a.eniTypeAttr || len(a.eniTagFilter) > 0 || a.enableERDMA {
-		if !trunkFound || len(a.eniTagFilter) > 0 || a.enableERDMA {
-			var innerErr error
-			var eniSet []*client.NetworkInterface
-			err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
-				eniSet, innerErr = a.openAPI.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", a.eniTagFilter)
-				if innerErr == nil {
-					return true, nil
-				}
-				if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
-					return true, innerErr
-				}
-				return false, nil
-			})
-			if err != nil {
-				if innerErr != nil {
-					return nil, innerErr
-				}
-				return nil, err
+	if feat > 0 || len(a.eniTags) > 0 {
+		var innerErr error
+		var eniSet []*client.NetworkInterface
+		err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
+			eniSet, innerErr = a.openAPI.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", a.eniTagFilter)
+			if innerErr == nil {
+				return true, nil
 			}
-			for _, eni := range eniSet {
-				e, ok := idMap[eni.NetworkInterfaceID]
-				if !ok {
-					continue
-				}
-				e.Trunk = eni.Type == client.ENITypeTrunk
-				e.ERdma = eni.NetworkInterfaceTrafficMode == client.ENITrafficModeRDMA
-
-				// take to intersect
-				result = append(result, e)
+			if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
+				return true, innerErr
 			}
-		} else {
-			result = enis
+			return false, nil
+		})
+		if err != nil {
+			if innerErr != nil {
+				return nil, innerErr
+			}
+			return nil, err
 		}
+		for _, eni := range eniSet {
+			e, ok := idMap[eni.NetworkInterfaceID]
+			if !ok {
+				continue
+			}
+			e.Trunk = eni.Type == client.ENITypeTrunk
+			e.ERdma = eni.NetworkInterfaceTrafficMode == client.ENITrafficModeRDMA
+
+			// take to intersect
+			result = append(result, e)
+		}
+
 	} else {
 		result = enis
 	}

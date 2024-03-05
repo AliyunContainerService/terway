@@ -71,7 +71,7 @@ var _ reconcile.Reconciler = &ReconcilePodNetworking{}
 type ReconcilePodNetworking struct {
 	client       client.Client
 	scheme       *runtime.Scheme
-	aliyunClient aliyunClient.VSwitch
+	aliyunClient aliyunClient.VPC
 	swPool       *vswitch.SwitchPool
 
 	//record event recorder
@@ -79,7 +79,7 @@ type ReconcilePodNetworking struct {
 }
 
 // NewReconcilePodNetworking watch pod lifecycle events and sync to podENI resource
-func NewReconcilePodNetworking(mgr manager.Manager, aliyunClient aliyunClient.VSwitch, swPool *vswitch.SwitchPool) *ReconcilePodNetworking {
+func NewReconcilePodNetworking(mgr manager.Manager, aliyunClient aliyunClient.VPC, swPool *vswitch.SwitchPool) *ReconcilePodNetworking {
 	r := &ReconcilePodNetworking{
 		client:       mgr.GetClient(),
 		scheme:       mgr.GetScheme(),

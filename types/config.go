@@ -1,5 +1,22 @@
 package types
 
+type ENIConfig struct {
+	ZoneID           string
+	VSwitchOptions   []string
+	ENITags          map[string]string
+	SecurityGroupIDs []string
+	InstanceID       string
+
+	VSwitchSelectionPolicy string
+
+	ResourceGroupID string
+
+	EniTypeAttr Feat
+
+	EnableIPv4 bool
+	EnableIPv6 bool
+}
+
 // PoolConfig configuration of pool and resource factory
 type PoolConfig struct {
 	EnableIPv4 bool
@@ -14,18 +31,23 @@ type PoolConfig struct {
 
 	MaxPoolSize int
 	MinPoolSize int
+}
 
-	ZoneID           string
-	VSwitchOptions   []string
-	ENITags          map[string]string
-	SecurityGroupIDs []string
-	InstanceID       string
+type Feat uint8
 
-	VSwitchSelectionPolicy string
+const (
+	FeatTrunk Feat = 1 << iota
+	FeatERDMA
+)
 
-	DisableSecurityGroupCheck bool
+func EnableFeature(features *Feat, feature Feat) {
+	*features |= feature
+}
 
-	TrunkENIID string
+func DisableFeature(features *Feat, feature Feat) {
+	*features &= ^feature
+}
 
-	ResourceGroupID string
+func IsFeatureEnabled(features Feat, feature Feat) bool {
+	return features&feature != 0
 }

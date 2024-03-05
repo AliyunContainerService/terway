@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	"github.com/AliyunContainerService/terway/types/secret"
 
 	jsonpatch "github.com/evanphx/json-patch"
@@ -31,7 +30,6 @@ type Config struct {
 	AccessID               secret.Secret       `yaml:"access_key" json:"access_key"`
 	AccessSecret           secret.Secret       `yaml:"access_secret" json:"access_secret"`
 	RegionID               string              `yaml:"region_id" json:"region_id"`
-	InstanceType           string              `yaml:"-" json:"-"`
 	CredentialPath         string              `yaml:"credential_path" json:"credential_path"`
 	ServiceCIDR            string              `yaml:"service_cidr" json:"service_cidr"`
 	VSwitches              map[string][]string `yaml:"vswitches" json:"vswitches"`
@@ -64,6 +62,7 @@ type Config struct {
 	DisableSecurityGroupCheck   bool                    `json:"disable_security_group_check"`
 	KubeClientQPS               float32                 `json:"kube_client_qps"`
 	KubeClientBurst             int                     `json:"kube_client_burst"`
+	ResourceGroupID             string                  `json:"resource_group_id"`
 }
 
 func (c *Config) GetSecurityGroups() []string {
@@ -92,15 +91,6 @@ func (c *Config) GetExtraRoutes() []string {
 }
 
 func (c *Config) Populate() {
-	if c.RegionID == "" {
-		c.RegionID = instance.GetInstanceMeta().RegionID
-	}
-
-	if c.InstanceType == "" {
-		// TODO support retreat from node label
-		c.InstanceType = instance.GetInstanceMeta().InstanceType
-	}
-
 	if c.EniCapRatio == 0 {
 		c.EniCapRatio = 1
 	}

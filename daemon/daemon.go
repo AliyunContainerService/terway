@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	vswpool "github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/eni"
+	"github.com/AliyunContainerService/terway/pkg/factory"
 	"github.com/AliyunContainerService/terway/pkg/factory/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/k8s"
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -785,23 +787,31 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		return nil, fmt.Errorf("failed parse config: %v", err)
 	}
 
-	if len(dynamicCfg) == 0 {
-		serviceLog.Info("got config", "config", fmt.Sprintf("%+v", config))
-	} else {
-		serviceLog.Info("got config", "config", fmt.Sprintf("%+v", config), "dynamicConfig", fmt.Sprintf("%+v", dynamicCfg))
-	}
-
 	config.Populate()
 	err = config.Validate()
 	if err != nil {
 		return nil, err
 	}
 
+	serviceLog.Info("got config", "config", fmt.Sprintf("%+v", config))
+
 	backoff.OverrideBackoff(config.BackoffOverride)
 	_ = netSrv.k8s.SetCustomStatefulWorkloadKinds(config.CustomStatefulWorkloadKinds)
 	netSrv.ipamType = config.IPAMType
 
-	var enableIPv4, enableIPv6 bool
+	if os.Getenv("TERWAY_DEPLOY_ENV") == "eflo" {
+		instance.SetPopulateFunc(instance.EfloPopulate)
+		client.SetGetLimit(client.EfloGetLimit)
+	}
+
+	meta := instance.GetInstanceMeta()
+
+	var (
+		enableIPv4, enableIPv6 bool
+		trunkENIID             = ""
+		nodeAnnotations        = map[string]string{}
+	)
+
 	switch config.IPStack {
 	case "ipv4":
 		enableIPv4 = true
@@ -819,7 +829,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	providers = append(providers, credential.NewEncryptedCredentialProvider(utils.NormalizePath(config.CredentialPath), "", ""))
 	providers = append(providers, credential.NewMetadataProvider())
 
-	clientSet, err := credential.NewClientMgr(config.RegionID, providers...)
+	clientSet, err := credential.NewClientMgr(meta.RegionID, providers...)
 	if err != nil {
 		return nil, err
 	}
@@ -831,27 +841,27 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		return nil, err
 	}
 
-	limit, err := instance.GetLimit(aliyunClient, config.InstanceType)
+	limit, err := client.GetLimit(aliyunClient, meta.InstanceType)
 	if err != nil {
 		return nil, fmt.Errorf("upable get instance limit, %w", err)
 	}
+
 	if enableIPv6 {
 		if !limit.SupportIPv6() {
 			enableIPv6 = false
-			serviceLog.Info("instance is not support ipv6", "instanceType", config.InstanceType)
+			serviceLog.Info("instance is not support ipv6", "instanceType", meta.InstanceType)
 		} else if daemonMode == daemon.ModeENIMultiIP && !limit.SupportMultiIPIPv6() {
 			enableIPv6 = false
-			serviceLog.Info("instance is not support multi ipv6", "instanceType", config.InstanceType)
+			serviceLog.Info("instance is not support multi ipv6", "instanceType", meta.InstanceType)
 		}
 	}
-
 	if limit.TrunkPod() <= 0 {
 		config.EnableENITrunking = false
 	}
 
 	if config.EnableERDMA {
 		if limit.ERDMARes() <= 0 {
-			serviceLog.Info("instance is not support erdma", "instanceType", config.InstanceType)
+			serviceLog.Info("instance is not support erdma", "instanceType", meta.InstanceType)
 			config.EnableERDMA = false
 		} else {
 			ok := nodecap.GetNodeCapabilities(nodecap.NodeCapabilityERDMA)
@@ -862,43 +872,33 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		}
 	}
 
-	netSrv.resourceDB, err = storage.NewDiskStorage(
-		resDBName, utils.NormalizePath(resDBPath), json.Marshal, func(bytes []byte) (interface{}, error) {
-			resourceRel := &daemon.PodResources{}
-			err = json.Unmarshal(bytes, resourceRel)
-			if err != nil {
-				return nil, err
-			}
-			return *resourceRel, nil
-		})
-	if err != nil {
-		return nil, err
-	}
-
-	nodeAnnotations := map[string]string{}
-
-	// get pool config
-	poolConfig, err := getPoolConfig(config, daemonMode, limit)
-	if err != nil {
-		return nil, err
-	}
-	poolConfig.EnableIPv4 = enableIPv4
-	poolConfig.EnableIPv6 = enableIPv6
-
 	netSrv.enableIPv4 = enableIPv4
 	netSrv.enableIPv6 = enableIPv6
 
+	eniConfig := getENIConfig(config)
+	eniConfig.EnableIPv4 = enableIPv4
+	eniConfig.EnableIPv6 = enableIPv6
+
 	// fall back to use primary eni's sg
-	if len(poolConfig.SecurityGroupIDs) == 0 {
-		enis, err := aliyunClient.DescribeNetworkInterface(ctx, "", nil, poolConfig.InstanceID, "Primary", "", nil)
+	if len(eniConfig.SecurityGroupIDs) == 0 {
+		enis, err := aliyunClient.DescribeNetworkInterface(ctx, "", nil, eniConfig.InstanceID, "Primary", "", nil)
 		if err != nil {
 			return nil, err
 		}
 		if len(enis) == 0 {
 			return nil, fmt.Errorf("no primary eni found")
 		}
-		poolConfig.SecurityGroupIDs = enis[0].SecurityGroupIDs
+		eniConfig.SecurityGroupIDs = enis[0].SecurityGroupIDs
 	}
+
+	// get pool config
+	poolConfig, err := getPoolConfig(config, daemonMode, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	poolConfig.EnableIPv4 = enableIPv4
+	poolConfig.EnableIPv6 = enableIPv6
 
 	serviceLog.Info("pool config", "pool", fmt.Sprintf("%+v", poolConfig))
 
@@ -907,7 +907,12 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		return nil, fmt.Errorf("error init vsw pool, %w", err)
 	}
 
-	factory := aliyun.NewAliyun(ctx, aliyunClient, eni2.NewENIMetadata(poolConfig.EnableIPv4, poolConfig.EnableIPv6), vswPool, poolConfig)
+	var factory factory.Factory
+	if os.Getenv("TERWAY_DEPLOY_ENV") == "eflo" {
+		factory = aliyun.NewEflo(ctx, aliyunClient, vswPool, eniConfig)
+	} else {
+		factory = aliyun.NewAliyun(ctx, aliyunClient, eni2.NewENIMetadata(enableIPv4, enableIPv6), vswPool, eniConfig)
+	}
 
 	// init trunk
 	if config.EnableENITrunking {
@@ -933,7 +938,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 					}
 					found = true
 
-					poolConfig.TrunkENIID = preferTrunkID
+					trunkENIID = preferTrunkID
 					netSrv.enableTrunk = true
 
 					nodeAnnotations[types.TrunkOn] = preferTrunkID
@@ -956,7 +961,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 						return nil, fmt.Errorf("error create trunk eni, %w", err)
 					}
 
-					poolConfig.TrunkENIID = eni.ID
+					trunkENIID = eni.ID
 					netSrv.enableTrunk = true
 
 					nodeAnnotations[types.TrunkOn] = eni.ID
@@ -970,7 +975,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 			}
 		} else {
 			// WaitTrunkENI enabled, we believe what we got.
-			poolConfig.TrunkENIID = preferTrunkID
+			trunkENIID = preferTrunkID
 			netSrv.enableTrunk = true
 
 			nodeAnnotations[types.TrunkOn] = preferTrunkID
@@ -982,7 +987,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity)
 	}
 
-	attached, err := factory.GetAttachedNetworkInterface(poolConfig.TrunkENIID)
+	attached, err := factory.GetAttachedNetworkInterface(trunkENIID)
 	if err != nil {
 		return nil, err
 	}
@@ -1037,19 +1042,22 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		return nil, fmt.Errorf("error patch node annotations, %w", err)
 	}
 
-	localResource := make(map[string]map[string]resourceManagerInitItem)
-	objList, err := netSrv.resourceDB.List()
+	netSrv.resourceDB, err = storage.NewDiskStorage(
+		resDBName, utils.NormalizePath(resDBPath), json.Marshal, func(bytes []byte) (interface{}, error) {
+			resourceRel := &daemon.PodResources{}
+			err = json.Unmarshal(bytes, resourceRel)
+			if err != nil {
+				return nil, err
+			}
+			return *resourceRel, nil
+		})
 	if err != nil {
 		return nil, err
 	}
-	for _, resObj := range objList {
-		podRes := resObj.(daemon.PodResources)
-		for _, res := range podRes.Resources {
-			if localResource[res.Type] == nil {
-				localResource[res.Type] = make(map[string]resourceManagerInitItem)
-			}
-			localResource[res.Type][res.ID] = resourceManagerInitItem{item: res, podInfo: podRes.PodInfo}
-		}
+
+	objList, err := netSrv.resourceDB.List()
+	if err != nil {
+		return nil, err
 	}
 
 	podResources := getPodResources(objList)
@@ -1062,12 +1070,6 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		}
 		serviceLog.Info("eip migrate finished")
 	}
-
-	resStr, err := json.Marshal(localResource)
-	if err != nil {
-		return nil, err
-	}
-	serviceLog.Info("local resources to restore", "resources", string(resStr))
 
 	err = preStartResourceManager(daemonMode, netSrv.k8s)
 	if err != nil {
@@ -1127,7 +1129,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		)
 		for _, ni := range attached {
 			serviceLog.V(5).Info("found attached eni", "eni", ni)
-			if config.EnableENITrunking && ni.Trunk && poolConfig.TrunkENIID == ni.ID {
+			if config.EnableENITrunking && ni.Trunk && trunkENIID == ni.ID {
 				lo := eni.NewLocal(ni, "trunk", factory, poolConfig)
 				eniList = append(eniList, eni.NewTrunk(netSrv.k8s.GetClient(), lo))
 			} else if config.EnableERDMA && ni.ERdma {
