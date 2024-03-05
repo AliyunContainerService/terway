@@ -21,8 +21,10 @@ terway_config_val() {
   jq -r ".plugins[] | select(.type == \"terway\") | .${config_key}" /etc/cni/net.d/10-terway.conflist | sed 's/^null$//'
 }
 
+virtyal_type=$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')
+
 # kernel version has already checked in initContainer, so just determine whether plugin chaining exists
-if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = "ipvlan" ]; then
+if [ "$virtyal_type" = "ipvlan" ] || [ "$virtyal_type" = "datapathv2" ]; then
   # check kernel version & enable cilium
   KERNEL_MAJOR_VERSION=$(uname -r | awk -F . '{print $1}')
   KERNEL_MINOR_VERSION=$(uname -r | awk -F . '{print $2}')
@@ -64,6 +66,19 @@ if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = 
 		fi
 
     echo "using cilium as network routing & policy"
+
+    node_capabilities=/var-run-eni/node_capabilities
+    datapath_mode=ipvlan
+
+    if [ ! -f "$node_capabilities" ]; then
+      echo "Init node capabilities not finished, exiting"
+      exit 1
+    fi
+
+    if grep -q "datapath *= *datapathv2" "$node_capabilities"; then
+          datapath_mode=veth
+    fi
+
     # shellcheck disable=SC2086
     exec cilium-agent --tunnel=disabled --enable-ipv4-masquerade=false --enable-ipv6-masquerade=false \
          --enable-policy=$ENABLE_POLICY \
@@ -71,7 +86,7 @@ if [ "$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')" = 
          --enable-local-node-route=false --ipv4-range=169.254.10.0/30 --ipv6-range=fe80:2400:3200:baba::/30 --enable-endpoint-health-checking=false \
          --enable-health-checking=false --enable-service-topology=true --disable-cnp-status-updates=true --k8s-heartbeat-timeout=0 --enable-session-affinity=true \
          --install-iptables-rules=false --enable-l7-proxy=false \
-         --ipam=cluster-pool ${extra_args}
+         --ipam=cluster-pool  --datapath-mode=${datapath_mode} --enable-runtime-device-detection=true ${extra_args}
   fi
 fi
   # shellcheck disable=SC1091

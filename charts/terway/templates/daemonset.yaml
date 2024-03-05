@@ -120,6 +120,8 @@ spec:
               name: host-root
             - mountPath: /var/run/
               name: eni-run
+            - mountPath: /var-run-eni
+              name: var-run-eni
       containers:
         - name: terway
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -243,6 +245,8 @@ spec:
               host: 127.0.0.1
             periodSeconds: 10
           volumeMounts:
+            - mountPath: /var-run-eni
+              name: var-run-eni
             - mountPath: /lib/modules
               name: lib-modules
             - mountPath: /etc/cni/net.d
@@ -258,6 +262,8 @@ spec:
               name: xtables-lock
       volumes:
         - name: config
+          emptyDir: { }
+        - name: var-run-eni
           emptyDir: { }
         - name: configvolume
           configMap:

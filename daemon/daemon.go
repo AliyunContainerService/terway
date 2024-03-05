@@ -29,6 +29,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
@@ -853,7 +854,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 			serviceLog.Info("instance is not support erdma", "instanceType", config.InstanceType)
 			config.EnableERDMA = false
 		} else {
-			ok := utils.GetNodeCapabilities(utils.NodeCapabilityERDMA)
+			ok := nodecap.GetNodeCapabilities(nodecap.NodeCapabilityERDMA)
 			if ok == "" {
 				config.EnableERDMA = false
 				serviceLog.Info("os is not support erdma")
