@@ -991,22 +991,28 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	if err != nil {
 		return nil, err
 	}
-	if len(attached) >= limit.Adapters-limit.ERdmaAdapters {
-		if attachedERdma := lo.Filter(attached, func(ni *daemon.ENI, idx int) bool { return ni.ERdma }); len(attachedERdma)+limit.Adapters-len(attached) < limit.ERDMARes() {
-			serviceLog.Info("node has no enough free eni slot to attach more erdma to achieve erdma res: ", limit.ERDMARes())
+
+	realRdmaCount := limit.ERDMARes()
+	if config.EnableERDMA && len(attached) >= limit.Adapters-1-limit.ERdmaAdapters {
+		attachedERdma := lo.Filter(attached, func(ni *daemon.ENI, idx int) bool { return ni.ERdma })
+		if len(attachedERdma) <= 0 {
+			// turn off only when no one use it
+			serviceLog.Info(fmt.Sprintf("node has no enough free eni slot to attach more erdma to achieve erdma res: %d", limit.ERDMARes()))
 			config.EnableERDMA = false
 		}
+		// reset the cap to the actual using
+		realRdmaCount = min(realRdmaCount, len(attachedERdma))
 	}
 
 	if config.EnableERDMA {
 		if daemonMode == daemon.ModeENIMultiIP {
-			nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity - limit.ERDMARes())
-			nodeAnnotations[string(types.ERDMAIPTypeIPs)] = strconv.Itoa(limit.ERDMARes())
-			poolConfig.ERdmaCapacity = limit.ERDMARes()
+			nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity - realRdmaCount*limit.IPv4PerAdapter)
+			nodeAnnotations[string(types.ERDMAIPTypeIPs)] = strconv.Itoa(realRdmaCount * limit.IPv4PerAdapter)
+			poolConfig.ERdmaCapacity = realRdmaCount * limit.IPv4PerAdapter
 		} else if daemonMode == daemon.ModeENIOnly {
-			nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity - limit.ExclusiveERDMARes())
-			nodeAnnotations[string(types.ERDMAIPTypeIPs)] = strconv.Itoa(limit.ExclusiveERDMARes())
-			poolConfig.ERdmaCapacity = limit.ExclusiveERDMARes()
+			nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity - realRdmaCount)
+			nodeAnnotations[string(types.ERDMAIPTypeIPs)] = strconv.Itoa(realRdmaCount)
+			poolConfig.ERdmaCapacity = realRdmaCount
 		}
 
 	}
