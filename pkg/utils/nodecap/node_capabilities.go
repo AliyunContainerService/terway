@@ -27,6 +27,11 @@ func init() {
 	}
 }
 
+// SetNodeCapabilities set node capability , test purpose
+func SetNodeCapabilities(capName, val string) {
+	cachedNodeCapabilities[capName] = val
+}
+
 func GetNodeCapabilities(capName string) string {
 	return cachedNodeCapabilities[capName]
 }

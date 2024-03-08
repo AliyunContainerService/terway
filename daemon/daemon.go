@@ -73,8 +73,6 @@ type networkService struct {
 	pendingPods sync.Map
 	sync.RWMutex
 
-	enableTrunk bool
-
 	enableIPv4, enableIPv6 bool
 
 	ipamType types.IPAMType
@@ -807,20 +805,9 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	meta := instance.GetInstanceMeta()
 
 	var (
-		enableIPv4, enableIPv6 bool
-		trunkENIID             = ""
-		nodeAnnotations        = map[string]string{}
+		trunkENIID      = ""
+		nodeAnnotations = map[string]string{}
 	)
-
-	switch config.IPStack {
-	case "ipv4":
-		enableIPv4 = true
-	case "dual":
-		enableIPv4 = true
-		enableIPv6 = true
-	case "ipv6":
-		enableIPv6 = true
-	}
 
 	var providers []credential.Interface
 	if string(config.AccessID) != "" && string(config.AccessSecret) != "" {
@@ -846,31 +833,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		return nil, fmt.Errorf("upable get instance limit, %w", err)
 	}
 
-	if enableIPv6 {
-		if !limit.SupportIPv6() {
-			enableIPv6 = false
-			serviceLog.Info("instance is not support ipv6", "instanceType", meta.InstanceType)
-		} else if daemonMode == daemon.ModeENIMultiIP && !limit.SupportMultiIPIPv6() {
-			enableIPv6 = false
-			serviceLog.Info("instance is not support multi ipv6", "instanceType", meta.InstanceType)
-		}
-	}
-	if limit.TrunkPod() <= 0 {
-		config.EnableENITrunking = false
-	}
-
-	if config.EnableERDMA {
-		if limit.ERDMARes() <= 0 {
-			serviceLog.Info("instance is not support erdma", "instanceType", meta.InstanceType)
-			config.EnableERDMA = false
-		} else {
-			ok := nodecap.GetNodeCapabilities(nodecap.NodeCapabilityERDMA)
-			if ok == "" {
-				config.EnableERDMA = false
-				serviceLog.Info("os is not support erdma")
-			}
-		}
-	}
+	enableIPv4, enableIPv6 := checkInstance(limit, daemonMode, config)
 
 	netSrv.enableIPv4 = enableIPv4
 	netSrv.enableIPv6 = enableIPv6
@@ -914,71 +877,15 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		factory = aliyun.NewAliyun(ctx, aliyunClient, eni2.NewENIMetadata(enableIPv4, enableIPv6), vswPool, eniConfig)
 	}
 
-	// init trunk
 	if config.EnableENITrunking {
-		preferTrunkID := netSrv.k8s.GetTrunkID()
-		if preferTrunkID == "" && config.WaitTrunkENI {
-			preferTrunkID, err = netSrv.k8s.WaitTrunkReady()
-			if err != nil {
-				return nil, fmt.Errorf("error wait trunk ready, %w", err)
-			}
+		trunkENIID, err = initTrunk(config, poolConfig, netSrv.k8s, factory)
+		if err != nil {
+			return nil, err
 		}
-
-		if !config.WaitTrunkENI {
-			enis, err := factory.GetAttachedNetworkInterface(preferTrunkID)
-			if err != nil {
-				return nil, fmt.Errorf("error get attached eni, %w", err)
-			}
-			found := false
-			for _, eni := range enis {
-				if eni.Trunk && eni.ID == preferTrunkID {
-					if eni.ERdma {
-						serviceLog.Info("erdma eni on trunk mode, disable erdma")
-						config.EnableERDMA = false
-					}
-					found = true
-
-					trunkENIID = preferTrunkID
-					netSrv.enableTrunk = true
-
-					nodeAnnotations[types.TrunkOn] = preferTrunkID
-					nodeAnnotations[string(types.MemberENIIPTypeIPs)] = strconv.Itoa(poolConfig.MaxMemberENI)
-					break
-				}
-			}
-			if !found {
-				if poolConfig.MaxENI > len(enis) {
-					v6 := 0
-					if enableIPv6 {
-						v6 = 1
-					}
-					eni, _, _, err := factory.CreateNetworkInterface(1, v6, "trunk")
-					if err != nil {
-						if eni != nil {
-							_ = factory.DeleteNetworkInterface(eni.ID)
-						}
-
-						return nil, fmt.Errorf("error create trunk eni, %w", err)
-					}
-
-					trunkENIID = eni.ID
-					netSrv.enableTrunk = true
-
-					nodeAnnotations[types.TrunkOn] = eni.ID
-					nodeAnnotations[string(types.MemberENIIPTypeIPs)] = strconv.Itoa(poolConfig.MaxMemberENI)
-				} else {
-					serviceLog.Info("no trunk eni found, fallback to non-trunk mode")
-
-					config.EnableENITrunking = false
-					config.DisableDevicePlugin = true
-				}
-			}
+		if trunkENIID == "" {
+			serviceLog.Info("no trunk eni found, fallback to non-trunk mode")
 		} else {
-			// WaitTrunkENI enabled, we believe what we got.
-			trunkENIID = preferTrunkID
-			netSrv.enableTrunk = true
-
-			nodeAnnotations[types.TrunkOn] = preferTrunkID
+			nodeAnnotations[types.TrunkOn] = trunkENIID
 			nodeAnnotations[string(types.MemberENIIPTypeIPs)] = strconv.Itoa(poolConfig.MaxMemberENI)
 		}
 	}
@@ -1014,33 +921,9 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 			nodeAnnotations[string(types.ERDMAIPTypeIPs)] = strconv.Itoa(realRdmaCount)
 			poolConfig.ERdmaCapacity = realRdmaCount
 		}
-
 	}
 
-	if !(daemonMode == daemon.ModeENIMultiIP && !config.EnableENITrunking) {
-		if !config.DisableDevicePlugin {
-			res := deviceplugin.ENITypeENI
-			capacity := poolConfig.MaxENI
-			if config.EnableENITrunking {
-				res = deviceplugin.ENITypeMember
-				capacity = poolConfig.MaxMemberENI
-			}
-
-			dp := deviceplugin.NewENIDevicePlugin(capacity, res)
-			go dp.Serve()
-		}
-	}
-
-	if config.EnableERDMA {
-		if !config.DisableDevicePlugin {
-			res := deviceplugin.ENITypeERDMA
-			capacity := poolConfig.ERdmaCapacity
-			if capacity > 0 {
-				dp := deviceplugin.NewENIDevicePlugin(capacity, res)
-				go dp.Serve()
-			}
-		}
-	}
+	runDevicePlugin(daemonMode, config, poolConfig)
 
 	// ensure node annotations
 	err = netSrv.k8s.PatchNodeAnnotations(nodeAnnotations)
@@ -1177,6 +1060,143 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	tracing.RegisterEventRecorder(netSrv.k8s.RecordNodeEvent, netSrv.k8s.RecordPodEvent)
 
 	return netSrv, nil
+}
+
+func checkInstance(limit *client.Limits, daemonMode string, config *daemon.Config) (bool, bool) {
+	var enableIPv4, enableIPv6 bool
+	switch config.IPStack {
+	case "ipv4":
+		enableIPv4 = true
+	case "dual":
+		enableIPv4 = true
+		enableIPv6 = true
+	case "ipv6":
+		enableIPv6 = true
+	}
+
+	if enableIPv6 {
+		if !limit.SupportIPv6() {
+			enableIPv6 = false
+			serviceLog.Info("instance is not support ipv6")
+		} else if daemonMode == daemon.ModeENIMultiIP && !limit.SupportMultiIPIPv6() {
+			enableIPv6 = false
+			serviceLog.Info("instance is not support multi ipv6")
+		}
+	}
+
+	if config.EnableENITrunking && limit.TrunkPod() <= 0 {
+		config.EnableENITrunking = false
+		serviceLog.Info("instance is not support trunk")
+	}
+
+	if config.EnableERDMA {
+		if limit.ERDMARes() <= 0 {
+			config.EnableERDMA = false
+			serviceLog.Info("instance is not support erdma")
+		} else {
+			ok := nodecap.GetNodeCapabilities(nodecap.NodeCapabilityERDMA)
+			if ok == "" {
+				config.EnableERDMA = false
+				serviceLog.Info("os is not support erdma")
+			}
+		}
+	}
+	return enableIPv4, enableIPv6
+}
+
+// initTrunk to ensure trunk eni is present. Return eni id if found.
+func initTrunk(config *daemon.Config, poolConfig *types.PoolConfig, k8sClient k8s.Kubernetes, f factory.Factory) (string, error) {
+	var err error
+
+	// get eni id form node annotation
+	preferTrunkID := k8sClient.GetTrunkID()
+
+	if config.WaitTrunkENI {
+		// at this mode , we retreat id ONLY by node annotation
+		if preferTrunkID == "" {
+			preferTrunkID, err = k8sClient.WaitTrunkReady()
+			if err != nil {
+				return "", fmt.Errorf("error wait trunk ready, %w", err)
+			}
+		}
+		return preferTrunkID, nil
+	}
+
+	// already exclude the primary eni
+	enis, err := f.GetAttachedNetworkInterface(preferTrunkID)
+	if err != nil {
+		return "", fmt.Errorf("error get attached eni, %w", err)
+	}
+
+	// get attached trunk eni
+	preferred := lo.Filter(enis, func(ni *daemon.ENI, idx int) bool { return ni.Trunk && ni.ID == preferTrunkID })
+	if len(preferred) > 0 {
+		// found the eni
+		trunk := preferred[0]
+		if trunk.ERdma {
+			serviceLog.Info("erdma eni on trunk mode, disable erdma")
+			config.EnableERDMA = false
+		}
+
+		return trunk.ID, nil
+	}
+
+	// choose one
+	attachedTrunk := lo.Filter(enis, func(ni *daemon.ENI, idx int) bool { return ni.Trunk })
+	if len(attachedTrunk) > 0 {
+		trunk := attachedTrunk[0]
+		if trunk.ERdma {
+			serviceLog.Info("erdma eni on trunk mode, disable erdma")
+			config.EnableERDMA = false
+		}
+
+		return trunk.ID, nil
+	}
+
+	// we have to create one if possible
+	if poolConfig.MaxENI <= len(enis) {
+		config.EnableENITrunking = false
+		return "", nil
+	}
+
+	v6 := 0
+	if poolConfig.EnableIPv6 {
+		v6 = 1
+	}
+	trunk, _, _, err := f.CreateNetworkInterface(1, v6, "trunk")
+	if err != nil {
+		if trunk != nil {
+			_ = f.DeleteNetworkInterface(trunk.ID)
+		}
+
+		return "", fmt.Errorf("error create trunk eni, %w", err)
+	}
+
+	return trunk.ID, nil
+}
+
+func runDevicePlugin(daemonMode string, config *daemon.Config, poolConfig *types.PoolConfig) {
+	switch daemonMode {
+	case daemon.ModeVPC, daemon.ModeENIOnly:
+		dp := deviceplugin.NewENIDevicePlugin(poolConfig.MaxENI, deviceplugin.ENITypeENI)
+		go dp.Serve()
+	case daemon.ModeENIMultiIP:
+		if config.EnableENITrunking {
+			dp := deviceplugin.NewENIDevicePlugin(poolConfig.MaxMemberENI, deviceplugin.ENITypeMember)
+			go dp.Serve()
+		}
+	}
+
+	if config.EnableERDMA {
+		if !config.DisableDevicePlugin {
+			res := deviceplugin.ENITypeERDMA
+			capacity := poolConfig.ERdmaCapacity
+			if capacity > 0 {
+				dp := deviceplugin.NewENIDevicePlugin(capacity, res)
+				go dp.Serve()
+			}
+		}
+	}
 }
 
 func getPodResources(list []interface{}) []daemon.PodResources {
