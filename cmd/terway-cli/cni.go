@@ -261,7 +261,7 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 	}
 
 	if ebpfSupport && requireEBPFChainer && !ebpfChainerExist {
-		err = g.ArrayAppend(map[string]any{"type": "cilium-cni", "enable-debug": true, "log-file": "/var/run/cilium/cilium-cni.log", "data-path": datapath}, "plugins")
+		err = g.ArrayAppend(map[string]any{"type": "cilium-cni", "enable-debug": false, "log-file": "/var/run/cilium/cilium-cni.log", "data-path": datapath}, "plugins")
 		if err != nil {
 			return "", err
 		}
