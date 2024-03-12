@@ -1,3 +1,5 @@
+//go:generate mockery --name Kubernetes
+
 package k8s
 
 import (
