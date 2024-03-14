@@ -581,15 +581,16 @@ func (m *ReconcilePodENI) gcCRPodENIs(ctx context.Context) {
 
 			// pod exist just update timestamp
 			if err == nil {
+				// for non fixed-ip pod no need to update timeStamp
+				if !podENI.Spec.HaveFixedIP() {
+					return
+				}
+
 				if !podRequirePodENI(p, m.crdMode) {
 					err = m.deletePodENI(ctx, &podENI)
 					if err != nil {
 						ll.Error(err, "error set podENI to ENIPhaseDeleting")
 					}
-					return
-				}
-				// for non fixed-ip pod no need to update timeStamp
-				if !podENI.Spec.HaveFixedIP() {
 					return
 				}
 
