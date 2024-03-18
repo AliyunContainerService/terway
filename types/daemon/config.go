@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	addonSecretPath      = "/var/addon/alibaba-addon-secret"
+	addonSecretPath      = "/var/alibaba-addon-secret"
 	addonSecretKeyID     = "access-key-id"
 	addonSecretKeySecret = "access-key-secret"
 )
