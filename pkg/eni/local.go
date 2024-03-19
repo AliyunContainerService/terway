@@ -834,8 +834,8 @@ func (l *Local) errorHandleLocked(err error) {
 		return
 	}
 
+	_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, "AllocIPFailed", err.Error())
 	if apiErr.ErrAssert(apiErr.ErrEniPerInstanceLimitExceeded, err) {
-		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, string(types.ErrIPOutOfSyncErr), err.Error())
 		next := time.Now().Add(1 * time.Minute)
 		if next.After(l.ipAllocInhibitExpireAt) {
 			l.ipAllocInhibitExpireAt = next
