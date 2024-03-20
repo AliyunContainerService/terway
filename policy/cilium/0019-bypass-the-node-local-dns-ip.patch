@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Wed, 20 Mar 2024 16:05:48 +0800
+Subject: bypass the node local dns ip
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ bpf/bpf_lxc.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index 9a879f8ab7..7698a568e2 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -15,6 +15,8 @@
+
+ #define EVENT_SOURCE LXC_ID
+
++#define LOCAL_DNS_IP 0x0A14FEA9
++
+ #include "lib/tailcall.h"
+ #include "lib/common.h"
+ #include "lib/config.h"
+@@ -1108,10 +1110,14 @@ skip_vtep:
+ 			return ret;
+ 	}
+ #endif /* TUNNEL_MODE */
++    // we use 169.254.20.10 as nodelocal dns ip, so we should pass to stack
+ 	if (is_defined(ENABLE_HOST_ROUTING)) {
+ 	    // for 5.10 use bpf redirect neigh
+ 		int oif;
+
++        if (ip4->daddr == LOCAL_DNS_IP )
++            goto pass_to_stack;
++
+ 		ret = redirect_direct_v4(ctx, ETH_HLEN, ip4, &oif);
+ 		if (likely(ret == CTX_ACT_REDIRECT))
+ 			send_trace_notify(ctx, TRACE_TO_NETWORK, SECLABEL,
+@@ -1122,6 +1128,8 @@ skip_vtep:
+ 	    // for 4.19 use redirect
+ 	    int oif = CONTAINER_DIRECT_ROUTING_DEV_IFINDEX;
+ 
++        if (ip4->daddr == LOCAL_DNS_IP )
++            goto pass_to_stack;
+         return ctx_redirect(ctx, oif, 0);
+ 	}
+ 
+-- 
+2.44.0
+
