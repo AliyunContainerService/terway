@@ -38,13 +38,13 @@ index 9f04908b07..bdd3420fd4 100644
 @@ -41,6 +41,9 @@ type EndpointChangeRequest struct {
  	// Docker network ID
  	DockerNetworkID string `json:"docker-network-id,omitempty"`
-
+ 
 +	// Index of eni network device
 +	EniInterfaceIndex int64 `json:"eni-interface-index,omitempty"`
 +
  	// MAC address
  	HostMac string `json:"host-mac,omitempty"`
-
+ 
 diff --git a/api/v1/models/endpoint_datapath_configuration.go b/api/v1/models/endpoint_datapath_configuration.go
 index 1f9f1aee11..e1266deb96 100644
 --- a/api/v1/models/endpoint_datapath_configuration.go
@@ -52,7 +52,7 @@ index 1f9f1aee11..e1266deb96 100644
 @@ -22,6 +22,10 @@ type EndpointDatapathConfiguration struct {
  	//
  	DisableSipVerification bool `json:"disable-sip-verification,omitempty"`
-
+ 
 +	// Index of the eni interface to use for the endpoint.
 +	//
 +	EniInterfaceIndex int64 `json:"eni-interface-index,omitempty"`
@@ -123,24 +123,24 @@ index b97b4be1d1..e668d6ef20 100644
            "description": "Indicates that IPAM is done external to Cilium. This will prevent the IP from being released and re-allocation of the IP address is skipped on restore.\n",
            "type": "boolean"
 diff --git a/bpf/bpf_host.c b/bpf/bpf_host.c
-index 54075f92cb..87e8834f5c 100644
+index 54075f92cb..e29bbc5c97 100644
 --- a/bpf/bpf_host.c
 +++ b/bpf/bpf_host.c
 @@ -227,7 +227,7 @@ handle_ipv6(struct __ctx_buff *ctx, __u32 secctx, const bool from_host)
  	}
  #endif /* ENABLE_NODEPORT */
-
+ 
 -#if defined(NO_REDIRECT) && !defined(ENABLE_HOST_ROUTING)
-+#if defined(NO_REDIRECT) && ( !defined(ENABLE_HOST_ROUTING) || !defined(ENABLE_REDIRECT) )
++#if defined(NO_REDIRECT) && ( !defined(ENABLE_HOST_ROUTING) && !defined(ENABLE_REDIRECT) )
  	/* See IPv4 case for NO_REDIRECT/ENABLE_HOST_ROUTING comments */
  	if (!from_host)
  		skip_redirect = true;
 @@ -507,7 +507,7 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 secctx,
  	}
  #endif /* ENABLE_NODEPORT */
-
+ 
 -#if defined(NO_REDIRECT) && !defined(ENABLE_HOST_ROUTING)
-+#if defined(NO_REDIRECT) && ( !defined(ENABLE_HOST_ROUTING) || !defined(ENABLE_REDIRECT) )
++#if defined(NO_REDIRECT) && ( !defined(ENABLE_HOST_ROUTING) && !defined(ENABLE_REDIRECT) )
  	/* Without bpf_redirect_neigh() helper, we cannot redirect a
  	 * packet to a local endpoint in the direct routing mode, as
  	 * the redirect bypasses nf_conntrack table. This makes a
@@ -159,16 +159,16 @@ index 137b3853ac..9a879f8ab7 100644
 +
 +        return ctx_redirect(ctx, oif, 0);
 +    }
-
+ 
  	goto pass_to_stack;
-
+ 
 @@ -1104,6 +1109,7 @@ skip_vtep:
  	}
  #endif /* TUNNEL_MODE */
  	if (is_defined(ENABLE_HOST_ROUTING)) {
 +	    // for 5.10 use bpf redirect neigh
  		int oif;
-
+ 
  		ret = redirect_direct_v4(ctx, ETH_HLEN, ip4, &oif);
 @@ -1112,6 +1118,11 @@ skip_vtep:
  					  *dst_id, 0, oif,
@@ -180,29 +180,29 @@ index 137b3853ac..9a879f8ab7 100644
 +
 +        return ctx_redirect(ctx, oif, 0);
  	}
-
+ 
  	goto pass_to_stack;
 diff --git a/bpf/lib/fib.h b/bpf/lib/fib.h
 index 215b374154..5c4babe14f 100644
 --- a/bpf/lib/fib.h
 +++ b/bpf/lib/fib.h
 @@ -49,7 +49,7 @@ redirect_direct_v6(struct __ctx_buff *ctx __maybe_unused,
-
+ 
  	*oif = fib_params.ifindex;
  # else
 -	*oif = DIRECT_ROUTING_DEV_IFINDEX;
 +	*oif = CONTAINER_DIRECT_ROUTING_DEV_IFINDEX;
  # endif /* ENABLE_SKIP_FIB */
-
+ 
  	ret = ipv6_l3(ctx, l3_off, NULL, NULL, METRIC_EGRESS);
 @@ -115,7 +115,7 @@ redirect_direct_v4(struct __ctx_buff *ctx __maybe_unused,
-
+ 
  	*oif = fib_params.ifindex;
  # else
 -	*oif = DIRECT_ROUTING_DEV_IFINDEX;
 +	*oif = CONTAINER_DIRECT_ROUTING_DEV_IFINDEX;
  # endif /* ENABLE_SKIP_FIB */
-
+ 
  	ret = ipv4_l3(ctx, l3_off, NULL, NULL, ip4);
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
 index 375a11d5cf..ab35062146 100644
@@ -210,7 +210,7 @@ index 375a11d5cf..ab35062146 100644
 +++ b/daemon/cmd/daemon_main.go
 @@ -1374,6 +1374,8 @@ func initEnv(cmd *cobra.Command) {
  	}
-
+ 
  	switch option.Config.DatapathMode {
 +	case datapathOption.DatapathModeIPvlan:
 +
@@ -224,11 +224,11 @@ index 9f0fbc0ef8..8cb34cbaec 100644
 @@ -16,6 +16,7 @@ import (
  	"strconv"
  	"strings"
-
+ 
 +	"github.com/spf13/viper"
  	"github.com/vishvananda/netlink"
  	"golang.org/x/sys/unix"
-
+ 
 @@ -637,7 +638,9 @@ func disableNodePort() {
  	option.Config.EnableHostPort = false
  	option.Config.EnableExternalIPs = false
@@ -238,7 +238,7 @@ index 9f0fbc0ef8..8cb34cbaec 100644
 +		option.Config.EnableHostLegacyRouting = true
 +	}
  }
-
+ 
  // markHostExtension tells the socket LB that MKE managed containers belong
 diff --git a/pkg/datapath/config.go b/pkg/datapath/config.go
 index ad36354742..24ccd76240 100644
@@ -252,7 +252,7 @@ index ad36354742..24ccd76240 100644
 +	// GetENIIndex returns the ENI index of the endpoint, return 0 if the endpoint is not exist.
 +	GetENIIndex() int64
  }
-
+ 
  // EndpointConfiguration provides datapath implementations a clean interface
 diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
 index 0f078ad502..4c21ac7544 100644
@@ -269,7 +269,7 @@ index 0f078ad502..4c21ac7544 100644
 @@ -861,16 +862,19 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, e datapath.Endp
  		fmt.Fprintf(fw, "#define DISABLE_SIP_VERIFICATION 1\n")
  	}
-
+ 
 -	if !option.Config.EnableHostLegacyRouting && option.Config.DirectRoutingDevice != "" {
 -		directRoutingIface := option.Config.DirectRoutingDevice
 -		directRoutingIfIndex, err := link.GetIfIndex(directRoutingIface)
@@ -294,7 +294,7 @@ index 0f078ad502..4c21ac7544 100644
 +	default:
 +		return fmt.Errorf("unsupported datapath mode: %s", option.Config.DatapathMode)
  	}
-
+ 
  	if e.IsHost() {
 diff --git a/pkg/datapath/linux/devices.go b/pkg/datapath/linux/devices.go
 index f20bc52ac4..ff7aa42d93 100644
@@ -302,7 +302,7 @@ index f20bc52ac4..ff7aa42d93 100644
 +++ b/pkg/datapath/linux/devices.go
 @@ -17,6 +17,7 @@ import (
  	"golang.org/x/sys/unix"
-
+ 
  	"github.com/cilium/cilium/pkg/datapath/linux/probes"
 +	datapathOption "github.com/cilium/cilium/pkg/datapath/option"
  	"github.com/cilium/cilium/pkg/k8s"
@@ -315,7 +315,7 @@ index f20bc52ac4..ff7aa42d93 100644
 +		"cali",
 +		"ipvl_",
  	}
-
+ 
  	// Route filter to look at all routing tables.
 @@ -405,7 +408,8 @@ func (dm *DeviceManager) Listen(ctx context.Context) (chan []string, error) {
  func (dm *DeviceManager) AreDevicesRequired() bool {
@@ -325,7 +325,7 @@ index f20bc52ac4..ff7aa42d93 100644
 +		option.Config.EnableBandwidthManager ||
 +		option.Config.DatapathMode == datapathOption.DatapathModeVeth // attach bpf on multi nic
  }
-
+ 
  // expandDevices expands all wildcard device names to concrete devices.
 diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
 index ab692881f7..e0c3fe6a00 100644
@@ -334,11 +334,11 @@ index ab692881f7..e0c3fe6a00 100644
 @@ -12,10 +12,11 @@ import (
  	"strconv"
  	"sync"
-
+ 
 -	"github.com/cilium/cilium/pkg/command/exec"
  	"github.com/sirupsen/logrus"
  	"github.com/vishvananda/netlink"
-
+ 
 +	"github.com/cilium/cilium/pkg/command/exec"
 +
  	"github.com/cilium/cilium/pkg/bpf"
@@ -410,7 +410,7 @@ index ab692881f7..e0c3fe6a00 100644
 -			return err
 -		}
 -		defer finalize()
-
+ 
 -		if ep.RequireEgressProg() {
 -			finalize, err := replaceDatapath(ctx, ep.InterfaceName(), objPath, symbolToEndpoint, dirEgress, false, "")
 +		} else {
@@ -452,7 +452,7 @@ index ab692881f7..e0c3fe6a00 100644
  		}
 +
  	}
-
+ 
  	if ep.RequireEndpointRoute() {
 diff --git a/pkg/datapath/option/option.go b/pkg/datapath/option/option.go
 index a1aca7641a..145af07060 100644
@@ -461,7 +461,7 @@ index a1aca7641a..145af07060 100644
 @@ -9,6 +9,10 @@ const (
  	// attached to a network via veth pairs).
  	DatapathModeVeth = "veth"
-
+ 
 +
 +	// DatapathModeIPvlan specifies ipvlan datapath mode.
 +	DatapathModeIPvlan = "ipvlan"
@@ -475,11 +475,11 @@ index 398e50474d..49508c6008 100644
 +++ b/pkg/defaults/defaults.go
 @@ -232,7 +232,7 @@ const (
  	ClientConnectTimeout = 30 * time.Second
-
+ 
  	// DatapathMode is the default value for the datapath mode.
 -	DatapathMode = "veth"
 +	DatapathMode = "ipvlan"
-
+ 
  	// EnableBPFTProxy is the default value for EnableBPFTProxy
  	EnableBPFTProxy = false
 diff --git a/pkg/endpoint/api.go b/pkg/endpoint/api.go
@@ -491,13 +491,13 @@ index f6c622470f..a6517bd348 100644
  	ep.K8sNamespace = base.K8sNamespace
  	ep.datapathMapID = int(base.DatapathMapID)
 +	ep.eniInterfaceIndex = base.EniInterfaceIndex
-
+ 
  	if base.Mac != "" {
  		m, err := mac.ParseMAC(base.Mac)
 @@ -471,6 +472,11 @@ func (e *Endpoint) ProcessChangeRequest(newEp *Endpoint, validPatchTransitionSta
  		}
  	}
-
+ 
 +	if newEp.eniInterfaceIndex != e.eniInterfaceIndex {
 +		e.eniInterfaceIndex = newEp.eniInterfaceIndex
 +		changed = true
@@ -513,7 +513,7 @@ index 084cd82c0e..5b14a7921a 100644
 @@ -1484,6 +1484,11 @@ func (e *Endpoint) DisableSIPVerification() bool {
  	return e.DatapathConfiguration.DisableSipVerification
  }
-
+ 
 +// GetENIIndex returns the ENI index of the endpoint, return 0 if the endpoint is not exist.
 +func (e *Endpoint) GetENIIndex() int64 {
 +	return e.eniInterfaceIndex
@@ -540,15 +540,15 @@ index 916c3f72b7..c3d5ce7a81 100644
 +++ b/pkg/endpoint/endpoint.go
 @@ -347,6 +347,8 @@ type Endpoint struct {
  	noTrackPort uint16
-
+ 
  	ciliumEndpointUID types.UID
 +
 +	eniInterfaceIndex int64
  }
-
+ 
  type namedPortsGetter interface {
 @@ -2065,8 +2067,9 @@ type policySignal struct {
-
+ 
  // WaitForPolicyRevision returns a channel that is closed when one or more of
  // the following conditions have met:
 -//  - the endpoint is disconnected state
@@ -570,7 +570,7 @@ index b02803db11..824fe4d964 100644
 +		EniInterfaceIndex:     e.eniInterfaceIndex,
  	}
  }
-
+ 
 @@ -512,6 +513,8 @@ type serializableEndpoint struct {
  	// This is used to avoid overwriting/deleting ciliumendpoints that are managed
  	// by other endpoints.
@@ -578,7 +578,7 @@ index b02803db11..824fe4d964 100644
 +
 +	EniInterfaceIndex int64
  }
-
+ 
  // UnmarshalJSON expects that the contents of `raw` are a serializableEndpoint,
 @@ -549,6 +552,7 @@ func (ep *Endpoint) fromSerializedEndpoint(r *serializableEndpoint) {
  	ep.ifIndex = r.IfIndex
@@ -603,7 +603,7 @@ index df026092f8..d4d9643f4e 100644
 +	// nb(l1b0k) multi nic, ignore this
 +	return false
  }
-
+ 
  // EnableK8sLeasesFallbackDiscovery enables using direct API probing as a fallback to check
 diff --git a/plugins/cilium-cni/chaining/generic-veth/generic-veth.go b/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
 index b3bb837b50..8e9cfb2656 100644
@@ -614,7 +614,7 @@ index b3bb837b50..8e9cfb2656 100644
  	"errors"
  	"fmt"
 +	"net"
-
+ 
  	cniTypesVer "github.com/containernetworking/cni/pkg/types/100"
  	cniVersion "github.com/containernetworking/cni/pkg/version"
 @@ -119,6 +120,7 @@ func (f *GenericVethChainer) Add(ctx context.Context, pluginCtx chainingapi.Plug
@@ -622,7 +622,7 @@ index b3bb837b50..8e9cfb2656 100644
  	vethHostName = peer.Attrs().Name
  	vethHostIdx = peer.Attrs().Index
 +	eniIndex := getEniInterfaceIndex(vethIP, vethIPv6)
-
+ 
  	switch {
  	case vethHostName == "":
 @@ -133,6 +135,9 @@ func (f *GenericVethChainer) Add(ctx context.Context, pluginCtx chainingapi.Plug
@@ -633,7 +633,7 @@ index b3bb837b50..8e9cfb2656 100644
 +		err = errors.New("unable to determine eni index of veth pair on the host side")
 +		return
  	}
-
+ 
  	var disabled = false
 @@ -143,6 +148,7 @@ func (f *GenericVethChainer) Add(ctx context.Context, pluginCtx chainingapi.Plug
  		},
@@ -700,7 +700,7 @@ index 802384084e..0dfbf74c68 100644
 @@ -18,12 +18,6 @@ import (
  	"context"
  	"fmt"
-
+ 
 -	"github.com/cilium/cilium/api/v1/models"
 -	"github.com/cilium/cilium/pkg/datapath/link"
 -	endpointid "github.com/cilium/cilium/pkg/endpoint/id"
@@ -723,22 +723,22 @@ index 802384084e..0dfbf74c68 100644
 +	chainingapi "github.com/cilium/cilium/plugins/cilium-cni/chaining/api"
 +	genericveth "github.com/cilium/cilium/plugins/cilium-cni/chaining/generic-veth"
  )
-
+ 
  var (
 @@ -40,7 +42,10 @@ var (
  )
-
+ 
  // TerwayChainer is terway chain object
 -type TerwayChainer struct{}
 +type TerwayChainer struct {
 +	ipvlan  *datapathIPvlan
 +	generic *genericveth.GenericVethChainer
 +}
-
+ 
  // ImplementsAdd returns true if method 'add' is available
  func (f *TerwayChainer) ImplementsAdd() bool {
 @@ -49,6 +54,41 @@ func (f *TerwayChainer) ImplementsAdd() bool {
-
+ 
  // Add setups the ipvlan port's tc-bpf
  func (f *TerwayChainer) Add(ctx context.Context, pluginCtx chainingapi.PluginContext) (res *cniTypesVer.Result, err error) {
 +	switch pluginCtx.NetConf.DataPath {
@@ -782,7 +782,7 @@ index 802384084e..0dfbf74c68 100644
 @@ -168,24 +208,14 @@ func (f *TerwayChainer) Add(ctx context.Context, pluginCtx chainingapi.PluginCon
  	return
  }
-
+ 
 -// ImplementsDelete return true if method 'delete' is available
 -func (f *TerwayChainer) ImplementsDelete() bool {
 -	return true
@@ -799,7 +799,7 @@ index 802384084e..0dfbf74c68 100644
  	}
  	return nil
  }
-
+ 
 -func init() {
 -	chainingapi.Register(name, &TerwayChainer{})
 -}
@@ -817,8 +817,8 @@ index e84e949968..2327cf5816 100644
  	LogFile      string                 `json:"log-file"`
 +	DataPath     string                 `json:"data-path,omitempty"`
  }
-
+ 
  // IPAM is the Cilium specific CNI IPAM configuration
---
-2.43.2
+-- 
+2.44.0
 
