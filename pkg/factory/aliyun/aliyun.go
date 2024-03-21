@@ -44,7 +44,8 @@ type Aliyun struct {
 	}
 	getter eni.ENIInfoGetter
 
-	vsw *vswpool.SwitchPool
+	vsw             *vswpool.SwitchPool
+	selectionPolicy vswpool.SelectionPolicy
 
 	vSwitchOptions   []string
 	securityGroupIDs []string
@@ -72,6 +73,7 @@ func NewAliyun(ctx context.Context, openAPI *client.OpenAPI, getter eni.ENIInfoG
 		resourceGroupID:  cfg.ResourceGroupID,
 		eniTags:          cfg.ENITags,
 		eniTypeAttr:      cfg.EniTypeAttr,
+		selectionPolicy:  cfg.VSwitchSelectionPolicy,
 	}
 }
 
@@ -93,7 +95,9 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		erdma = true
 	}
 	err := wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENICreate), func(ctx context.Context) (bool, error) {
-		vsw, innerErr := a.vsw.GetOne(ctx, a.openAPI, a.zoneID, a.vSwitchOptions)
+		vsw, innerErr := a.vsw.GetOne(ctx, a.openAPI, a.zoneID, a.vSwitchOptions, &vswpool.SelectOptions{
+			VSwitchSelectPolicy: a.selectionPolicy,
+		})
 		if innerErr != nil {
 			return false, innerErr
 		}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
+	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/k8s"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
@@ -25,13 +26,21 @@ func getDynamicConfig(ctx context.Context, k8s k8s.Kubernetes) (string, string, 
 }
 
 func getENIConfig(cfg *daemon.Config) *types.ENIConfig {
+
+	policy := vswitch.VSwitchSelectionPolicyRandom
+	switch cfg.VSwitchSelectionPolicy {
+	case "ordered":
+		// keep the previous behave
+		policy = vswitch.VSwitchSelectionPolicyMost
+	}
+
 	eniConfig := &types.ENIConfig{
 		ZoneID:                 instance.GetInstanceMeta().ZoneID,
 		VSwitchOptions:         nil,
 		ENITags:                cfg.ENITags,
 		SecurityGroupIDs:       cfg.GetSecurityGroups(),
 		InstanceID:             instance.GetInstanceMeta().InstanceID,
-		VSwitchSelectionPolicy: cfg.VSwitchSelectionPolicy,
+		VSwitchSelectionPolicy: policy,
 		ResourceGroupID:        cfg.ResourceGroupID,
 		EniTypeAttr:            0,
 	}
