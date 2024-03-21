@@ -34,6 +34,7 @@ type Eflo struct {
 	securityGroupIDs []string
 	resourceGroupID  string
 	vsw              *vswpool.SwitchPool
+	selectionPolicy  vswpool.SelectionPolicy
 }
 
 func NewEflo(ctx context.Context, openAPI *client.OpenAPI, vsw *vswpool.SwitchPool, cfg *types.ENIConfig) *Eflo {
@@ -48,6 +49,7 @@ func NewEflo(ctx context.Context, openAPI *client.OpenAPI, vsw *vswpool.SwitchPo
 		vSwitchOptions:   cfg.VSwitchOptions,
 		securityGroupIDs: cfg.SecurityGroupIDs,
 		resourceGroupID:  cfg.ResourceGroupID,
+		selectionPolicy:  cfg.VSwitchSelectionPolicy,
 	}
 }
 
@@ -55,7 +57,9 @@ func (p *Eflo) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon.E
 	ctx, cancel := context.WithTimeout(p.ctx, time.Second*60)
 	defer cancel()
 
-	vsw, innerErr := p.vsw.GetOne(ctx, p.api, p.zoneID, p.vSwitchOptions)
+	vsw, innerErr := p.vsw.GetOne(ctx, p.api, p.zoneID, p.vSwitchOptions, &vswpool.SelectOptions{
+		VSwitchSelectPolicy: p.selectionPolicy,
+	})
 	if innerErr != nil {
 		return nil, nil, nil, innerErr
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
+	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
@@ -82,7 +83,7 @@ func TestGetENIConfig(t *testing.T) {
 	cfg := &daemon.Config{
 		ENITags:                map[string]string{"aa": "bb"},
 		SecurityGroups:         []string{"sg1", "sg2"},
-		VSwitchSelectionPolicy: "policy",
+		VSwitchSelectionPolicy: "ordered",
 		ResourceGroupID:        "rgID",
 		EnableENITrunking:      true,
 		EnableERDMA:            true,
@@ -98,7 +99,7 @@ func TestGetENIConfig(t *testing.T) {
 	assert.Equal(t, 1, len(eniConfig.ENITags))
 	assert.Equal(t, []string{"sg1", "sg2"}, eniConfig.SecurityGroupIDs)
 	assert.Equal(t, "instanceID", eniConfig.InstanceID)
-	assert.Equal(t, "policy", eniConfig.VSwitchSelectionPolicy)
+	assert.Equal(t, vswitch.VSwitchSelectionPolicyMost, eniConfig.VSwitchSelectionPolicy)
 	assert.Equal(t, "rgID", eniConfig.ResourceGroupID)
 	assert.Equal(t, types.Feat(3), eniConfig.EniTypeAttr)
 }

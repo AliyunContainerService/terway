@@ -1,5 +1,9 @@
 package types
 
+import (
+	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
+)
+
 type ENIConfig struct {
 	ZoneID           string
 	VSwitchOptions   []string
@@ -7,7 +11,7 @@ type ENIConfig struct {
 	SecurityGroupIDs []string
 	InstanceID       string
 
-	VSwitchSelectionPolicy string
+	VSwitchSelectionPolicy vswitch.SelectionPolicy
 
 	ResourceGroupID string
 
