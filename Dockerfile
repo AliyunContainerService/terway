@@ -1,4 +1,4 @@
-ARG TERWAY_POLICY_IMAGE=registry.cn-hongkong.aliyuncs.com/acs/terway:policy-20240305-c2f8da7@sha256:16674a3922ec143c463cc9ace2fe5345ddadffacc6bcef57cda1111647b6e1f0
+ARG TERWAY_POLICY_IMAGE=registry.cn-hongkong.aliyuncs.com/acs/terway:policy-20240322-cf4e7cd3@sha256:02adcd3aaf3b83b3bfa5ec1dbfb00b1a621111ab30d9fe4c4a0f59a6fb6ff3af
 ARG UBUNTU_IMAGE=registry.cn-hangzhou.aliyuncs.com/acs/ubuntu:20.04-update
 ARG CILIUM_LLVM_IMAGE=quay.io/cilium/cilium-llvm:547db7ec9a750b8f888a506709adb41f135b952e@sha256:4d6fa0aede3556c5fb5a9c71bc6b9585475ac9b1064f516d4c45c8fb691c9d9e
 ARG CILIUM_BPFTOOL_IMAGE=quay.io/cilium/cilium-bpftool:78448c1a37ff2b790d5e25c3d8b8ec3e96e6405f@sha256:99a9453a921a8de99899ef82e0822f0c03f65d97005c064e231c06247ad8597d
