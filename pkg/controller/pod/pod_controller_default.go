@@ -8,7 +8,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
-	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
+	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 )
 

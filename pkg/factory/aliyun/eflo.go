@@ -13,8 +13,8 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	vswpool "github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/factory"
+	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )

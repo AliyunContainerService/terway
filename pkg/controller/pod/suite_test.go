@@ -10,13 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client/fake"
-	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	register "github.com/AliyunContainerService/terway/pkg/controller"
-	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
-	"github.com/AliyunContainerService/terway/types/controlplane"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,6 +22,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client/fake"
+	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	register "github.com/AliyunContainerService/terway/pkg/controller"
+	"github.com/AliyunContainerService/terway/pkg/vswitch"
+	"github.com/AliyunContainerService/terway/types/controlplane"
 )
 
 var cfg *rest.Config

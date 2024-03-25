@@ -1,7 +1,7 @@
 package types
 
 import (
-	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
+	"github.com/AliyunContainerService/terway/pkg/vswitch"
 )
 
 type ENIConfig struct {

@@ -21,11 +21,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
-	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/go-playground/mold/v4/modifiers"
 	"github.com/go-playground/validator/v10"
 	"k8s.io/apimachinery/pkg/util/yaml"
+
+	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 )
 
 var (

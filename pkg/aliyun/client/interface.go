@@ -1,3 +1,6 @@
+//go:generate mockery --name VPC --tags default_build
+//go:generate mockery --name EFLO --tags default_build
+
 package client
 
 import (

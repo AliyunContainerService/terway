@@ -47,6 +47,6 @@ func NewNodeInfo(node *corev1.Node) (*NodeInfo, error) {
 		res.ZoneID = zone
 		return res, nil
 	}
-	return nil, fmt.Errorf("cat not found zone label from node %s", node.Name)
+	return nil, fmt.Errorf("can not found zone label from node %s", node.Name)
 
 }
