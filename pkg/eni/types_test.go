@@ -24,6 +24,7 @@ func Test_syncIPLocked(t *testing.T) {
 					netip.MustParseAddr("127.0.0.1"): &IP{
 						ip:      netip.MustParseAddr("127.0.0.1"),
 						primary: true,
+						status:  ipStatusValid,
 					},
 				},
 				remote: nil,
