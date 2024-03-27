@@ -17,9 +17,12 @@ limitations under the License.
 package podnetworking
 
 import (
-	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
 
 type predicateForPodnetwokringEvent struct {
@@ -32,9 +35,18 @@ func (p *predicateForPodnetwokringEvent) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	if newPodNetworking.Status.Status == "" {
+	switch newPodNetworking.Status.Status {
+	case "", v1beta1.NetworkingStatusFail:
 		return true
 	}
 
-	return false
+	return changed(newPodNetworking)
+}
+
+func changed(pn *v1beta1.PodNetworking) bool {
+	expect := sets.New[string](pn.Spec.VSwitchOptions...)
+	got := sets.New[string](lo.Map([]v1beta1.VSwitch{}, func(item v1beta1.VSwitch, index int) string {
+		return item.ID
+	})...)
+	return expect.Equal(got)
 }

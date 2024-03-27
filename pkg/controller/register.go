@@ -14,11 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+//go:generate mockery --name Interface --tags default_build
+
 package register
 
 import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
+	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"

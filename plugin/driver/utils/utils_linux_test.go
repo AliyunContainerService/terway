@@ -7,14 +7,15 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/AliyunContainerService/terway/pkg/tc"
-	terwayTypes "github.com/AliyunContainerService/terway/types"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
+
+	"github.com/AliyunContainerService/terway/pkg/tc"
+	terwayTypes "github.com/AliyunContainerService/terway/types"
 )
 
 func TestCNI(t *testing.T) {
@@ -182,7 +183,7 @@ var _ = Describe("Test TC filter", func() {
 			eni, err := netlink.LinkByName(nicName)
 			Expect(err).NotTo(HaveOccurred())
 
-			Context("add new ip", func() {
+			By("add new ip", func() {
 				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
 					IPv4: &net.IPNet{
 						IP:   net.ParseIP("192.168.1.1"),
@@ -201,7 +202,7 @@ var _ = Describe("Test TC filter", func() {
 				Expect(len(filters)).Should(Equal(2))
 			})
 
-			Context("re-add same ip shoud succeed", func() {
+			By("re-add same ip shoud succeed", func() {
 				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
 					IPv4: &net.IPNet{
 						IP:   net.ParseIP("192.168.1.1"),
@@ -220,7 +221,7 @@ var _ = Describe("Test TC filter", func() {
 				Expect(len(filters)).Should(Equal(2))
 			})
 
-			Context("add new rule should success", func() {
+			By("add new rule should success", func() {
 				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
 					IPv4: &net.IPNet{
 						IP:   net.ParseIP("192.168.1.2"),
@@ -239,7 +240,7 @@ var _ = Describe("Test TC filter", func() {
 				Expect(len(filters)).Should(Equal(4))
 			})
 
-			Context("delete filter should clean up", func() {
+			By("delete filter should clean up", func() {
 				err = DelFilter(eni, netlink.HANDLE_MIN_EGRESS, &terwayTypes.IPNetSet{
 					IPv4: &net.IPNet{
 						IP:   net.ParseIP("192.168.1.2"),
@@ -258,7 +259,7 @@ var _ = Describe("Test TC filter", func() {
 				Expect(len(filters)).Should(Equal(2))
 			})
 
-			Context("add same ip vid should be updated", func() {
+			By("add same ip vid should be updated", func() {
 				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
 					IPv4: &net.IPNet{
 						IP:   net.ParseIP("192.168.1.1"),

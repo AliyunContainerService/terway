@@ -29,7 +29,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
-	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
+	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"

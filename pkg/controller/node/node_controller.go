@@ -13,7 +13,7 @@ import (
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	eni_pool "github.com/AliyunContainerService/terway/pkg/controller/pool"
-	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
+	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 	"github.com/AliyunContainerService/terway/types/daemon"

@@ -7,7 +7,8 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/fake"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
-	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
+	"github.com/AliyunContainerService/terway/pkg/vswitch"
+
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/wait"

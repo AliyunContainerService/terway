@@ -16,8 +16,8 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun/eni"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
-	vswpool "github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/factory"
+	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )

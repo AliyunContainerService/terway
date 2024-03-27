@@ -23,14 +23,13 @@ import (
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
-	"github.com/AliyunContainerService/terway/pkg/controller/vswitch"
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -70,7 +69,6 @@ var _ reconcile.Reconciler = &ReconcilePodNetworking{}
 // ReconcilePodNetworking reconciles a AutoRepair object
 type ReconcilePodNetworking struct {
 	client       client.Client
-	scheme       *runtime.Scheme
 	aliyunClient aliyunClient.VPC
 	swPool       *vswitch.SwitchPool
 
@@ -82,7 +80,6 @@ type ReconcilePodNetworking struct {
 func NewReconcilePodNetworking(mgr manager.Manager, aliyunClient aliyunClient.VPC, swPool *vswitch.SwitchPool) *ReconcilePodNetworking {
 	r := &ReconcilePodNetworking{
 		client:       mgr.GetClient(),
-		scheme:       mgr.GetScheme(),
 		record:       mgr.GetEventRecorderFor("PodNetworking"),
 		aliyunClient: aliyunClient,
 		swPool:       swPool,

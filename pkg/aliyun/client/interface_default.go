@@ -1,5 +1,7 @@
 //go:build default_build
 
+//go:generate mockery --name ECS --tags default_build
+
 package client
 
 import (

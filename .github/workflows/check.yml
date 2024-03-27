@@ -19,9 +19,7 @@ jobs:
     - name: Test
       run: |
         go=$(which go)
-        sudo $go test -tags default_build,privileged -v ./...
-        sudo $go test -tags default_build,privileged -race -v ./...
-        sudo $go test -tags default_build,privileged -coverpkg=./... -race -coverprofile=coverage.txt -covermode=atomic ./...
+        sudo make test
     - uses: codecov/codecov-action@v3
       with:
         token: ${{ secrets.CODECOV_TOKEN }}

@@ -20,9 +20,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client/fake"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client/fake"
 )
 
 func TestSwitchPool_GetOne(t *testing.T) {
