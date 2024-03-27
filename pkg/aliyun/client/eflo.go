@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -18,7 +20,9 @@ func (a *OpenAPI) CreateElasticNetworkInterface(zoneID, nodeID, vSwitchID, secur
 	req.VSwitchId = vSwitchID
 	req.SecurityGroupId = securityGroupID
 
+	start := time.Now()
 	resp, err := a.ClientSet.EFLO().CreateElasticNetworkInterface(req)
+	metric.OpenAPILatency.WithLabelValues("CreateElasticNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		return "", "", err
 	}
@@ -34,7 +38,9 @@ func (a *OpenAPI) DeleteElasticNetworkInterface(ctx context.Context, eniID strin
 	req := eflo.CreateDeleteElasticNetworkInterfaceRequest()
 	req.ElasticNetworkInterfaceId = eniID
 
+	start := time.Now()
 	resp, err := a.ClientSet.EFLO().DeleteElasticNetworkInterface(req)
+	metric.OpenAPILatency.WithLabelValues("DeleteElasticNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
@@ -55,7 +61,9 @@ func (a *OpenAPI) AssignLeniPrivateIPAddress(ctx context.Context, eniID, prefer 
 	req.ElasticNetworkInterfaceId = eniID
 	req.PrivateIpAddress = prefer
 
+	start := time.Now()
 	resp, err := a.ClientSet.EFLO().AssignLeniPrivateIpAddress(req)
+	metric.OpenAPILatency.WithLabelValues("AssignLeniPrivateIPAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
@@ -79,7 +87,9 @@ func (a *OpenAPI) UnassignLeniPrivateIPAddress(ctx context.Context, eniID, ipNam
 	req.ElasticNetworkInterfaceId = eniID
 	req.IpName = ipName
 
+	start := time.Now()
 	resp, err := a.ClientSet.EFLO().UnassignLeniPrivateIpAddress(req)
+	metric.OpenAPILatency.WithLabelValues("UnassignLeniPrivateIpAddress", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
@@ -95,7 +105,9 @@ func (a *OpenAPI) GetElasticNetworkInterface(eniID string) (*eflo.Content, error
 	req := eflo.CreateGetElasticNetworkInterfaceRequest()
 	req.ElasticNetworkInterfaceId = eniID
 
+	start := time.Now()
 	resp, err := a.ClientSet.EFLO().GetElasticNetworkInterface(req)
+	metric.OpenAPILatency.WithLabelValues("GetElasticNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +127,9 @@ func (a *OpenAPI) ListLeniPrivateIPAddresses(ctx context.Context, eniID, ipName,
 	req.IpName = ipName
 	req.PrivateIpAddress = ipAddress
 
+	start := time.Now()
 	resp, err := a.ClientSet.EFLO().ListLeniPrivateIpAddresses(req)
+	metric.OpenAPILatency.WithLabelValues("ListLeniPrivateIpAddresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
@@ -139,7 +153,9 @@ func (a *OpenAPI) ListElasticNetworkInterfaces(ctx context.Context, zoneID, node
 	req.NodeId = nodeID
 	req.PageSize = requests.NewInteger(100)
 
+	start := time.Now()
 	resp, err := a.ClientSet.EFLO().ListElasticNetworkInterfaces(req)
+	metric.OpenAPILatency.WithLabelValues("ListElasticNetworkInterfaces", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
@@ -161,7 +177,9 @@ func (a *OpenAPI) GetNodeInfoForPod(ctx context.Context, nodeID string) (*eflo.C
 	req := eflo.CreateGetNodeInfoForPodRequest()
 	req.NodeId = nodeID
 
+	start := time.Now()
 	resp, err := a.ClientSet.EFLO().GetNodeInfoForPod(req)
+	metric.OpenAPILatency.WithLabelValues("GetNodeInfoForPod", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		return nil, err
 	}
