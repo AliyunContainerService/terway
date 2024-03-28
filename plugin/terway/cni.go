@@ -28,7 +28,7 @@ import (
 const (
 	defaultSocketPath   = "/var/run/eni/eni.socket"
 	defaultVethPrefix   = "cali"
-	defaultDialTimeout  = 10 * time.Second
+	defaultDialTimeout  = 60 * time.Second
 	defaultCniTimeout   = 120 * time.Second
 	defaultEventTimeout = 10 * time.Second
 	delegateIpam        = "host-local"
