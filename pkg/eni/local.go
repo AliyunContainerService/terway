@@ -207,12 +207,12 @@ func (l *Local) load(podResources []daemon.PodResources) error {
 
 	for _, v := range ipv4 {
 		l.ipv4.Add(NewValidIP(v, netip.MustParseAddr(v.String()) == primary))
-		metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Inc()
-		metric.ResourcePoolTotal.WithLabelValues("ResourceTypeLocalIP").Inc()
+		metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Inc()
+		metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Inc()
 	}
 	l.ipv6.PutValid(ipv6...)
-	metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Add(float64(len(ipv6)))
-	metric.ResourcePoolTotal.WithLabelValues("ResourceTypeLocalIP").Add(float64(len(ipv6)))
+	metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Add(float64(len(ipv6)))
+	metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Add(float64(len(ipv6)))
 
 	l.status = statusInUse
 
@@ -248,7 +248,7 @@ func (l *Local) load(podResources []daemon.PodResources) error {
 					continue
 				}
 				v.Allocate(podID)
-				metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Dec()
+				metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
 			}
 			if res.IPv6 != "" {
 				ip, err := netip.ParseAddr(res.IPv6)
@@ -264,7 +264,7 @@ func (l *Local) load(podResources []daemon.PodResources) error {
 					continue
 				}
 				v.Allocate(podID)
-				metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Dec()
+				metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Dec()
 			}
 		}
 	}
@@ -276,9 +276,9 @@ func (l *Local) load(podResources []daemon.PodResources) error {
 		for _, ip := range l.ipv4.Idles() {
 			ip.Dispose()
 
-			metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Dec()
-			metric.ResourcePoolTotal.WithLabelValues("ResourceTypeLocalIP").Dec()
-			metric.ResourcePoolDisposed.WithLabelValues("ResourceTypeLocalIP").Inc()
+			metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
+			metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
+			metric.ResourcePoolDisposed.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Inc()
 		}
 	}
 	if len(l.ipv6) > l.cap {
@@ -286,9 +286,9 @@ func (l *Local) load(podResources []daemon.PodResources) error {
 		for _, ip := range l.ipv6.Idles() {
 			ip.Dispose()
 
-			metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Dec()
-			metric.ResourcePoolTotal.WithLabelValues("ResourceTypeLocalIP").Dec()
-			metric.ResourcePoolDisposed.WithLabelValues("ResourceTypeLocalIP").Inc()
+			metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Dec()
+			metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Dec()
+			metric.ResourcePoolDisposed.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Inc()
 		}
 	}
 
@@ -418,14 +418,14 @@ func (l *Local) Release(ctx context.Context, cni *daemon.CNI, request NetworkRes
 	if res.IP.IPv4.IsValid() {
 		l.ipv4.Release(cni.PodID, res.IP.IPv4)
 
-		metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Inc()
+		metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Inc()
 
 		log.Info("release ipv4", "ipv4", res.IP.IPv4)
 	}
 	if res.IP.IPv6.IsValid() {
 		l.ipv6.Release(cni.PodID, res.IP.IPv6)
 
-		metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Inc()
+		metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Inc()
 
 		log.Info("release ipv6", "ipv6", res.IP.IPv6)
 	}
@@ -526,13 +526,13 @@ func (l *Local) allocWorker(ctx context.Context, cni *daemon.CNI, request *Local
 			if ipv4 != nil {
 				ipv4.Allocate(cni.PodID)
 				if cni.PodID != "" {
-					metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Dec()
+					metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
 				}
 			}
 			if ipv6 != nil {
 				ipv6.Allocate(cni.PodID)
 				if cni.PodID != "" {
-					metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Dec()
+					metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Dec()
 				}
 			}
 		}
@@ -632,15 +632,15 @@ func (l *Local) factoryAllocWorker(ctx context.Context) {
 				for _, v := range ipv4Set {
 					l.ipv4.Add(NewValidIP(v, netip.MustParseAddr(v.String()) == primary))
 
-					metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Inc()
-					metric.ResourcePoolTotal.WithLabelValues("ResourceTypeLocalIP").Inc()
+					metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Inc()
+					metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Inc()
 				}
 			}
 
 			l.ipv6.PutValid(ipv6Set...)
 
-			metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Add(float64(len(ipv6Set)))
-			metric.ResourcePoolTotal.WithLabelValues("ResourceTypeLocalIP").Add(float64(len(ipv6Set)))
+			metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Add(float64(len(ipv6Set)))
+			metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Add(float64(len(ipv6Set)))
 
 			l.status = statusInUse
 		} else {
@@ -675,8 +675,8 @@ func (l *Local) factoryAllocWorker(ctx context.Context) {
 
 				l.ipv4.PutValid(ipv4Set...)
 
-				metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Add(float64(len(ipv4Set)))
-				metric.ResourcePoolTotal.WithLabelValues("ResourceTypeLocalIP").Add(float64(len(ipv4Set)))
+				metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Add(float64(len(ipv4Set)))
+				metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Add(float64(len(ipv4Set)))
 
 			}
 
@@ -708,8 +708,8 @@ func (l *Local) factoryAllocWorker(ctx context.Context) {
 
 				l.ipv6.PutValid(ipv6Set...)
 
-				metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Add(float64(len(ipv6Set)))
-				metric.ResourcePoolTotal.WithLabelValues("ResourceTypeLocalIP").Add(float64(len(ipv6Set)))
+				metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Add(float64(len(ipv6Set)))
+				metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Add(float64(len(ipv6Set)))
 			}
 		}
 
@@ -764,9 +764,9 @@ func (l *Local) Dispose(n int) int {
 				continue
 			}
 			v.Dispose() // small problem for primary ip
-			metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Dec()
-			metric.ResourcePoolTotal.WithLabelValues("ResourceTypeLocalIP").Dec()
-			metric.ResourcePoolDisposed.WithLabelValues("ResourceTypeLocalIP").Inc()
+			metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
+			metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
+			metric.ResourcePoolDisposed.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Inc()
 			break
 		}
 	}
@@ -779,9 +779,9 @@ func (l *Local) Dispose(n int) int {
 				continue
 			}
 			v.Dispose()
-			metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Dec()
-			metric.ResourcePoolTotal.WithLabelValues("ResourceTypeLocalIP").Dec()
-			metric.ResourcePoolDisposed.WithLabelValues("ResourceTypeLocalIP").Inc()
+			metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Dec()
+			metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Dec()
+			metric.ResourcePoolDisposed.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Inc()
 			break
 		}
 	}
@@ -956,9 +956,13 @@ func syncIPLocked(lo Set, remote []netip.Addr) {
 			_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, string(types.ErrResourceInvalid), fmt.Sprintf("Mark as invalid, ip: %s", v.ip.String()))
 			v.SetInvalid()
 
-			metric.ResourcePoolTotal.WithLabelValues("ResourceTypeLocalIP").Dec()
-			metric.ResourcePoolIdle.WithLabelValues("ResourceTypeLocalIP").Dec()
-
+			if v.ip.Is4() {
+				metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
+				metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
+			} else {
+				metric.ResourcePoolTotal.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Dec()
+				metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Dec()
+			}
 		}
 	}
 }

@@ -191,7 +191,7 @@ func (r *Remote) Allocate(ctx context.Context, cni *daemon.CNI, request Resource
 
 			networkResources = append(networkResources, remote)
 
-			metric.ResourcePoolAllocated.WithLabelValues("ResourceTypeRemoteIP").Inc()
+			metric.ResourcePoolAllocated.WithLabelValues(metric.ResourcePoolTypeRemote).Inc()
 		}
 
 		select {
