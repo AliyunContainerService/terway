@@ -14,6 +14,7 @@ import (
 	podENITypes "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
+	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
@@ -189,6 +190,8 @@ func (r *Remote) Allocate(ctx context.Context, cni *daemon.CNI, request Resource
 			l.Info("get pod eni success", "uid", podENI.UID)
 
 			networkResources = append(networkResources, remote)
+
+			metric.ResourcePoolAllocated.WithLabelValues(metric.ResourcePoolTypeRemote).Inc()
 		}
 
 		select {
