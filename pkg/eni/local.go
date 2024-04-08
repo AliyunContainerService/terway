@@ -951,6 +951,13 @@ func (l *Local) Status() Status {
 func syncIPLocked(lo Set, remote []netip.Addr) {
 	s := sets.New[netip.Addr](remote...)
 	for _, v := range lo {
+		// ignore status for ip already gone
+		switch v.status {
+		case ipStatusValid:
+		default:
+			continue
+		}
+
 		if !s.Has(v.ip) {
 			logf.Log.Info("remote ip gone, mark as invalid", "ip", v.ip.String())
 			_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, string(types.ErrResourceInvalid), fmt.Sprintf("Mark as invalid, ip: %s", v.ip.String()))
