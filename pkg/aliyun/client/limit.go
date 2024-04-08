@@ -54,12 +54,8 @@ func (l *Limits) MultiIPPod() int {
 	return (l.Adapters - 1) * l.IPv4PerAdapter
 }
 
-func (l *Limits) ExclusiveERDMARes() int {
-	return l.ERdmaAdapters
-}
-
 func (l *Limits) ERDMARes() int {
-	return l.ERdmaAdapters * l.IPv4PerAdapter
+	return l.ERdmaAdapters
 }
 
 func (l *Limits) ExclusiveENIPod() int {
