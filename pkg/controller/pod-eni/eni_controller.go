@@ -581,28 +581,23 @@ func (m *ReconcilePodENI) gcCRPodENIs(ctx context.Context) {
 
 			// pod exist just update timestamp
 			if err == nil {
-				// for non fixed-ip pod no need to update timeStamp
-				if !podENI.Spec.HaveFixedIP() {
-					return
-				}
+				if podRequirePodENI(p, m.crdMode) {
+					// for non fixed-ip pod no need to update timeStamp
+					if !podENI.Spec.HaveFixedIP() {
+						return
+					}
 
-				if !podRequirePodENI(p, m.crdMode) {
-					err = m.deletePodENI(ctx, &podENI)
+					ll.V(5).Info("update pod lastSeen to now")
+					update := podENI.DeepCopy()
+					update.Status.PodLastSeen = metav1.Now()
+
+					err = m.client.Status().Patch(ctx, update, client.MergeFrom(&podENI))
 					if err != nil {
-						ll.Error(err, "error set podENI to ENIPhaseDeleting")
+						ll.Error(err, "error update timestamp")
 					}
 					return
 				}
-
-				ll.V(5).Info("update pod lastSeen to now")
-				update := podENI.DeepCopy()
-				update.Status.PodLastSeen = metav1.Now()
-
-				err = m.client.Status().Patch(ctx, update, client.MergeFrom(&podENI))
-				if err != nil {
-					ll.Error(err, "error update timestamp")
-				}
-				return
+				// pod not require pod eni, so follow the release strategy
 			}
 
 			switch podENI.Status.Phase {
@@ -841,14 +836,6 @@ func (m *ReconcilePodENI) getNode(ctx context.Context, name string) (*corev1.Nod
 		Name: name,
 	}, node)
 	return node, err
-}
-
-func (m *ReconcilePodENI) deletePodENI(ctx context.Context, podENI *v1beta1.PodENI) error {
-	update := podENI.DeepCopy()
-	update.Status.Phase = v1beta1.ENIPhaseDeleting
-
-	_, err := common.UpdatePodENIStatus(ctx, m.client, update)
-	return err
 }
 
 func allocIDs(podENI *v1beta1.PodENI) []string {
