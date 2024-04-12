@@ -110,10 +110,10 @@ spec:
               mountPath: /etc/eni
             - name: configvolume
               mountPath: /tmp/eni
+            - name: cni-config
+              mountPath: /etc/cni/net.d
             - name: cni-bin
               mountPath: /opt/cni/bin/
-            - name: cni
-              mountPath: /etc/cni/net.d/
             - mountPath: /lib/modules
               name: lib-modules
             - mountPath: /host
@@ -122,6 +122,8 @@ spec:
               name: eni-run
             - mountPath: /var-run-eni
               name: var-run-eni
+            - mountPath: /etc-cni-net.d
+              name: cni-config
       containers:
         - name: terway
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -151,6 +153,11 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
           volumeMounts:
+            - name: cni-config
+              mountPath: /etc/cni/net.d
+              readOnly: true
+            - name: cni
+              mountPath: /host-etc-net.d
             - name: config
               mountPath: /etc/eni
               readOnly: true
@@ -167,6 +174,8 @@ spec:
             - name: addon-token
               mountPath: "/var/addon"
               readOnly: true
+            - mountPath: /host-etc-net.d
+              name: cni
         - name: policy
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
@@ -261,6 +270,8 @@ spec:
             - mountPath: /run/xtables.lock
               name: xtables-lock
       volumes:
+        - name: cni-config
+          emptyDir: { }
         - name: config
           emptyDir: { }
         - name: var-run-eni

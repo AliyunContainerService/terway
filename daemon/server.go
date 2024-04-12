@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	_ "net/http/pprof" // import pprof for diagnose
@@ -11,13 +12,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/go-logr/logr"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/pkg/utils"
@@ -29,6 +30,13 @@ import (
 )
 
 const daemonRPCTimeout = 118 * time.Second
+
+const (
+	prevCNIConfFile   = "10-terway.conf"
+	cinConfFile       = "10-terway.conflist"
+	tmpCNIConfigPath  = "/etc/cni/net.d" // that is tmpfs
+	hostCNIConfigPath = "/host-etc-net.d"
+)
 
 // stackTriger print golang stack trace to log
 func stackTriger() {
@@ -47,7 +55,8 @@ func stackTriger() {
 				bufferLen *= 2
 			}
 			buf = buf[:stackSize]
-			logger.DefaultLogger.Printf("dump stacks: %s\n", string(buf))
+
+			os.Stdout.Write(buf)
 		}
 	}(sigchain)
 
@@ -56,18 +65,7 @@ func stackTriger() {
 
 // Run terway daemon
 func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath, daemonMode string) error {
-	err := os.MkdirAll(filepath.Dir(socketFilePath), 0700)
-	if err != nil {
-		return fmt.Errorf("error create socket dir: %s, %w", filepath.Dir(socketFilePath), err)
-	}
-	err = syscall.Unlink(socketFilePath)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("error unlink socket file: %s, %w", socketFilePath, err)
-	}
-	mask := syscallUmask(0777)
-	defer syscallUmask(mask)
-
-	l, err := net.Listen("unix", socketFilePath)
+	l, err := newUnixListener(socketFilePath)
 	if err != nil {
 		return fmt.Errorf("error listen at %s: %v", socketFilePath, err)
 	}
@@ -86,7 +84,7 @@ func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath,
 	stop := make(chan struct{})
 
 	stackTriger()
-	err = runDebugServer(debugSocketListen)
+	err = runDebugServer(ctx, &svc.wg, debugSocketListen)
 	if err != nil {
 		return err
 	}
@@ -95,10 +93,15 @@ func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath,
 		serviceLog.Info("start serving", "path", socketFilePath)
 		err = grpcServer.Serve(l)
 		if err != nil {
-			logger.DefaultLogger.Errorf("error start grpc server: %v", err)
+			serviceLog.Error(err, "error serving grpc")
 			close(stop)
 		}
 	}()
+
+	err = ensureCNIConfig()
+	if err != nil {
+		return err
+	}
 
 	select {
 	case <-ctx.Done():
@@ -111,22 +114,63 @@ func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath,
 	return nil
 }
 
-func runDebugServer(debugSocketListen string) error {
+func newUnixListener(addr string) (net.Listener, error) {
+	err := os.MkdirAll(filepath.Dir(addr), 0700)
+	if err != nil {
+		return nil, fmt.Errorf("error create socket dir: %s, %w", addr, err)
+	}
+
+	err = syscall.Unlink(addr)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("error unlink socket file: %s, %w", addr, err)
+	}
+	mask := syscallUmask(0777)
+	defer syscallUmask(mask)
+
+	l, err := net.Listen("unix", addr)
+	if err != nil {
+		return nil, err
+	}
+	err = os.Chmod(addr, 0600)
+	if err != nil {
+		return nil, err
+	}
+
+	return l, nil
+}
+
+func ensureCNIConfig() error {
+	src, err := os.Open(filepath.Join(tmpCNIConfigPath, cinConfFile))
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(filepath.Join(hostCNIConfigPath, cinConfFile), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	_, err = io.Copy(dst, src)
+	if err != nil {
+		return err
+	}
+
+	serviceLog.Info("write cni conf success")
+
+	_ = os.Remove(filepath.Join(hostCNIConfigPath, prevCNIConfFile))
+	return nil
+}
+
+func runDebugServer(ctx context.Context, wg *sync.WaitGroup, debugSocketListen string) error {
 	var (
 		l   net.Listener
 		err error
 	)
 	if strings.HasPrefix(debugSocketListen, "unix://") {
 		debugSocketListen = strings.TrimPrefix(debugSocketListen, "unix://")
-		if err := os.MkdirAll(filepath.Dir(debugSocketListen), 0700); err != nil {
-			return err
-		}
-
-		if err := syscall.Unlink(debugSocketListen); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-
-		l, err = net.Listen("unix", debugSocketListen)
+		l, err = newUnixListener(debugSocketListen)
 		if err != nil {
 			return fmt.Errorf("error listen at %s: %v", debugSocketListen, err)
 		}
@@ -143,8 +187,16 @@ func runDebugServer(debugSocketListen string) error {
 	go func() {
 		err := http.Serve(l, http.DefaultServeMux)
 		if err != nil {
-			logger.DefaultLogger.Errorf("error start debug server: %v", err)
+			serviceLog.Error(err, "error start debug server")
 		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		<-ctx.Done()
+		_ = l.Close()
+
+		wg.Done()
 	}()
 
 	return nil

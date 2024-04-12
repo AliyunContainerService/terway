@@ -13,8 +13,6 @@ chmod +x /opt/cni/bin/cilium-cni
 cp /tmp/eni/eni_conf /etc/eni/eni.json
 
 terway-cli cni /tmp/eni/10-terway.conflist /tmp/eni/10-terway.conf --output /etc/cni/net.d/10-terway.conflist
-# remove legacy cni config
-rm -f /etc/cni/net.d/10-terway.conf
 
 node_capabilities=/var/run/eni/node_capabilities
 if [ ! -f "$node_capabilities" ]; then
