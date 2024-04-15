@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -103,21 +102,30 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		}
 		vswID = vsw.ID
 
-		eni, innerErr = a.openAPI.CreateNetworkInterface(ctx, trunk, erdma, vswID, a.securityGroupIDs, a.resourceGroupID, ipv4, ipv6, a.eniTags)
+		bo := backoff.Backoff(backoff.ENICreate)
+		option := &client.CreateNetworkInterfaceOptions{
+			NetworkInterfaceOptions: &client.NetworkInterfaceOptions{
+				Trunk:            trunk,
+				ERDMA:            erdma,
+				SecurityGroupIDs: a.securityGroupIDs,
+				IPv6Count:        ipv6,
+				IPCount:          ipv4,
+				VSwitchID:        vswID,
+				InstanceID:       a.instanceID,
+				Tags:             a.eniTags,
+				ResourceGroupID:  a.resourceGroupID,
+			},
+			Backoff: &bo,
+		}
+
+		eni, innerErr = a.openAPI.CreateNetworkInterface(ctx, option)
 		if innerErr != nil {
-			if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
-				return true, innerErr
-			}
-			if apiErr.ErrAssert(apiErr.ErrSecurityGroupInstanceLimitExceed, innerErr) {
-				return true, innerErr
-			}
-			if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
+			if apiErr.ErrorCodeIs(innerErr, apiErr.InvalidVSwitchIDIPNotEnough) {
 				a.vsw.Block(vswID)
 				return false, nil
 			}
-			return false, nil
+			return true, innerErr
 		}
-
 		return true, nil
 	})
 
@@ -226,27 +234,18 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 func (a *Aliyun) AssignNIPv4(eniID string, count int, mac string) ([]netip.Addr, error) {
 	// 1. assign ip
 	var ips []netip.Addr
-	var err, innerErr error
-	idempotentKey := uuid.NewString()
+	var err error
 
-	err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
-		ips, innerErr = a.openAPI.AssignPrivateIPAddress(ctx, eniID, count, idempotentKey)
-		if innerErr != nil {
-			if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
-				return true, innerErr
-			}
-			if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
-				return true, innerErr
-			}
-			return false, nil
-		}
-		return true, nil
-	})
+	bo := backoff.Backoff(backoff.ENIIPOps)
+	option := &client.AssignPrivateIPAddressOptions{
+		Backoff: &bo,
+		NetworkInterfaceOptions: &client.NetworkInterfaceOptions{
+			NetworkInterfaceID: eniID,
+			IPCount:            count,
+		}}
 
+	ips, err = a.openAPI.AssignPrivateIPAddress(a.ctx, option)
 	if err != nil {
-		if innerErr != nil {
-			return ips, innerErr
-		}
 		return nil, err
 	}
 
@@ -266,27 +265,18 @@ func (a *Aliyun) AssignNIPv4(eniID string, count int, mac string) ([]netip.Addr,
 func (a *Aliyun) AssignNIPv6(eniID string, count int, mac string) ([]netip.Addr, error) {
 	// 1. assign ip
 	var ips []netip.Addr
-	var err, innerErr error
-	idempotentKey := uuid.NewString()
+	var err error
 
-	err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
-		ips, innerErr = a.openAPI.AssignIpv6Addresses(ctx, eniID, count, idempotentKey)
-		if innerErr != nil {
-			if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
-				return true, innerErr
-			}
-			if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
-				return true, innerErr
-			}
-			return false, nil
-		}
-		return true, nil
-	})
+	bo := backoff.Backoff(backoff.ENIIPOps)
+	option := &client.AssignIPv6AddressesOptions{
+		Backoff: &bo,
+		NetworkInterfaceOptions: &client.NetworkInterfaceOptions{
+			NetworkInterfaceID: eniID,
+			IPv6Count:          count,
+		}}
 
+	ips, err = a.openAPI.AssignIpv6Addresses(a.ctx, option)
 	if err != nil {
-		if innerErr != nil {
-			return ips, innerErr
-		}
 		return nil, err
 	}
 

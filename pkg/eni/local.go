@@ -1,6 +1,6 @@
 package eni
 
-//go:generate stringer -type=status -trimprefix=status
+//go:generate stringer -type=eniStatus -trimprefix=status
 
 import (
 	"context"
@@ -881,14 +881,14 @@ func (l *Local) errorHandleLocked(err error) {
 	}
 
 	_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, "AllocIPFailed", err.Error())
-	if apiErr.ErrAssert(apiErr.ErrEniPerInstanceLimitExceeded, err) {
+	if apiErr.ErrorCodeIs(err, apiErr.ErrEniPerInstanceLimitExceeded) {
 		next := time.Now().Add(1 * time.Minute)
 		if next.After(l.ipAllocInhibitExpireAt) {
 			l.ipAllocInhibitExpireAt = next
 		}
 	}
 
-	if apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, err) {
+	if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough) {
 		next := time.Now().Add(10 * time.Minute)
 		if next.After(l.ipAllocInhibitExpireAt) {
 			l.ipAllocInhibitExpireAt = next

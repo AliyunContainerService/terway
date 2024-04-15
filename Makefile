@@ -94,6 +94,10 @@ build-push-terway-controlplane:
 	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway-controlplane:$(GIT_COMMIT_SHORT) -f Dockerfile.controlplane .
 
 ##@ Dependencies
+.PHONY: go-generate
+go-generate:
+	@echo "Running go generate"
+	@go generate ./...
 
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin

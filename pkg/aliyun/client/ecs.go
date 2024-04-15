@@ -9,14 +9,12 @@ import (
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
-	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/flowcontrol"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
-	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 )
@@ -25,7 +23,8 @@ var _ VPC = &OpenAPI{}
 var _ ECS = &OpenAPI{}
 
 type OpenAPI struct {
-	ClientSet credential.Client
+	ClientSet        credential.Client
+	IdempotentKeyGen IdempotentKeyGen
 
 	ReadOnlyRateLimiter flowcontrol.RateLimiter
 	MutatingRateLimiter flowcontrol.RateLimiter
@@ -34,54 +33,30 @@ type OpenAPI struct {
 func New(c credential.Client, readOnly, mutating flowcontrol.RateLimiter) (*OpenAPI, error) {
 	return &OpenAPI{
 		ClientSet:           c,
+		IdempotentKeyGen:    NewIdempotentKeyGenerator(),
 		ReadOnlyRateLimiter: readOnly,
 		MutatingRateLimiter: mutating,
 	}, nil
 }
 
-// CreateNetworkInterface instanceType Secondary Trunk
-func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk, erdma bool, vSwitch string, securityGroups []string, resourceGroupID string, ipCount, ipv6Count int, eniTags map[string]string) (*NetworkInterface, error) {
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "CreateNetworkInterface",
-		LogFieldVSwitchID, vSwitch,
-		LogFieldSgID, securityGroups,
-		LogFieldResourceGroupID, resourceGroupID,
-	)
-	req := ecs.CreateCreateNetworkInterfaceRequest()
-	req.ClientToken = string(uuid.NewUUID())
-	req.VSwitchId = vSwitch
-	req.InstanceType = ENITypeSecondary
-	if trunk {
-		req.InstanceType = ENITypeTrunk
-	}
-	if erdma {
-		req.NetworkInterfaceTrafficMode = ENITrafficModeRDMA
-	}
-	req.SecurityGroupIds = &securityGroups
-	req.NetworkInterfaceName = generateEniName()
-	req.ResourceGroupId = resourceGroupID
-	req.Description = eniDescription
-	if ipCount > 1 {
-		req.SecondaryPrivateIpAddressCount = requests.NewInteger(ipCount - 1)
-	}
-	if ipv6Count > 0 {
-		req.Ipv6AddressCount = requests.NewInteger(ipv6Count)
+func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error) {
+	option := &CreateNetworkInterfaceOptions{}
+	for _, opt := range opts {
+		opt.ApplyCreateNetworkInterface(option)
 	}
 
-	var tags []ecs.CreateNetworkInterfaceTag
-	for k, v := range eniTags {
-		tags = append(tags, ecs.CreateNetworkInterfaceTag{
-			Key:   k,
-			Value: v,
-		})
+	req, rollBackFunc, err := option.Finish(a.IdempotentKeyGen)
+	if err != nil {
+		return nil, err
 	}
-	req.Tag = &tags
+	l := LogFields(logf.FromContext(ctx), req)
 
 	var (
-		innerErr error
 		resp     *ecs.CreateNetworkInterfaceResponse
+		innerErr error
 	)
-	err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.ENICreate), func(ctx context.Context) (bool, error) {
+
+	err = wait.ExponentialBackoffWithContext(ctx, *option.Backoff, func(ctx context.Context) (bool, error) {
 		a.MutatingRateLimiter.Accept()
 		start := time.Now()
 		resp, innerErr = a.ClientSet.ECS().CreateNetworkInterface(req)
@@ -90,24 +65,20 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, trunk, erdma bool,
 			innerErr = apiErr.WarpError(innerErr)
 			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(innerErr)).Error(innerErr, "failed")
 
-			if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) ||
-				apiErr.ErrAssert(apiErr.ErrSecurityGroupInstanceLimitExceed, innerErr) ||
-				apiErr.ErrAssert(apiErr.InvalidVSwitchIDIPNotEnough, innerErr) {
-				return false, innerErr
+			if apiErr.ErrorIs(innerErr, apiErr.IsURLError, apiErr.WarpFn(apiErr.ErrThrottling, apiErr.ErrInternalError)) {
+				return false, nil
 			}
-			return false, nil
+
+			return true, innerErr
 		}
+
 		return true, nil
 	})
+
 	if err != nil {
-		fmtErr := fmt.Sprintf("error create eni, %v", innerErr)
-		return nil, fmt.Errorf("%s, %w", fmtErr, err)
+		rollBackFunc()
 	}
 
-	l.WithValues(
-		LogFieldENIID, resp.NetworkInterfaceId,
-		LogFieldRequestID, resp.RequestId,
-	).Info("create ENI")
 	return FromCreateResp(resp), err
 }
 
@@ -209,7 +180,7 @@ func (a *OpenAPI) DetachNetworkInterface(ctx context.Context, eniID, instanceID,
 	metric.OpenAPILatency.WithLabelValues("DetachNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
-		if apiErr.ErrAssert(apiErr.ErrInvalidENINotFound, err) {
+		if apiErr.ErrorCodeIs(err, apiErr.ErrInvalidENINotFound) {
 			return nil
 		}
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "detach ENI failed")
@@ -273,34 +244,49 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 	return eniInfo, nil
 }
 
-// AssignPrivateIPAddress assign secondary ip
-func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, eniID string, count int, idempotentKey string) ([]netip.Addr, error) {
-	req := ecs.CreateAssignPrivateIpAddressesRequest()
-	req.NetworkInterfaceId = eniID
-	req.SecondaryPrivateIpAddressCount = requests.NewInteger(count)
-	req.ClientToken = idempotentKey
+func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]netip.Addr, error) {
+	option := &AssignPrivateIPAddressOptions{}
+	for _, opt := range opts {
+		opt.ApplyAssignPrivateIPAddress(option)
+	}
 
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "AssignPrivateIpAddresses",
-		LogFieldENIID, eniID,
-		LogFieldSecondaryIPCount, count,
+	req, rollBackFunc, err := option.Finish(a.IdempotentKeyGen)
+	if err != nil {
+		return nil, err
+	}
+	l := LogFields(logf.FromContext(ctx), req)
+
+	var (
+		resp     *ecs.AssignPrivateIpAddressesResponse
+		innerErr error
 	)
-	start := time.Now()
-	resp, err := a.ClientSet.ECS().AssignPrivateIpAddresses(req)
-	metric.OpenAPILatency.WithLabelValues("AssignPrivateIpAddresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
-	if err != nil {
-		err = apiErr.WarpError(err)
-		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
-		return nil, err
-	}
-	ips, err := ip.ToIPAddrs(resp.AssignedPrivateIpAddressesSet.PrivateIpSet.PrivateIpAddress)
-	if err != nil {
-		l.WithValues(LogFieldRequestID, resp.RequestId).Error(err, "failed")
-		return nil, err
-	}
-	l.WithValues(LogFieldRequestID, resp.RequestId).Info("assign private ip", "ips", strings.Join(resp.AssignedPrivateIpAddressesSet.PrivateIpSet.PrivateIpAddress, ","))
 
-	return ips, nil
+	err = wait.ExponentialBackoffWithContext(ctx, *option.Backoff, func(ctx context.Context) (bool, error) {
+		a.MutatingRateLimiter.Accept()
+		start := time.Now()
+		resp, innerErr = a.ClientSet.ECS().AssignPrivateIpAddresses(req)
+		metric.OpenAPILatency.WithLabelValues("AssignPrivateIpAddresses", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
+		if innerErr != nil {
+			innerErr = apiErr.WarpError(innerErr)
+			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(innerErr)).Error(innerErr, "failed")
+
+			if apiErr.ErrorIs(innerErr, apiErr.IsURLError, apiErr.WarpFn(apiErr.ErrThrottling, apiErr.ErrInternalError)) {
+				return false, nil
+			}
+
+			return true, innerErr
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		rollBackFunc()
+	}
+
+	ips, err := ip.ToIPAddrs(resp.AssignedPrivateIpAddressesSet.PrivateIpSet.PrivateIpAddress)
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("assign private ip", "ips", ips)
+
+	return ips, err
 }
 
 // UnAssignPrivateIPAddresses remove ip from eni
@@ -326,7 +312,7 @@ func (a *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, 
 
 	if err != nil {
 		err = apiErr.WarpError(err)
-		if apiErr.ErrAssert(apiErr.ErrInvalidIPIPUnassigned, err) || apiErr.ErrAssert(apiErr.ErrInvalidENINotFound, err) {
+		if apiErr.ErrorCodeIs(err, apiErr.ErrInvalidIPIPUnassigned, apiErr.ErrInvalidENINotFound) {
 			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Info("success")
 			return nil
 		}
@@ -339,33 +325,49 @@ func (a *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, 
 }
 
 // AssignIpv6Addresses assign ipv6 address
-func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, eniID string, count int, idempotentKey string) ([]netip.Addr, error) {
-	req := ecs.CreateAssignIpv6AddressesRequest()
-	req.NetworkInterfaceId = eniID
-	req.Ipv6AddressCount = requests.NewInteger(count)
-	req.ClientToken = idempotentKey
+func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6AddressesOption) ([]netip.Addr, error) {
+	option := &AssignIPv6AddressesOptions{}
+	for _, opt := range opts {
+		opt.ApplyAssignIPv6Addresses(option)
+	}
 
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "AssignIpv6Addresses",
-		LogFieldENIID, eniID,
-		LogFieldSecondaryIPCount, count,
+	req, rollBackFunc, err := option.Finish(a.IdempotentKeyGen)
+	if err != nil {
+		return nil, err
+	}
+	l := LogFields(logf.FromContext(ctx), req)
+
+	var (
+		resp     *ecs.AssignIpv6AddressesResponse
+		innerErr error
 	)
-	start := time.Now()
-	resp, err := a.ClientSet.ECS().AssignIpv6Addresses(req)
-	metric.OpenAPILatency.WithLabelValues("AssignIpv6Addresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
-	if err != nil {
-		err = apiErr.WarpError(err)
-		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
-		return nil, err
-	}
-	ips, err := ip.ToIPAddrs(resp.Ipv6Sets.Ipv6Address)
-	if err != nil {
-		l.WithValues(LogFieldRequestID, resp.RequestId).Error(err, "failed")
-		return nil, err
-	}
-	l.WithValues(LogFieldRequestID, resp.RequestId).Info("assign ipv6 ip", "ips", strings.Join(resp.Ipv6Sets.Ipv6Address, ","))
 
-	return ips, nil
+	err = wait.ExponentialBackoffWithContext(ctx, *option.Backoff, func(ctx context.Context) (bool, error) {
+		a.MutatingRateLimiter.Accept()
+		start := time.Now()
+		resp, innerErr = a.ClientSet.ECS().AssignIpv6Addresses(req)
+		metric.OpenAPILatency.WithLabelValues("AssignIpv6Addresses", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
+		if innerErr != nil {
+			innerErr = apiErr.WarpError(innerErr)
+			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(innerErr)).Error(innerErr, "failed")
+
+			if apiErr.ErrorIs(innerErr, apiErr.IsURLError, apiErr.WarpFn(apiErr.ErrThrottling, apiErr.ErrInternalError)) {
+				return false, nil
+			}
+
+			return true, innerErr
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		rollBackFunc()
+	}
+
+	ips, err := ip.ToIPAddrs(resp.Ipv6Sets.Ipv6Address)
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("assign ipv6", "ips", ips)
+
+	return ips, err
 }
 
 // UnAssignIpv6Addresses remove ip from eni
@@ -390,7 +392,7 @@ func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips [
 
 	if err != nil {
 		err = apiErr.WarpError(err)
-		if apiErr.ErrAssert(apiErr.ErrInvalidIPIPUnassigned, err) || apiErr.ErrAssert(apiErr.ErrInvalidENINotFound, err) {
+		if apiErr.ErrorCodeIs(err, apiErr.ErrInvalidIPIPUnassigned, apiErr.ErrInvalidENINotFound) {
 			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Info("success")
 			return nil
 		}

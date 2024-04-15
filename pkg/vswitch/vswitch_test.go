@@ -22,35 +22,34 @@ import (
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client/fake"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 )
 
 func TestSwitchPool_GetOne(t *testing.T) {
-	api := &fake.OpenAPI{
-		VSwitches: make(map[string]vpc.VSwitch),
-	}
-	api.VSwitches["vsw-1"] = vpc.VSwitch{
+	openAPI := mocks.NewVPC(t)
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
 		VSwitchId:               "vsw-1",
 		ZoneId:                  "zone-1",
 		AvailableIpAddressCount: 10,
-	}
-	api.VSwitches["vsw-2"] = vpc.VSwitch{
+	}, nil).Maybe()
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&vpc.VSwitch{
 		VSwitchId:               "vsw-2",
 		ZoneId:                  "zone-2",
 		AvailableIpAddressCount: 10,
-	}
-	api.VSwitches["vsw-3"] = vpc.VSwitch{
+	}, nil).Maybe()
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(&vpc.VSwitch{
 		VSwitchId:               "vsw-3",
 		ZoneId:                  "zone-2",
 		AvailableIpAddressCount: 10,
-	}
+	}, nil).Maybe()
 
 	switchPool, err := NewSwitchPool(100, "100m")
 	assert.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
-		sw, err := switchPool.GetOne(context.Background(), api, "zone-2", []string{"vsw-2", "vsw-3"}, &SelectOptions{
+		sw, err := switchPool.GetOne(context.Background(), openAPI, "zone-2", []string{"vsw-2", "vsw-3"}, &SelectOptions{
 			IgnoreZone:          false,
 			VSwitchSelectPolicy: VSwitchSelectionPolicyOrdered,
 		})
@@ -60,7 +59,7 @@ func TestSwitchPool_GetOne(t *testing.T) {
 
 	ids := make(map[string]struct{})
 	for i := 0; i < 10; i++ {
-		sw, err := switchPool.GetOne(context.Background(), api, "zone-2", []string{"vsw-2", "vsw-3"}, &SelectOptions{
+		sw, err := switchPool.GetOne(context.Background(), openAPI, "zone-2", []string{"vsw-2", "vsw-3"}, &SelectOptions{
 			IgnoreZone:          false,
 			VSwitchSelectPolicy: VSwitchSelectionPolicyRandom,
 		})

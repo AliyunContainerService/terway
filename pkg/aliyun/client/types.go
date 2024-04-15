@@ -1,12 +1,15 @@
 package client
 
 import (
-	"encoding/hex"
-	"math/rand"
-	"time"
+	"errors"
+	"reflect"
+	"strings"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"github.com/go-logr/logr"
 )
+
+var ErrInvalidArgs = errors.New("invalid args")
 
 // log fields
 const (
@@ -28,15 +31,6 @@ const (
 	eniDescription    = "interface create by terway"
 	maxSinglePageSize = 500
 )
-
-func generateEniName() string {
-	b := make([]byte, 3)
-	_, err := rand.New(rand.NewSource(time.Now().UnixNano())).Read(b)
-	if err != nil {
-		panic(err)
-	}
-	return eniNamePrefix + hex.EncodeToString(b)
-}
 
 // status for eni
 const (
@@ -121,4 +115,46 @@ func FromDescribeResp(in *ecs.NetworkInterfaceSet) *NetworkInterface {
 		Type:                        in.Type,
 		CreationTime:                in.CreationTime,
 	}
+}
+
+// LogFields function enhances the provided logger with key-value pairs extracted from the fields of the given object.
+//
+// Parameters:
+// l     - The original logr.Logger instance to be augmented with object field information.
+// obj   - An arbitrary object whose fields will be inspected for logging. Must be of a struct type.
+//
+// Return Value:
+// Returns an updated logr.Logger instance that includes key-value pairs for non-empty, non-zero fields of the input object.
+// The original logger `l` is modified in place, and the returned logger is a reference to the same instance.
+func LogFields(l logr.Logger, obj any) logr.Logger {
+	r := l
+	t := reflect.TypeOf(obj)
+
+	realObj := obj
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+		objValue := reflect.ValueOf(obj).Elem()
+		realObj = objValue.Interface()
+	}
+
+	if t.Kind() == reflect.Struct {
+		r.WithValues(LogFieldAPI, strings.TrimSuffix(t.Name(), "Request"))
+	}
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		tagValue := field.Tag.Get("name")
+		if tagValue == "" {
+			continue
+		}
+
+		fieldValue := reflect.ValueOf(realObj).FieldByName(field.Name)
+		if !fieldValue.IsValid() || fieldValue.IsZero() {
+			continue
+		}
+
+		r = r.WithValues(field.Name, fieldValue.Interface())
+	}
+	return r
 }
