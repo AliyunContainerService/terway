@@ -316,3 +316,7 @@ slave device.
 ### DingTalk
 
 Join `DingTalk` group by `DingTalkGroup` id "35924643".
+
+## Security
+
+Please report vulnerabilities by email to [kubernetes-security@service.aliyun.com](mailto:kubernetes-security@service.aliyun.com). Also see our [SECURITY.md](SECURITY.md) file for details.
