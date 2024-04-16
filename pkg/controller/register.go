@@ -33,10 +33,9 @@ type Interface interface {
 }
 
 type ControllerCtx struct {
-	Config         *controlplane.Config
-	VSwitchPool    *vswitch.SwitchPool
-	AliyunClient   Interface
-	DelegateClient Interface
+	Config       *controlplane.Config
+	VSwitchPool  *vswitch.SwitchPool
+	AliyunClient Interface
 }
 
 type Creator func(mgr manager.Manager, ctrlCtx *ControllerCtx) error

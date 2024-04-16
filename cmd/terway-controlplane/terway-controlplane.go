@@ -39,7 +39,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/cert"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/all"
-	"github.com/AliyunContainerService/terway/pkg/controller/delegate"
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/utils"
@@ -160,10 +159,9 @@ func main() {
 	}
 
 	ctrlCtx := &register.ControllerCtx{
-		Config:         cfg,
-		VSwitchPool:    vSwitchCtrl,
-		AliyunClient:   aliyunClient,
-		DelegateClient: delegate.NewDelegate(aliyunClient, mgr.GetClient()),
+		Config:       cfg,
+		VSwitchPool:  vSwitchCtrl,
+		AliyunClient: aliyunClient,
 	}
 
 	for name := range register.Controllers {

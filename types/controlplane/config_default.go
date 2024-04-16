@@ -51,7 +51,6 @@ type Config struct {
 	ClusterID string `json:"clusterID" validate:"required"`
 	VPCID     string `json:"vpcID" validate:"required"`
 
-	EnableENIPool      bool   `json:"enableENIPool"`
 	EnableTrunk        *bool  `json:"enableTrunk,omitempty"`
 	EnableDevicePlugin bool   `json:"enableDevicePlugin"`
 	IPStack            string `json:"ipStack,omitempty" validate:"oneof=ipv4 ipv6 dual" mod:"default=ipv4"`
