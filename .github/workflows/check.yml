@@ -20,7 +20,7 @@ jobs:
       run: |
         go=$(which go)
         sudo make test
-    - uses: codecov/codecov-action@v3
+    - uses: codecov/codecov-action@v4
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.txt
@@ -50,8 +50,9 @@ jobs:
     - uses: actions/setup-go@v5
       with:
         go-version: 1.21.3
+        cache: false
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v3
+      uses: golangci/golangci-lint-action@v4
       with:
         version: v1.55
         args: --config=.golangci.yml

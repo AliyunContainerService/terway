@@ -5,13 +5,12 @@ import (
 	_ "embed"
 	"fmt"
 
+	"golang.org/x/mod/semver"
 	"k8s.io/apimachinery/pkg/api/errors"
-
-	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/yaml"
 )
@@ -60,32 +59,21 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 	return ciliumCRD
 }
 
-func createCRD(cs apiextensionsclient.Interface, name string) error {
-	log.Info("creating", "crd", name)
-	client := cs.ApiextensionsV1().CustomResourceDefinitions()
-	crd := getCRD(name)
-	_, err := client.Create(context.TODO(), &crd, metav1.CreateOptions{})
-	if err == nil {
-		return nil
-	}
-	if errors.IsAlreadyExists(err) {
-		log.Info("already exist", "name", name)
-		return nil
-	}
-	return err
-}
-
-func createOrUpdateCRD(cs apiextensionsclient.Interface, name string) error {
+func CreateOrUpdateCRD(ctx context.Context, c client.Client, name string) error {
 	log.Info("syncing", "crd", name)
-	client := cs.ApiextensionsV1().CustomResourceDefinitions()
-	crd := getCRD(name)
-	exist, err := client.Get(context.TODO(), name, metav1.GetOptions{})
+
+	expect := getCRD(name)
+	exist := &apiextensionsv1.CustomResourceDefinition{}
+	err := c.Get(ctx, client.ObjectKey{
+		Name: expect.Name,
+	}, exist)
+
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			return err
 		}
 		log.Info("creating", "crd", name)
-		_, err = client.Create(context.TODO(), &crd, metav1.CreateOptions{})
+		err = c.Create(ctx, &expect)
 		if err == nil {
 			return nil
 		}
@@ -95,37 +83,19 @@ func createOrUpdateCRD(cs apiextensionsclient.Interface, name string) error {
 		return err
 	}
 
-	if exist.Annotations[crdVersionKey] == crd.Annotations[crdVersionKey] {
+	result := semver.Compare(exist.Annotations[crdVersionKey], expect.Annotations[crdVersionKey])
+	if result <= 0 {
 		return nil
 	}
-	crd.CreationTimestamp = exist.CreationTimestamp
-	crd.ResourceVersion = exist.ResourceVersion
-	crd.UID = exist.UID
-	crd.Generation = exist.Generation
-	_, err = client.Update(context.TODO(), &crd, metav1.UpdateOptions{})
+	log.Info("update crd", "exist", exist.Annotations[crdVersionKey], "expect", expect.Annotations[crdVersionKey])
+
+	update := exist.DeepCopy()
+	_, err = controllerutil.CreateOrPatch(ctx, c, update, func() error {
+		update.Status = expect.Status
+		update.Spec = expect.Spec
+		update.Annotations = expect.Annotations
+		return nil
+	})
+
 	return err
-}
-
-// RegisterCRDs will create all crds if not present
-func RegisterCRDs() error {
-	crds := []string{CRDPodENI, CRDPodNetworking}
-	for _, crd := range crds {
-		err := createOrUpdateCRD(k8sclient.APIExtensionsClient, crd)
-		if err != nil {
-			return err
-		}
-	}
-	log.Info("syncing crd success")
-	return nil
-}
-
-func RegisterCRD(crds []string) error {
-	for _, crd := range crds {
-		err := createCRD(k8sclient.APIExtensionsClient, crd)
-		if err != nil {
-			return err
-		}
-	}
-	log.Info("create crd success")
-	return nil
 }

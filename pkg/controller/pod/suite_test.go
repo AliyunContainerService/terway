@@ -114,10 +114,9 @@ var _ = BeforeSuite(func() {
 		},
 	}
 	err = register.Controllers[controllerName].Creator(k8sManager, &register.ControllerCtx{
-		Config:         &controlplane.Config{},
-		VSwitchPool:    vsw,
-		AliyunClient:   fakeClient,
-		DelegateClient: fakeClient,
+		Config:       &controlplane.Config{},
+		VSwitchPool:  vsw,
+		AliyunClient: fakeClient,
 	})
 	Expect(err).ToNot(HaveOccurred())
 

@@ -19,7 +19,7 @@ limitations under the License.
 package register
 
 import (
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 
@@ -28,15 +28,14 @@ import (
 
 // Interface aliyun client for terway-controlplane
 type Interface interface {
-	client.VPC
-	client.ECS
+	aliyunClient.VPC
+	aliyunClient.ECS
 }
 
 type ControllerCtx struct {
-	Config         *controlplane.Config
-	VSwitchPool    *vswitch.SwitchPool
-	AliyunClient   Interface
-	DelegateClient Interface
+	Config       *controlplane.Config
+	VSwitchPool  *vswitch.SwitchPool
+	AliyunClient Interface
 }
 
 type Creator func(mgr manager.Manager, ctrlCtx *ControllerCtx) error

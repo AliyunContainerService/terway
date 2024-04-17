@@ -600,7 +600,7 @@ func (n *networkService) migrateEIP(ctx context.Context, objs []interface{}) err
 
 			var err error
 			once.Do(func() {
-				err = crds.RegisterCRD([]string{crds.CRDPodEIP})
+				err = crds.CreateOrUpdateCRD(ctx, n.k8s.GetClient(), crds.CRDPodEIP)
 			})
 			if err != nil {
 				return err

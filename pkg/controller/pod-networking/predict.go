@@ -45,8 +45,8 @@ func (p *predicateForPodnetwokringEvent) Update(e event.UpdateEvent) bool {
 
 func changed(pn *v1beta1.PodNetworking) bool {
 	expect := sets.New[string](pn.Spec.VSwitchOptions...)
-	got := sets.New[string](lo.Map([]v1beta1.VSwitch{}, func(item v1beta1.VSwitch, index int) string {
+	got := sets.New[string](lo.Map(pn.Status.VSwitches, func(item v1beta1.VSwitch, index int) string {
 		return item.ID
 	})...)
-	return expect.Equal(got)
+	return !expect.Equal(got)
 }

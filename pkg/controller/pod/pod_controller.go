@@ -27,7 +27,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
-	eni_pool "github.com/AliyunContainerService/terway/pkg/controller/pool"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
@@ -59,7 +58,7 @@ func init() {
 		crdMode := controlplane.GetConfig().IPAMType == types.IPAMTypeCRD
 
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
-			Reconciler:              NewReconcilePod(mgr, ctrlCtx.DelegateClient, ctrlCtx.VSwitchPool, crdMode),
+			Reconciler:              NewReconcilePod(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool, crdMode),
 			MaxConcurrentReconciles: controlplane.GetConfig().PodMaxConcurrent,
 		})
 		if err != nil {
@@ -253,10 +252,6 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		},
 	}
 
-	if controlplane.GetConfig().EnableENIPool {
-		ctx = common.NodeNameWithCtx(ctx, nodeInfo.NodeName)
-	}
-
 	defer func() {
 		if err != nil {
 			l.Error(err, "error ,will roll back all created eni")
@@ -268,13 +263,6 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	}()
 
 	podENI.Spec.Zone = nodeInfo.ZoneID
-
-	if controlplane.GetConfig().EnableENIPool {
-		if cacheable(&allocs, allocType) {
-			ctx = eni_pool.AllocTypeWithCtx(ctx, eni_pool.AllocPolicyPreferPool)
-			podENI.Annotations[types.ENIAllocFromPool] = ""
-		}
-	}
 
 	// 2.2 create eni
 	err = m.createENI(ctx, &allocs, allocType, pod, podENI)
@@ -672,29 +660,4 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 	close(ch)
 	<-done
 	return err
-}
-
-// cacheable check this allocation is allowed to use cached eni resource
-func cacheable(allocs *[]*v1beta1.Allocation, allocType *v1beta1.AllocationType) bool {
-	// set ctx
-	if allocs == nil {
-		return false
-	}
-	if len(*allocs) != 1 {
-		return false
-	}
-	if allocType.Type == v1beta1.IPAllocTypeFixed {
-		return false
-	}
-	if len((*allocs)[0].ExtraConfig) > 0 {
-		return false
-	}
-
-	for _, v := range *allocs {
-		if v.ENI.ResourceGroupID != "" {
-			return false
-		}
-	}
-
-	return true
 }

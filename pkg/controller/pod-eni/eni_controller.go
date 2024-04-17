@@ -27,7 +27,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -61,7 +60,7 @@ const layout = "2006-01-02T15:04:05Z"
 
 func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
-		r := NewReconcilePod(mgr, ctrlCtx.DelegateClient)
+		r := NewReconcilePod(mgr, ctrlCtx.AliyunClient)
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
 			Reconciler:              r,
 			MaxConcurrentReconciles: controlplane.GetConfig().PodENIMaxConcurrent,
@@ -160,45 +159,6 @@ func (m *ReconcilePodENI) Reconcile(ctx context.Context, request reconcile.Reque
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, err
-	}
-
-	if controlplane.GetConfig().EnableENIPool {
-		nodeName := podENI.Labels[types.ENIRelatedNodeName]
-		if nodeName == "" {
-			// for legacy
-			nodes := &corev1.NodeList{}
-			labelSelector, _ := labels.Parse("type!=virtual-kubelet")
-			err = m.client.List(ctx, nodes, &client.ListOptions{
-				LabelSelector: labelSelector,
-			})
-			if err != nil {
-				return reconcile.Result{}, err
-			}
-			for _, n := range nodes.Items {
-				nodeInfo, err := common.NewNodeInfo(&n)
-				if err != nil {
-					return reconcile.Result{}, err
-				}
-				if nodeInfo.InstanceID == podENI.Status.InstanceID {
-					nodeName = n.Name
-					break
-				}
-			}
-		}
-		if nodeName != "" {
-			_, err = m.getNode(ctx, nodeName)
-			if err != nil {
-				if !k8sErr.IsNotFound(err) {
-					return reconcile.Result{}, err
-				}
-				// for node has gone , use default client
-			} else {
-				// set node name in ctx
-				l.Info("set ctx", "nodeName", nodeName)
-				ctx = common.NodeNameWithCtx(ctx, nodeName)
-			}
-		}
-		// use default client
 	}
 
 	if !podENI.DeletionTimestamp.IsZero() {
@@ -420,14 +380,6 @@ func (m *ReconcilePodENI) gcSecondaryENI(ctx context.Context) {
 		if networkInterface.Type != aliyunClient.ENITypeSecondary {
 			continue
 		}
-		// ignore eni with pool tag
-		if controlplane.GetConfig().EnableENIPool {
-			if m.eniFilter(networkInterface, map[string]string{
-				types.TagENIAllocPolicy: "pool",
-			}) {
-				continue
-			}
-		}
 
 		networkInterfaces = append(networkInterfaces, networkInterface)
 	}
@@ -453,14 +405,6 @@ func (m *ReconcilePodENI) gcMemberENI(ctx context.Context) {
 	for _, networkInterface := range enis {
 		if networkInterface.Type != aliyunClient.ENITypeMember {
 			continue
-		}
-		// ignore eni with pool tag
-		if controlplane.GetConfig().EnableENIPool {
-			if m.eniFilter(networkInterface, map[string]string{
-				types.TagENIAllocPolicy: "pool",
-			}) {
-				continue
-			}
 		}
 
 		networkInterfaces = append(networkInterfaces, networkInterface)
