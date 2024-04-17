@@ -11,6 +11,12 @@ endif
 
 GO_BUILD_TAGS ?= default_build,privileged
 
+REGISTRY ?= registry.cn-hangzhou.aliyuncs.com/acs
+GIT_COMMIT_SHORT ?= $(shell git rev-parse --short=8 HEAD 2>/dev/null)
+
+BUILD_PLATFORMS ?= linux/amd64,linux/arm64
+
+
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
 SHELL = /usr/bin/env bash -o pipefail
@@ -58,10 +64,34 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 ##@ Build
 
 .PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
-	go build --tags "$(GO_BUILD_TAGS)" -o bin/terwayd cmd/terway/main.go
-	go build --tags "$(GO_BUILD_TAGS)" -o bin/terway-controlplane cmd/terway-controlplane/terway-controlplane.go
-	go build --tags "$(GO_BUILD_TAGS)" -o bin/terway-cli ./cmd/terway-cli/
+build: manifests generate fmt vet build-terway build-terway-controlplane
+
+.PHONY: build-policy
+build-policy:
+	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:policy-$(GIT_COMMIT_SHORT) -f Dockerfile.policy .
+
+.PHONY: build-terway
+build-terway:
+	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:$(GIT_COMMIT_SHORT) -f Dockerfile .
+
+.PHONY: build-terway-controlplane
+build-terway-controlplane:
+	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway-controlplane:$(GIT_COMMIT_SHORT) -f Dockerfile.controlplane .
+
+.PHONY: build-push
+build-push: build-push-terway build-push-terway-controlplane
+
+.PHONY: build-push-policy
+build-push-policy:
+	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:policy-$(GIT_COMMIT_SHORT) -f Dockerfile.policy .
+
+.PHONY: build-push-terway
+build-push-terway:
+	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:$(GIT_COMMIT_SHORT) -f Dockerfile .
+
+.PHONY: build-terway-controlplane
+build-push-terway-controlplane:
+	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway-controlplane:$(GIT_COMMIT_SHORT) -f Dockerfile.controlplane .
 
 ##@ Dependencies
 
