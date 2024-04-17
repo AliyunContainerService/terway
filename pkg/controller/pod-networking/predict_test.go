@@ -25,16 +25,34 @@ func Test_changed(t *testing.T) {
 					Status: v1beta1.PodNetworkingStatus{
 						VSwitches: []v1beta1.VSwitch{
 							{
-								Zone: "var",
+								ID: "bar",
 							},
 							{
-								Zone: "foo",
+								ID: "foo",
 							},
 						},
 					},
 				},
 			},
 			want: false,
+		},
+		{
+			name: "modify",
+			args: args{
+				pn: &v1beta1.PodNetworking{
+					Spec: v1beta1.PodNetworkingSpec{
+						VSwitchOptions: []string{"foo", "bar"},
+					},
+					Status: v1beta1.PodNetworkingStatus{
+						VSwitches: []v1beta1.VSwitch{
+							{
+								ID: "var",
+							},
+						},
+					},
+				},
+			},
+			want: true,
 		},
 	}
 	for _, tt := range tests {

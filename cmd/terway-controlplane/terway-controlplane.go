@@ -19,8 +19,10 @@ package main
 import (
 	"flag"
 	"math/rand"
+	"os"
 	"time"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -28,8 +30,10 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	wh "sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	aliyun "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
@@ -55,6 +59,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
 	utilruntime.Must(networkv1beta1.AddToScheme(scheme))
 
 	metrics.Registry.MustRegister(metric.OpenAPILatency)
@@ -85,24 +90,39 @@ func main() {
 	backoff.OverrideBackoff(cfg.BackoffOverride)
 	utils.SetStsKinds(cfg.CustomStatefulWorkloadKinds)
 
+	log.Info("using config", "config", cfg)
+
 	restConfig := ctrl.GetConfigOrDie()
 	restConfig.QPS = cfg.KubeClientQPS
 	restConfig.Burst = cfg.KubeClientBurst
 	restConfig.UserAgent = version.UA
 	k8sclient.RegisterClients(restConfig)
 
-	log.Info("using config", "config", cfg)
-
-	err = crds.RegisterCRDs()
+	directClient, err := client.New(restConfig, client.Options{Scheme: scheme})
 	if err != nil {
-		panic(err)
+		log.Error(err, "unable to init k8s client")
+		os.Exit(1)
 	}
 
+	err = crds.CreateOrUpdateCRD(ctx, directClient, crds.CRDPodENI)
+	if err != nil {
+		log.Error(err, "unable sync crd")
+		os.Exit(1)
+	}
+	err = crds.CreateOrUpdateCRD(ctx, directClient, crds.CRDPodNetworking)
+	if err != nil {
+		log.Error(err, "unable sync crd")
+		os.Exit(1)
+	}
+
+	ws := wh.NewServer(wh.Options{
+		Port:    cfg.WebhookPort,
+		CertDir: cfg.CertDir,
+	})
 	options := ctrl.Options{
 		Scheme:                     scheme,
 		HealthProbeBindAddress:     cfg.HealthzBindAddress,
-		Port:                       cfg.WebhookPort,
-		CertDir:                    cfg.CertDir,
+		WebhookServer:              ws,
 		LeaderElection:             cfg.LeaderElection,
 		LeaderElectionID:           cfg.ControllerName,
 		LeaderElectionNamespace:    cfg.ControllerNamespace,
@@ -111,7 +131,7 @@ func main() {
 	}
 
 	if !cfg.DisableWebhook {
-		err = cert.SyncCert(cfg.ControllerNamespace, cfg.ControllerName, cfg.ClusterDomain, cfg.CertDir)
+		err = cert.SyncCert(ctx, directClient, cfg.ControllerNamespace, cfg.ControllerName, cfg.ClusterDomain, cfg.CertDir)
 		if err != nil {
 			panic(err)
 		}

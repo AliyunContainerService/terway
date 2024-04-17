@@ -661,28 +661,3 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 	<-done
 	return err
 }
-
-// cacheable check this allocation is allowed to use cached eni resource
-func cacheable(allocs *[]*v1beta1.Allocation, allocType *v1beta1.AllocationType) bool {
-	// set ctx
-	if allocs == nil {
-		return false
-	}
-	if len(*allocs) != 1 {
-		return false
-	}
-	if allocType.Type == v1beta1.IPAllocTypeFixed {
-		return false
-	}
-	if len((*allocs)[0].ExtraConfig) > 0 {
-		return false
-	}
-
-	for _, v := range *allocs {
-		if v.ENI.ResourceGroupID != "" {
-			return false
-		}
-	}
-
-	return true
-}

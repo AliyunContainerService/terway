@@ -4,6 +4,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.9.2
+    crd.alibabacloud.com/version: v0.1.0
   creationTimestamp: null
   name: podeips.alibabacloud.com
 spec:
@@ -74,8 +75,6 @@ spec:
           status:
             description: PodEIPStatus defines the observed state of PodEIP
             properties:
-              bandwidth:
-                type: string
               bandwidthPackageID:
                 description: BandwidthPackageID
                 type: string
@@ -91,8 +90,6 @@ spec:
               networkInterfaceID:
                 description: eni
                 type: string
-              period:
-                type: integer
               podLastSeen:
                 description: PodLastSeen is the timestamp when pod resource last seen
                 format: date-time

@@ -2,6 +2,7 @@ package types
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -17,6 +18,7 @@ var Scheme = runtime.NewScheme()
 func init() {
 	utilruntime.Must(corev1.AddToScheme(Scheme))
 	utilruntime.Must(aliv1beta1.AddToScheme(Scheme))
+	utilruntime.Must(apiextensionsv1.AddToScheme(Scheme))
 	utilruntime.Must(v1beta1.AddToScheme(Scheme))
 }
 

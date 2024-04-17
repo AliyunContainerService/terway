@@ -23,14 +23,12 @@ import (
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
-	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -102,6 +100,10 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 		return reconcile.Result{}, err
 	}
 
+	if !changed(old) && old.Status.Status == v1beta1.NetworkingStatusReady {
+		return reconcile.Result{}, nil
+	}
+
 	update := old.DeepCopy()
 	update.Status.UpdateAt = metav1.Now()
 
@@ -130,7 +132,7 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 		m.record.Eventf(update, corev1.EventTypeWarning, types.EventSyncPodNetworkingFailed, "Sync failed %s", err.Error())
 	}
 
-	err2 := m.updateStatus(ctx, update, old)
+	err2 := m.client.Status().Update(ctx, update)
 	if err != nil {
 		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 	}
@@ -140,20 +142,4 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 // NeedLeaderElection need election
 func (m *ReconcilePodNetworking) NeedLeaderElection() bool {
 	return true
-}
-
-func (m *ReconcilePodNetworking) updateStatus(ctx context.Context, update, old *v1beta1.PodNetworking) error {
-	err := wait.ExponentialBackoff(utils.DefaultPatchBackoff, func() (done bool, err error) {
-		innerErr := m.client.Status().Patch(ctx, update, client.MergeFrom(old))
-		if innerErr != nil {
-			if errors.IsNotFound(innerErr) {
-				l := log.FromContext(ctx)
-				l.Info("podNetworking is not found")
-				return true, nil
-			}
-			return false, err
-		}
-		return true, nil
-	})
-	return err
 }
