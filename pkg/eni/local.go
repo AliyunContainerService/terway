@@ -350,6 +350,9 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 
 	if l.enableIPv4 {
 		if lo.NoCache {
+			if len(l.ipv4)+l.allocatingV4 >= l.cap {
+				return nil, []Trace{{Condition: Full}}
+			}
 			expectV4 = 1
 		} else {
 			ipv4 := l.ipv4.PeekAvailable(cni.PodID)
@@ -363,6 +366,9 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 
 	if l.enableIPv6 {
 		if lo.NoCache {
+			if len(l.ipv6)+l.allocatingV6 >= l.cap {
+				return nil, []Trace{{Condition: Full}}
+			}
 			expectV6 = 1
 		} else {
 			ipv6 := l.ipv6.PeekAvailable(cni.PodID)
