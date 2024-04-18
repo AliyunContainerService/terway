@@ -277,14 +277,14 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	}
 
 	// 2.4 wait cr created
-	_ = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+	_ = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
 		podENI := &v1beta1.PodENI{}
 		err := m.client.Get(ctx, k8stypes.NamespacedName{
 			Namespace: pod.Namespace,
 			Name:      pod.Name,
 		}, podENI)
 		if err != nil {
-			return false, err
+			return false, nil
 		}
 		return true, nil
 	})
