@@ -24,7 +24,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/wait"
 
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/utils"
@@ -627,11 +629,24 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 		g.Go(func() error {
 			alloc := (*allocs)[ii]
 			ctx := common.WithCtx(ctx, alloc)
-
-			eni, err := m.aliyun.CreateNetworkInterface(ctx, false, false, alloc.ENI.VSwitchID, alloc.ENI.SecurityGroupIDs, alloc.ENI.ResourceGroupID, 1, ipv6Count, map[string]string{
-				types.TagKeyClusterID:               clusterID,
-				types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
-			})
+			bo := backoff.Backoff(backoff.ENICreate)
+			option := &aliyunClient.CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
+					Trunk:            false,
+					ERDMA:            false,
+					VSwitchID:        alloc.ENI.VSwitchID,
+					SecurityGroupIDs: alloc.ENI.SecurityGroupIDs,
+					ResourceGroupID:  alloc.ENI.ResourceGroupID,
+					IPCount:          1,
+					IPv6Count:        ipv6Count,
+					Tags: map[string]string{
+						types.TagKeyClusterID:               clusterID,
+						types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
+					},
+				},
+				Backoff: &bo,
+			}
+			eni, err := m.aliyun.CreateNetworkInterface(ctx, option)
 			if err != nil {
 				return fmt.Errorf("create eni with openAPI err, %w", err)
 			}

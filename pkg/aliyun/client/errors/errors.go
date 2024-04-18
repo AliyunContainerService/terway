@@ -3,11 +3,14 @@ package errors
 import (
 	"errors"
 	"fmt"
+	"net/url"
 
 	apiErr "github.com/aliyun/alibaba-cloud-sdk-go/sdk/errors"
 )
 
 const (
+	ErrInternalError = "InternalError"
+
 	ErrForbidden = "Forbidden.RAM"
 
 	// InvalidVSwitchIDIPNotEnough AssignPrivateIpAddresses const error message
@@ -37,20 +40,6 @@ const (
 	// ErrInvalidAllocationIDNotFound InvalidAllocationId.NotFound EIP not found
 	ErrInvalidAllocationIDNotFound = "InvalidAllocationId.NotFound"
 
-	// ErrIncorrectEIPStatus ..
-	// for API UnassociateEipAddress ReleaseEipAddress
-	ErrIncorrectEIPStatus = "IncorrectEipStatus"
-
-	// ErrAssociationDuplicated ..
-	// for API AssociateEipAddress
-	ErrAssociationDuplicated = "InvalidAssociation.Duplicated"
-
-	// ErrIPNotInCbwp for eip
-	ErrIPNotInCbwp = "OperationUnsupported.IpNotInCbwp"
-
-	// ErrTaskConflict for eip
-	ErrTaskConflict = "TaskConflict"
-
 	// ErrThrottling .
 	ErrThrottling = "Throttling"
 )
@@ -61,6 +50,7 @@ var (
 )
 
 // ErrAssert check err is match errCode
+// DEPRECATED
 func ErrAssert(errCode string, err error) bool {
 	var respErr apiErr.Error
 	ok := errors.As(err, &respErr)
@@ -70,12 +60,17 @@ func ErrAssert(errCode string, err error) bool {
 	return false
 }
 
-// ErrStatusCodeAssert check err is match errCode
-func ErrStatusCodeAssert(code int, err error) bool {
+func ErrorCodeIs(err error, codes ...string) bool {
 	var respErr apiErr.Error
 	ok := errors.As(err, &respErr)
-	if ok {
-		return respErr.HttpStatus() == code
+	if !ok {
+		return false
+	}
+
+	for _, code := range codes {
+		if respErr.ErrorCode() == code {
+			return true
+		}
 	}
 	return false
 }
@@ -117,4 +112,31 @@ func WarpError(err error) error {
 	}
 
 	return &E{e: respErr}
+}
+
+// IsURLError if there is conn problem
+func IsURLError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var urlErr *url.Error
+	return errors.As(err, &urlErr)
+}
+
+func WarpFn(codes ...string) CheckErr {
+	return func(err error) bool {
+		return ErrorCodeIs(err, codes...)
+	}
+}
+
+type CheckErr = func(err error) bool
+
+func ErrorIs(err error, fns ...CheckErr) bool {
+	for _, fn := range fns {
+		if fn(err) {
+			return true
+		}
+	}
+	return false
 }
