@@ -200,3 +200,17 @@ func TestLocal_DisposeWholeENI(t *testing.T) {
 	assert.Equal(t, 1, n)
 	assert.Equal(t, statusDeleting, local.status)
 }
+
+func TestLocal_Allocate_NoCache(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true})
+
+	request := &LocalIPRequest{NoCache: true}
+	cni := &daemon.CNI{PodID: "pod-1"}
+
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.2"), false))
+
+	_, resp := local.Allocate(context.Background(), cni, request)
+
+	assert.Equal(t, 1, len(resp))
+}
