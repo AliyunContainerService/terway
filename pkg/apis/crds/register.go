@@ -40,13 +40,16 @@ var (
 
 func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 	var crdBytes []byte
+	var version string
 	switch name {
 	case CRDPodENI:
 		crdBytes = crdsPodENI
+		version = "v0.1.0"
 	case CRDPodNetworking:
 		crdBytes = crdsPodNetworking
 	case CRDPodEIP:
 		crdBytes = crdsPodEIP
+		version = "v0.1.0"
 	default:
 		panic(fmt.Sprintf("crd %s name not exist", name))
 	}
@@ -56,6 +59,12 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 		panic(fmt.Sprintf("error unmarshalling CRD %s,%s", name, err.Error()))
 	}
 
+	if ciliumCRD.Annotations == nil {
+		ciliumCRD.Annotations = make(map[string]string)
+	}
+	if version != "" {
+		ciliumCRD.Annotations[crdVersionKey] = version
+	}
 	return ciliumCRD
 }
 
