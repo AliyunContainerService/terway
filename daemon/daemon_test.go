@@ -256,3 +256,66 @@ func Test_initTrunk(t *testing.T) {
 		})
 	}
 }
+
+func TestFilterENINotFound(t *testing.T) {
+	podResources := []daemon.PodResources{
+		{
+			Resources: []daemon.ResourceItem{
+				{Type: daemon.ResourceTypeENI, ID: "eni1"},
+				{Type: daemon.ResourceTypeEIP, ID: "eip1"},
+			},
+		},
+		{
+			Resources: []daemon.ResourceItem{
+				{Type: daemon.ResourceTypeENI, ID: "eni2"},
+			},
+		},
+		{
+			Resources: []daemon.ResourceItem{
+				{Type: daemon.ResourceTypeENIIP, ID: "eni3"},
+				{Type: daemon.ResourceTypeEIP, ID: "eip3"},
+			},
+		},
+	}
+
+	attachedENIID := map[string]struct{}{
+		"eni1": struct{}{},
+		"eni3": struct{}{},
+	}
+
+	expected := []daemon.PodResources{
+		{
+			Resources: []daemon.ResourceItem{
+				{Type: daemon.ResourceTypeENI, ID: "eni1"},
+				{Type: daemon.ResourceTypeEIP, ID: "eip1"},
+			},
+		},
+		{
+			Resources: []daemon.ResourceItem{},
+		},
+		{
+			Resources: []daemon.ResourceItem{
+				{Type: daemon.ResourceTypeENIIP, ID: "eni3"},
+				{Type: daemon.ResourceTypeEIP, ID: "eip3"},
+			},
+		},
+	}
+
+	filtered := filterENINotFound(podResources, attachedENIID)
+
+	if len(filtered) != len(expected) {
+		t.Errorf("Expected length of filtered pod resources to be %d, but got %d", len(expected), len(filtered))
+	}
+
+	for i := range filtered {
+		if len(filtered[i].Resources) != len(expected[i].Resources) {
+			t.Errorf("Expected length of resources in filtered pod resources at index %d to be %d, but got %d", i, len(expected[i].Resources), len(filtered[i].Resources))
+		}
+
+		for j := range filtered[i].Resources {
+			if filtered[i].Resources[j].Type != expected[i].Resources[j].Type || filtered[i].Resources[j].ID != expected[i].Resources[j].ID {
+				t.Errorf("Expected resource at index %d in filtered pod resources at index %d to be %v, but got %v", j, i, expected[i].Resources[j], filtered[i].Resources[j])
+			}
+		}
+	}
+}

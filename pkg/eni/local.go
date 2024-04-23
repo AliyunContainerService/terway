@@ -338,7 +338,7 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 		return nil, []Trace{{Condition: ResourceTypeMismatch}}
 	}
 
-	if lo.NetworkInterfaceID != "" && l.eni.ID != lo.NetworkInterfaceID {
+	if lo.NetworkInterfaceID != "" && l.eni != nil && l.eni.ID != lo.NetworkInterfaceID {
 		return nil, []Trace{{Condition: NetworkInterfaceMismatch}}
 	}
 

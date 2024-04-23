@@ -949,8 +949,13 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		return nil, err
 	}
 
+	attachedENIID := lo.SliceToMap(attached, func(item *daemon.ENI) (string, struct{}) {
+		return item.ID, struct{}{}
+	})
 	podResources := getPodResources(objList)
 	serviceLog.Info(fmt.Sprintf("loaded pod res, %v", podResources))
+
+	podResources = filterENINotFound(podResources, attachedENIID)
 
 	if config.EnableEIPMigrate {
 		err = netSrv.migrateEIP(ctx, objList)
@@ -1321,4 +1326,18 @@ func getPodIPs(netConfs []*rpc.NetConf) []string {
 		}
 	}
 	return ips
+}
+
+func filterENINotFound(podResources []daemon.PodResources, attachedENIID map[string]struct{}) []daemon.PodResources {
+	for i := range podResources {
+		for j := 0; j < len(podResources[i].Resources); j++ {
+			if podResources[i].Resources[j].Type == daemon.ResourceTypeENI ||
+				podResources[i].Resources[j].Type == daemon.ResourceTypeENIIP {
+				if _, ok := attachedENIID[podResources[i].Resources[j].ID]; !ok {
+					podResources[i].Resources = append(podResources[i].Resources[:j], podResources[i].Resources[j+1:]...)
+				}
+			}
+		}
+	}
+	return podResources
 }
