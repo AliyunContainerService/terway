@@ -83,7 +83,7 @@ func (c *CreateNetworkInterfaceOptions) Finish(idempotentKeyGen IdempotentKeyGen
 	argsHash := md5Hash(req)
 	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
 
-	if c.Backoff != nil {
+	if c.Backoff == nil {
 		c.Backoff = &wait.Backoff{
 			Steps: 1,
 		}
@@ -124,7 +124,7 @@ func (c *AssignPrivateIPAddressOptions) Finish(idempotentKeyGen IdempotentKeyGen
 	argsHash := md5Hash(req)
 	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
 
-	if c.Backoff != nil {
+	if c.Backoff == nil {
 		c.Backoff = &wait.Backoff{
 			Steps: 1,
 		}
@@ -165,7 +165,7 @@ func (c *AssignIPv6AddressesOptions) Finish(idempotentKeyGen IdempotentKeyGen) (
 	argsHash := md5Hash(req)
 	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
 
-	if c.Backoff != nil {
+	if c.Backoff == nil {
 		c.Backoff = &wait.Backoff{
 			Steps: 1,
 		}

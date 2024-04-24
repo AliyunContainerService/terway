@@ -55,6 +55,7 @@ func TestCreateNetworkInterfaceOptions_Finish(t *testing.T) {
 	assert.Equal(t, niOptions.ResourceGroupID, req.ResourceGroupId)
 	assert.Equal(t, eniDescription, req.Description)
 	assert.Equal(t, "mockToken", req.ClientToken)
+	assert.NotNil(t, c.Backoff)
 
 	// Cleanup
 	cleanup()
