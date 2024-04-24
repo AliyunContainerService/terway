@@ -71,7 +71,7 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, opts ...CreateNetw
 
 			return true, innerErr
 		}
-
+		l.WithValues(LogFieldRequestID, resp.RequestId, LogFieldENIID, resp.NetworkInterfaceId).Info("eni created")
 		return true, nil
 	})
 
@@ -155,7 +155,7 @@ func (a *OpenAPI) AttachNetworkInterface(ctx context.Context, eniID, instanceID,
 	metric.OpenAPILatency.WithLabelValues("AttachNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
-		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "attach ENI failed")
+		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "attach eni failed")
 		return err
 	}
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("attach eni")
@@ -180,10 +180,10 @@ func (a *OpenAPI) DetachNetworkInterface(ctx context.Context, eniID, instanceID,
 	metric.OpenAPILatency.WithLabelValues("DetachNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
-		if apiErr.ErrorCodeIs(err, apiErr.ErrInvalidENINotFound) {
+		if apiErr.ErrorCodeIs(err, apiErr.ErrInvalidENINotFound, apiErr.ErrInvalidEcsIDNotFound) {
 			return nil
 		}
-		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "detach ENI failed")
+		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "detach eni failed")
 		return err
 	}
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("detach eni")

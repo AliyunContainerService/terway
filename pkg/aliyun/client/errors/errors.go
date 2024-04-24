@@ -33,6 +33,8 @@ const (
 	// for API UnassignPrivateIpAddresses DetachNetworkInterface
 	ErrInvalidENINotFound = "InvalidEniId.NotFound"
 
+	ErrInvalidEcsIDNotFound = "InvalidEcsId.NotFound"
+
 	// ErrInvalidENIState ..
 	// for API DeleteNetworkInterface
 	ErrInvalidENIState = "InvalidOperation.InvalidEniState"
