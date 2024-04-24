@@ -8,18 +8,19 @@ import (
 
 // NetworkInterfaceOptions represents the common options for network interface operations.
 type NetworkInterfaceOptions struct {
-	Trunk              bool
-	ERDMA              bool
-	VSwitchID          string
-	SecurityGroupIDs   []string
-	ResourceGroupID    string
-	IPCount            int
-	IPv6Count          int
-	Tags               map[string]string
-	InstanceID         string
-	InstanceType       string
-	Status             string
-	NetworkInterfaceID string
+	Trunk                 bool
+	ERDMA                 bool
+	VSwitchID             string
+	SecurityGroupIDs      []string
+	ResourceGroupID       string
+	IPCount               int
+	IPv6Count             int
+	Tags                  map[string]string
+	InstanceID            string
+	InstanceType          string
+	Status                string
+	NetworkInterfaceID    string
+	DeleteENIOnECSRelease *bool
 }
 
 type CreateNetworkInterfaceOption interface {
@@ -64,6 +65,10 @@ func (c *CreateNetworkInterfaceOptions) Finish(idempotentKeyGen IdempotentKeyGen
 	}
 	if c.NetworkInterfaceOptions.IPv6Count > 0 {
 		req.Ipv6AddressCount = requests.NewInteger(c.NetworkInterfaceOptions.IPv6Count)
+	}
+
+	if c.NetworkInterfaceOptions.DeleteENIOnECSRelease != nil {
+		req.DeleteOnRelease = requests.NewBoolean(*c.NetworkInterfaceOptions.DeleteENIOnECSRelease)
 	}
 
 	var tags []ecs.CreateNetworkInterfaceTag

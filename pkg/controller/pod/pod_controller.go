@@ -629,6 +629,11 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 		g.Go(func() error {
 			alloc := (*allocs)[ii]
 			ctx := common.WithCtx(ctx, alloc)
+
+			deleteENIOnECSRelease := true
+			if allocType.Type == v1beta1.IPAllocTypeFixed {
+				deleteENIOnECSRelease = false
+			}
 			bo := backoff.Backoff(backoff.ENICreate)
 			option := &aliyunClient.CreateNetworkInterfaceOptions{
 				NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
@@ -643,6 +648,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 						types.TagKeyClusterID:               clusterID,
 						types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
 					},
+					DeleteENIOnECSRelease: &deleteENIOnECSRelease,
 				},
 				Backoff: &bo,
 			}
