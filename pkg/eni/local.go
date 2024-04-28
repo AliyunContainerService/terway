@@ -321,7 +321,7 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 	if request.ResourceType() != ResourceTypeLocalIP {
 		return nil, []Trace{{Condition: ResourceTypeMismatch}}
 	}
-	if request.(*LocalIPRequest).LocalIPType == LocalIPTypeERDMA && l.eniType != "erdma" {
+	if (request.(*LocalIPRequest).LocalIPType == LocalIPTypeERDMA) != (l.eniType == "erdma") {
 		return nil, []Trace{{Condition: ResourceTypeMismatch}}
 	}
 
@@ -737,7 +737,8 @@ func (l *Local) Dispose(n int) int {
 
 	// 1. check if can dispose the eni
 	if n >= max(len(l.ipv4), len(l.ipv6)) {
-		if strings.ToLower(l.eniType) != "trunk" && !l.eni.Trunk && len(l.ipv4.InUse()) == 0 && len(l.ipv6.InUse()) == 0 {
+		eniType := strings.ToLower(l.eniType)
+		if eniType != "trunk" && eniType != "erdma" && !l.eni.Trunk && len(l.ipv4.InUse()) == 0 && len(l.ipv6.InUse()) == 0 {
 			log.Info("dispose eni")
 			l.status = statusDeleting
 			return max(len(l.ipv4), len(l.ipv6))
