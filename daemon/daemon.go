@@ -422,6 +422,21 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 		IPv6:    n.enableIPv6,
 	}
 
+	switch pod.PodNetworkType {
+	case daemon.PodNetworkTypeENIMultiIP:
+		reply.IPType = rpc.IPType_TypeENIMultiIP
+	case daemon.PodNetworkTypeVPCIP:
+		reply.IPType = rpc.IPType_TypeVPCIP
+	case daemon.PodNetworkTypeVPCENI:
+		reply.IPType = rpc.IPType_TypeVPCENI
+
+	default:
+		return nil, &types.Error{
+			Code: types.ErrInternalError,
+			Msg:  "Unknown pod network type",
+		}
+	}
+
 	// 2. Find old resource info
 	oldRes, err := n.getPodResource(pod)
 	if err != nil {
