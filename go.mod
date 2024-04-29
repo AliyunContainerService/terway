@@ -28,7 +28,7 @@ require (
 	github.com/spf13/cobra v1.6.1
 	github.com/stretchr/testify v1.9.0
 	github.com/vishvananda/netlink v1.2.1-beta.2
-	go.uber.org/atomic v1.9.0
+	go.uber.org/atomic v1.11.0
 	golang.org/x/mod v0.12.0
 	golang.org/x/net v0.19.0
 	golang.org/x/sync v0.5.0
