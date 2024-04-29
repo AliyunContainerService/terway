@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Mon, 29 Apr 2024 12:44:57 +0800
+Subject: fix cilium should not remove un-managed filters
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ pkg/datapath/loader/loader.go  |  3 ++-
+ pkg/datapath/loader/netlink.go | 15 +++++++++++++--
+ 2 files changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
+index 2ed01b9b19..3350875af9 100644
+--- a/pkg/datapath/loader/loader.go
++++ b/pkg/datapath/loader/loader.go
+@@ -237,7 +237,8 @@ func (l *Loader) reloadHostDatapath(ctx context.Context, ep datapath.Endpoint, o
+ 		interfaceNames = append(interfaceNames, device)
+ 		symbols = append(symbols, symbolFromHostNetdevEp)
+ 		directions = append(directions, dirIngress)
+-		if option.Config.EnableNodePort || option.Config.EnableHostFirewall {
++		if option.Config.EnableNodePort || option.Config.EnableHostFirewall ||
++			(option.Config.EnableBandwidthManager && option.Config.DatapathMode == datapathOption.DatapathModeVeth ) {
+ 			interfaceNames = append(interfaceNames, device)
+ 			symbols = append(symbols, symbolToHostNetdevEp)
+ 			directions = append(directions, dirEgress)
+diff --git a/pkg/datapath/loader/netlink.go b/pkg/datapath/loader/netlink.go
+index 1e6a750883..92af541580 100644
+--- a/pkg/datapath/loader/netlink.go
++++ b/pkg/datapath/loader/netlink.go
+@@ -8,6 +8,7 @@ import (
+ 	"fmt"
+ 	"net"
+ 	"strconv"
++	"strings"
+
+ 	"github.com/vishvananda/netlink"
+
+@@ -163,8 +164,18 @@ func RemoveTCFilters(ifName string, tcDir uint32) error {
+ 	}
+
+ 	for _, f := range filters {
+-		if err := netlink.FilterDel(f); err != nil {
+-			return err
++		bpfFilter, ok := f.(*netlink.BpfFilter)
++		if !ok {
++			continue
++		}
++		if strings.Contains(bpfFilter.Name, "bpf_netdev") ||
++			strings.Contains(bpfFilter.Name, "bpf_network") ||
++			strings.Contains(bpfFilter.Name, "bpf_host") ||
++			strings.Contains(bpfFilter.Name, "bpf_lxc") {
++			log.Infof("remove tc filter %#v", bpfFilter)
++			if err := netlink.FilterDel(f); err != nil {
++				return err
++			}
+ 		}
+ 	}
+ 
+-- 
+2.44.0
+
