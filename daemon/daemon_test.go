@@ -261,19 +261,19 @@ func TestFilterENINotFound(t *testing.T) {
 	podResources := []daemon.PodResources{
 		{
 			Resources: []daemon.ResourceItem{
-				{Type: daemon.ResourceTypeENI, ID: "eni1"},
-				{Type: daemon.ResourceTypeEIP, ID: "eip1"},
+				{Type: daemon.ResourceTypeENI, ENIID: "eni1", ID: "resource"},
+				{Type: daemon.ResourceTypeEIP, ENIID: "eip1", ID: "resource"},
 			},
 		},
 		{
 			Resources: []daemon.ResourceItem{
-				{Type: daemon.ResourceTypeENI, ID: "eni2"},
+				{Type: daemon.ResourceTypeENI, ENIID: "eni2", ID: "resource"},
 			},
 		},
 		{
 			Resources: []daemon.ResourceItem{
-				{Type: daemon.ResourceTypeENIIP, ID: "eni3"},
-				{Type: daemon.ResourceTypeEIP, ID: "eip3"},
+				{Type: daemon.ResourceTypeENIIP, ENIID: "eni3", ID: "resource"},
+				{Type: daemon.ResourceTypeEIP, ENIID: "eip3", ID: "resource"},
 			},
 		},
 	}
@@ -286,8 +286,8 @@ func TestFilterENINotFound(t *testing.T) {
 	expected := []daemon.PodResources{
 		{
 			Resources: []daemon.ResourceItem{
-				{Type: daemon.ResourceTypeENI, ID: "eni1"},
-				{Type: daemon.ResourceTypeEIP, ID: "eip1"},
+				{Type: daemon.ResourceTypeENI, ENIID: "eni1", ID: "resource"},
+				{Type: daemon.ResourceTypeEIP, ENIID: "eip1", ID: "resource"},
 			},
 		},
 		{
@@ -295,8 +295,8 @@ func TestFilterENINotFound(t *testing.T) {
 		},
 		{
 			Resources: []daemon.ResourceItem{
-				{Type: daemon.ResourceTypeENIIP, ID: "eni3"},
-				{Type: daemon.ResourceTypeEIP, ID: "eip3"},
+				{Type: daemon.ResourceTypeENIIP, ENIID: "eni3", ID: "resource"},
+				{Type: daemon.ResourceTypeEIP, ENIID: "eip3", ID: "resource"},
 			},
 		},
 	}
