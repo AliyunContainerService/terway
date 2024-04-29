@@ -64,6 +64,8 @@ const (
 	commandResDB   = "resdb"
 
 	IfEth0 = "eth0"
+
+	envEFLO = "eflo"
 )
 
 type networkService struct {
@@ -858,7 +860,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	_ = netSrv.k8s.SetCustomStatefulWorkloadKinds(config.CustomStatefulWorkloadKinds)
 	netSrv.ipamType = config.IPAMType
 
-	if os.Getenv("TERWAY_DEPLOY_ENV") == "eflo" {
+	if os.Getenv("TERWAY_DEPLOY_ENV") == envEFLO {
 		instance.SetPopulateFunc(instance.EfloPopulate)
 		client.SetGetLimit(client.EfloGetLimit)
 	}
@@ -889,7 +891,11 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		return nil, err
 	}
 
-	limit, err := client.GetLimit(aliyunClient, meta.InstanceType)
+	instanceType := meta.InstanceType
+	if os.Getenv("TERWAY_DEPLOY_ENV") == envEFLO {
+		instanceType = meta.InstanceID
+	}
+	limit, err := client.GetLimit(aliyunClient, instanceType)
 	if err != nil {
 		return nil, fmt.Errorf("upable get instance limit, %w", err)
 	}
@@ -932,7 +938,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	}
 
 	var factory factory.Factory
-	if os.Getenv("TERWAY_DEPLOY_ENV") == "eflo" {
+	if os.Getenv("TERWAY_DEPLOY_ENV") == envEFLO {
 		factory = aliyun.NewEflo(ctx, aliyunClient, vswPool, eniConfig)
 	} else {
 		factory = aliyun.NewAliyun(ctx, aliyunClient, eni2.NewENIMetadata(enableIPv4, enableIPv6), vswPool, eniConfig)
