@@ -1400,7 +1400,7 @@ func filterENINotFound(podResources []daemon.PodResources, attachedENIID map[str
 		for j := 0; j < len(podResources[i].Resources); j++ {
 			if podResources[i].Resources[j].Type == daemon.ResourceTypeENI ||
 				podResources[i].Resources[j].Type == daemon.ResourceTypeENIIP {
-				if _, ok := attachedENIID[podResources[i].Resources[j].ID]; !ok {
+				if _, ok := attachedENIID[podResources[i].Resources[j].ENIID]; !ok {
 					podResources[i].Resources = append(podResources[i].Resources[:j], podResources[i].Resources[j+1:]...)
 				}
 			}
