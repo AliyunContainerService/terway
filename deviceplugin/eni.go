@@ -334,7 +334,6 @@ func (m *ENIDevicePlugin) Serve() {
 	if err != nil {
 		klog.Fatalf("Could not start device plugin: %v", err)
 	}
-	time.Sleep(5 * time.Second)
 	klog.Infof("Starting to serve on %s", m.socket)
 
 	err = m.Register(
