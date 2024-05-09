@@ -22,12 +22,15 @@ terway_config_val() {
 }
 
 virtyal_type=$(terway_config_val 'eniip_virtual_type' | tr '[:upper:]' '[:lower:]')
+network_policy_provider=$(terway_config_val 'network_policy_provider')
+
+KERNEL_MAJOR_VERSION=$(uname -r | awk -F . '{print $1}')
+KERNEL_MINOR_VERSION=$(uname -r | awk -F . '{print $2}')
 
 # kernel version has already checked in initContainer, so just determine whether plugin chaining exists
 if [ "$virtyal_type" = "ipvlan" ] || [ "$virtyal_type" = "datapathv2" ]; then
   # check kernel version & enable cilium
-  KERNEL_MAJOR_VERSION=$(uname -r | awk -F . '{print $1}')
-  KERNEL_MINOR_VERSION=$(uname -r | awk -F . '{print $2}')
+
   # kernel version equal and above 4.19
   if { [ "$KERNEL_MAJOR_VERSION" -eq 4 ] && [ "$KERNEL_MINOR_VERSION" -ge 19 ]; } ||
      [ "$KERNEL_MAJOR_VERSION" -gt 4 ]; then
@@ -93,7 +96,6 @@ fi
   source uninstall_policy.sh
 
   # check kernel version
-  KERNEL_MAJOR_VERSION=$(uname -r | awk -F . '{print $1}')
 
   export FELIX_IPTABLESBACKEND=Auto
   if ( uname -r | grep -E "el7|an7" && [ "${KERNEL_MAJOR_VERSION}" -eq 3 ] ) || ( uname -r | grep -E "al7" && [ "${KERNEL_MAJOR_VERSION}" -eq 4 ] ); then
@@ -134,16 +136,32 @@ fi
   fi
 
   if [ -z "$DISABLE_POLICY" ] || [ "$DISABLE_POLICY" = "false" ] || [ "$DISABLE_POLICY" = "0" ]; then
-      exec calico-felix
-  else
-      config_masquerade
-      cleanup_felix
-      # for health check
-      if [ "$FELIX_HEALTHPORT" != "" ]; then
-          # shellcheck disable=SC2016
-          exec socat TCP-LISTEN:"$FELIX_HEALTHPORT",bind=127.0.0.1,fork,reuseaddr system:'sleep 2;kill -9 $SOCAT_PID 2>/dev/null'
+      if [ "$network_policy_provider" = "ebpf" ]; then
+          cleanup_felix
+          # kernel version equal and above 4.19
+          if { [ "$KERNEL_MAJOR_VERSION" -eq 4 ] && [ "$KERNEL_MINOR_VERSION" -ge 19 ]; } ||
+             [ "$KERNEL_MAJOR_VERSION" -gt 4 ]; then
+            # shellcheck disable=SC2086
+            exec cilium-agent --kube-proxy-replacement=disabled --tunnel=disabled --enable-ipv4-masquerade=false --enable-ipv6-masquerade=false \
+                 --enable-policy=default \
+                 --agent-health-port=9099 --disable-envoy-version-check=true \
+                 --enable-local-node-route=false --ipv4-range=169.254.10.0/30 --ipv6-range=fe80:2400:3200:baba::/30 --enable-endpoint-health-checking=false \
+                 --enable-health-checking=false --enable-service-topology=true --disable-cnp-status-updates=true --k8s-heartbeat-timeout=0 --enable-session-affinity=true \
+                 --install-iptables-rules=false --enable-l7-proxy=false \
+                 --ipam=cluster-pool
+           fi
       else
-          # shellcheck disable=SC2016
-          exec socat TCP-LISTEN:9099,bind=127.0.0.1,fork,reuseaddr system:'sleep 2;kill -9 $SOCAT_PID 2>/dev/null'
+        exec calico-felix
       fi
+  fi
+
+  config_masquerade
+  cleanup_felix
+  # for health check
+  if [ "$FELIX_HEALTHPORT" != "" ]; then
+      # shellcheck disable=SC2016
+      exec socat TCP-LISTEN:"$FELIX_HEALTHPORT",bind=127.0.0.1,fork,reuseaddr system:'sleep 2;kill -9 $SOCAT_PID 2>/dev/null'
+  else
+      # shellcheck disable=SC2016
+      exec socat TCP-LISTEN:9099,bind=127.0.0.1,fork,reuseaddr system:'sleep 2;kill -9 $SOCAT_PID 2>/dev/null'
   fi

@@ -25,9 +25,16 @@ type switchDataPathV2Func func() bool
 var _switchDataPathV2 switchDataPathV2Func
 
 const (
+	dataPathDefault        = ""
+	dataPathVeth           = "veth"
 	dataPathIPvlan         = "ipvlan"
 	dataPathV2             = "datapathv2"
 	nodeCapabilityDatapath = "datapath"
+)
+
+const (
+	NetworkPolicyProviderIpt  = "iptables"
+	NetworkPolicyProviderEBPF = "ebpf"
 )
 
 type feature struct {
@@ -170,6 +177,8 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 	ebpfChainerExist := false
 	datapath := ""
 
+	networkPolicyProvider := NetworkPolicyProviderIpt
+
 	for _, config := range configs {
 		plugin, err := gabs.ParseJSON(config)
 		if err != nil {
@@ -198,6 +207,12 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 			}
 
 		case "terway":
+			if plugin.Exists("network_policy_provider") {
+				networkPolicyProvider, ok = plugin.Path("network_policy_provider").Data().(string)
+				if !ok {
+					return "", fmt.Errorf("network_policy_provider type error")
+				}
+			}
 			if plugin.Exists("eniip_virtual_type") {
 				virtualType, ok := plugin.Path("eniip_virtual_type").Data().(string)
 				if !ok {
@@ -212,6 +227,12 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 					requireIPvlan := false
 
 					switch strings.ToLower(virtualType) {
+					case dataPathVeth, dataPathDefault:
+						// only for terway-eniip
+						if ebpfSupport && networkPolicyProvider == NetworkPolicyProviderEBPF {
+							requireEBPFChainer = true
+							datapath = dataPathVeth
+						}
 					case dataPathIPvlan:
 						requireIPvlan = true
 						datapath = dataPathIPvlan
@@ -250,6 +271,11 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 							return "", err
 						}
 					}
+				}
+			} else {
+				if ebpfSupport && networkPolicyProvider == NetworkPolicyProviderEBPF {
+					requireEBPFChainer = true
+					datapath = dataPathVeth
 				}
 			}
 		}
