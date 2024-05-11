@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/intstr"
+
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/tests/utils"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
-	appsv1 "k8s.io/api/apps/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/util/intstr"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -569,18 +570,16 @@ func TestFixedIP(t *testing.T) {
 			p := corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: cfg.Namespace()},
 			}
-			stopChan := make(chan struct{})
 			err = wait.For(conditions.New(cfg.Client().Resources()).ResourceMatch(&p, func(object k8s.Object) bool {
 				p := object.(*corev1.Pod)
 				switch p.Status.Phase {
 				case corev1.PodSucceeded:
 					return true
 				case corev1.PodFailed:
-					stopChan <- struct{}{}
 					t.Fatal("pod status failed")
 				}
 				return false
-			}), wait.WithInterval(time.Second), wait.WithTimeout(time.Minute*2), wait.WithStopChannel(stopChan))
+			}), wait.WithInterval(time.Second), wait.WithTimeout(time.Minute*2))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -642,18 +641,16 @@ func TestFixedIP(t *testing.T) {
 			p := corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: cfg.Namespace()},
 			}
-			stopChan := make(chan struct{})
 			err = wait.For(conditions.New(cfg.Client().Resources()).ResourceMatch(&p, func(object k8s.Object) bool {
 				p := object.(*corev1.Pod)
 				switch p.Status.Phase {
 				case corev1.PodSucceeded:
 					return true
 				case corev1.PodFailed:
-					stopChan <- struct{}{}
 					t.Fatal("pod status failed")
 				}
 				return false
-			}), wait.WithInterval(time.Second), wait.WithTimeout(time.Minute*2), wait.WithStopChannel(stopChan))
+			}), wait.WithInterval(time.Second), wait.WithTimeout(time.Minute*2))
 			if err != nil {
 				t.Fatal(err)
 			}
