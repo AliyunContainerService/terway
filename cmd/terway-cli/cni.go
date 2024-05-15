@@ -46,6 +46,8 @@ var (
 	outPutPath string
 
 	featureGates map[string]bool
+
+	enableNetworkPolicy bool
 )
 
 func init() {
@@ -53,6 +55,11 @@ func init() {
 	fs.StringVar(&outPutPath, "output", "", "output path")
 	fs.Var(cliflag.NewMapStringBool(&featureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features. "+
 		"Options are:\n"+strings.Join(utilfeature.DefaultFeatureGate.KnownFeatures(), "\n"))
+
+	disable := os.Getenv("DISABLE_POLICY")
+	if disable == "" || disable == "false" || disable == "0" {
+		enableNetworkPolicy = true
+	}
 }
 
 var cniCmd = &cobra.Command{
@@ -229,7 +236,7 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 					switch strings.ToLower(virtualType) {
 					case dataPathVeth, dataPathDefault:
 						// only for terway-eniip
-						if ebpfSupport && networkPolicyProvider == NetworkPolicyProviderEBPF {
+						if enableNetworkPolicy && ebpfSupport && networkPolicyProvider == NetworkPolicyProviderEBPF {
 							requireEBPFChainer = true
 							datapath = dataPathVeth
 						}
@@ -273,7 +280,7 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 					}
 				}
 			} else {
-				if ebpfSupport && networkPolicyProvider == NetworkPolicyProviderEBPF {
+				if enableNetworkPolicy && ebpfSupport && networkPolicyProvider == NetworkPolicyProviderEBPF {
 					requireEBPFChainer = true
 					datapath = dataPathVeth
 				}
