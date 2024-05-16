@@ -461,7 +461,12 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 			Msg:  "Unexpected network type, maybe daemon mode changed",
 		}
 	}
-
+	if oldRes.ContainerID != nil {
+		if r.K8SPodInfraContainerId != *oldRes.ContainerID {
+			log.Info("cni request not match stored resource, ignored", "old", *oldRes.ContainerID)
+			return reply, nil
+		}
+	}
 	netConf := make([]*rpc.NetConf, 0)
 
 	err = json.Unmarshal([]byte(oldRes.NetConf), &netConf)
