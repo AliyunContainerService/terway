@@ -135,24 +135,30 @@ fi
       export FELIX_DATASTORETYPE="$DATASTORE_TYPE"
   fi
 
-  if [ -z "$DISABLE_POLICY" ] || [ "$DISABLE_POLICY" = "false" ] || [ "$DISABLE_POLICY" = "0" ]; then
-      if [ "$network_policy_provider" = "ebpf" ]; then
-          cleanup_felix
-          # kernel version equal and above 4.19
-          if { [ "$KERNEL_MAJOR_VERSION" -eq 4 ] && [ "$KERNEL_MINOR_VERSION" -ge 19 ]; } ||
-             [ "$KERNEL_MAJOR_VERSION" -gt 4 ]; then
-            # shellcheck disable=SC2086
-            exec cilium-agent --kube-proxy-replacement=disabled --tunnel=disabled --enable-ipv4-masquerade=false --enable-ipv6-masquerade=false \
-                 --enable-policy=default \
-                 --agent-health-port=9099 --disable-envoy-version-check=true \
-                 --enable-local-node-route=false --ipv4-range=169.254.10.0/30 --ipv6-range=fe80:2400:3200:baba::/30 --enable-endpoint-health-checking=false \
-                 --enable-health-checking=false --enable-service-topology=true --disable-cnp-status-updates=true --k8s-heartbeat-timeout=0 --enable-session-affinity=true \
-                 --install-iptables-rules=false --enable-l7-proxy=false \
-                 --ipam=cluster-pool
-           fi
-      else
-        exec calico-felix
+  if [ "$network_policy_provider" = "ebpf" ]; then
+     cleanup_felix
+     # kernel version equal and above 4.19
+     if { [ "$KERNEL_MAJOR_VERSION" -eq 4 ] && [ "$KERNEL_MINOR_VERSION" -ge 19 ]; } ||
+        [ "$KERNEL_MAJOR_VERSION" -gt 4 ]; then
+
+       if [ -z "$DISABLE_POLICY" ] || [ "$DISABLE_POLICY" = "false" ] || [ "$DISABLE_POLICY" = "0" ]; then
+         ENABLE_POLICY="default"
+       else
+         ENABLE_POLICY="never"
+       fi
+       # shellcheck disable=SC2086
+       exec cilium-agent --kube-proxy-replacement=disabled --tunnel=disabled --enable-ipv4-masquerade=false --enable-ipv6-masquerade=false \
+            --enable-policy=$ENABLE_POLICY \
+            --agent-health-port=9099 --disable-envoy-version-check=true \
+            --enable-local-node-route=false --ipv4-range=169.254.10.0/30 --ipv6-range=fe80:2400:3200:baba::/30 --enable-endpoint-health-checking=false \
+            --enable-health-checking=false --enable-service-topology=true --disable-cnp-status-updates=true --k8s-heartbeat-timeout=0 --enable-session-affinity=true \
+            --install-iptables-rules=false --enable-l7-proxy=false \
+            --ipam=cluster-pool
       fi
+  else
+     if [ -z "$DISABLE_POLICY" ] || [ "$DISABLE_POLICY" = "false" ] || [ "$DISABLE_POLICY" = "0" ]; then
+        exec calico-felix
+     fi
   fi
 
   config_masquerade
