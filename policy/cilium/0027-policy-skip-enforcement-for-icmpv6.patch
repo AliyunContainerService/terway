@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Fri, 17 May 2024 15:21:20 +0800
+Subject: policy: skip enforcement for icmpv6
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ bpf/bpf_lxc.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index c0c8ba8b7f..2773e2c276 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -1435,11 +1435,15 @@ ipv6_policy(struct __ctx_buff *ctx, int ifindex, __u32 src_label,
+ 	__u32 monitor = 0;
+ 	__u8 policy_match_type = POLICY_MATCH_NONE;
+ 	__u8 audited = 0;
++	bool skip_policy_enforcement = false;
+ 	bool emit_policy_verdict = true;
+ 
+ 	if (!revalidate_data(ctx, &data, &data_end, &ip6))
+ 		return DROP_INVALID;
+ 
++    if (unlikely(ip6->nexthdr == IPPROTO_ICMPV6)) {
++        skip_policy_enforcement = true;
++    }
+ 	policy_clear_mark(ctx);
+ 
+ 	ipv6_addr_copy(&orig_sip, (union v6addr *)&ip6->saddr);
+@@ -1511,7 +1515,7 @@ ipv6_policy(struct __ctx_buff *ctx, int ifindex, __u32 src_label,
+ 	/* Reply packets and related packets are allowed, all others must be
+ 	 * permitted by policy.
+ 	 */
+-	if (ret != CT_REPLY && ret != CT_RELATED && verdict < 0) {
++	if (ret != CT_REPLY && ret != CT_RELATED && verdict < 0 && !skip_policy_enforcement) {
+ 		send_policy_verdict_notify(ctx, src_label, tuple->dport,
+ 					   tuple->nexthdr, POLICY_INGRESS, 1,
+ 					   verdict, policy_match_type, audited);
+-- 
+2.44.0
+
