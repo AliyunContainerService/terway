@@ -154,7 +154,10 @@ fi
             --enable-health-checking=false --enable-service-topology=true --disable-cnp-status-updates=true --k8s-heartbeat-timeout=0 --enable-session-affinity=true \
             --install-iptables-rules=false --enable-l7-proxy=false \
             --ipam=cluster-pool
-      fi
+     else
+       echo "unsupported kernel version"
+       exit 1
+     fi
   else
      if [ -z "$DISABLE_POLICY" ] || [ "$DISABLE_POLICY" = "false" ] || [ "$DISABLE_POLICY" = "0" ]; then
         exec calico-felix
