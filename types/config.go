@@ -4,6 +4,14 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 )
 
+type EniSelectionPolicy string
+
+// Network interface Selection Policy
+const (
+	EniSelectionPolicyLeastIPs EniSelectionPolicy = "least_ips"
+	EniSelectionPolicyMostIPs  EniSelectionPolicy = "most_ips"
+)
+
 type ENIConfig struct {
 	ZoneID           string
 	VSwitchOptions   []string
@@ -12,6 +20,7 @@ type ENIConfig struct {
 	InstanceID       string
 
 	VSwitchSelectionPolicy vswitch.SelectionPolicy
+	EniSelectionPolicy     EniSelectionPolicy
 
 	ResourceGroupID string
 
