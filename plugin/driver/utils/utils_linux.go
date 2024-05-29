@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
@@ -354,7 +355,9 @@ func EnsureNetConfSet(ipv4, ipv6 bool) error {
 			for _, cfg := range ipv4NetConfig {
 				innerErr := terwaySysctl.EnsureConf(fmt.Sprintf(cfg[0], link.Attrs().Name), cfg[1])
 				if innerErr != nil {
-					err = fmt.Errorf("%v, %w", err, innerErr)
+					if !os.IsNotExist(innerErr) {
+						err = fmt.Errorf("%v, %w", err, innerErr)
+					}
 				}
 			}
 		}
@@ -362,7 +365,9 @@ func EnsureNetConfSet(ipv4, ipv6 bool) error {
 			for _, cfg := range ipv6NetConfig {
 				innerErr := terwaySysctl.EnsureConf(fmt.Sprintf(cfg[0], link.Attrs().Name), cfg[1])
 				if innerErr != nil {
-					err = fmt.Errorf("%v, %w", err, innerErr)
+					if !os.IsNotExist(innerErr) {
+						err = fmt.Errorf("%v, %w", err, innerErr)
+					}
 				}
 			}
 		}
