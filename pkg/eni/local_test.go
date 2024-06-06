@@ -2,6 +2,7 @@ package eni
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"sync"
 	"testing"
@@ -262,4 +263,35 @@ func TestLocal_Allocate_ERDMA(t *testing.T) {
 
 	assert.Equal(t, 1, len(resp))
 	assert.Equal(t, ResourceTypeMismatch, resp[0].Condition)
+}
+
+func Test_parseResourceID(t *testing.T) {
+	type args struct {
+		id string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    string
+		want1   string
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name:    "test1",
+			args:    args{id: "00:00:00:00:00:00.192.0.2.1"},
+			want:    "00:00:00:00:00:00",
+			want1:   "192.0.2.1",
+			wantErr: assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got1, err := parseResourceID(tt.args.id)
+			if !tt.wantErr(t, err, fmt.Sprintf("parseResourceID(%v)", tt.args.id)) {
+				return
+			}
+			assert.Equalf(t, tt.want, got, "parseResourceID(%v)", tt.args.id)
+			assert.Equalf(t, tt.want1, got1, "parseResourceID(%v)", tt.args.id)
+		})
+	}
 }
