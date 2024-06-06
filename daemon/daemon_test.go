@@ -276,11 +276,33 @@ func TestFilterENINotFound(t *testing.T) {
 				{Type: daemon.ResourceTypeEIP, ENIID: "eip3", ID: "resource"},
 			},
 		},
+		{
+			Resources: []daemon.ResourceItem{
+				{Type: daemon.ResourceTypeENIIP, ENIID: "", ID: "00:00:00:00:00:04.192.0.0.4"},
+			},
+		},
+		{
+			Resources: []daemon.ResourceItem{
+				{Type: daemon.ResourceTypeENI, ENIID: "", ID: "00:00:00:00:00:05"},
+			},
+		},
 	}
 
-	attachedENIID := map[string]struct{}{
-		"eni1": struct{}{},
-		"eni3": struct{}{},
+	attachedENIID := map[string]*daemon.ENI{
+		"eni1": {
+			ID: "eni1",
+		},
+		"eni3": {
+			ID: "eni3",
+		},
+		"eni4": {
+			ID:  "eni4",
+			MAC: "00:00:00:00:00:04",
+		},
+		"eni5": {
+			ID:  "eni5",
+			MAC: "00:00:00:00:00:05",
+		},
 	}
 
 	expected := []daemon.PodResources{
@@ -297,6 +319,16 @@ func TestFilterENINotFound(t *testing.T) {
 			Resources: []daemon.ResourceItem{
 				{Type: daemon.ResourceTypeENIIP, ENIID: "eni3", ID: "resource"},
 				{Type: daemon.ResourceTypeEIP, ENIID: "eip3", ID: "resource"},
+			},
+		},
+		{
+			Resources: []daemon.ResourceItem{
+				{Type: daemon.ResourceTypeENIIP, ENIID: "", ID: "00:00:00:00:00:04.192.0.0.4"},
+			},
+		},
+		{
+			Resources: []daemon.ResourceItem{
+				{Type: daemon.ResourceTypeENI, ENIID: "", ID: "00:00:00:00:00:05"},
 			},
 		},
 	}

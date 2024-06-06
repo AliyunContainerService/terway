@@ -227,43 +227,101 @@ func (l *Local) load(podResources []daemon.PodResources) error {
 				continue
 			}
 
-			if res.ENIID != l.eni.ID {
-				continue
-			}
+			if res.ENIID == "" {
+				logf.Log.Info("legacy record", "id", res.ID, "type", res.Type)
+				if res.ID != "" {
+					// 1. eni only the res id is the mac address
+					// 2. eniip the res id is the mac.ip
+					// this case is ipv4 only
 
-			logf.Log.Info("existed pod", "pod", podID, "ipv4", res.IPv4, "ipv6", res.IPv6, "eni", l.eni.ID)
+					switch res.Type {
+					case daemon.ResourceTypeENIIP:
+						mac, ipStr, err := parseResourceID(res.ID)
+						if err != nil {
+							return err
+						}
+						if mac != l.eni.MAC {
+							continue
+						}
+						logf.Log.Info("existed pod", "pod", podID, "ipv4", ipStr, "eni", l.eni.ID)
 
-			// belong to this eni
-			if res.IPv4 != "" {
-				ip, err := netip.ParseAddr(res.IPv4)
-				if err != nil {
-					return &types.Error{
-						Code: types.ErrInvalidDataType,
-						Msg:  err.Error(),
-						R:    err,
+						ip, err := netip.ParseAddr(ipStr)
+						if err != nil {
+							return &types.Error{
+								Code: types.ErrInvalidDataType,
+								Msg:  err.Error(),
+								R:    err,
+							}
+						}
+						v, ok := l.ipv4[ip]
+						if !ok {
+							continue
+						}
+						v.Allocate(podID)
+						metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
+					case daemon.PodNetworkTypeVPCENI:
+						if res.ID != l.eni.MAC {
+							continue
+						}
+						primaryIP := l.eni.PrimaryIP.IPv4.String()
+						logf.Log.Info("existed pod", "pod", podID, "ipv4", primaryIP, "eni", l.eni.ID)
+
+						ip, err := netip.ParseAddr(primaryIP)
+						if err != nil {
+							return &types.Error{
+								Code: types.ErrInvalidDataType,
+								Msg:  err.Error(),
+								R:    err,
+							}
+						}
+						v, ok := l.ipv4[ip]
+						if !ok {
+							continue
+						}
+						v.Allocate(podID)
+						metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
 					}
 				}
-				v, ok := l.ipv4[ip]
-				if !ok {
+			} else {
+				if res.ENIID != l.eni.ID {
 					continue
 				}
-				v.Allocate(podID)
-				metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
-			}
-			if res.IPv6 != "" {
-				ip, err := netip.ParseAddr(res.IPv6)
-				if err != nil {
-					return &types.Error{
-						Code: types.ErrInvalidDataType,
-						Msg:  err.Error(),
-						R:    err,
+
+				logf.Log.Info("existed pod", "pod", podID, "ipv4", res.IPv4, "ipv6", res.IPv6, "eni", l.eni.ID)
+
+				// belong to this eni
+				if res.IPv4 != "" {
+					ip, err := netip.ParseAddr(res.IPv4)
+					if err != nil {
+						return &types.Error{
+							Code: types.ErrInvalidDataType,
+							Msg:  err.Error(),
+							R:    err,
+						}
 					}
+					v, ok := l.ipv4[ip]
+					if !ok {
+						continue
+					}
+					v.Allocate(podID)
+					metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
 				}
-				v, ok := l.ipv6[ip]
-				if !ok {
-					continue
+				if res.IPv6 != "" {
+					ip, err := netip.ParseAddr(res.IPv6)
+					if err != nil {
+						return &types.Error{
+							Code: types.ErrInvalidDataType,
+							Msg:  err.Error(),
+							R:    err,
+						}
+					}
+					v, ok := l.ipv6[ip]
+					if !ok {
+						continue
+					}
+					v.Allocate(podID)
 				}
-				v.Allocate(podID)
+
 				metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Dec()
 			}
 		}
@@ -979,4 +1037,12 @@ func syncIPLocked(lo Set, remote []netip.Addr) {
 			}
 		}
 	}
+}
+
+func parseResourceID(id string) (string, string, error) {
+	parts := strings.SplitN(id, ".", 2)
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("invalid resource id: %s", id)
+	}
+	return parts[0], parts[1], nil
 }

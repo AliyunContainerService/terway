@@ -1021,8 +1021,8 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		return nil, err
 	}
 
-	attachedENIID := lo.SliceToMap(attached, func(item *daemon.ENI) (string, struct{}) {
-		return item.ID, struct{}{}
+	attachedENIID := lo.SliceToMap(attached, func(item *daemon.ENI) (string, *daemon.ENI) {
+		return item.ID, item
 	})
 	podResources := getPodResources(objList)
 	serviceLog.Info(fmt.Sprintf("loaded pod res, %v", podResources))
@@ -1400,13 +1400,35 @@ func getPodIPs(netConfs []*rpc.NetConf) []string {
 	return ips
 }
 
-func filterENINotFound(podResources []daemon.PodResources, attachedENIID map[string]struct{}) []daemon.PodResources {
+func filterENINotFound(podResources []daemon.PodResources, attachedENIID map[string]*daemon.ENI) []daemon.PodResources {
 	for i := range podResources {
 		for j := 0; j < len(podResources[i].Resources); j++ {
 			if podResources[i].Resources[j].Type == daemon.ResourceTypeENI ||
 				podResources[i].Resources[j].Type == daemon.ResourceTypeENIIP {
-				if _, ok := attachedENIID[podResources[i].Resources[j].ENIID]; !ok {
-					podResources[i].Resources = append(podResources[i].Resources[:j], podResources[i].Resources[j+1:]...)
+
+				eniID := podResources[i].Resources[j].ENIID
+				if eniID == "" {
+					list := strings.SplitN(podResources[i].Resources[j].ID, ".", 2)
+					if len(list) == 0 {
+						continue
+					}
+					mac := list[0]
+
+					found := false
+					for _, eni := range attachedENIID {
+						if eni.MAC == mac {
+							// found
+							found = true
+							break
+						}
+					}
+					if !found {
+						podResources[i].Resources = append(podResources[i].Resources[:j], podResources[i].Resources[j+1:]...)
+					}
+				} else {
+					if _, ok := attachedENIID[eniID]; !ok {
+						podResources[i].Resources = append(podResources[i].Resources[:j], podResources[i].Resources[j+1:]...)
+					}
 				}
 			}
 		}
