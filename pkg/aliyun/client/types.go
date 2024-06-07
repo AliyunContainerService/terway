@@ -36,6 +36,9 @@ const (
 const (
 	ENIStatusInUse     string = "InUse"
 	ENIStatusAvailable string = "Available"
+	ENIStatusAttaching string = "Attaching"
+	ENIStatusDetaching string = "Detaching"
+	ENIStatusDeleting  string = "Deleting"
 )
 
 const (
@@ -46,7 +49,8 @@ const (
 )
 
 const (
-	ENITrafficModeRDMA string = "HighPerformance"
+	ENITrafficModeRDMA     string = "HighPerformance"
+	ENITrafficModeStandard string = "Standard"
 )
 
 const EIPInstanceTypeNetworkInterface = "NetworkInterface"
@@ -138,7 +142,7 @@ func LogFields(l logr.Logger, obj any) logr.Logger {
 	}
 
 	if t.Kind() == reflect.Struct {
-		r.WithValues(LogFieldAPI, strings.TrimSuffix(t.Name(), "Request"))
+		r = r.WithValues(LogFieldAPI, strings.TrimSuffix(t.Name(), "Request"))
 	}
 
 	for i := 0; i < t.NumField(); i++ {

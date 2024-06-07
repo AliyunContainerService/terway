@@ -17,19 +17,33 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"math/rand"
 	"os"
 	"time"
 
+	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
+	oteltrace "go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -104,16 +118,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = crds.CreateOrUpdateCRD(ctx, directClient, crds.CRDPodENI)
-	if err != nil {
-		log.Error(err, "unable sync crd")
-		os.Exit(1)
-	}
-	err = crds.CreateOrUpdateCRD(ctx, directClient, crds.CRDPodNetworking)
-	if err != nil {
-		log.Error(err, "unable sync crd")
-		os.Exit(1)
-	}
+	lo.ForEach([]string{crds.CRDPodENI, crds.CRDPodNetworking, crds.CRDNode}, func(item string, index int) {
+		err = crds.CreateOrUpdateCRD(ctx, directClient, item)
+		if err != nil {
+			log.Error(err, "unable sync crd")
+			os.Exit(1)
+		}
+	})
 
 	ws := wh.NewServer(wh.Options{
 		Port:    cfg.WebhookPort,
@@ -128,6 +139,39 @@ func main() {
 		LeaderElectionNamespace:    cfg.ControllerNamespace,
 		LeaderElectionResourceLock: "leases",
 		MetricsBindAddress:         cfg.MetricsBindAddress,
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Node{}: {
+					Transform: func(i interface{}) (interface{}, error) {
+						if node, ok := i.(*corev1.Node); ok {
+							node.Status.Images = nil
+							node.Status.VolumesInUse = nil
+							node.Status.VolumesAttached = nil
+							return node, nil
+						}
+						return nil, fmt.Errorf("unexpected type %T", i)
+					},
+				},
+				&corev1.Pod{}: {
+					Transform: func(i interface{}) (interface{}, error) {
+						if pod, ok := i.(*corev1.Pod); ok {
+							pod.Spec.Volumes = nil
+							pod.Spec.EphemeralContainers = nil
+							pod.Spec.SecurityContext = nil
+							pod.Spec.ImagePullSecrets = nil
+							pod.Spec.Tolerations = nil
+							pod.Spec.ReadinessGates = nil
+							pod.Spec.PreemptionPolicy = nil
+							pod.Status.InitContainerStatuses = nil
+							pod.Status.ContainerStatuses = nil
+							pod.Status.EphemeralContainerStatuses = nil
+							return pod, nil
+						}
+						return nil, fmt.Errorf("unexpected type %T", i)
+					},
+				},
+			},
+		},
 	}
 
 	if !cfg.DisableWebhook {
@@ -178,10 +222,23 @@ func main() {
 		panic(err)
 	}
 
+	tp := oteltrace.NewNoopTracerProvider()
+	if cfg.EnableTrace {
+		grpcTP, err := initOpenTelemetry(ctx, "terway-controlplane", version.Version, cfg)
+		if err != nil {
+			panic(err)
+		}
+		defer grpcTP.Shutdown(ctx)
+		tp = grpcTP
+	}
+	wg := &wait.Group{}
 	ctrlCtx := &register.ControllerCtx{
-		Config:       cfg,
-		VSwitchPool:  vSwitchCtrl,
-		AliyunClient: aliyunClient,
+		Context:        ctx,
+		Config:         cfg,
+		VSwitchPool:    vSwitchCtrl,
+		AliyunClient:   aliyunClient,
+		Wg:             wg,
+		TracerProvider: tp,
 	}
 
 	for name := range register.Controllers {
@@ -199,4 +256,44 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	wg.Wait()
+}
+
+// initOpenTelemetry bootstraps the OpenTelemetry pipeline.
+// If it does not return an error, make sure to call shutdown for proper cleanup.
+func initOpenTelemetry(ctx context.Context, serviceName, serviceVersion string, cfg *controlplane.Config) (*trace.TracerProvider, error) {
+	res, err := resource.Merge(resource.Default(),
+		resource.NewWithAttributes(semconv.SchemaURL,
+			semconv.ServiceNameKey.String(serviceName),
+			semconv.ServiceVersionKey.String(serviceVersion),
+			semconv.K8SNodeNameKey.String(os.Getenv("K8S_NODE_NAME")),
+		))
+	if err != nil {
+		return nil, err
+	}
+
+	// Set up trace provider.
+	headers := map[string]string{"Authentication": string(cfg.OtelToken)}
+	traceClient := otlptracegrpc.NewClient(
+		otlptracegrpc.WithInsecure(),
+		otlptracegrpc.WithEndpoint(cfg.OtelEndpoint),
+		otlptracegrpc.WithHeaders(headers),
+		otlptracegrpc.WithDialOption(grpc.WithBlock()))
+
+	traceExporter, err := otlptrace.New(ctx, traceClient)
+
+	if err != nil {
+		return nil, err
+	}
+
+	traceProvider := trace.NewTracerProvider(
+		trace.WithBatcher(traceExporter,
+			trace.WithBatchTimeout(5*time.Second)),
+		trace.WithResource(res),
+	)
+
+	otel.SetTracerProvider(traceProvider)
+
+	return traceProvider, nil
 }

@@ -18,6 +18,7 @@ package vswitch
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
@@ -68,4 +69,39 @@ func TestSwitchPool_GetOne(t *testing.T) {
 	}
 
 	assert.Equal(t, 2, len(ids))
+}
+
+func TestGetByID(t *testing.T) {
+	openAPI := mocks.NewVPC(t)
+
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&vpc.VSwitch{
+		VSwitchId:               "vsw-2",
+		ZoneId:                  "zone-2",
+		AvailableIpAddressCount: 10,
+	}, nil).Maybe()
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(nil, fmt.Errorf("err")).Maybe()
+
+	switchPool, err := NewSwitchPool(100, "100m")
+	assert.NoError(t, err)
+	switchPool.Add(&Switch{
+		ID:               "vsw-1",
+		Zone:             "zone-1",
+		AvailableIPCount: 10,
+	})
+	// Test when switch is in cache
+	switchObj, err := switchPool.GetByID(context.Background(), openAPI, "vsw-1")
+	assert.NoError(t, err)
+	assert.NotNil(t, switchObj)
+	assert.Equal(t, "vsw-1", switchObj.ID)
+
+	// Test when switch is not in cache
+	switchObj, err = switchPool.GetByID(context.Background(), openAPI, "vsw-2")
+	assert.NoError(t, err)
+	assert.NotNil(t, switchObj)
+	assert.Equal(t, "vsw-2", switchObj.ID)
+
+	// Test when DescribeVSwitchByID returns error
+	switchObj, err = switchPool.GetByID(context.Background(), openAPI, "vsw-3")
+	assert.Error(t, err)
+	assert.Nil(t, switchObj)
 }

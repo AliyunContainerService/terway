@@ -16,6 +16,9 @@ import (
 
 // DescribeVSwitchByID get vsw by id
 func (a *OpenAPI) DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*vpc.VSwitch, error) {
+	ctx, span := a.Tracer.Start(ctx, "DescribeVSwitchByID")
+	defer span.End()
+
 	req := vpc.CreateDescribeVSwitchesRequest()
 	req.VSwitchId = vSwitchID
 

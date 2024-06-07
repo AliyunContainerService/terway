@@ -103,6 +103,8 @@ type Kubernetes interface {
 	GetTrunkID() string
 
 	GetClient() client.Client
+
+	NodeName() string
 }
 
 // NewK8S return Kubernetes service by pod spec and daemon mode
@@ -541,6 +543,10 @@ func (k *k8s) GetDynamicConfigWithName(ctx context.Context, name string) (string
 	}
 
 	return "", errors.New("configmap not included eni_conf")
+}
+
+func (k *k8s) NodeName() string {
+	return k.nodeName
 }
 
 func podNetworkType(daemonMode string, pod *corev1.Pod) string {

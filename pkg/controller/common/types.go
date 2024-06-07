@@ -18,8 +18,10 @@ package common
 
 // NodeInfo is the type describe the eni config for this pod
 type NodeInfo struct {
-	NodeName   string
-	InstanceID string
-	ZoneID     string
-	TrunkENIID string
+	NodeName     string
+	InstanceID   string
+	InstanceType string
+	ZoneID       string
+	TrunkENIID   string
+	RegionID     string
 }

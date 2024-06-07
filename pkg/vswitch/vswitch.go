@@ -24,6 +24,7 @@ import (
 	"sort"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/util/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -52,6 +53,8 @@ func (a ByAvailableIP) Less(i, j int) bool { return a[i].AvailableIPCount > a[j]
 type SwitchPool struct {
 	cache *cache.LRUExpireCache
 	ttl   time.Duration
+
+	g singleflight.Group
 }
 
 // NewSwitchPool create pool and set vSwitches to pool
@@ -138,19 +141,27 @@ func (s *SwitchPool) GetOne(ctx context.Context, client client.VPC, zone string,
 func (s *SwitchPool) GetByID(ctx context.Context, client client.VPC, id string) (*Switch, error) {
 	v, ok := s.cache.Get(id)
 	if !ok {
-		resp, err := client.DescribeVSwitchByID(ctx, id)
+		v, err, _ := s.g.Do(id, func() (interface{}, error) {
+			resp, err := client.DescribeVSwitchByID(ctx, id)
+			if err != nil {
+				return nil, fmt.Errorf("error get vSwitch %s, %w", id, err)
+			}
+			sw := &Switch{
+				ID:               resp.VSwitchId,
+				Zone:             resp.ZoneId,
+				AvailableIPCount: resp.AvailableIpAddressCount,
+				IPv4CIDR:         resp.CidrBlock,
+				IPv6CIDR:         resp.Ipv6CidrBlock,
+			}
+			return sw, nil
+		})
 		if err != nil {
-			return nil, fmt.Errorf("error get vSwitch %s, %w", id, err)
+			return nil, err
 		}
-		sw := &Switch{
-			ID:               resp.VSwitchId,
-			Zone:             resp.ZoneId,
-			AvailableIPCount: resp.AvailableIpAddressCount,
-			IPv4CIDR:         resp.CidrBlock,
-			IPv6CIDR:         resp.Ipv6CidrBlock,
-		}
-		s.cache.Add(resp.VSwitchId, sw, s.ttl)
-		return sw, nil
+		vsw := v.(*Switch)
+		s.cache.Add(vsw.ID, vsw, s.ttl)
+
+		return vsw, nil
 	}
 	sw := v.(*Switch)
 	return sw, nil

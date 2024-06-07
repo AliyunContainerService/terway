@@ -35,6 +35,9 @@ const (
 
 	ErrInvalidEcsIDNotFound = "InvalidEcsId.NotFound"
 
+	ErrIPv4CountExceeded = "InvalidOperation.Ipv4CountExceeded"
+	ErrIPv6CountExceeded = "InvalidOperation.Ipv6CountExceeded"
+
 	// ErrInvalidENIState ..
 	// for API DeleteNetworkInterface
 	ErrInvalidENIState = "InvalidOperation.InvalidEniState"
@@ -44,6 +47,8 @@ const (
 
 	// ErrThrottling .
 	ErrThrottling = "Throttling"
+
+	ErrOperationConflict = "Operation.Conflict"
 )
 
 // define well known err

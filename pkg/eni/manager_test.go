@@ -155,6 +155,11 @@ func TestManagerAllocateWithTimeoutWhenAllocationFails(t *testing.T) {
 
 type FakeK8s struct{}
 
+func (f *FakeK8s) NodeName() string {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (f *FakeK8s) GetLocalPods() ([]*daemon.PodInfo, error) {
 	//TODO implement me
 	panic("implement me")

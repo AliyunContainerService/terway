@@ -9,6 +9,8 @@ import (
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/flowcontrol"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -28,6 +30,8 @@ type OpenAPI struct {
 
 	ReadOnlyRateLimiter flowcontrol.RateLimiter
 	MutatingRateLimiter flowcontrol.RateLimiter
+
+	Tracer trace.Tracer
 }
 
 func New(c credential.Client, readOnly, mutating flowcontrol.RateLimiter) (*OpenAPI, error) {
@@ -36,10 +40,14 @@ func New(c credential.Client, readOnly, mutating flowcontrol.RateLimiter) (*Open
 		IdempotentKeyGen:    NewIdempotentKeyGenerator(),
 		ReadOnlyRateLimiter: readOnly,
 		MutatingRateLimiter: mutating,
+		Tracer:              otel.Tracer("openAPI"),
 	}, nil
 }
 
 func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error) {
+	ctx, span := a.Tracer.Start(ctx, "CreateNetworkInterface")
+	defer span.End()
+
 	option := &CreateNetworkInterfaceOptions{}
 	for _, opt := range opts {
 		opt.ApplyCreateNetworkInterface(option)
@@ -85,6 +93,9 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, opts ...CreateNetw
 
 // DescribeNetworkInterface list eni
 func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error) {
+	ctx, span := a.Tracer.Start(ctx, "DescribeNetworkInterface")
+	defer span.End()
+
 	var result []*NetworkInterface
 	nextToken := ""
 
@@ -110,10 +121,7 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 
 		req.MaxResults = requests.NewInteger(maxSinglePageSize)
 
-		l := logf.FromContext(ctx).WithValues(
-			LogFieldAPI, "DescribeNetworkInterfaces",
-			LogFieldENIID, eniID,
-			LogFieldInstanceID, instanceID)
+		l := LogFields(logf.FromContext(ctx), req)
 
 		a.ReadOnlyRateLimiter.Accept()
 		start := time.Now()
@@ -128,6 +136,8 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 			result = append(result, FromDescribeResp(&r))
 		}
 
+		l.V(4).Info("describe enis")
+
 		if len(resp.NetworkInterfaceSets.NetworkInterfaceSet) < maxSinglePageSize {
 			break
 		}
@@ -141,6 +151,9 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 
 // AttachNetworkInterface attach eni
 func (a *OpenAPI) AttachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error {
+	ctx, span := a.Tracer.Start(ctx, "AttachNetworkInterface")
+	defer span.End()
+
 	req := ecs.CreateAttachNetworkInterfaceRequest()
 	req.NetworkInterfaceId = eniID
 	req.InstanceId = instanceID
@@ -165,6 +178,9 @@ func (a *OpenAPI) AttachNetworkInterface(ctx context.Context, eniID, instanceID,
 
 // DetachNetworkInterface detach eni
 func (a *OpenAPI) DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error {
+	ctx, span := a.Tracer.Start(ctx, "DetachNetworkInterface")
+	defer span.End()
+
 	req := ecs.CreateDetachNetworkInterfaceRequest()
 	req.NetworkInterfaceId = eniID
 	req.InstanceId = instanceID
@@ -193,6 +209,9 @@ func (a *OpenAPI) DetachNetworkInterface(ctx context.Context, eniID, instanceID,
 
 // DeleteNetworkInterface del eni by id
 func (a *OpenAPI) DeleteNetworkInterface(ctx context.Context, eniID string) error {
+	ctx, span := a.Tracer.Start(ctx, "DeleteNetworkInterface")
+	defer span.End()
+
 	req := ecs.CreateDeleteNetworkInterfaceRequest()
 	req.NetworkInterfaceId = eniID
 
@@ -215,6 +234,9 @@ func (a *OpenAPI) DeleteNetworkInterface(ctx context.Context, eniID string) erro
 
 // WaitForNetworkInterface wait status of eni
 func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error) {
+	ctx, span := a.Tracer.Start(ctx, "WaitForNetworkInterface")
+	defer span.End()
+
 	var eniInfo *NetworkInterface
 	if eniID == "" {
 		return nil, fmt.Errorf("eniID not set")
@@ -246,6 +268,9 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 }
 
 func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]netip.Addr, error) {
+	ctx, span := a.Tracer.Start(ctx, "AssignPrivateIPAddress")
+	defer span.End()
+
 	option := &AssignPrivateIPAddressOptions{}
 	for _, opt := range opts {
 		opt.ApplyAssignPrivateIPAddress(option)
@@ -271,7 +296,7 @@ func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, opts ...AssignPriv
 			innerErr = apiErr.WarpError(innerErr)
 			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(innerErr)).Error(innerErr, "failed")
 
-			if apiErr.ErrorIs(innerErr, apiErr.IsURLError, apiErr.WarpFn(apiErr.ErrThrottling, apiErr.ErrInternalError)) {
+			if apiErr.ErrorIs(innerErr, apiErr.IsURLError, apiErr.WarpFn(apiErr.ErrThrottling, apiErr.ErrInternalError, apiErr.ErrOperationConflict)) {
 				return false, nil
 			}
 
@@ -298,6 +323,10 @@ func (a *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, 
 	if len(ips) == 0 {
 		return nil
 	}
+
+	ctx, span := a.Tracer.Start(ctx, "UnAssignPrivateIPAddresses")
+	defer span.End()
+
 	req := ecs.CreateUnassignPrivateIpAddressesRequest()
 	req.NetworkInterfaceId = eniID
 	str := ip.IPAddrs2str(ips)
@@ -328,6 +357,9 @@ func (a *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, 
 
 // AssignIpv6Addresses assign ipv6 address
 func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6AddressesOption) ([]netip.Addr, error) {
+	ctx, span := a.Tracer.Start(ctx, "AssignIpv6Addresses")
+	defer span.End()
+
 	option := &AssignIPv6AddressesOptions{}
 	for _, opt := range opts {
 		opt.ApplyAssignIPv6Addresses(option)
@@ -353,7 +385,7 @@ func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6Add
 			innerErr = apiErr.WarpError(innerErr)
 			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(innerErr)).Error(innerErr, "failed")
 
-			if apiErr.ErrorIs(innerErr, apiErr.IsURLError, apiErr.WarpFn(apiErr.ErrThrottling, apiErr.ErrInternalError)) {
+			if apiErr.ErrorIs(innerErr, apiErr.IsURLError, apiErr.WarpFn(apiErr.ErrThrottling, apiErr.ErrInternalError, apiErr.ErrOperationConflict)) {
 				return false, nil
 			}
 
@@ -376,6 +408,9 @@ func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6Add
 // UnAssignIpv6Addresses remove ip from eni
 // return ok if 1. eni is released 2. ip is already released 3. release success
 func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []netip.Addr) error {
+	ctx, span := a.Tracer.Start(ctx, "UnAssignIpv6Addresses")
+	defer span.End()
+
 	if len(ips) == 0 {
 		return nil
 	}
@@ -408,6 +443,9 @@ func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips [
 }
 
 func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error) {
+	ctx, span := a.Tracer.Start(ctx, "DescribeInstanceTypes")
+	defer span.End()
+
 	var result []ecs.InstanceType
 
 	nextToken := ""
@@ -444,6 +482,9 @@ func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]
 }
 
 func (a *OpenAPI) ModifyNetworkInterfaceAttribute(ctx context.Context, eniID string, securityGroupIDs []string) error {
+	ctx, span := a.Tracer.Start(ctx, "ModifyNetworkInterfaceAttribute")
+	defer span.End()
+
 	req := ecs.CreateModifyNetworkInterfaceAttributeRequest()
 	req.NetworkInterfaceId = eniID
 	req.SecurityGroupId = &securityGroupIDs
@@ -461,74 +502,4 @@ func (a *OpenAPI) ModifyNetworkInterfaceAttribute(ctx context.Context, eniID str
 	}
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("modify securityGroup", "ids", strings.Join(securityGroupIDs, ","))
 	return nil
-}
-
-// DefaultGetLimit returns the instance limits of a particular instance type. // https://www.alibabacloud.com/help/doc-detail/25620.htm
-// if instanceType is empty will list all instanceType and warm the cache, no error and Limits will return
-func DefaultGetLimit(client interface{}, instanceType string) (*Limits, error) {
-	a, ok := client.(*OpenAPI)
-	if !ok {
-		return nil, fmt.Errorf("unsupported client")
-	}
-
-	v, ok := limits.Load(instanceType)
-	if ok {
-		return v.(*Limits), nil
-	}
-	var req []string
-	if instanceType != "" {
-		req = append(req, instanceType)
-	}
-	ins, err := a.DescribeInstanceTypes(context.Background(), req)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, instanceTypeInfo := range ins {
-		instanceTypeID := instanceTypeInfo.InstanceTypeId
-		adapterLimit := instanceTypeInfo.EniQuantity
-		ipv4PerAdapter := instanceTypeInfo.EniPrivateIpAddressQuantity
-		ipv6PerAdapter := instanceTypeInfo.EniIpv6AddressQuantity
-		memberAdapterLimit := instanceTypeInfo.EniTotalQuantity - instanceTypeInfo.EniQuantity
-		eRdmaLimit := instanceTypeInfo.EriQuantity
-		// exclude eth0 eth1
-		maxMemberAdapterLimit := instanceTypeInfo.EniTotalQuantity - 2
-		if !instanceTypeInfo.EniTrunkSupported {
-			memberAdapterLimit = 0
-			maxMemberAdapterLimit = 0
-		}
-		limits.Store(instanceTypeID, &Limits{
-			Adapters:              adapterLimit,
-			TotalAdapters:         instanceTypeInfo.EniTotalQuantity,
-			IPv4PerAdapter:        max(ipv4PerAdapter, 0),
-			IPv6PerAdapter:        max(ipv6PerAdapter, 0),
-			MemberAdapterLimit:    max(memberAdapterLimit, 0),
-			MaxMemberAdapterLimit: max(maxMemberAdapterLimit, 0),
-			ERdmaAdapters:         max(eRdmaLimit, 0),
-			InstanceBandwidthRx:   instanceTypeInfo.InstanceBandwidthRx,
-			InstanceBandwidthTx:   instanceTypeInfo.InstanceBandwidthTx,
-		})
-		logf.Log.WithValues(
-			"instance-type", instanceType,
-			"adapters", adapterLimit,
-			"total-adapters", instanceTypeInfo.EniTotalQuantity,
-			"ipv4", ipv4PerAdapter,
-			"ipv6", ipv6PerAdapter,
-			"member-adapters", memberAdapterLimit,
-			"erdma-adapters", eRdmaLimit,
-			"max-member-adapters", maxMemberAdapterLimit,
-			"bandwidth-rx", instanceTypeInfo.InstanceBandwidthRx,
-			"bandwidth-tx", instanceTypeInfo.InstanceBandwidthTx,
-		).Info("instance limit")
-
-	}
-	if instanceType == "" {
-		return nil, nil
-	}
-	v, ok = limits.Load(instanceType)
-	if !ok {
-		return nil, fmt.Errorf("unexpected error")
-	}
-
-	return v.(*Limits), nil
 }

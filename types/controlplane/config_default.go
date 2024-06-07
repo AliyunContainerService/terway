@@ -39,10 +39,12 @@ type Config struct {
 	CertDir            string `json:"certDir" validate:"required" mod:"default=/var/run/webhook-cert"`
 	LeaderElection     bool   `json:"leaderElection"`
 	RegisterEndpoint   bool   `json:"registerEndpoint"` // deprecated
+	EnableTrace        bool   `json:"enableTrace"`
 
-	NodeMaxConcurrent   int `json:"nodeMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
 	PodMaxConcurrent    int `json:"podMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
 	PodENIMaxConcurrent int `json:"podENIMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
+	NodeController
+	MultiIPController
 
 	Controllers []string `json:"controllers"`
 
@@ -80,4 +82,18 @@ type Credential struct {
 	CredentialPath  string        `json:"credentialPath"`
 	SecretNamespace string        `json:"secretNamespace" validate:"required_with=SecretName"`
 	SecretName      string        `json:"secretName" validate:"required_with=SecretNamespace"`
+	OtelEndpoint    string        `json:"otelEndpoint"`
+	OtelToken       secret.Secret `json:"otelToken"`
+}
+
+type MultiIPController struct {
+	MultiIPMaxConcurrent          int    `json:"multiIPMaxConcurrent" validate:"gt=0,lte=20000" mod:"default=500"`
+	MultiIPNodeSyncPeriod         string `json:"multiIPNodeSyncPeriod" mod:"default=12h"`
+	MultiIPGCPeriod               string `json:"multiIPGCPeriod" mod:"default=2m"`
+	MultiIPMinSyncPeriodOnFailure string `json:"multiIPMinSyncPeriodOnFailure" mod:"default=1s"`
+	MultiIPMaxSyncPeriodOnFailure string `json:"multiIPMaxSyncPeriodOnFailure" mod:"default=300s"`
+}
+
+type NodeController struct {
+	NodeMaxConcurrent int `json:"nodeMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
 }

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
@@ -22,11 +23,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 )
 
-var log = logger.DefaultLogger.WithField("subSys", "webhook-cert")
+var log = ctrl.Log.WithName("webhook-cert")
 
 const (
 	serverCertKey = "tls.crt"
@@ -126,7 +126,7 @@ func SyncCert(ctx context.Context, c client.Client, ns, name, domain, certDir st
 		err = wait.ExponentialBackoffWithContext(ctx, utils.DefaultPatchBackoff, func(ctx context.Context) (done bool, err error) {
 			innerErr := c.Patch(ctx, mutatingWebhook, client.StrategicMergeFrom(oldMutatingWebhook))
 			if innerErr != nil {
-				log.Error(innerErr)
+				log.Error(innerErr, "error patch ca")
 				return false, nil
 			}
 			return true, nil
@@ -160,7 +160,7 @@ func SyncCert(ctx context.Context, c client.Client, ns, name, domain, certDir st
 		err = wait.ExponentialBackoffWithContext(ctx, utils.DefaultPatchBackoff, func(ctx context.Context) (done bool, err error) {
 			innerErr := c.Patch(ctx, validateWebhook, client.StrategicMergeFrom(oldValidateWebhook))
 			if innerErr != nil {
-				log.Error(innerErr)
+				log.Error(innerErr, "error patch ca")
 				return false, nil
 			}
 			return true, nil
