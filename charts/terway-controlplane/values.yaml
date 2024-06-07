@@ -13,6 +13,9 @@ nameOverride: ""
 fullnameOverride: ""
 
 podAnnotations: {}
+#  prometheus.io/path: "/metrics"
+#  prometheus.io/port: "9999"
+#  prometheus.io/scrape: "true"
 
 service:
   type: ClusterIP
@@ -26,6 +29,23 @@ resources:
 nodeSelector: {}
 
 tolerations: []
+
+envs:
+  - name: K8S_POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
+  - name: K8S_NODE_NAME
+    valueFrom:
+      fieldRef:
+        apiVersion: v1
+        fieldPath: spec.nodeName
+  - name: MY_POD_IP
+    valueFrom:
+      fieldRef:
+        fieldPath: status.podIP
+#  - name: aliyun_logs_terway-controlplane
+#    value: stdout
 
 affinity:
   podAntiAffinity:
@@ -49,6 +69,8 @@ affinity:
 webhookFailurePolicy: Ignore
 webhookTimeoutSeconds: 10
 
+logLevel: "2"
+
 # configmap
 regionID: ch-hangzhou
 clusterID: ""
@@ -58,7 +80,17 @@ clusterDomain: "cluster.local"
 webhookPort: 4443
 enableTrunk: true
 ipStack: ipv4
+enableTrace: false
+controllers:
+  - pod-eni
+  - pod
+  - pod-networking
+  - node
+  - multi-ip-node
+  - multi-ip-pod
 
 # secrets
 accessKey: ""
 accessSecret: ""
+secretNamespace: ""
+secretName: ""

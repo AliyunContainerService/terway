@@ -28,3 +28,13 @@ rules:
       - watch
       - create
       - update
+{{- if .Values.secretName }}
+  - apiGroups: [ "" ]
+    resources:
+      - secrets
+    verbs:
+      - get
+      - watch
+    resourceNames:
+      - {{ .Values.secretName }}
+{{- end }}
