@@ -438,7 +438,7 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 		}
 	}
 
-	if expectV4 > 0 && expectV6 > 0 && l.ipAllocInhibitExpireAt.After(time.Now()) {
+	if (expectV4 > 0 || expectV6 > 0) && l.ipAllocInhibitExpireAt.After(time.Now()) {
 		log.Info("eni alloc inhibit", "expire", l.ipAllocInhibitExpireAt.String())
 		return nil, []Trace{{Condition: InsufficientVSwitchIP, Reason: fmt.Sprintf("alloc inhibit, expire at %s", l.ipAllocInhibitExpireAt.String())}}
 	}
