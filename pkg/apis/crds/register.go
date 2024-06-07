@@ -93,7 +93,7 @@ func CreateOrUpdateCRD(ctx context.Context, c client.Client, name string) error 
 	}
 
 	result := semver.Compare(exist.Annotations[crdVersionKey], expect.Annotations[crdVersionKey])
-	if result <= 0 {
+	if result >= 0 {
 		return nil
 	}
 	log.Info("update crd", "exist", exist.Annotations[crdVersionKey], "expect", expect.Annotations[crdVersionKey])

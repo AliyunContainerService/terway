@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/time/rate"
@@ -263,6 +264,19 @@ func TestLocal_Allocate_ERDMA(t *testing.T) {
 
 	assert.Equal(t, 1, len(resp))
 	assert.Equal(t, ResourceTypeMismatch, resp[0].Condition)
+}
+
+func TestLocal_Allocate_Inhibit(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "")
+
+	request := &LocalIPRequest{}
+	cni := &daemon.CNI{PodID: "pod-1"}
+
+	local.ipAllocInhibitExpireAt = time.Now().Add(time.Minute)
+
+	allocResp, resp := local.Allocate(context.Background(), cni, request)
+	assert.Nil(t, allocResp)
+	assert.Equal(t, 1, len(resp))
 }
 
 func Test_parseResourceID(t *testing.T) {
