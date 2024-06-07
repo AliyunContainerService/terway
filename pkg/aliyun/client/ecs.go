@@ -77,6 +77,7 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, opts ...CreateNetw
 
 	if err != nil {
 		rollBackFunc()
+		return nil, err
 	}
 
 	return FromCreateResp(resp), err
@@ -281,6 +282,7 @@ func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, opts ...AssignPriv
 	})
 	if err != nil {
 		rollBackFunc()
+		return nil, err
 	}
 
 	ips, err := ip.ToIPAddrs(resp.AssignedPrivateIpAddressesSet.PrivateIpSet.PrivateIpAddress)
@@ -362,6 +364,7 @@ func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6Add
 	})
 	if err != nil {
 		rollBackFunc()
+		return nil, err
 	}
 
 	ips, err := ip.ToIPAddrs(resp.Ipv6Sets.Ipv6Address)
