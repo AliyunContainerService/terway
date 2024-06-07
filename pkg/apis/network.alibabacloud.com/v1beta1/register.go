@@ -21,7 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	network "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com"
+	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com"
 )
 
 // SchemeGroupVersion is group version used to register these objects
@@ -51,6 +51,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&PodENIList{},
 		&PodNetworking{},
 		&PodNetworkingList{},
+		&Node{},
+		&NodeList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

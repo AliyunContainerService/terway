@@ -1,0 +1,258 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: nodes.network.alibabacloud.com
+spec:
+  group: network.alibabacloud.com
+  names:
+    kind: Node
+    listKind: NodeList
+    plural: nodes
+    singular: node
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: Node is the Schema for the nodes API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NodeSpec defines the desired state of Node
+            properties:
+              eni:
+                properties:
+                  enableERDMA:
+                    type: boolean
+                  enableIPv4:
+                    type: boolean
+                  enableIPv6:
+                    type: boolean
+                  enableTrunk:
+                    type: boolean
+                  resourceGroupID:
+                    type: string
+                  securityGroupIDs:
+                    items:
+                      type: string
+                    type: array
+                  tag:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  tagFilter:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  vSwitchOptions:
+                    items:
+                      type: string
+                    type: array
+                  vSwitchSelectPolicy:
+                    enum:
+                    - ordered
+                    - random
+                    - most
+                    type: string
+                type: object
+              flavor:
+                description: Flavor guide the controller to generate eni as expected
+                items:
+                  properties:
+                    count:
+                      minimum: 0
+                      type: integer
+                    networkInterfaceTrafficMode:
+                      description: NetworkInterfaceTrafficMode represents the traffic
+                        mode of the network interface.
+                      enum:
+                      - Standard
+                      - HighPerformance
+                      type: string
+                    networkInterfaceType:
+                      description: ENIType for this eni, only Secondary and Member
+                        is supported
+                      enum:
+                      - Secondary
+                      - Trunk
+                      - Primary
+                      - Member
+                      type: string
+                  required:
+                  - count
+                  - networkInterfaceTrafficMode
+                  - networkInterfaceType
+                  type: object
+                type: array
+              nodeCap:
+                properties:
+                  adapters:
+                    type: integer
+                  eriQuantity:
+                    type: integer
+                  instanceBandwidthRx:
+                    type: integer
+                  instanceBandwidthTx:
+                    type: integer
+                  ipv4PerAdapter:
+                    type: integer
+                  ipv6PerAdapter:
+                    type: integer
+                  maxMemberAdapterLimit:
+                    type: integer
+                  memberAdapterLimit:
+                    type: integer
+                  totalAdapters:
+                    type: integer
+                type: object
+              nodeMetadata:
+                properties:
+                  instanceID:
+                    type: string
+                  instanceType:
+                    type: string
+                  regionID:
+                    type: string
+                  zoneID:
+                    type: string
+                type: object
+              pool:
+                properties:
+                  maxPoolSize:
+                    minimum: 0
+                    type: integer
+                  minPoolSize:
+                    minimum: 0
+                    type: integer
+                type: object
+            type: object
+          status:
+            description: NodeStatus defines the observed state of Node
+            properties:
+              lastSyncOpenAPITime:
+                format: date-time
+                type: string
+              networkInterfaces:
+                additionalProperties:
+                  properties:
+                    ID:
+                      type: string
+                    VSwitchID:
+                      type: string
+                    ipv4:
+                      additionalProperties:
+                        properties:
+                          ip:
+                            type: string
+                          podID:
+                            description: Add the pod ID
+                            type: string
+                          primary:
+                            type: boolean
+                          status:
+                            description: IPStatus representing the status of an IP
+                              address.
+                            enum:
+                            - Valid
+                            - Deleting
+                            type: string
+                        required:
+                        - ip
+                        - primary
+                        - status
+                        type: object
+                      type: object
+                    ipv4CIDR:
+                      type: string
+                    ipv6:
+                      additionalProperties:
+                        properties:
+                          ip:
+                            type: string
+                          podID:
+                            description: Add the pod ID
+                            type: string
+                          primary:
+                            type: boolean
+                          status:
+                            description: IPStatus representing the status of an IP
+                              address.
+                            enum:
+                            - Valid
+                            - Deleting
+                            type: string
+                        required:
+                        - ip
+                        - primary
+                        - status
+                        type: object
+                      type: object
+                    ipv6CIDR:
+                      type: string
+                    macAddress:
+                      type: string
+                    networkInterfaceTrafficMode:
+                      description: NetworkInterfaceTrafficMode represents the traffic
+                        mode of the network interface.
+                      enum:
+                      - Standard
+                      - HighPerformance
+                      type: string
+                    networkInterfaceType:
+                      description: ENIType for this eni, only Secondary and Member
+                        is supported
+                      enum:
+                      - Secondary
+                      - Trunk
+                      - Primary
+                      - Member
+                      type: string
+                    primaryIPAddress:
+                      type: string
+                    securityGroupIDs:
+                      items:
+                        type: string
+                      type: array
+                    status:
+                      type: string
+                  required:
+                  - ID
+                  - VSwitchID
+                  - ipv4CIDR
+                  - ipv6CIDR
+                  - macAddress
+                  - networkInterfaceTrafficMode
+                  - networkInterfaceType
+                  - primaryIPAddress
+                  - securityGroupIDs
+                  - status
+                  type: object
+                type: object
+              nextSyncOpenAPITime:
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
