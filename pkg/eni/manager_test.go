@@ -166,6 +166,11 @@ func (f *FakeK8s) GetNodeDynamicConfigLabel() string {
 	panic("implement me")
 }
 
+func (f *FakeK8s) GetNodeLabels() map[string]string {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (f *FakeK8s) GetDynamicConfigWithName(ctx context.Context, name string) (string, error) {
 	//TODO implement me
 	panic("implement me")
