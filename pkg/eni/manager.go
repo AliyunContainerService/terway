@@ -96,6 +96,7 @@ func (n ByPriority) Swap(i, j int) { n[i], n[j] = n[j], n[i] }
 type Manager struct {
 	sync.RWMutex
 	networkInterfaces []NetworkInterface
+	selectionPolicy   types.EniSelectionPolicy
 
 	minIdles int
 	maxIdles int
@@ -161,7 +162,12 @@ func (m *Manager) Allocate(ctx context.Context, cni *daemon.CNI, req *AllocReque
 	var traces []Trace
 
 	m.Lock()
-	sort.Sort(ByPriority(m.networkInterfaces))
+	switch m.selectionPolicy {
+	case types.EniSelectionPolicyLeastIPs:
+		sort.Sort(sort.Reverse(ByPriority(m.networkInterfaces)))
+	default:
+		sort.Sort(ByPriority(m.networkInterfaces))
+	}
 
 	var err error
 	for _, request := range req.ResourceRequests {
@@ -266,7 +272,12 @@ func (m *Manager) Status() []Status {
 
 func (m *Manager) syncPool(ctx context.Context) {
 	m.Lock()
-	sort.Sort(sort.Reverse(ByPriority(m.networkInterfaces)))
+	switch m.selectionPolicy {
+	case types.EniSelectionPolicyLeastIPs:
+		sort.Sort(ByPriority(m.networkInterfaces))
+	default:
+		sort.Sort(sort.Reverse(ByPriority(m.networkInterfaces)))
+	}
 
 	var idles, inuses int
 	for _, ni := range m.networkInterfaces {
@@ -333,13 +344,14 @@ func (m *Manager) syncPool(ctx context.Context) {
 	wg.Wait()
 }
 
-func NewManager(minIdles, maxIdles, total int, syncPeriod time.Duration, networkInterfaces []NetworkInterface, k8s k8s.Kubernetes) *Manager {
+func NewManager(minIdles, maxIdles, total int, syncPeriod time.Duration, networkInterfaces []NetworkInterface, selectionPolicy types.EniSelectionPolicy, k8s k8s.Kubernetes) *Manager {
 	if syncPeriod < 2*time.Minute && syncPeriod > 0 {
 		syncPeriod = 2 * time.Minute
 	}
 
 	return &Manager{
 		networkInterfaces: networkInterfaces,
+		selectionPolicy:   selectionPolicy,
 		minIdles:          minIdles,
 		maxIdles:          maxIdles,
 		total:             total,

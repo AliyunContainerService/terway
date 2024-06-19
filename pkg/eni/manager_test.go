@@ -2,6 +2,8 @@ package eni
 
 import (
 	"context"
+	"net"
+	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -41,7 +43,10 @@ func (o *timeOut) Run(ctx context.Context, podResources []daemon.PodResources, w
 
 var _ NetworkInterface = &success{}
 
-type success struct{}
+type success struct {
+	priority int
+	IPv4     netip.Addr
+}
 
 func (s *success) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace) {
 	ch := make(chan *AllocResp)
@@ -52,7 +57,9 @@ func (s *success) Allocate(ctx context.Context, cni *daemon.CNI, request Resourc
 				&LocalIPResource{
 					PodID: "",
 					ENI:   daemon.ENI{},
-					IP:    types.IPSet2{},
+					IP: types.IPSet2{
+						IPv4: s.IPv4,
+					},
 				}},
 		}
 	}()
@@ -64,7 +71,7 @@ func (s *success) Release(ctx context.Context, cni *daemon.CNI, request NetworkR
 }
 
 func (s *success) Priority() int {
-	return 0
+	return s.priority
 }
 
 func (s *success) Dispose(n int) int {
@@ -77,7 +84,7 @@ func (s *success) Run(ctx context.Context, podResources []daemon.PodResources, w
 
 func TestManagerAllocateReturnsResourcesWhenSuccessful(t *testing.T) {
 	mockNI := &success{}
-	manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI}, &FakeK8s{})
+	manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI}, types.EniSelectionPolicyMostIPs, &FakeK8s{})
 
 	resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
 		ResourceRequests: []ResourceRequest{&LocalIPRequest{}},
@@ -87,8 +94,45 @@ func TestManagerAllocateReturnsResourcesWhenSuccessful(t *testing.T) {
 	assert.NotNil(t, resources)
 }
 
+func TestManagerAllocateSelectionPolicy(t *testing.T) {
+	ip, _ := netip.AddrFromSlice(net.ParseIP("192.168.0.1"))
+	mockNI := &success{
+		priority: 1,
+		IPv4:     ip,
+	}
+	ip, _ = netip.AddrFromSlice(net.ParseIP("192.168.0.2"))
+	mockNI2 := &success{
+		priority: 2,
+		IPv4:     ip,
+	}
+
+	{
+		manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI, mockNI2}, types.EniSelectionPolicyMostIPs, &FakeK8s{})
+
+		resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
+			ResourceRequests: []ResourceRequest{&LocalIPRequest{}},
+		})
+
+		assert.Nil(t, err)
+		assert.NotNil(t, resources)
+		assert.Equal(t, mockNI2.IPv4.String(), resources[0].ToStore()[0].IPv4)
+	}
+
+	{
+		manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI, mockNI2}, types.EniSelectionPolicyLeastIPs, &FakeK8s{})
+
+		resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
+			ResourceRequests: []ResourceRequest{&LocalIPRequest{}},
+		})
+
+		assert.Nil(t, err)
+		assert.NotNil(t, resources)
+		assert.Equal(t, mockNI.IPv4.String(), resources[0].ToStore()[0].IPv4)
+	}
+}
+
 func TestManagerAllocateReturnsErrorWhenNoBackendCanHandleAllocation(t *testing.T) {
-	manager := NewManager(0, 0, 0, 0, []NetworkInterface{}, &FakeK8s{})
+	manager := NewManager(0, 0, 0, 0, []NetworkInterface{}, types.EniSelectionPolicyMostIPs, &FakeK8s{})
 
 	_, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
 		ResourceRequests: []ResourceRequest{&LocalIPRequest{}},
@@ -99,7 +143,7 @@ func TestManagerAllocateReturnsErrorWhenNoBackendCanHandleAllocation(t *testing.
 
 func TestManagerAllocateWithTimeoutWhenAllocationFails(t *testing.T) {
 	mockNI := &timeOut{}
-	manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI}, &FakeK8s{})
+	manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI}, types.EniSelectionPolicyMostIPs, &FakeK8s{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
