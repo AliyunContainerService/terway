@@ -23,8 +23,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	eni2 "github.com/AliyunContainerService/terway/pkg/aliyun/eni"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
-	"github.com/AliyunContainerService/terway/pkg/apis/alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/apis/crds"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/eni"
 	"github.com/AliyunContainerService/terway/pkg/factory"
@@ -43,11 +41,8 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/flowcontrol"
-	"k8s.io/client-go/util/retry"
 )
 
 const (
@@ -639,108 +634,6 @@ func gcLeakedRules(existIP sets.Set[string]) {
 	gcTCFilters(normalLinks, existIP)
 }
 
-func (n *networkService) migrateEIP(ctx context.Context, objs []interface{}) error {
-	once := sync.Once{}
-
-	for _, resObj := range objs {
-		podRes, ok := resObj.(daemon.PodResources)
-		if !ok {
-			continue
-		}
-		if podRes.PodInfo == nil || !podRes.PodInfo.EipInfo.PodEip {
-			continue
-		}
-		for _, eipRes := range podRes.Resources {
-			if eipRes.Type != daemon.ResourceTypeEIP {
-				continue
-			}
-			allocType := v1beta1.IPAllocTypeAuto
-			if podRes.PodInfo.EipInfo.PodEipID != "" {
-				allocType = v1beta1.IPAllocTypeStatic
-			}
-			releaseStrategy := v1beta1.ReleaseStrategyFollow
-			releaseAfter := ""
-
-			if podRes.PodInfo.IPStickTime > 0 {
-				releaseStrategy = v1beta1.ReleaseStrategyTTL
-				releaseAfter = podRes.PodInfo.IPStickTime.String()
-			}
-
-			var err error
-			once.Do(func() {
-				err = crds.CreateOrUpdateCRD(ctx, n.k8s.GetClient(), crds.CRDPodEIP)
-			})
-			if err != nil {
-				return err
-			}
-
-			ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-
-			//l := serviceLog.WithField("name", fmt.Sprintf("%s/%s", podRes.PodInfo.Namespace, podRes.PodInfo.Name))
-
-			c := n.k8s.GetClient()
-			podEIP := &v1beta1.PodEIP{}
-			err = c.Get(ctx, k8stypes.NamespacedName{Namespace: podRes.PodInfo.Namespace, Name: podRes.PodInfo.Name}, podEIP)
-			if err == nil {
-				cancel()
-				//l.Info("skip create podEIP, already exist")
-				continue
-			}
-			if !k8sErr.IsNotFound(err) {
-				cancel()
-				return err
-			}
-
-			err = retry.OnError(wait.Backoff{
-				Steps:    4,
-				Duration: 200 * time.Millisecond,
-				Factor:   5.0,
-				Jitter:   0.1,
-			}, func(err error) bool {
-				if k8sErr.IsTooManyRequests(err) {
-					return true
-				}
-				if k8sErr.IsInternalError(err) {
-					return true
-				}
-				return false
-			}, func() error {
-				podEIP = &v1beta1.PodEIP{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:        podRes.PodInfo.Name,
-						Namespace:   podRes.PodInfo.Namespace,
-						Annotations: map[string]string{},
-						Finalizers:  []string{"podeip-controller.alibabacloud.com/finalizer"},
-					},
-					Spec: v1beta1.PodEIPSpec{
-						AllocationID:       eipRes.ID,
-						BandwidthPackageID: podRes.PodInfo.EipInfo.PodEipBandwidthPackageID,
-						AllocationType: v1beta1.AllocationType{
-							Type:            allocType,
-							ReleaseStrategy: releaseStrategy,
-							ReleaseAfter:    releaseAfter,
-						},
-					},
-				}
-
-				//l.Infof("create podEIP for %v", podRes)
-
-				err := c.Create(ctx, podEIP)
-				if k8sErr.IsAlreadyExists(err) {
-					return nil
-				}
-				return err
-			})
-			cancel()
-
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 // tracing
 func (n *networkService) Config() []tracing.MapKeyValueEntry {
 	// name, daemon_mode, configFilePath, kubeconfig, master
@@ -1028,14 +921,6 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	serviceLog.Info(fmt.Sprintf("loaded pod res, %v", podResources))
 
 	podResources = filterENINotFound(podResources, attachedENIID)
-
-	if config.EnableEIPMigrate {
-		err = netSrv.migrateEIP(ctx, objList)
-		if err != nil {
-			return nil, err
-		}
-		serviceLog.Info("eip migrate finished")
-	}
 
 	err = preStartResourceManager(daemonMode, netSrv.k8s)
 	if err != nil {
