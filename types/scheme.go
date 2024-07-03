@@ -9,7 +9,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 
-	aliv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
 
@@ -17,7 +16,6 @@ var Scheme = runtime.NewScheme()
 
 func init() {
 	utilruntime.Must(corev1.AddToScheme(Scheme))
-	utilruntime.Must(aliv1beta1.AddToScheme(Scheme))
 	utilruntime.Must(apiextensionsv1.AddToScheme(Scheme))
 	utilruntime.Must(v1beta1.AddToScheme(Scheme))
 }
