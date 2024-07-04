@@ -84,6 +84,7 @@ func TestGetENIConfig(t *testing.T) {
 		ENITags:                map[string]string{"aa": "bb"},
 		SecurityGroups:         []string{"sg1", "sg2"},
 		VSwitchSelectionPolicy: "ordered",
+		EniSelectionPolicy:     "most_ips",
 		ResourceGroupID:        "rgID",
 		EnableENITrunking:      true,
 		EnableERDMA:            true,
@@ -100,6 +101,7 @@ func TestGetENIConfig(t *testing.T) {
 	assert.Equal(t, []string{"sg1", "sg2"}, eniConfig.SecurityGroupIDs)
 	assert.Equal(t, "instanceID", eniConfig.InstanceID)
 	assert.Equal(t, vswitch.VSwitchSelectionPolicyMost, eniConfig.VSwitchSelectionPolicy)
+	assert.Equal(t, types.EniSelectionPolicyMostIPs, eniConfig.EniSelectionPolicy)
 	assert.Equal(t, "rgID", eniConfig.ResourceGroupID)
 	assert.Equal(t, types.Feat(3), eniConfig.EniTypeAttr)
 }

@@ -26,12 +26,17 @@ func getDynamicConfig(ctx context.Context, k8s k8s.Kubernetes) (string, string, 
 }
 
 func getENIConfig(cfg *daemon.Config) *types.ENIConfig {
-
-	policy := vswitch.VSwitchSelectionPolicyRandom
+	vswitchSelectionPolicy := vswitch.VSwitchSelectionPolicyRandom
 	switch cfg.VSwitchSelectionPolicy {
 	case "ordered":
 		// keep the previous behave
-		policy = vswitch.VSwitchSelectionPolicyMost
+		vswitchSelectionPolicy = vswitch.VSwitchSelectionPolicyMost
+	}
+
+	eniSelectionPolicy := types.EniSelectionPolicyMostIPs
+	switch cfg.EniSelectionPolicy {
+	case "least_ips":
+		eniSelectionPolicy = types.EniSelectionPolicyLeastIPs
 	}
 
 	eniConfig := &types.ENIConfig{
@@ -40,7 +45,8 @@ func getENIConfig(cfg *daemon.Config) *types.ENIConfig {
 		ENITags:                cfg.ENITags,
 		SecurityGroupIDs:       cfg.GetSecurityGroups(),
 		InstanceID:             instance.GetInstanceMeta().InstanceID,
-		VSwitchSelectionPolicy: policy,
+		VSwitchSelectionPolicy: vswitchSelectionPolicy,
+		EniSelectionPolicy:     eniSelectionPolicy,
 		ResourceGroupID:        cfg.ResourceGroupID,
 		EniTypeAttr:            0,
 	}

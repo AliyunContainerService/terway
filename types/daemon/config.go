@@ -44,6 +44,7 @@ type Config struct {
 	EniCapRatio            float64             `yaml:"eni_cap_ratio" json:"eni_cap_ratio" mod:"default=1"`
 	EniCapShift            int                 `yaml:"eni_cap_shift" json:"eni_cap_shift"`
 	VSwitchSelectionPolicy string              `yaml:"vswitch_selection_policy" json:"vswitch_selection_policy" mod:"default=random"`
+	EniSelectionPolicy     string              `yaml:"eni_selection_policy" json:"eni_selection_policy" mod:"default=most_ips"`
 	EnableEIPPool          string              `yaml:"enable_eip_pool" json:"enable_eip_pool"`
 	// deprecated
 	EnableEIPMigrate bool   `yaml:"enable_eip_migrate" json:"enable_eip_migrate"`

@@ -1004,7 +1004,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 		}
 	}
 
-	eniManager := eni.NewManager(poolConfig.MinPoolSize, poolConfig.MaxPoolSize, poolConfig.Capacity, 30*time.Second, eniList, netSrv.k8s)
+	eniManager := eni.NewManager(poolConfig.MinPoolSize, poolConfig.MaxPoolSize, poolConfig.Capacity, 30*time.Second, eniList, eniConfig.EniSelectionPolicy, netSrv.k8s)
 	netSrv.eniMgr = eniManager
 	err = eniManager.Run(ctx, &netSrv.wg, podResources)
 	if err != nil {
