@@ -88,6 +88,7 @@ type Kubernetes interface {
 
 	GetServiceCIDR() *types.IPNetSet
 	GetNodeCidr() *types.IPNetSet
+	GetNodeLabels() map[string]string
 	SetNodeAllocatablePod(count int) error
 
 	PatchNodeAnnotations(anno map[string]string) error
@@ -515,6 +516,13 @@ func (k *k8s) RecordPodEvent(podName, podNamespace, eventType, reason, message s
 
 	k.recorder.Event(ref, eventType, reason, message)
 	return nil
+}
+
+func (k *k8s) GetNodeLabels() map[string]string {
+	if k.node.Labels == nil {
+		return map[string]string{}
+	}
+	return k.node.Labels
 }
 
 // GetNodeDynamicConfigLabel returns value with label config
