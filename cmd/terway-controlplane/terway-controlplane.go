@@ -32,7 +32,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -228,7 +227,12 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		defer grpcTP.Shutdown(ctx)
+		defer func(grpcTP *trace.TracerProvider, ctx context.Context) {
+			err := grpcTP.Shutdown(ctx)
+			if err != nil {
+				log.Error(err, "failed to shutdown grpc tracer")
+			}
+		}(grpcTP, ctx)
 		tp = grpcTP
 	}
 	wg := &wait.Group{}
@@ -278,8 +282,7 @@ func initOpenTelemetry(ctx context.Context, serviceName, serviceVersion string, 
 	traceClient := otlptracegrpc.NewClient(
 		otlptracegrpc.WithInsecure(),
 		otlptracegrpc.WithEndpoint(cfg.OtelEndpoint),
-		otlptracegrpc.WithHeaders(headers),
-		otlptracegrpc.WithDialOption(grpc.WithBlock()))
+		otlptracegrpc.WithHeaders(headers))
 
 	traceExporter, err := otlptrace.New(ctx, traceClient)
 

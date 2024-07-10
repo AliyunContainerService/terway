@@ -215,9 +215,7 @@ func cmdCheck(args *skel.CmdArgs) error {
 }
 
 func getNetworkClient(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
-	ctx, parent := context.WithTimeout(ctx, defaultDialTimeout)
-	defer parent()
-	conn, err := grpc.DialContext(ctx, defaultSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
+	conn, err := grpc.NewClient(defaultSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
 		func(ctx context.Context, s string) (net.Conn, error) {
 			unixAddr, err := net.ResolveUnixAddr("unix", s)
 			if err != nil {
@@ -226,7 +224,6 @@ func getNetworkClient(ctx context.Context) (rpc.TerwayBackendClient, *grpc.Clien
 			d := net.Dialer{}
 			return d.DialContext(ctx, "unix", unixAddr.String())
 		}),
-		grpc.WithBlock(),
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff: backoff.Config{
 				BaseDelay:  time.Second,
