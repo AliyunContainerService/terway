@@ -1,0 +1,193 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joe Stringer <joe@cilium.io>
+Date: Wed, 6 Sep 2023 05:38:03 +0800
+Subject: k8s: Restrict configuring reserved:init policy via CNP
+
+Typically if the policy target EndpointSelector does not include a
+namespace, parsing will inject the namespace to ensure that only Pods
+within the same namespace can be selected. Furthermore, for peer
+EndpointSelectors there is a similar behaviour where ingress or egress
+is allowed only to the current namespace unless the user specifies which
+namespace the peer exists in. However, these defaults did not previously
+apply to policies that select the reserved:init Identity, since this
+Identity is not inherently namespaced, and hence automatically injecting
+the namespace would cause the policy to no longer match this Identity.
+
+The reserved:init Identity was introduced in order to allow a different
+policy to apply to Pods as they start up, iff the full Identity of those
+workloads cannot be determined when they are first connecting to the
+Cilium network (CNI ADD). In order to support this special reserved:init
+Identity, various exceptions were introduced into CiliumNetworkPolicy
+parser that removed the automatic insertion of namespace into the
+policies when there were label matches for the reserved:init namespace.
+
+The awkward part about this abstraction early on was that there was no
+way to directly associate the reserved:init Identity to any specific
+Kubernetes namespace, and yet CiliumNetworkPolicy was always inherently
+tied to a specific namespace. Since the introduction of the
+reserved:init Identity, CiliumClusterwideNetworkPolicy was also
+introduced, which is a much better fit for the ability to select
+endpoints that are not inherently namespaced.
+
+This patch deprecates support for applying network policies for the
+reserved:init Identity via CiliumNetworkPolicy in favour of
+CiliumClusterwideNetworkPolicy. As a benefit, this allows us to simplify
+the logic that applies the namespaces into the policies and reduce the
+likelihood of misconfigurations.
+
+Signed-off-by: Joe Stringer <joe@cilium.io>
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ examples/policies/l4/init.yaml             |  2 +-
+ pkg/k8s/apis/cilium.io/utils/utils.go      | 16 +++--
+ pkg/k8s/apis/cilium.io/utils/utils_test.go | 83 ++++++++++++++++++++++
+ 3 files changed, 93 insertions(+), 8 deletions(-)
+
+diff --git a/examples/policies/l4/init.yaml b/examples/policies/l4/init.yaml
+index 038524feb7..30c8633674 100644
+--- a/examples/policies/l4/init.yaml
++++ b/examples/policies/l4/init.yaml
+@@ -1,5 +1,5 @@
+ apiVersion: "cilium.io/v2"
+-kind: CiliumNetworkPolicy
++kind: CiliumClusterwideNetworkPolicy
+ metadata:
+   name: init
+ specs:
+diff --git a/pkg/k8s/apis/cilium.io/utils/utils.go b/pkg/k8s/apis/cilium.io/utils/utils.go
+index badcdfbdf4..365621fe63 100644
+--- a/pkg/k8s/apis/cilium.io/utils/utils.go
++++ b/pkg/k8s/apis/cilium.io/utils/utils.go
+@@ -82,14 +82,16 @@ func getEndpointSelector(namespace string, labelSelector *slim_metav1.LabelSelec
+ 	// Those pods don't have any labels, so they don't have a namespace label either.
+ 	// Don't add a namespace label to those endpoint selectors, or we wouldn't be
+ 	// able to match on those pods.
+-	if !matchesInit && !es.HasKey(podPrefixLbl) && !es.HasKey(podAnyPrefixLbl) {
++	if !es.HasKey(podPrefixLbl) && !es.HasKey(podAnyPrefixLbl) {
+ 		if namespace == "" {
+ 			// For a clusterwide policy if a namespace is not specified in the labels we add
+ 			// a selector to only match endpoints that contains a namespace label.
+ 			// This is to make sure that we are only allowing traffic for cilium managed k8s endpoints
+ 			// and even if a wildcard is provided in the selector we don't proceed with a truly
+ 			// empty(allow all) endpoint selector for the policy.
+-			es.AddMatchExpression(podPrefixLbl, slim_metav1.LabelSelectorOpExists, []string{})
++			if !matchesInit {
++				es.AddMatchExpression(podPrefixLbl, slim_metav1.LabelSelectorOpExists, []string{})
++			}
+ 		} else {
+ 			es.AddMatch(podPrefixLbl, namespace)
+ 		}
+@@ -299,11 +301,11 @@ func ParseToCiliumRule(namespace, name string, uid types.UID, r *api.Rule) *api.
+ 		// the policy is being stored, thus we add the namespace to
+ 		// the MatchLabels map.
+ 		//
+-		// Policies applying on initializing pods are a special case.
+-		// Those pods don't have any labels, so they don't have a namespace label either.
+-		// Don't add a namespace label to those endpoint selectors, or we wouldn't be
+-		// able to match on those pods.
+-		if !retRule.EndpointSelector.HasKey(podInitLbl) && namespace != "" {
++		// Policies applying to all namespaces are a special case.
++		// Such policies can match on any traffic from Pods or Nodes,
++		// so it wouldn't make sense to inject a namespace match for
++		// those policies.
++		if namespace != "" {
+ 			userNamespace, present := r.EndpointSelector.GetMatch(podPrefixLbl)
+ 			if present && !namespacesAreValid(namespace, userNamespace) {
+ 				log.WithFields(logrus.Fields{
+diff --git a/pkg/k8s/apis/cilium.io/utils/utils_test.go b/pkg/k8s/apis/cilium.io/utils/utils_test.go
+index 88fdcdad3a..060cc3a593 100644
+--- a/pkg/k8s/apis/cilium.io/utils/utils_test.go
++++ b/pkg/k8s/apis/cilium.io/utils/utils_test.go
+@@ -201,6 +201,89 @@ func Test_ParseToCiliumRule(t *testing.T) {
+ 				},
+ 			),
+ 		},
++		{
++			// CNP with endpoint selectors should always select the
++			// current namespace
++			name: "parse-init-policy-namespaced",
++			args: args{
++				namespace: slim_metav1.NamespaceDefault,
++				uid:       uuid,
++				rule: &api.Rule{
++					EndpointSelector: api.NewESFromMatchRequirements(
++						nil,
++						[]slim_metav1.LabelSelectorRequirement{
++							{
++								Key:      "reserved.init",
++								Operator: slim_metav1.LabelSelectorOpDoesNotExist,
++							},
++						},
++					),
++					Ingress: []api.IngressRule{
++						{
++							IngressCommonRule: api.IngressCommonRule{
++								FromEndpoints: []api.EndpointSelector{
++									{
++										LabelSelector: &slim_metav1.LabelSelector{},
++									},
++								},
++							},
++						},
++					},
++				},
++			},
++			want: api.NewRule().WithEndpointSelector(
++				api.NewESFromMatchRequirements(
++					map[string]string{
++						namespace: "default",
++					},
++					[]slim_metav1.LabelSelectorRequirement{
++						{
++							Key:      "reserved.init",
++							Operator: slim_metav1.LabelSelectorOpDoesNotExist,
++						},
++					},
++				),
++			).WithIngressRules(
++				[]api.IngressRule{
++					{
++						IngressCommonRule: api.IngressCommonRule{
++							FromEndpoints: []api.EndpointSelector{
++								api.NewESFromK8sLabelSelector(
++									labels.LabelSourceK8sKeyPrefix,
++									&slim_metav1.LabelSelector{
++										MatchLabels: map[string]string{
++											k8sConst.PodNamespaceLabel: "default",
++										},
++									}),
++							},
++						},
++					},
++				},
++			).WithLabels(
++				labels.LabelArray{
++					{
++						Key:    "io.cilium.k8s.policy.derived-from",
++						Value:  "CiliumNetworkPolicy",
++						Source: labels.LabelSourceK8s,
++					},
++					{
++						Key:    "io.cilium.k8s.policy.name",
++						Value:  "parse-init-policy-namespaced",
++						Source: labels.LabelSourceK8s,
++					},
++					{
++						Key:    "io.cilium.k8s.policy.namespace",
++						Value:  "default",
++						Source: labels.LabelSourceK8s,
++					},
++					{
++						Key:    "io.cilium.k8s.policy.uid",
++						Value:  string(uuid),
++						Source: labels.LabelSourceK8s,
++					},
++				},
++			),
++		},
+ 		{
+ 			name: "set-any-source-for-namespace",
+ 			args: args{
+-- 
+2.45.2
+
