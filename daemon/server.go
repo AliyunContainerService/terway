@@ -16,7 +16,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alexflint/go-filemutex"
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/util/wait"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -30,6 +32,7 @@ import (
 )
 
 const daemonRPCTimeout = 118 * time.Second
+const lockFile = "/var/run/eni/terwayd.lock"
 
 const (
 	prevCNIConfFile   = "10-terway.conf"
@@ -65,6 +68,24 @@ func stackTriger() {
 
 // Run terway daemon
 func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath, daemonMode string) error {
+	// init.sh already create the /var/run/eni
+	lock, err := filemutex.New(lockFile)
+	if err != nil {
+		return fmt.Errorf("error create lock file: %s, %w", lockFile, err)
+	}
+	defer func(lock *filemutex.FileMutex) {
+		_ = lock.Unlock()
+	}(lock)
+	err = wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (done bool, err error) {
+		innerErr := lock.TryLock()
+		if innerErr != nil {
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to acquire lock: %v", err)
+	}
 	l, err := newUnixListener(socketFilePath)
 	if err != nil {
 		return fmt.Errorf("error listen at %s: %v", socketFilePath, err)
