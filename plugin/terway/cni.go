@@ -215,7 +215,7 @@ func cmdCheck(args *skel.CmdArgs) error {
 }
 
 func getNetworkClient(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
-	conn, err := grpc.NewClient(defaultSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
+	conn, err := grpc.NewClient("passthrough:"+defaultSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
 		func(ctx context.Context, s string) (net.Conn, error) {
 			unixAddr, err := net.ResolveUnixAddr("unix", s)
 			if err != nil {
