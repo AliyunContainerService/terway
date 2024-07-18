@@ -104,6 +104,7 @@ func (l *LocalIPResource) ToRPC() []*rpc.NetConf {
 			Trunk:     false,
 			Vid:       0,
 			GatewayIP: l.ENI.GatewayIP.ToRPC(),
+			ERDMA:     l.ENI.ERdma,
 		},
 		Pod:          nil,
 		IfName:       "",

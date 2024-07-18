@@ -303,12 +303,20 @@ func generateENICfgForPolicy(cfg *types.SetupConfig, link netlink.Link, table in
 }
 
 func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
+	eni, err := netlink.LinkByIndex(cfg.ENIIndex)
+	if err != nil {
+		return err
+	}
+
 	vethCfg := &veth.Veth{
 		IfName:   cfg.ContainerIfName,
 		PeerName: cfg.HostVETHName,
 		MTU:      cfg.MTU,
 	}
-	err := veth.Setup(vethCfg, netNS)
+	if cfg.ERDMA {
+		vethCfg.HwAddr = eni.Attrs().HardwareAddr
+	}
+	err = veth.Setup(vethCfg, netNS)
 	if err != nil {
 		return err
 	}
@@ -319,6 +327,7 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	}
 
 	err = netNS.Do(func(_ ns.NetNS) error {
+
 		// 2. add address for container interface
 		contLink, err := netlink.LinkByName(cfg.ContainerIfName)
 		if err != nil {
@@ -337,11 +346,6 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	})
 	if err != nil {
 		return fmt.Errorf("setup container, %w", err)
-	}
-
-	eni, err := netlink.LinkByIndex(cfg.ENIIndex)
-	if err != nil {
-		return err
 	}
 
 	if cfg.EnableNetworkPriority {

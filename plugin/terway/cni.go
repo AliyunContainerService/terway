@@ -251,6 +251,7 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 		deviceID       int32
 		trunkENI       bool
 		vid            uint32
+		erdma          bool
 
 		ingress         uint64
 		egress          uint64
@@ -302,6 +303,7 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 		}
 		trunkENI = alloc.GetENIInfo().GetTrunk()
 		vid = alloc.GetENIInfo().GetVid()
+		erdma = alloc.GetENIInfo().GetERDMA()
 		if alloc.GetENIInfo().GetGatewayIP() != nil {
 			eniGatewayIP, err = terwayTypes.ToIPSet(alloc.GetENIInfo().GetGatewayIP())
 			if err != nil {
@@ -357,6 +359,7 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 		GatewayIP:             gatewayIP,
 		MTU:                   conf.MTU,
 		ENIIndex:              int(deviceID),
+		ERDMA:                 erdma,
 		ENIGatewayIP:          eniGatewayIP,
 		ServiceCIDR:           serviceCIDR,
 		HostStackCIDRs:        hostStackCIDRs,
