@@ -461,14 +461,14 @@ func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]
 		resp, err := a.ClientSet.ECS().DescribeInstanceTypes(req)
 		metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypes", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
-		l := logf.FromContext(ctx).WithValues(
-			LogFieldAPI, "DescribeInstanceTypes",
-		)
+		l := LogFields(logf.FromContext(ctx), req)
+
 		if err != nil {
 			err = apiErr.WarpError(err)
 			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "describe instance types failed")
 			return nil, err
 		}
+		l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
 
 		result = append(result, resp.InstanceTypes.InstanceType...)
 

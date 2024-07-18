@@ -105,6 +105,8 @@ type Kubernetes interface {
 	GetClient() client.Client
 
 	NodeName() string
+
+	Node() *corev1.Node
 }
 
 // NewK8S return Kubernetes service by pod spec and daemon mode
@@ -547,6 +549,10 @@ func (k *k8s) GetDynamicConfigWithName(ctx context.Context, name string) (string
 
 func (k *k8s) NodeName() string {
 	return k.nodeName
+}
+
+func (k *k8s) Node() *corev1.Node {
+	return k.node
 }
 
 func podNetworkType(daemonMode string, pod *corev1.Pod) string {
