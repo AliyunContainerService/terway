@@ -86,21 +86,16 @@ func NewENIDevicePlugin(count int, eniType string) *ENIDevicePlugin {
 
 // dial establishes the gRPC communication with the registered device plugin.
 func dial(unixSocketPath string, timeout time.Duration) (*grpc.ClientConn, func(), error) {
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	c, err := grpc.DialContext(timeoutCtx, unixSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(),
+	c, err := grpc.NewClient(unixSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 			return net.DialTimeout("unix", addr, timeout)
-		}),
-	)
-
+		}))
 	if err != nil {
-		cancel()
 		return nil, nil, err
 	}
 
 	return c, func() {
 		err = c.Close()
-		cancel()
 	}, nil
 }
 
@@ -130,13 +125,6 @@ func (m *ENIDevicePlugin) Start() error {
 			klog.Errorf("error start device plugin server, %+v", err)
 		}
 	}()
-
-	// Wait for server to start by launching a blocking connection
-	_, closeConn, err := dial(m.socket, 5*time.Second)
-	if err != nil {
-		return err
-	}
-	closeConn()
 	return nil
 }
 

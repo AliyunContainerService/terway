@@ -2,38 +2,28 @@ package daemon
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/netip"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/util/sets"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
-	eni2 "github.com/AliyunContainerService/terway/pkg/aliyun/eni"
-	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
-	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/eni"
 	"github.com/AliyunContainerService/terway/pkg/factory"
-	"github.com/AliyunContainerService/terway/pkg/factory/aliyun"
 	"github.com/AliyunContainerService/terway/pkg/k8s"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
-	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
@@ -42,7 +32,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/util/flowcontrol"
 )
 
 const (
@@ -473,6 +462,7 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 
 	reply.Success = true
 
+	log.Info("get info reply", "reply", reply)
 	return reply, nil
 }
 
@@ -612,28 +602,6 @@ func (n *networkService) gcPods(ctx context.Context) error {
 	return nil
 }
 
-func gcLeakedRules(existIP sets.Set[string]) {
-	links, err := netlink.LinkList()
-	if err != nil {
-		serviceLog.Error(err, "error list links")
-		return
-	}
-
-	ipvlLinks := lo.Filter(links, func(item netlink.Link, index int) bool {
-		_, ok := item.(*netlink.IPVlan)
-		return ok
-	})
-
-	gcRoutes(ipvlLinks, existIP)
-
-	normalLinks := lo.Filter(links, func(item netlink.Link, index int) bool {
-		_, ok := item.(*netlink.Device)
-		return ok
-	})
-
-	gcTCFilters(normalLinks, existIP)
-}
-
 // tracing
 func (n *networkService) Config() []tracing.MapKeyValueEntry {
 	// name, daemon_mode, configFilePath, kubeconfig, master
@@ -712,316 +680,17 @@ func (n *networkService) GetResourceMapping() ([]*rpc.ResourceMapping, error) {
 func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (*networkService, error) {
 	serviceLog.Info("start network service", "config", configFilePath, "daemonMode", daemonMode)
 
-	netSrv := &networkService{
-		configFilePath: configFilePath,
-		pendingPods:    sync.Map{},
-	}
-	if daemonMode == daemon.ModeENIMultiIP || daemonMode == daemon.ModeVPC || daemonMode == daemon.ModeENIOnly {
-		netSrv.daemonMode = daemonMode
-	} else {
-		return nil, fmt.Errorf("unsupport daemon mode")
-	}
-
-	var err error
-
 	globalConfig, err := daemon.GetConfigFromFileWithMerge(configFilePath, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	netSrv.k8s, err = k8s.NewK8S(daemonMode, globalConfig)
-	if err != nil {
-		return nil, fmt.Errorf("error init k8s: %w", err)
-	}
-
-	// load dynamic config
-	dynamicCfg, _, err := getDynamicConfig(ctx, netSrv.k8s)
-	if err != nil {
-		//serviceLog.Warnf("get dynamic config error: %s. fallback to default config", err.Error())
-		dynamicCfg = ""
-	}
-
-	config, err := daemon.GetConfigFromFileWithMerge(configFilePath, []byte(dynamicCfg))
-	if err != nil {
-		return nil, fmt.Errorf("failed parse config: %v", err)
-	}
-
-	config.Populate()
-	err = config.Validate()
-	if err != nil {
-		return nil, err
-	}
-
-	serviceLog.Info("got config", "config", fmt.Sprintf("%+v", config))
-
-	backoff.OverrideBackoff(config.BackoffOverride)
-	_ = netSrv.k8s.SetCustomStatefulWorkloadKinds(config.CustomStatefulWorkloadKinds)
-	netSrv.ipamType = config.IPAMType
-
-	if os.Getenv("TERWAY_DEPLOY_ENV") == envEFLO {
-		instance.SetPopulateFunc(instance.EfloPopulate)
-		client.SetGetLimit(client.EfloGetLimit)
-	}
-
-	meta := instance.GetInstanceMeta()
-
-	var (
-		trunkENIID      = ""
-		nodeAnnotations = map[string]string{}
-	)
-
-	var providers []credential.Interface
-	if string(config.AccessID) != "" && string(config.AccessSecret) != "" {
-		providers = append(providers, credential.NewAKPairProvider(string(config.AccessID), string(config.AccessSecret)))
-	}
-	providers = append(providers, credential.NewEncryptedCredentialProvider(utils.NormalizePath(config.CredentialPath), "", ""))
-	providers = append(providers, credential.NewMetadataProvider())
-
-	clientSet, err := credential.NewClientMgr(meta.RegionID, providers...)
-	if err != nil {
-		return nil, err
-	}
-
-	aliyunClient, err := client.New(clientSet,
-		flowcontrol.NewTokenBucketRateLimiter(8, 10),
-		flowcontrol.NewTokenBucketRateLimiter(4, 5))
-	if err != nil {
-		return nil, err
-	}
-
-	instanceType := meta.InstanceType
-	if os.Getenv("TERWAY_DEPLOY_ENV") == envEFLO {
-		instanceType = meta.InstanceID
-	}
-	limit, err := client.GetLimit(aliyunClient, instanceType)
-	if err != nil {
-		return nil, fmt.Errorf("upable get instance limit, %w", err)
-	}
-
-	enableIPv4, enableIPv6 := checkInstance(limit, daemonMode, config)
-
-	netSrv.enableIPv4 = enableIPv4
-	netSrv.enableIPv6 = enableIPv6
-
-	eniConfig := getENIConfig(config)
-	eniConfig.EnableIPv4 = enableIPv4
-	eniConfig.EnableIPv6 = enableIPv6
-
-	// fall back to use primary eni's sg
-	if len(eniConfig.SecurityGroupIDs) == 0 {
-		enis, err := aliyunClient.DescribeNetworkInterface(ctx, "", nil, eniConfig.InstanceID, "Primary", "", nil)
-		if err != nil {
-			return nil, err
-		}
-		if len(enis) == 0 {
-			return nil, fmt.Errorf("no primary eni found")
-		}
-		eniConfig.SecurityGroupIDs = enis[0].SecurityGroupIDs
-	}
-
-	// get pool config
-	poolConfig, err := getPoolConfig(config, daemonMode, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	poolConfig.EnableIPv4 = enableIPv4
-	poolConfig.EnableIPv6 = enableIPv6
-
-	serviceLog.Info("pool config", "pool", fmt.Sprintf("%+v", poolConfig))
-
-	vswPool, err := vswpool.NewSwitchPool(100, "10m")
-	if err != nil {
-		return nil, fmt.Errorf("error init vsw pool, %w", err)
-	}
-
-	var factory factory.Factory
-	if os.Getenv("TERWAY_DEPLOY_ENV") == envEFLO {
-		factory = aliyun.NewEflo(ctx, aliyunClient, vswPool, eniConfig)
+	if daemonMode == daemon.ModeENIMultiIP && globalConfig.IPAMType == types.IPAMTypeCRD {
+		// current the logic is for eniip
+		return newCRDV2Service(ctx, configFilePath, daemonMode)
 	} else {
-		factory = aliyun.NewAliyun(ctx, aliyunClient, eni2.NewENIMetadata(enableIPv4, enableIPv6), vswPool, eniConfig)
+		return newLegacyService(ctx, configFilePath, daemonMode)
 	}
-
-	if config.EnableENITrunking {
-		trunkENIID, err = initTrunk(config, poolConfig, netSrv.k8s, factory)
-		if err != nil {
-			return nil, err
-		}
-		if trunkENIID == "" {
-			serviceLog.Info("no trunk eni found, fallback to non-trunk mode")
-		} else {
-			nodeAnnotations[types.TrunkOn] = trunkENIID
-			nodeAnnotations[string(types.MemberENIIPTypeIPs)] = strconv.Itoa(poolConfig.MaxMemberENI)
-		}
-	}
-
-	if daemonMode != daemon.ModeVPC {
-		nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity)
-	}
-
-	attached, err := factory.GetAttachedNetworkInterface(trunkENIID)
-	if err != nil {
-		return nil, err
-	}
-
-	realRdmaCount := limit.ERDMARes()
-	if config.EnableERDMA && len(attached) >= limit.Adapters-1-limit.ERdmaAdapters {
-		attachedERdma := lo.Filter(attached, func(ni *daemon.ENI, idx int) bool { return ni.ERdma })
-		if len(attachedERdma) <= 0 {
-			// turn off only when no one use it
-			serviceLog.Info(fmt.Sprintf("node has no enough free eni slot to attach more erdma to achieve erdma res: %d", limit.ERDMARes()))
-			config.EnableERDMA = false
-		}
-		// reset the cap to the actual using
-		realRdmaCount = min(realRdmaCount, len(attachedERdma))
-	}
-
-	if config.EnableERDMA {
-		if daemonMode == daemon.ModeENIMultiIP {
-			nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity - realRdmaCount*limit.IPv4PerAdapter)
-			nodeAnnotations[string(types.ERDMAIPTypeIPs)] = strconv.Itoa(realRdmaCount * limit.IPv4PerAdapter)
-			poolConfig.ERdmaCapacity = realRdmaCount * limit.IPv4PerAdapter
-		} else if daemonMode == daemon.ModeENIOnly {
-			nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity - realRdmaCount)
-			nodeAnnotations[string(types.ERDMAIPTypeIPs)] = strconv.Itoa(realRdmaCount)
-			poolConfig.ERdmaCapacity = realRdmaCount
-		}
-	}
-
-	runDevicePlugin(daemonMode, config, poolConfig)
-
-	// ensure node annotations
-	err = netSrv.k8s.PatchNodeAnnotations(nodeAnnotations)
-	if err != nil {
-		return nil, fmt.Errorf("error patch node annotations, %w", err)
-	}
-
-	netSrv.resourceDB, err = storage.NewDiskStorage(
-		resDBName, utils.NormalizePath(resDBPath), json.Marshal, func(bytes []byte) (interface{}, error) {
-			resourceRel := &daemon.PodResources{}
-			err = json.Unmarshal(bytes, resourceRel)
-			if err != nil {
-				return nil, err
-			}
-			return *resourceRel, nil
-		})
-	if err != nil {
-		return nil, err
-	}
-
-	objList, err := netSrv.resourceDB.List()
-	if err != nil {
-		return nil, err
-	}
-
-	attachedENIID := lo.SliceToMap(attached, func(item *daemon.ENI) (string, *daemon.ENI) {
-		return item.ID, item
-	})
-	podResources := getPodResources(objList)
-	serviceLog.Info(fmt.Sprintf("loaded pod res, %v", podResources))
-
-	podResources = filterENINotFound(podResources, attachedENIID)
-
-	err = preStartResourceManager(daemonMode, netSrv.k8s)
-	if err != nil {
-		return nil, err
-	}
-
-	var eniList []eni.NetworkInterface
-
-	if daemonMode == daemon.ModeVPC {
-		eniList = append(eniList, &eni.Veth{})
-	}
-
-	if daemonMode == daemon.ModeENIOnly {
-		if config.IPAMType == types.IPAMTypeCRD {
-			if !config.EnableENITrunking {
-				eniList = append(eniList, eni.NewRemote(netSrv.k8s.GetClient(), nil))
-			} else {
-				for _, ni := range attached {
-					if !ni.Trunk {
-						continue
-					}
-					lo := eni.NewLocal(ni, "trunk", factory, poolConfig)
-					eniList = append(eniList, eni.NewTrunk(netSrv.k8s.GetClient(), lo))
-				}
-			}
-		} else {
-			var (
-				normalENICount int
-				erdmaENICount  int
-			)
-			// the legacy mode
-			for _, ni := range attached {
-				if config.EnableERDMA && ni.ERdma {
-					erdmaENICount++
-					eniList = append(eniList, eni.NewLocal(ni, "erdma", factory, poolConfig))
-				} else {
-					normalENICount++
-					eniList = append(eniList, eni.NewLocal(ni, "secondary", factory, poolConfig))
-				}
-			}
-			normalENINeeded := poolConfig.MaxENI - normalENICount
-			if config.EnableERDMA {
-				normalENINeeded = poolConfig.MaxENI - limit.ERdmaAdapters - normalENICount
-				for i := 0; i < limit.ERdmaAdapters-erdmaENICount; i++ {
-					eniList = append(eniList, eni.NewLocal(nil, "erdma", factory, poolConfig))
-				}
-			}
-
-			for i := 0; i < normalENINeeded; i++ {
-				eniList = append(eniList, eni.NewLocal(nil, "secondary", factory, poolConfig))
-			}
-		}
-	} else {
-		var (
-			normalENICount int
-			erdmaENICount  int
-		)
-		for _, ni := range attached {
-			serviceLog.V(5).Info("found attached eni", "eni", ni)
-			if config.EnableENITrunking && ni.Trunk && trunkENIID == ni.ID {
-				lo := eni.NewLocal(ni, "trunk", factory, poolConfig)
-				eniList = append(eniList, eni.NewTrunk(netSrv.k8s.GetClient(), lo))
-			} else if config.EnableERDMA && ni.ERdma {
-				erdmaENICount++
-				eniList = append(eniList, eni.NewLocal(ni, "erdma", factory, poolConfig))
-			} else {
-				normalENICount++
-				eniList = append(eniList, eni.NewLocal(ni, "secondary", factory, poolConfig))
-			}
-		}
-		normalENINeeded := poolConfig.MaxENI - normalENICount
-		if config.EnableERDMA {
-			normalENINeeded = poolConfig.MaxENI - limit.ERdmaAdapters - normalENICount
-			for i := 0; i < limit.ERdmaAdapters-erdmaENICount; i++ {
-				eniList = append(eniList, eni.NewLocal(nil, "erdma", factory, poolConfig))
-			}
-		}
-
-		for i := 0; i < normalENINeeded; i++ {
-			eniList = append(eniList, eni.NewLocal(nil, "secondary", factory, poolConfig))
-		}
-	}
-
-	eniManager := eni.NewManager(poolConfig.MinPoolSize, poolConfig.MaxPoolSize, poolConfig.Capacity, 30*time.Second, eniList, eniConfig.EniSelectionPolicy, netSrv.k8s)
-	netSrv.eniMgr = eniManager
-	err = eniManager.Run(ctx, &netSrv.wg, podResources)
-	if err != nil {
-		return nil, err
-	}
-
-	if config.IPAMType != types.IPAMTypeCRD {
-		//start gc loop
-		go netSrv.startGarbageCollectionLoop(ctx)
-	}
-
-	// register for tracing
-	_ = tracing.Register(tracing.ResourceTypeNetworkService, "default", netSrv)
-	tracing.RegisterResourceMapping(netSrv)
-	tracing.RegisterEventRecorder(netSrv.k8s.RecordNodeEvent, netSrv.k8s.RecordPodEvent)
-
-	return netSrv, nil
 }
 
 func checkInstance(limit *client.Limits, daemonMode string, config *daemon.Config) (bool, bool) {
@@ -1319,85 +988,4 @@ func filterENINotFound(podResources []daemon.PodResources, attachedENIID map[str
 		}
 	}
 	return podResources
-}
-
-func gcRoutes(links []netlink.Link, existIP sets.Set[string]) {
-	for _, link := range links {
-		routes, err := netlink.RouteList(link, netlink.FAMILY_V4)
-		if err != nil {
-			serviceLog.Error(err, "gc list route", "link", link)
-			return
-		}
-		for _, route := range routes {
-			if route.Dst == nil {
-				continue
-			}
-			// if not found
-			if existIP.Has(route.Dst.IP.String()) {
-				continue
-			}
-
-			serviceLog.Info("gc del route", "route", route)
-			err = netlink.RouteDel(&route)
-			if err != nil {
-				serviceLog.Error(err, "gc del route", "route", route)
-				return
-			}
-		}
-	}
-}
-
-func gcTCFilters(links []netlink.Link, existIP sets.Set[string]) {
-	// map ip to u32
-	toU32List := lo.Map(existIP.UnsortedList(), func(item string, index int) uint32 {
-		ip := net.ParseIP(item)
-		if ip == nil {
-			return 0
-		}
-		return binary.BigEndian.Uint32(ip.To4())
-	})
-	u32IPMap := lo.SliceToMap(toU32List, func(item uint32) (uint32, struct{}) {
-		return item, struct{}{}
-	})
-
-	for _, link := range links {
-		filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
-		if err != nil {
-			serviceLog.Error(err, "gc list filter", "link", link)
-			continue
-		}
-		for _, filter := range filters {
-			u32, ok := filter.(*netlink.U32)
-			if !ok {
-				continue
-			}
-			if u32.Priority != 50001 {
-				continue
-			}
-
-			if u32.Sel == nil || len(u32.Sel.Keys) != 1 {
-				continue
-			}
-			if len(u32.Actions) != 1 {
-				continue
-			}
-			_, ok = u32.Actions[0].(*netlink.VlanAction)
-			if !ok {
-				continue
-			}
-			if u32.Sel.Keys[0].Off != 12 {
-				continue
-			}
-			_, ok = u32IPMap[u32.Sel.Keys[0].Val]
-			if ok {
-				continue
-			}
-
-			serviceLog.Info("gc tc filter", "filter", filter)
-			err = netlink.FilterDel(filter)
-			if err != nil {
-				serviceLog.Error(err, "gc list filter", "link", link)
-			}
-		}
-	}
 }

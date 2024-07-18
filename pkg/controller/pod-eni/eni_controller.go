@@ -175,11 +175,6 @@ func (m *ReconcilePodENI) Reconcile(ctx context.Context, request reconcile.Reque
 		return result, err
 	}
 
-	if err = common.SetPodAnnotation(ctx, m.client, podENI); err != nil {
-		m.recordPodENICreateErr(podENI, start, err)
-		return reconcile.Result{}, err
-	}
-
 	return result, nil
 }
 

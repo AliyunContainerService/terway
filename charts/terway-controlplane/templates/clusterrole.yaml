@@ -6,6 +6,14 @@ rules:
   - apiGroups: [ "" ]
     resources:
       - pods
+      - nodes/status
+      - nodes
+    verbs:
+      - patch
+      - update
+  - apiGroups: [ "" ]
+    resources:
+      - pods
       - nodes
       - namespaces
       - configmaps
@@ -41,6 +49,7 @@ rules:
     resourceNames:
       - podnetworkings.network.alibabacloud.com
       - podenis.network.alibabacloud.com
+      - nodes.network.alibabacloud.com
   - apiGroups:
       - admissionregistration.k8s.io
     resources:

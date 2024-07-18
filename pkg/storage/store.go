@@ -6,12 +6,9 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/AliyunContainerService/terway/pkg/logger"
-
 	"github.com/boltdb/bolt"
+	"k8s.io/klog/v2"
 )
-
-var log = logger.DefaultLogger.WithField("subSys", "storage")
 
 // ErrNotFound key not found in store
 var ErrNotFound = errors.New("not found")
@@ -149,7 +146,7 @@ func (d *DiskStorage) load() error {
 		b := tx.Bucket([]byte(d.name))
 		cursor := b.Cursor()
 		for k, v := cursor.First(); k != nil; k, v = cursor.Next() {
-			log.Infof("load pod cache %s from db", k)
+			klog.Infof("load pod cache %s from db", k)
 			obj, err := d.deserializer(v)
 			if err != nil {
 				return err

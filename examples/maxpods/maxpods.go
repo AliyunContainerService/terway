@@ -57,13 +57,13 @@ func main() {
 	}
 
 	if mode == "terway-eniip" {
-		limit, err := client.GetLimit(api, instance.GetInstanceMeta().InstanceType)
+		limit, err := client.LimitProviders["ecs"].GetLimit(api, instance.GetInstanceMeta().InstanceType)
 		if err != nil {
 			panic(err)
 		}
 		fmt.Println(limit.IPv4PerAdapter * (limit.Adapters - 1))
 	} else if mode == "terway-eni" {
-		limit, err := client.GetLimit(api, instance.GetInstanceMeta().InstanceType)
+		limit, err := client.LimitProviders["ecs"].GetLimit(api, instance.GetInstanceMeta().InstanceType)
 		if err != nil {
 			panic(err)
 		}

@@ -125,6 +125,11 @@ spec:
                     type:
                       description: ENIType for this eni, only Secondary and Member
                         is supported
+                      enum:
+                      - Secondary
+                      - Trunk
+                      - Primary
+                      - Member
                       type: string
                     vid:
                       type: integer

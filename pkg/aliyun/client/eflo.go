@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/AliyunContainerService/terway/pkg/metric"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 )
@@ -186,22 +187,4 @@ func (a *OpenAPI) GetNodeInfoForPod(ctx context.Context, nodeID string) (*eflo.C
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
 
 	return &resp.Content, nil
-}
-
-func EfloGetLimit(client interface{}, instanceType string) (*Limits, error) {
-	a, ok := client.(*OpenAPI)
-	if !ok {
-		return nil, fmt.Errorf("unsupported client")
-	}
-
-	resp, err := a.GetNodeInfoForPod(context.Background(), instanceType)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Limits{
-		Adapters:       resp.LeniQuota,
-		TotalAdapters:  resp.LeniQuota,
-		IPv4PerAdapter: resp.LniSipQuota,
-	}, nil
 }

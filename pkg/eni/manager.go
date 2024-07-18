@@ -104,8 +104,6 @@ type Manager struct {
 
 	syncPeriod time.Duration
 
-	k8s k8s.Kubernetes
-
 	node *NodeCondition
 }
 
@@ -349,6 +347,10 @@ func NewManager(minIdles, maxIdles, total int, syncPeriod time.Duration, network
 		syncPeriod = 2 * time.Minute
 	}
 
+	var handler NodeConditionHandler
+	if k8s != nil {
+		handler = k8s.PatchNodeIPResCondition
+	}
 	return &Manager{
 		networkInterfaces: networkInterfaces,
 		selectionPolicy:   selectionPolicy,
@@ -356,12 +358,10 @@ func NewManager(minIdles, maxIdles, total int, syncPeriod time.Duration, network
 		maxIdles:          maxIdles,
 		total:             total,
 		syncPeriod:        syncPeriod,
-		k8s:               k8s,
-
 		node: &NodeCondition{
 			factoryIPExhaustiveTimer: time.NewTimer(0),
 			factoryIPExhaustive:      atomic.NewBool(true),
-			handler:                  k8s.PatchNodeIPResCondition,
+			handler:                  handler,
 		},
 	}
 }

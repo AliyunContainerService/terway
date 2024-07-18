@@ -19,6 +19,11 @@ limitations under the License.
 package register
 
 import (
+	"context"
+
+	"go.opentelemetry.io/otel/trace"
+	"k8s.io/apimachinery/pkg/util/wait"
+
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/controlplane"
@@ -33,9 +38,15 @@ type Interface interface {
 }
 
 type ControllerCtx struct {
+	context.Context
+
 	Config       *controlplane.Config
 	VSwitchPool  *vswitch.SwitchPool
 	AliyunClient Interface
+
+	Wg *wait.Group
+
+	TracerProvider trace.TracerProvider
 }
 
 type Creator func(mgr manager.Manager, ctrlCtx *ControllerCtx) error

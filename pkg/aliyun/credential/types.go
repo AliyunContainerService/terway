@@ -4,11 +4,10 @@ import (
 	"time"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth"
-
-	"github.com/AliyunContainerService/terway/pkg/logger"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-var log = logger.DefaultLogger.WithField("subSys", "credential")
+var log = ctrl.Log.WithName("credential")
 
 type Credential struct {
 	Credential auth.Credential

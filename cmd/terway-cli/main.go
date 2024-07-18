@@ -34,7 +34,7 @@ var (
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			// create connection and grpc client
 			ctx, contextCancel = context.WithTimeout(context.Background(), connTimeout)
-			conn, err := grpc.DialContext(ctx, defaultSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
+			conn, err := grpc.NewClient(defaultSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
 				func(ctx context.Context, s string) (net.Conn, error) {
 					unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
 					if err != nil {

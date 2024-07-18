@@ -18,6 +18,7 @@ const (
 	MetaAssignPrivateIP   = "meta_assign_private_ip"
 	MetaUnAssignPrivateIP = "meta_unassign_private_ip"
 	WaitStsTokenReady     = "wait_sts_token_ready"
+	WaitNodeStatus        = "wait_node_status"
 )
 
 var backoffMap = map[string]wait.Backoff{
@@ -80,6 +81,12 @@ var backoffMap = map[string]wait.Backoff{
 		Factor:   1,
 		Jitter:   0.2,
 		Steps:    60,
+	},
+	WaitNodeStatus: {
+		Duration: time.Second * 1,
+		Factor:   1,
+		Jitter:   0.3,
+		Steps:    90,
 	},
 }
 

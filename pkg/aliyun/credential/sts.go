@@ -49,7 +49,7 @@ func (e *EncryptedCredentialProvider) Resolve() (*Credential, error) {
 	var akInfo EncryptedCredentialInfo
 
 	if e.credentialPath != "" {
-		log.Infof("resolve encrypted credential %s", e.credentialPath)
+		log.Info("resolve encrypted credential", "path", e.credentialPath)
 		if utils.IsWindowsOS() {
 			// NB(thxCode): since os.Stat has not worked as expected,
 			// we use os.Lstat instead of os.Stat here,
@@ -66,7 +66,7 @@ func (e *EncryptedCredentialProvider) Resolve() (*Credential, error) {
 			return nil, fmt.Errorf("failed to read token config, err: %w", err)
 		}
 	} else {
-		log.Infof("resolve secret %s/%s", e.secretNamespace, e.secretName)
+		log.Info(fmt.Sprintf("resolve secret %s/%s", e.secretNamespace, e.secretName))
 
 		var secret *corev1.Secret
 		err = retry.OnError(backoff.Backoff(backoff.WaitStsTokenReady), func(err error) bool {

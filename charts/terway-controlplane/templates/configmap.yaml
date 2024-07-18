@@ -20,3 +20,8 @@ data:
     vpcID: "{{ .Values.vpcID }}"
     ipStack: "{{ .Values.ipStack }}"
     enableTrunk: {{.Values.enableTrunk}}
+    enableTrace: {{.Values.enableTrace}}
+    {{- with .Values.controllers }}
+    controllers:
+    {{- toYaml . | nindent 4 }}
+    {{- end }}

@@ -37,6 +37,16 @@ func NewNodeInfo(node *corev1.Node) (*NodeInfo, error) {
 
 	res.TrunkENIID = node.GetAnnotations()[types.TrunkOn]
 
+	res.RegionID = node.Labels[corev1.LabelTopologyRegion]
+	if res.RegionID == "" {
+		return nil, fmt.Errorf("can not found regionID from node %s", node.Name)
+	}
+
+	res.InstanceType = node.Labels[corev1.LabelInstanceTypeStable]
+	if res.InstanceType == "" {
+		return nil, fmt.Errorf("can not found instance type from node %s", node.Name)
+	}
+
 	zone, ok := node.GetLabels()[corev1.LabelTopologyZone]
 	if ok {
 		res.ZoneID = zone
@@ -48,5 +58,4 @@ func NewNodeInfo(node *corev1.Node) (*NodeInfo, error) {
 		return res, nil
 	}
 	return nil, fmt.Errorf("can not found zone label from node %s", node.Name)
-
 }

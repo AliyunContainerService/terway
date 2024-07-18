@@ -12,8 +12,7 @@ import (
 	"time"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
-
-	"github.com/AliyunContainerService/terway/pkg/logger"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
@@ -28,7 +27,7 @@ type Client interface {
 }
 
 var (
-	mgrLog                     = logger.DefaultLogger.WithField("subSys", "clientMgr")
+	mgrLog                     = ctrl.Log.WithName("clientMgr")
 	kubernetesAlicloudIdentity = "Kubernetes.Alicloud"
 
 	tokenReSyncPeriod = 5 * time.Minute
@@ -130,10 +129,10 @@ func (c *ClientMgr) VPC() *vpc.Client {
 	defer c.Unlock()
 	ok, err := c.refreshToken()
 	if err != nil {
-		mgrLog.Error(err)
+		mgrLog.Error(err, "refresh token error")
 	}
 	if ok {
-		mgrLog.WithFields(map[string]interface{}{"updateAt": c.updateAt, "expireAt": c.expireAt}).Infof("credential update")
+		mgrLog.WithValues("updateAt", c.updateAt, "expireAt", c.expireAt).Info("credential update")
 	}
 	return c.vpc
 }
@@ -143,10 +142,10 @@ func (c *ClientMgr) ECS() *ecs.Client {
 	defer c.Unlock()
 	ok, err := c.refreshToken()
 	if err != nil {
-		mgrLog.Error(err)
+		mgrLog.Error(err, "refresh token error")
 	}
 	if ok {
-		mgrLog.WithFields(map[string]interface{}{"updateAt": c.updateAt, "expireAt": c.expireAt}).Infof("credential update")
+		mgrLog.WithValues("updateAt", c.updateAt, "expireAt", c.expireAt).Info("credential update")
 	}
 	return c.ecs
 }
@@ -156,10 +155,10 @@ func (c *ClientMgr) EFLO() *eflo.Client {
 	defer c.Unlock()
 	ok, err := c.refreshToken()
 	if err != nil {
-		mgrLog.Error(err)
+		mgrLog.Error(err, "refresh token error")
 	}
 	if ok {
-		mgrLog.WithFields(map[string]interface{}{"updateAt": c.updateAt, "expireAt": c.expireAt}).Infof("credential update")
+		mgrLog.WithValues("updateAt", c.updateAt, "expireAt", c.expireAt).Info("credential update")
 	}
 	return c.eflo
 }
@@ -182,7 +181,7 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		c.ecs.SetEndpointRules(c.ecs.EndpointMap, "regional", "vpc")
+		c.ecs.SetEndpointRules(c.ecs.EndpointMap, "regional", "public")
 
 		if c.ecsDomainOverride != "" {
 			c.ecs.Domain = c.ecsDomainOverride
@@ -192,7 +191,7 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		c.vpc.SetEndpointRules(c.vpc.EndpointMap, "regional", "vpc")
+		c.vpc.SetEndpointRules(c.vpc.EndpointMap, "regional", "public")
 
 		if c.vpcDomainOverride != "" {
 			c.vpc.Domain = c.vpcDomainOverride
@@ -202,7 +201,7 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		c.eflo.SetEndpointRules(c.eflo.EndpointMap, "regional", "vpc")
+		c.eflo.SetEndpointRules(c.eflo.EndpointMap, "regional", "public")
 
 		if c.efloDomainOverride != "" {
 			c.eflo.Domain = c.efloDomainOverride

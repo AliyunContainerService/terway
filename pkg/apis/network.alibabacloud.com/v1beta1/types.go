@@ -168,6 +168,7 @@ type ENIInfo struct {
 }
 
 // ENIType for this eni, only Secondary and Member is supported
+// +kubebuilder:validation:Enum=Secondary;Trunk;Primary;Member
 type ENIType string
 
 // status for ENIType

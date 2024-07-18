@@ -38,7 +38,52 @@ func (c *CreateNetworkInterfaceOptions) ApplyCreateNetworkInterface(options *Cre
 	if c.Backoff != nil {
 		options.Backoff = c.Backoff
 	}
-	options.NetworkInterfaceOptions = c.NetworkInterfaceOptions
+	if c.NetworkInterfaceOptions != nil {
+		if options.NetworkInterfaceOptions == nil {
+			options.NetworkInterfaceOptions = &NetworkInterfaceOptions{}
+		}
+
+		if c.NetworkInterfaceOptions.Trunk {
+			options.NetworkInterfaceOptions.Trunk = true
+		}
+		if c.NetworkInterfaceOptions.ERDMA {
+			options.NetworkInterfaceOptions.ERDMA = true
+		}
+		if c.NetworkInterfaceOptions.VSwitchID != "" {
+			options.NetworkInterfaceOptions.VSwitchID = c.NetworkInterfaceOptions.VSwitchID
+		}
+		if c.NetworkInterfaceOptions.ResourceGroupID != "" {
+			options.NetworkInterfaceOptions.ResourceGroupID = c.NetworkInterfaceOptions.ResourceGroupID
+		}
+		if c.NetworkInterfaceOptions.SecurityGroupIDs != nil {
+			options.NetworkInterfaceOptions.SecurityGroupIDs = c.NetworkInterfaceOptions.SecurityGroupIDs
+		}
+		if c.NetworkInterfaceOptions.IPCount > 1 {
+			options.NetworkInterfaceOptions.IPCount = c.NetworkInterfaceOptions.IPCount
+		}
+
+		if c.NetworkInterfaceOptions.IPv6Count > 1 {
+			options.NetworkInterfaceOptions.IPv6Count = c.NetworkInterfaceOptions.IPv6Count
+		}
+		if c.NetworkInterfaceOptions.Tags != nil {
+			options.NetworkInterfaceOptions.Tags = c.NetworkInterfaceOptions.Tags
+		}
+		if c.NetworkInterfaceOptions.InstanceID != "" {
+			options.NetworkInterfaceOptions.InstanceID = c.NetworkInterfaceOptions.InstanceID
+		}
+		if c.NetworkInterfaceOptions.InstanceType != "" {
+			options.NetworkInterfaceOptions.InstanceType = c.NetworkInterfaceOptions.InstanceType
+		}
+		if c.NetworkInterfaceOptions.Status != "" {
+			options.NetworkInterfaceOptions.Status = c.NetworkInterfaceOptions.Status
+		}
+		if c.NetworkInterfaceOptions.NetworkInterfaceID != "" {
+			options.NetworkInterfaceOptions.NetworkInterfaceID = c.NetworkInterfaceOptions.NetworkInterfaceID
+		}
+		if c.NetworkInterfaceOptions.DeleteENIOnECSRelease != nil {
+			options.NetworkInterfaceOptions.DeleteENIOnECSRelease = c.NetworkInterfaceOptions.DeleteENIOnECSRelease
+		}
+	}
 }
 
 func (c *CreateNetworkInterfaceOptions) Finish(idempotentKeyGen IdempotentKeyGen) (*ecs.CreateNetworkInterfaceRequest, func(), error) {

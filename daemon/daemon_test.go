@@ -8,6 +8,7 @@ import (
 	factorymocks "github.com/AliyunContainerService/terway/pkg/factory/mocks"
 	k8smocks "github.com/AliyunContainerService/terway/pkg/k8s/mocks"
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
+	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 
@@ -349,5 +350,116 @@ func TestFilterENINotFound(t *testing.T) {
 				t.Errorf("Expected resource at index %d in filtered pod resources at index %d to be %v, but got %v", j, i, expected[i].Resources[j], filtered[i].Resources[j])
 			}
 		}
+	}
+}
+
+func TestGetPodIPs(t *testing.T) {
+	tests := []struct {
+		name     string
+		netConfs []*rpc.NetConf
+		expected []string
+	}{
+		{
+			name: "SingleNetConfWithIPv4",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName: "eth0",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv4: "10.0.0.1",
+						},
+					},
+				},
+			},
+			expected: []string{"10.0.0.1"},
+		},
+		{
+			name: "SingleNetConfWithIPv6",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName: "eth0",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv6: "fe80::1",
+						},
+					},
+				},
+			},
+			expected: []string{"fe80::1"},
+		},
+		{
+			name: "MultipleNetConfsWithIPv4AndIPv6",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName: "eth0",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv4: "10.0.0.1",
+							IPv6: "fe80::1",
+						},
+					},
+				},
+				{
+					IfName: "eth0",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv4: "10.0.0.2",
+						},
+					},
+				},
+			},
+			expected: []string{"10.0.0.1", "fe80::1", "10.0.0.2"},
+		},
+		{
+			name: "WithNonDefaultIfName",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName: "eth1",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv4: "10.0.0.1",
+						},
+					},
+				},
+			},
+			expected: []string{},
+		},
+		{
+			name: "WithoutBasicInfo",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName:    "eth0",
+					BasicInfo: nil,
+				},
+			},
+			expected: []string{},
+		},
+		{
+			name: "WithoutPodIP",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName: "eth0",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: nil,
+					},
+				},
+			},
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getPodIPs(tt.netConfs)
+			if len(got) != len(tt.expected) {
+				t.Errorf("getPodIPs() = %v, want %v", got, tt.expected)
+			}
+
+			for i, ip := range got {
+				if ip != tt.expected[i] {
+					t.Errorf("getPodIPs()[%d] = %v, want %v", i, ip, tt.expected[i])
+				}
+			}
+		})
 	}
 }
