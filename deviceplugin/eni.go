@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -86,7 +85,7 @@ func NewENIDevicePlugin(count int, eniType string) *ENIDevicePlugin {
 
 // dial establishes the gRPC communication with the registered device plugin.
 func dial(unixSocketPath string, timeout time.Duration) (*grpc.ClientConn, func(), error) {
-	c, err := grpc.NewClient(unixSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()),
+	c, err := grpc.NewClient("passthrough:"+unixSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 			return net.DialTimeout("unix", addr, timeout)
 		}))
