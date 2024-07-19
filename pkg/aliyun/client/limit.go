@@ -4,15 +4,19 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"k8s.io/apimachinery/pkg/util/cache"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Limits specifies the IPAM relevant instance limits
 type Limits struct {
+	InstanceTypeID string
+
 	// Adapters specifies the maximum number of interfaces that can be
 	// attached to the instance
 	Adapters int
@@ -71,6 +75,7 @@ func (l *Limits) ExclusiveENIPod() int {
 
 type LimitProvider interface {
 	GetLimit(client interface{}, instanceType string) (*Limits, error)
+	GetLimitFromAnno(anno map[string]string) (*Limits, error)
 }
 
 type EfloLimitProvider struct{}
@@ -94,6 +99,10 @@ func (e *EfloLimitProvider) GetLimit(client interface{}, instanceType string) (*
 		TotalAdapters:  resp.LeniQuota,
 		IPv4PerAdapter: resp.LniSipQuota,
 	}, nil
+}
+
+func (e *EfloLimitProvider) GetLimitFromAnno(anno map[string]string) (*Limits, error) {
+	return nil, nil
 }
 
 type ECSLimitProvider struct {
@@ -128,42 +137,11 @@ func (d *ECSLimitProvider) GetLimit(client interface{}, instanceType string) (*L
 
 	for _, instanceTypeInfo := range ins {
 		instanceTypeID := instanceTypeInfo.InstanceTypeId
-		adapterLimit := instanceTypeInfo.EniQuantity
-		ipv4PerAdapter := instanceTypeInfo.EniPrivateIpAddressQuantity
-		ipv6PerAdapter := instanceTypeInfo.EniIpv6AddressQuantity
-		memberAdapterLimit := instanceTypeInfo.EniTotalQuantity - instanceTypeInfo.EniQuantity
-		eRdmaLimit := instanceTypeInfo.EriQuantity
-		// exclude eth0 eth1
-		maxMemberAdapterLimit := instanceTypeInfo.EniTotalQuantity - 2
-		if !instanceTypeInfo.EniTrunkSupported {
-			memberAdapterLimit = 0
-			maxMemberAdapterLimit = 0
-		}
 
-		d.cache.Add(instanceTypeID, &Limits{
-			Adapters:              adapterLimit,
-			TotalAdapters:         instanceTypeInfo.EniTotalQuantity,
-			IPv4PerAdapter:        max(ipv4PerAdapter, 0),
-			IPv6PerAdapter:        max(ipv6PerAdapter, 0),
-			MemberAdapterLimit:    max(memberAdapterLimit, 0),
-			MaxMemberAdapterLimit: max(maxMemberAdapterLimit, 0),
-			ERdmaAdapters:         max(eRdmaLimit, 0),
-			InstanceBandwidthRx:   instanceTypeInfo.InstanceBandwidthRx,
-			InstanceBandwidthTx:   instanceTypeInfo.InstanceBandwidthTx,
-		}, d.ttl)
-		logf.Log.WithValues(
-			"instance-type", instanceType,
-			"adapters", adapterLimit,
-			"total-adapters", instanceTypeInfo.EniTotalQuantity,
-			"ipv4", ipv4PerAdapter,
-			"ipv6", ipv6PerAdapter,
-			"member-adapters", memberAdapterLimit,
-			"erdma-adapters", eRdmaLimit,
-			"max-member-adapters", maxMemberAdapterLimit,
-			"bandwidth-rx", instanceTypeInfo.InstanceBandwidthRx,
-			"bandwidth-tx", instanceTypeInfo.InstanceBandwidthTx,
-		).Info("instance limit")
+		limit := getInstanceType(&instanceTypeInfo)
 
+		d.cache.Add(instanceTypeID, limit, d.ttl)
+		logf.Log.Info("instance limit", instanceTypeID, limit)
 	}
 	if instanceType == "" {
 		return nil, nil
@@ -174,6 +152,47 @@ func (d *ECSLimitProvider) GetLimit(client interface{}, instanceType string) (*L
 	}
 
 	return v.(*Limits), nil
+}
+
+func (d *ECSLimitProvider) GetLimitFromAnno(anno map[string]string) (*Limits, error) {
+	v, ok := anno["alibabacloud.com/instance-type-info"]
+	if !ok {
+		return nil, nil
+	}
+
+	instanceType := &ecs.InstanceType{}
+	err := json.Unmarshal([]byte(v), instanceType)
+	if err != nil {
+		return nil, err
+	}
+
+	return getInstanceType(instanceType), nil
+}
+
+func getInstanceType(instanceTypeInfo *ecs.InstanceType) *Limits {
+	adapterLimit := instanceTypeInfo.EniQuantity
+	ipv4PerAdapter := instanceTypeInfo.EniPrivateIpAddressQuantity
+	ipv6PerAdapter := instanceTypeInfo.EniIpv6AddressQuantity
+	memberAdapterLimit := instanceTypeInfo.EniTotalQuantity - instanceTypeInfo.EniQuantity
+	eRdmaLimit := instanceTypeInfo.EriQuantity
+	// exclude eth0 eth1
+	maxMemberAdapterLimit := instanceTypeInfo.EniTotalQuantity - 2
+	if !instanceTypeInfo.EniTrunkSupported {
+		memberAdapterLimit = 0
+		maxMemberAdapterLimit = 0
+	}
+	return &Limits{
+		InstanceTypeID:        instanceTypeInfo.InstanceTypeId,
+		Adapters:              adapterLimit,
+		TotalAdapters:         instanceTypeInfo.EniTotalQuantity,
+		IPv4PerAdapter:        max(ipv4PerAdapter, 0),
+		IPv6PerAdapter:        max(ipv6PerAdapter, 0),
+		MemberAdapterLimit:    max(memberAdapterLimit, 0),
+		MaxMemberAdapterLimit: max(maxMemberAdapterLimit, 0),
+		ERdmaAdapters:         max(eRdmaLimit, 0),
+		InstanceBandwidthRx:   instanceTypeInfo.InstanceBandwidthRx,
+		InstanceBandwidthTx:   instanceTypeInfo.InstanceBandwidthTx,
+	}
 }
 
 var ecsProvider LimitProvider

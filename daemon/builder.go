@@ -171,22 +171,39 @@ func (b *NetworkServiceBuilder) setupAliyunClient() error {
 }
 
 func (b *NetworkServiceBuilder) initInstanceLimit() error {
-	instanceType := instance.GetInstanceMeta().InstanceType
-
+	node := b.service.k8s.Node()
+	if node == nil {
+		return fmt.Errorf("k8s node not found")
+	}
 	provider := client.LimitProviders["ecs"]
 	if os.Getenv("TERWAY_DEPLOY_ENV") == envEFLO {
-		instanceType = instance.GetInstanceMeta().InstanceID
-
 		provider = client.LimitProviders["eflo"]
-	}
-	limit, err := provider.GetLimit(b.aliyunClient, instanceType)
-	if err != nil {
-		return fmt.Errorf("upable get instance limit, %w", err)
+		limit, err := provider.GetLimitFromAnno(node.Annotations)
+		if err != nil {
+			return err
+		}
+		if limit == nil {
+			limit, err = provider.GetLimit(b.aliyunClient, instance.GetInstanceMeta().InstanceID)
+			if err != nil {
+				return fmt.Errorf("upable get instance limit, %w", err)
+			}
+		}
+		b.limit = limit
+	} else {
+		limit, err := provider.GetLimitFromAnno(node.Annotations)
+		if err != nil {
+			return err
+		}
+		if limit == nil || instance.GetInstanceMeta().InstanceType != limit.InstanceTypeID {
+			limit, err = provider.GetLimit(b.aliyunClient, instance.GetInstanceMeta().InstanceType)
+			if err != nil {
+				return fmt.Errorf("upable get instance limit, %w", err)
+			}
+		}
+		b.limit = limit
 	}
 
-	b.limit = limit
-
-	b.service.enableIPv4, b.service.enableIPv6 = checkInstance(limit, b.daemonMode, b.config)
+	b.service.enableIPv4, b.service.enableIPv6 = checkInstance(b.limit, b.daemonMode, b.config)
 	return nil
 }
 

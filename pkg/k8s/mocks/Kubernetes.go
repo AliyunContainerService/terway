@@ -205,6 +205,26 @@ func (_m *Kubernetes) GetTrunkID() string {
 	return r0
 }
 
+// Node provides a mock function with given fields:
+func (_m *Kubernetes) Node() *v1.Node {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Node")
+	}
+
+	var r0 *v1.Node
+	if rf, ok := ret.Get(0).(func() *v1.Node); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.Node)
+		}
+	}
+
+	return r0
+}
+
 // NodeName provides a mock function with given fields:
 func (_m *Kubernetes) NodeName() string {
 	ret := _m.Called()
