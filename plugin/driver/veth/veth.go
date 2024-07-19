@@ -1,6 +1,8 @@
 package veth
 
 import (
+	"net"
+
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 
 	"github.com/containernetworking/plugins/pkg/ip"
@@ -11,6 +13,7 @@ import (
 type Veth struct {
 	IfName   string // cont in netns
 	PeerName string
+	HwAddr   net.HardwareAddr
 	MTU      int
 }
 
@@ -38,6 +41,9 @@ func Setup(cfg *Veth, netNS ns.NetNS) error {
 			Namespace: netlink.NsFd(int(netNS.Fd())),
 		},
 		PeerName: cfg.PeerName,
+	}
+	if cfg.HwAddr != nil {
+		v.HardwareAddr = cfg.HwAddr
 	}
 	err = utils.LinkAdd(v)
 	if err != nil {

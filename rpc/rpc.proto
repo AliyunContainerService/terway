@@ -56,6 +56,7 @@ message ENIInfo {
   bool Trunk = 2; // eni is trunk
   uint32 Vid = 3; // vlan ID
   IPSet GatewayIP = 4;
+  bool eRDMA = 5; // eni is eRDMA
 }
 
 message Route {
