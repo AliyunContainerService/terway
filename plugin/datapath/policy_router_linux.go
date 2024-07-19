@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/AliyunContainerService/terway/pkg/smc"
+
 	"github.com/AliyunContainerService/terway/plugin/driver/nic"
 	"github.com/AliyunContainerService/terway/plugin/driver/types"
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
@@ -346,6 +348,13 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	})
 	if err != nil {
 		return fmt.Errorf("setup container, %w", err)
+	}
+
+	if cfg.ERDMA {
+		err = smc.ConfigSMCForDevice("erdma_0", cfg.ContainerIfName, netNS)
+		if err != nil {
+			return fmt.Errorf("error setup pnet config for pod: %w", err)
+		}
 	}
 
 	if cfg.EnableNetworkPriority {
