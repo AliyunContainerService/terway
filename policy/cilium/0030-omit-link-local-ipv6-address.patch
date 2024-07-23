@@ -1,0 +1,33 @@
+From 91a5109dd72482296546848a4ad15b1e3fa7f36d Mon Sep 17 00:00:00 2001
+From: "bingshen.wbs" <bingshen.wbs@alibaba-inc.com>
+Date: Tue, 23 Jul 2024 11:03:09 +0800
+Subject: [PATCH] omit link-local ipv6 address
+
+Signed-off-by: bingshen.wbs <bingshen.wbs@alibaba-inc.com>
+---
+ plugins/cilium-cni/chaining/generic-veth/generic-veth.go | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/plugins/cilium-cni/chaining/generic-veth/generic-veth.go b/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
+index 8e9cfb2656..acd02e4955 100644
+--- a/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
++++ b/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
+@@ -95,9 +95,14 @@ func (f *GenericVethChainer) Add(ctx context.Context, pluginCtx chainingapi.Plug
+ 					logfields.Interface: link.Attrs().Name}).Warn("No valid IPv4 address found")
+ 			}
+ 
++			_, linkLocalRange, _ := net.ParseCIDR("fe80::/10")
+ 			addrsv6, err := netlink.AddrList(link, netlink.FAMILY_V6)
+ 			if err == nil && len(addrsv6) > 0 {
+-				vethIPv6 = addrsv6[0].IPNet.IP.String()
++				for _, addrv6 := range addrsv6 {
++					if !linkLocalRange.Contains(addrv6.IPNet.IP) {
++						vethIPv6 = addrv6.IPNet.IP.String()
++					}
++				}
+ 			} else if err != nil {
+ 				pluginCtx.Logger.WithError(err).WithFields(logrus.Fields{
+ 					logfields.Interface: link.Attrs().Name}).Warn("No valid IPv6 address found")
+-- 
+2.39.3 (Apple Git-146)
+
