@@ -1,0 +1,35 @@
+From 44109b0469c56e0677cc2c54b90a538c8c642abc Mon Sep 17 00:00:00 2001
+From: "bingshen.wbs" <bingshen.wbs@alibaba-inc.com>
+Date: Tue, 23 Jul 2024 11:03:09 +0800
+Subject: [PATCH] Ignore the link-local IPv6 addresses as it is generated based
+ on the MAC address and is not actually reachable within the network.
+ Additionally, in some network plugins, the MAC addresses in pods may be the
+ same, leading to conflicts in the generated IPv6 addresses and preventing the
+ creation of Cilium endpoints.
+
+Signed-off-by: bingshen.wbs <bingshen.wbs@alibaba-inc.com>
+---
+ plugins/cilium-cni/chaining/generic-veth/generic-veth.go | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/plugins/cilium-cni/chaining/generic-veth/generic-veth.go b/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
+index 8e9cfb2656..7bb3f8ed8f 100644
+--- a/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
++++ b/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
+@@ -97,7 +97,12 @@ func (f *GenericVethChainer) Add(ctx context.Context, pluginCtx chainingapi.Plug
+ 
+ 			addrsv6, err := netlink.AddrList(link, netlink.FAMILY_V6)
+ 			if err == nil && len(addrsv6) > 0 {
+-				vethIPv6 = addrsv6[0].IPNet.IP.String()
++				for _, addrv6 := range addrsv6 {
++					if !addrv6.IP.IsLinkLocalUnicast() {
++						vethIPv6 = addrv6.IPNet.IP.String()
++						break
++					}
++				}
+ 			} else if err != nil {
+ 				pluginCtx.Logger.WithError(err).WithFields(logrus.Fields{
+ 					logfields.Interface: link.Attrs().Name}).Warn("No valid IPv6 address found")
+-- 
+2.39.3 (Apple Git-146)
+
