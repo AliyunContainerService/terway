@@ -199,47 +199,6 @@ func Test_initTrunk(t *testing.T) {
 			},
 			want:    "",
 			wantErr: assert.NoError,
-		}, {
-			name: "enable wait trunk ready",
-			args: args{
-				config: &daemon.Config{
-					IPStack:           "dual",
-					EnableENITrunking: true,
-					EnableERDMA:       true,
-					WaitTrunkENI:      true,
-				},
-				poolConfig: &types.PoolConfig{
-					MaxENI: 2,
-				},
-				k8sClient: k8smocks.NewKubernetes(t),
-				f:         factorymocks.NewFactory(t),
-			},
-			preStart: func(args args) {
-				args.k8sClient.On("GetTrunkID").Return("eni-1")
-			},
-			want:    "eni-1",
-			wantErr: assert.NoError,
-		}, {
-			name: "enable wait trunk ready, get from remote",
-			args: args{
-				config: &daemon.Config{
-					IPStack:           "dual",
-					EnableENITrunking: true,
-					EnableERDMA:       true,
-					WaitTrunkENI:      true,
-				},
-				poolConfig: &types.PoolConfig{
-					MaxENI: 2,
-				},
-				k8sClient: k8smocks.NewKubernetes(t),
-				f:         factorymocks.NewFactory(t),
-			},
-			preStart: func(args args) {
-				args.k8sClient.On("GetTrunkID").Return("")
-				args.k8sClient.On("WaitTrunkReady").Return("eni-1", nil)
-			},
-			want:    "eni-1",
-			wantErr: assert.NoError,
 		},
 	}
 	for _, tt := range tests {

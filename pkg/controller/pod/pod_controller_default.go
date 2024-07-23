@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 )
@@ -37,15 +36,7 @@ func (m *ReconcilePod) ParsePodNetworksFromAnnotation(ctx context.Context, zoneI
 			ExtraConfig: map[string]string{},
 		}
 
-		ctx := common.WithCtx(ctx, alloc)
-
-		// allow config route without
-		realClient, _, err := common.Became(ctx, m.aliyun)
-		if err != nil {
-			return nil, err
-		}
-
-		sw, err := m.swPool.GetOne(ctx, realClient, zoneID, c.VSwitchOptions, &vswitch.SelectOptions{
+		sw, err := m.swPool.GetOne(ctx, m.aliyun, zoneID, c.VSwitchOptions, &vswitch.SelectOptions{
 			IgnoreZone: false,
 		})
 		if err != nil {

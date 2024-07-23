@@ -27,7 +27,6 @@ const (
 )
 
 const (
-	eniNamePrefix     = "eni-cni-"
 	eniDescription    = "interface create by terway"
 	maxSinglePageSize = 500
 )

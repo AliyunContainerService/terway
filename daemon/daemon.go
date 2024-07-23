@@ -742,17 +742,6 @@ func initTrunk(config *daemon.Config, poolConfig *types.PoolConfig, k8sClient k8
 	// get eni id form node annotation
 	preferTrunkID := k8sClient.GetTrunkID()
 
-	if config.WaitTrunkENI {
-		// at this mode , we retreat id ONLY by node annotation
-		if preferTrunkID == "" {
-			preferTrunkID, err = k8sClient.WaitTrunkReady()
-			if err != nil {
-				return "", fmt.Errorf("error wait trunk ready, %w", err)
-			}
-		}
-		return preferTrunkID, nil
-	}
-
 	// already exclude the primary eni
 	enis, err := f.GetAttachedNetworkInterface(preferTrunkID)
 	if err != nil {
