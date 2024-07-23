@@ -365,7 +365,7 @@ func (l *Local) sync() {
 
 	ipv4, ipv6, err := l.factory.LoadNetworkInterface(l.eni.MAC)
 	if err != nil {
-		_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, string(types.ErrOpenAPIErr), fmt.Sprintf("failed to sync eni, %s", err.Error()))
+		logf.Log.Error(err, "failed to sync eni")
 		return
 	}
 
