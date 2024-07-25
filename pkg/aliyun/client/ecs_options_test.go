@@ -3,6 +3,7 @@ package client
 import (
 	"testing"
 
+	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
@@ -56,6 +57,8 @@ func TestCreateNetworkInterfaceOptions_Finish(t *testing.T) {
 	assert.Equal(t, niOptions.ResourceGroupID, req.ResourceGroupId)
 	assert.Equal(t, eniDescription, req.Description)
 	assert.Equal(t, "mockToken", req.ClientToken)
+	assert.Equal(t, requests.NewInteger(1), req.SecondaryPrivateIpAddressCount)
+	assert.Equal(t, requests.NewInteger(1), req.Ipv6AddressCount)
 	assert.NotNil(t, c.Backoff)
 
 	// Cleanup
@@ -87,6 +90,7 @@ func TestCreateNetworkInterfaceOptions_ApplyCreateNetworkInterface(t *testing.T)
 					Trunk:            true,
 					ERDMA:            true,
 					IPCount:          2,
+					IPv6Count:        1,
 				},
 			},
 			args: args{
@@ -102,7 +106,7 @@ func TestCreateNetworkInterfaceOptions_ApplyCreateNetworkInterface(t *testing.T)
 					SecurityGroupIDs:      []string{"sg-xxxxxx"},
 					ResourceGroupID:       "rg-xxxxxx",
 					IPCount:               2,
-					IPv6Count:             0,
+					IPv6Count:             1,
 					Tags:                  map[string]string{"key1": "value1", "key2": "value2"},
 					InstanceID:            "",
 					InstanceType:          "",

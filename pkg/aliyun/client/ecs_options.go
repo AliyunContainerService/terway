@@ -58,11 +58,11 @@ func (c *CreateNetworkInterfaceOptions) ApplyCreateNetworkInterface(options *Cre
 		if c.NetworkInterfaceOptions.SecurityGroupIDs != nil {
 			options.NetworkInterfaceOptions.SecurityGroupIDs = c.NetworkInterfaceOptions.SecurityGroupIDs
 		}
-		if c.NetworkInterfaceOptions.IPCount > 1 {
+		if c.NetworkInterfaceOptions.IPCount >= 1 {
 			options.NetworkInterfaceOptions.IPCount = c.NetworkInterfaceOptions.IPCount
 		}
 
-		if c.NetworkInterfaceOptions.IPv6Count > 1 {
+		if c.NetworkInterfaceOptions.IPv6Count >= 1 {
 			options.NetworkInterfaceOptions.IPv6Count = c.NetworkInterfaceOptions.IPv6Count
 		}
 		if c.NetworkInterfaceOptions.Tags != nil {
