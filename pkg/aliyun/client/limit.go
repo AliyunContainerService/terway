@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/util/cache"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -108,6 +109,8 @@ func (e *EfloLimitProvider) GetLimitFromAnno(anno map[string]string) (*Limits, e
 type ECSLimitProvider struct {
 	cache cache.LRUExpireCache
 	ttl   time.Duration
+
+	g singleflight.Group
 }
 
 func NewECSLimitProvider() *ECSLimitProvider {
@@ -126,14 +129,24 @@ func (d *ECSLimitProvider) GetLimit(client interface{}, instanceType string) (*L
 	if ok {
 		return v.(*Limits), nil
 	}
+
 	var req []string
 	if instanceType != "" {
 		req = append(req, instanceType)
 	}
-	ins, err := a.DescribeInstanceTypes(context.Background(), req)
+
+	v, err, _ := d.g.Do(instanceType, func() (interface{}, error) {
+		ins, err := a.DescribeInstanceTypes(context.Background(), req)
+		if err != nil {
+			return nil, err
+		}
+		return ins, nil
+	})
 	if err != nil {
 		return nil, err
 	}
+
+	ins := v.([]ecs.InstanceType)
 
 	for _, instanceTypeInfo := range ins {
 		instanceTypeID := instanceTypeInfo.InstanceTypeId
