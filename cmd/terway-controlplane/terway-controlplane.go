@@ -34,6 +34,7 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -62,7 +63,9 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
 	"github.com/AliyunContainerService/terway/pkg/version"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
+	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
+	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
 var (
@@ -124,6 +127,12 @@ func main() {
 			os.Exit(1)
 		}
 	})
+
+	err = detectMultiIP(ctx, directClient, cfg)
+	if err != nil {
+		log.Error(err, "unable to detect multi IP")
+		os.Exit(1)
+	}
 
 	ws := wh.NewServer(wh.Options{
 		Port:    cfg.WebhookPort,
@@ -299,4 +308,41 @@ func initOpenTelemetry(ctx context.Context, serviceName, serviceVersion string, 
 	otel.SetTracerProvider(traceProvider)
 
 	return traceProvider, nil
+}
+
+func detectMultiIP(ctx context.Context, directClient client.Client, cfg *controlplane.Config) error {
+	if !lo.Contains(cfg.Controllers, "multi-ip-pod") {
+		return nil
+	}
+
+	var daemonConfig *daemon.Config
+	err := wait.PollUntilContextTimeout(ctx, 1*time.Second, 10*time.Second, true, func(ctx context.Context) (done bool, err error) {
+		var innerErr error
+		daemonConfig, innerErr = daemon.ConfigFromConfigMap(ctx, directClient, "")
+		if err != nil {
+			if k8sErr.IsNotFound(innerErr) {
+				return false, nil
+			}
+			log.Error(innerErr, "failed to get ConfigMap eni-config")
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		return err
+	}
+	switch daemonConfig.IPAMType {
+	case types.IPAMTypeCRD:
+		return nil
+	}
+
+	cfg.Controllers = lo.Reject(cfg.Controllers, func(item string, index int) bool {
+		switch item {
+		case "node", "multi-ip-pod", "multi-ip-node":
+			return true
+		}
+		return false
+	})
+	log.Info("daemon is not at crd mode, disable v2 ipam")
+	return nil
 }
