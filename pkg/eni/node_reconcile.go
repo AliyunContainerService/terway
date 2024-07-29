@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -14,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
@@ -25,6 +27,9 @@ var _ reconcile.Reconciler = &nodeReconcile{}
 type nodeReconcile struct {
 	client client.Client
 	record record.EventRecorder
+
+	once     sync.Once
+	nodeName string
 }
 
 func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
@@ -59,30 +64,30 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{}, err
 	}
 
-	if node.Spec.ENISpec == nil {
-		// the initial setup
-		ipv4 := false
-		ipv6 := false
-		switch eniConfig.IPStack {
-		case "", "ipv4":
-			ipv4 = true
-		case "dual":
-			ipv4, ipv6 = true, true
-			if node.Spec.NodeCap.IPv6PerAdapter != node.Spec.NodeCap.IPv4PerAdapter {
-				l.Info("unsupported dual stack instance")
-				r.record.Eventf(node, "Warning", "ConfigError", "Instance not support k8s dual stack. ipv4 and ipv6 count is not equal.")
-				ipv6 = false
-			}
-		case "ipv6":
-			ipv6 = true
-		default:
-			return reconcile.Result{}, fmt.Errorf("unsupported ip stack %s", eniConfig.IPStack)
-		}
+	node.Spec.ENISpec = nil
 
-		node.Spec.ENISpec = &networkv1beta1.ENISpec{
-			EnableIPv4: ipv4,
-			EnableIPv6: ipv6,
+	// the initial setup
+	ipv4 := false
+	ipv6 := false
+	switch eniConfig.IPStack {
+	case "", "ipv4":
+		ipv4 = true
+	case "dual":
+		ipv4, ipv6 = true, true
+		if node.Spec.NodeCap.IPv6PerAdapter != node.Spec.NodeCap.IPv4PerAdapter {
+			l.Info("unsupported dual stack instance")
+			r.record.Eventf(node, "Warning", "ConfigError", "Instance not support k8s dual stack. ipv4 and ipv6 count is not equal.")
+			ipv6 = false
 		}
+	case "ipv6":
+		ipv6 = true
+	default:
+		return reconcile.Result{}, fmt.Errorf("unsupported ip stack %s", eniConfig.IPStack)
+	}
+
+	node.Spec.ENISpec = &networkv1beta1.ENISpec{
+		EnableIPv4: ipv4,
+		EnableIPv6: ipv6,
 	}
 
 	vswitchOptions := []string{}
@@ -138,23 +143,22 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 	node.Spec.Flavor = nil
 
 	secondary := node.Spec.NodeCap.Adapters - 1
-	if eniConfig.EnableENITrunking {
+	if node.Spec.ENISpec.EnableTrunk && secondary > 0 {
 		node.Spec.Flavor = append(node.Spec.Flavor, networkv1beta1.Flavor{
 			NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
 			NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
 			Count:                       1,
 		})
 		secondary--
-
-		// node.Spec.ENISpec.EnableTrunk = eniConfig.EnableTrunk
 	}
-	if eniConfig.EnableERDMA {
+	if node.Spec.ENISpec.EnableERDMA && secondary > 0 {
 		node.Spec.Flavor = append(node.Spec.Flavor, networkv1beta1.Flavor{
 			NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
 			NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeHighPerformance,
 			Count:                       1,
 		})
 		secondary--
+		r.runERDMADevicePlugin(node.Spec.NodeCap.EriQuantity * node.Spec.NodeCap.IPv4PerAdapter)
 	}
 	node.Spec.Flavor = append(node.Spec.Flavor, networkv1beta1.Flavor{
 		NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
@@ -186,4 +190,12 @@ func (r *nodeReconcile) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&networkv1beta1.Node{}).
 		Complete(r)
+}
+
+func (r *nodeReconcile) runERDMADevicePlugin(count int) {
+	r.once.Do(func() {
+		log.Log.Info("start erdma device plugin")
+		dp := deviceplugin.NewENIDevicePlugin(count, deviceplugin.ENITypeERDMA)
+		go dp.Serve()
+	})
 }

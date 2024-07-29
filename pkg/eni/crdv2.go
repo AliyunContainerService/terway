@@ -67,8 +67,9 @@ func NewCRDV2(nodeName string) *CRDV2 {
 		panic(err)
 	}
 	if err = (&nodeReconcile{
-		client: mgr.GetClient(),
-		record: mgr.GetEventRecorderFor("terway-daemon"),
+		nodeName: nodeName,
+		client:   mgr.GetClient(),
+		record:   mgr.GetEventRecorderFor("terway-daemon"),
 	}).SetupWithManager(mgr); err != nil {
 		panic(err)
 	}
