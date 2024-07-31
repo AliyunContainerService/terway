@@ -57,6 +57,8 @@ const defaultInterface = "eth0"
 
 func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &corev1.Pod{})
+
 		crdMode := controlplane.GetConfig().IPAMType == types.IPAMTypeCRD
 
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
@@ -674,7 +676,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 			alloc.AllocationType = *allocType
 
 			ch <- alloc
-			return m.PostENICreate(ctx, alloc)
+			return nil
 		})
 	}
 	err = g.Wait()

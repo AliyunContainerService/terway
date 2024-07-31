@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package node
+package preheating
 
 import (
 	"fmt"
@@ -22,52 +22,24 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/stretchr/testify/mock"
-
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-
-	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	clientmocks "github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
-	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	register "github.com/AliyunContainerService/terway/pkg/controller"
-	"github.com/AliyunContainerService/terway/pkg/controller/mocks"
 	//+kubebuilder:scaffold:imports
 )
+
+var testEnv *envtest.Environment
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
-var cfg *rest.Config
-var k8sClient client.Client
-var testEnv *envtest.Environment
-var aliyun register.Interface
-
 func TestControllers(t *testing.T) {
-	ac := mocks.NewInterface(t)
-	ac.On("DescribeInstanceTypes", mock.Anything, []string{"xxx"}).Return([]ecs.InstanceType{
-		{
-			EriQuantity:                 1,
-			EniPrivateIpAddressQuantity: 10,
-			EniTotalQuantity:            6,
-			InstanceType:                "xxx",
-			EniQuantity:                 4,
-			EniTrunkSupported:           true,
-			InstanceTypeId:              "xxx",
-		},
-	}, nil).Maybe()
-	aliyun = ac
-
-	lp := clientmocks.NewLimitProvider(t)
-	lp.On("GetLimit", mock.Anything, "xx").Return(&aliyunClient.Limits{}, nil).Maybe()
-
 	RegisterFailHandler(Fail)
 
 	RunSpecs(t, "Controller Suite")
@@ -92,18 +64,24 @@ var _ = BeforeSuite(func() {
 
 	var err error
 	// cfg is defined in this file globally.
-	cfg, err = testEnv.Start()
+	cfg, err := testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	err = networkv1beta1.AddToScheme(scheme.Scheme)
+	err = scheme.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:scheme
 
-	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(k8sClient).NotTo(BeNil())
+	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
+		Scheme: scheme.Scheme,
+	})
+	Expect(err).ToNot(HaveOccurred())
+
+	err = (&DummyReconcile{
+		RegisterResource: []client.Object{&corev1.Pod{}},
+	}).SetupWithManager(k8sManager)
+	Expect(err).ToNot(HaveOccurred())
 })
 
 var _ = AfterSuite(func() {

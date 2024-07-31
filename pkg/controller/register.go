@@ -23,6 +23,7 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
@@ -47,6 +48,8 @@ type ControllerCtx struct {
 	Wg *wait.Group
 
 	TracerProvider trace.TracerProvider
+
+	RegisterResource []client.Object
 }
 
 type Creator func(mgr manager.Manager, ctrlCtx *ControllerCtx) error

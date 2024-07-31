@@ -57,6 +57,10 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/cert"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/all"
+	multiipnode "github.com/AliyunContainerService/terway/pkg/controller/multi-ip/node"
+	multiippod "github.com/AliyunContainerService/terway/pkg/controller/multi-ip/pod"
+	"github.com/AliyunContainerService/terway/pkg/controller/node"
+	"github.com/AliyunContainerService/terway/pkg/controller/preheating"
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/utils"
@@ -264,6 +268,13 @@ func main() {
 		}
 	}
 
+	if err = (&preheating.DummyReconcile{
+		RegisterResource: ctrlCtx.RegisterResource,
+	}).SetupWithManager(mgr); err != nil {
+		log.Error(err, "unable to create controller", "controller", "preheating")
+		os.Exit(1)
+	}
+
 	log.Info("controller started")
 	err = mgr.Start(ctx)
 	if err != nil {
@@ -311,15 +322,15 @@ func initOpenTelemetry(ctx context.Context, serviceName, serviceVersion string, 
 }
 
 func detectMultiIP(ctx context.Context, directClient client.Client, cfg *controlplane.Config) error {
-	if !lo.Contains(cfg.Controllers, "multi-ip-pod") {
+	if !lo.Contains(cfg.Controllers, multiipnode.ControllerName) {
 		return nil
 	}
 
 	var daemonConfig *daemon.Config
+	var innerErr error
 	err := wait.PollUntilContextTimeout(ctx, 1*time.Second, 10*time.Second, true, func(ctx context.Context) (done bool, err error) {
-		var innerErr error
 		daemonConfig, innerErr = daemon.ConfigFromConfigMap(ctx, directClient, "")
-		if err != nil {
+		if innerErr != nil {
 			if k8sErr.IsNotFound(innerErr) {
 				return false, nil
 			}
@@ -329,7 +340,7 @@ func detectMultiIP(ctx context.Context, directClient client.Client, cfg *control
 		return true, nil
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("error waiting for daemon to be configured: %w, innerErr %s", err, innerErr)
 	}
 	switch daemonConfig.IPAMType {
 	case types.IPAMTypeCRD:
@@ -338,7 +349,7 @@ func detectMultiIP(ctx context.Context, directClient client.Client, cfg *control
 
 	cfg.Controllers = lo.Reject(cfg.Controllers, func(item string, index int) bool {
 		switch item {
-		case "node", "multi-ip-pod", "multi-ip-node":
+		case node.ControllerName, multiipnode.ControllerName, multiippod.ControllerName:
 			return true
 		}
 		return false

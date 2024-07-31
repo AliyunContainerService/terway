@@ -31,13 +31,15 @@ import (
 )
 
 const (
-	controllerName = "node"
+	ControllerName = "node"
 
 	finalizer = "network.alibabacloud.com/node-controller"
 )
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+	register.Add(ControllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &corev1.Node{}, &networkv1beta1.Node{})
+
 		err := mgr.GetFieldIndexer().IndexField(ctrlCtx.Context, &corev1.Pod{}, "spec.nodeName", func(object client.Object) []string {
 			pod := object.(*corev1.Pod)
 			return []string{pod.Spec.NodeName}
@@ -54,7 +56,7 @@ func init() {
 			Watches(&networkv1beta1.Node{}, &handler.EnqueueRequestForObject{}).Complete(&ReconcileNode{
 			client: mgr.GetClient(),
 			scheme: mgr.GetScheme(),
-			record: mgr.GetEventRecorderFor(controllerName),
+			record: mgr.GetEventRecorderFor(ControllerName),
 			aliyun: ctrlCtx.AliyunClient,
 		})
 	}, false)

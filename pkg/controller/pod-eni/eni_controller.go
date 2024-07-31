@@ -60,6 +60,8 @@ const layout = "2006-01-02T15:04:05Z"
 
 func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &v1beta1.PodENI{})
+
 		r := NewReconcilePod(mgr, ctrlCtx.AliyunClient)
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
 			Reconciler:              r,
