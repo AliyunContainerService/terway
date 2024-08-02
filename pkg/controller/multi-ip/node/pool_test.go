@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"sync/atomic"
@@ -11,10 +12,15 @@ import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/go-logr/logr"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.opentelemetry.io/otel/trace"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
@@ -152,6 +158,46 @@ func Test_getEniOptions(t *testing.T) {
 				{
 					eniTypeKey: trunkKey,
 					eniRef:     nil,
+				},
+				{
+					eniTypeKey: secondaryKey,
+					eniRef:     nil,
+				},
+				{
+					eniTypeKey: secondaryKey,
+					eniRef:     nil,
+				},
+			},
+		},
+		{
+			name: "multi trunk support",
+			args: args{
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{
+							EnableTrunk: true,
+						},
+						Flavor: []networkv1beta1.Flavor{
+							{
+								NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+								NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+								Count:                       2,
+							},
+							{
+								NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
+								NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+								Count:                       2,
+							},
+						},
+					},
+				},
+			},
+			want: []*eniOptions{
+				{
+					eniTypeKey: trunkKey,
+				},
+				{
+					eniTypeKey: trunkKey,
 				},
 				{
 					eniTypeKey: secondaryKey,
@@ -1866,3 +1912,180 @@ func TestReconcileNode_adjustPool(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateCrCondition(t *testing.T) {
+	tests := []struct {
+		name      string
+		options   []*eniOptions
+		checkFunc func(t *testing.T, options []*eniOptions)
+	}{
+		{
+			name: "no errors",
+			options: []*eniOptions{
+				{
+					eniRef: &networkv1beta1.NetworkInterface{},
+				},
+			},
+			checkFunc: func(t *testing.T, options []*eniOptions) {
+				assert.Equal(t, []*eniOptions{
+					{
+						eniRef: &networkv1beta1.NetworkInterface{},
+					},
+				}, options)
+			},
+		},
+		{
+			name: "ip not enough error",
+			options: []*eniOptions{
+				{
+					eniRef: &networkv1beta1.NetworkInterface{
+						VSwitchID: "test-vswitch",
+					},
+					errors: []error{
+						vswpool.ErrNoAvailableVSwitch,
+					},
+				},
+			},
+			checkFunc: func(t *testing.T, options []*eniOptions) {
+				assert.Equal(t, "test-vswitch", options[0].eniRef.VSwitchID)
+				_, ok := options[0].eniRef.Conditions[ConditionInsufficientIP]
+				assert.True(t, ok)
+			},
+		},
+		{
+			name: "generic error",
+			options: []*eniOptions{
+				{
+					eniRef: &networkv1beta1.NetworkInterface{
+						VSwitchID: "test-vswitch",
+					},
+					errors: []error{
+						errors.New("generic error"),
+					},
+				},
+			},
+			checkFunc: func(t *testing.T, options []*eniOptions) {
+				_, ok := options[0].eniRef.Conditions[ConditionOperationErr]
+				assert.True(t, ok)
+			},
+		},
+		{
+			name: "multiple errors",
+			options: []*eniOptions{
+				{
+					eniRef: &networkv1beta1.NetworkInterface{
+						VSwitchID: "test-vswitch",
+					},
+					errors: []error{
+						vswpool.ErrNoAvailableVSwitch,
+						errors.New("generic error"),
+					},
+				},
+			},
+			checkFunc: func(t *testing.T, options []*eniOptions) {
+				_, ok := options[0].eniRef.Conditions[ConditionOperationErr]
+				assert.True(t, ok)
+				_, ok = options[0].eniRef.Conditions[ConditionInsufficientIP]
+				assert.True(t, ok)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		updateCrCondition(tt.options)
+		tt.checkFunc(t, tt.options)
+	}
+}
+
+var _ = Describe("Node Controller", func() {
+	ctx := context.Background()
+
+	BeforeEach(func() {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+		}
+		err := k8sClient.Create(ctx, node)
+		Expect(err).NotTo(HaveOccurred())
+	})
+	AfterEach(func() {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+		}
+		err := k8sClient.Delete(ctx, node)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	Context("Check update node status", func() {
+		It("Empty eni, should report InsufficientIP", func() {
+			updateNodeCondition(ctx, k8sClient, "foo", nil)
+
+			node := &corev1.Node{}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: "foo"}, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, result := lo.Find(node.Status.Conditions, func(item corev1.NodeCondition) bool {
+				if item.Type == "SufficientIP" && item.Status == "False" && item.Reason == "InsufficientIP" {
+					return true
+				}
+				return false
+			})
+			Expect(result).To(BeTrue())
+		})
+
+		It("Patch should update the old status", func() {
+			node := &corev1.Node{}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: "foo"}, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+				Type:               "SufficientIP",
+				Status:             "True",
+				LastHeartbeatTime:  metav1.Time{},
+				LastTransitionTime: metav1.Time{},
+				Reason:             "SufficientIP",
+				Message:            "",
+			})
+			err = k8sClient.Status().Update(ctx, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			updateNodeCondition(ctx, k8sClient, "foo", nil)
+
+			node = &corev1.Node{}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: "foo"}, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			count := 0
+			lo.ForEach(node.Status.Conditions, func(item corev1.NodeCondition, index int) {
+				if item.Type == "SufficientIP" {
+					count++
+				}
+			})
+			Expect(count).To(Equal(1))
+		})
+
+		It("Empty eni should be SufficientIP", func() {
+			updateNodeCondition(ctx, k8sClient, "foo", []*eniOptions{
+				{
+					eniTypeKey:     eniTypeKey{},
+					eniRef:         nil,
+					addIPv4N:       0,
+					addIPv6N:       0,
+					insufficientIP: false,
+					errors:         nil,
+				},
+			})
+
+			node := &corev1.Node{}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: "foo"}, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, result := lo.Find(node.Status.Conditions, func(item corev1.NodeCondition) bool {
+				if item.Type == "SufficientIP" && item.Status == "True" && item.Reason == "SufficientIP" {
+					return true
+				}
+				return false
+			})
+			Expect(result).To(BeTrue())
+		})
+	})
+})

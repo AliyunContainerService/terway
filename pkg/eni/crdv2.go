@@ -2,6 +2,7 @@ package eni
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/netip"
 	"sync"
@@ -111,7 +112,7 @@ func (r *CRDV2) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 	resp := make(chan *AllocResp)
 
 	go func() {
-		l := logf.FromContext(ctx)
+		l := logf.FromContext(ctx, "ipam", "crd")
 
 		node := &networkv1beta1.Node{}
 		allocResp := &AllocResp{}
@@ -156,6 +157,7 @@ func (r *CRDV2) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 				}
 			}
 			if (!ipv4.IsValid() && !ipv6.IsValid()) || eniInfo == nil {
+				l.V(2).Info("no valid ip found")
 				return false, nil
 			}
 
@@ -197,12 +199,26 @@ func (r *CRDV2) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 				},
 				IP: ip,
 			})
+			l.Info("get valid ip from crd", "cfg", allocResp.NetworkConfigs)
 
 			return true, nil
 		})
 
+		if err != nil {
+			if wait.Interrupted(err) {
+				allocResp.Err = &types.Error{
+					Code: types.ErrIPNotAllocated,
+					Msg:  fmt.Sprintf("timed out waiting for ip allocated. Use 'kubectl get nodes.network.alibabacloud.com %s' to see more detail", r.nodeName),
+					R:    err,
+				}
+			} else {
+				allocResp.Err = err
+			}
+		}
+
 		select {
 		case <-ctx.Done():
+			l.Error(ctx.Err(), "parent ctx done")
 		case resp <- allocResp:
 		}
 	}()

@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -50,6 +51,13 @@ func init() {
 		return ctrl.NewControllerManagedBy(mgr).
 			WithOptions(controller.Options{
 				MaxConcurrentReconciles: controlplane.GetConfig().NodeMaxConcurrent,
+				LogConstructor: func(request *reconcile.Request) logr.Logger {
+					log := mgr.GetLogger()
+					if request != nil {
+						log = log.WithValues("name", request.Name)
+					}
+					return log
+				},
 			}).
 			For(&corev1.Node{}, builder.WithPredicates(&predicateForNodeEvent{})).
 			Watches(&networkv1beta1.Node{}, &handler.EnqueueRequestForObject{}).Complete(&ReconcileNode{

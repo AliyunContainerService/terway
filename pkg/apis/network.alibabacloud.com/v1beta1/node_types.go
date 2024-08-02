@@ -128,13 +128,13 @@ type IPMap map[string]*IP
 
 type NetworkInterface struct {
 	// +kubebuilder:validation:Required
-	ID string `json:"ID"`
+	ID string `json:"id"`
 	// +kubebuilder:validation:Required
 	Status string `json:"status"`
 	// +kubebuilder:validation:Required
 	MacAddress string `json:"macAddress"`
 	// +kubebuilder:validation:Required
-	VSwitchID string `json:"VSwitchID"`
+	VSwitchID string `json:"vSwitchID"`
 	// +kubebuilder:validation:Required
 	SecurityGroupIDs []string `json:"securityGroupIDs"`
 	// +kubebuilder:validation:Required
@@ -150,6 +150,13 @@ type NetworkInterface struct {
 	IPv4CIDR string `json:"ipv4CIDR"`
 	// +kubebuilder:validation:Required
 	IPv6CIDR string `json:"ipv6CIDR"`
+
+	Conditions map[string]Condition `json:"conditions,omitempty"`
+}
+
+type Condition struct {
+	ObservedTime metav1.Time `json:"observedTime,omitempty"`
+	Message      string      `json:"message,omitempty"`
 }
 
 // NodeStatus defines the observed state of Node
