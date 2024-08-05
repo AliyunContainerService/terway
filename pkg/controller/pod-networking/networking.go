@@ -44,6 +44,8 @@ const controllerName = "pod-networking"
 
 func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &v1beta1.PodNetworking{})
+
 		c, err := controller.New(controllerName, mgr, controller.Options{
 			Reconciler:              NewReconcilePodNetworking(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool),
 			MaxConcurrentReconciles: 1,

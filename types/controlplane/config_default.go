@@ -87,7 +87,8 @@ type Credential struct {
 }
 
 type MultiIPController struct {
-	MultiIPMaxConcurrent          int    `json:"multiIPMaxConcurrent" validate:"gt=0,lte=20000" mod:"default=500"`
+	MultiIPPodMaxConcurrent       int    `json:"multiIPPodMaxConcurrent" validate:"gt=0,lte=20000" mod:"default=500"`
+	MultiIPNodeMaxConcurrent      int    `json:"multiIPNodeMaxConcurrent" validate:"gt=0,lte=20000" mod:"default=500"`
 	MultiIPNodeSyncPeriod         string `json:"multiIPNodeSyncPeriod" mod:"default=12h"`
 	MultiIPGCPeriod               string `json:"multiIPGCPeriod" mod:"default=2m"`
 	MultiIPMinSyncPeriodOnFailure string `json:"multiIPMinSyncPeriodOnFailure" mod:"default=1s"`

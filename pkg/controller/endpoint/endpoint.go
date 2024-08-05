@@ -20,10 +20,10 @@ import (
 
 var log = ctrl.Log.WithName("endpoint")
 
-const controllerName = "endpoint"
+const ControllerName = "endpoint"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+	register.Add(ControllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ipStr := os.Getenv("MY_POD_IP")
 		if ipStr == "" {
 			return fmt.Errorf("podIP is not found")

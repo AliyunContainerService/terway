@@ -21,19 +21,20 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/controller/multi-ip/node"
 )
 
-const controllerName = "multi-ip-pod"
+const ControllerName = "multi-ip-pod"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+	register.Add(ControllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &corev1.Pod{})
 		return ctrl.NewControllerManagedBy(mgr).
 			WithOptions(controller.Options{
-				MaxConcurrentReconciles: 10,
+				MaxConcurrentReconciles: ctrlCtx.Config.MultiIPPodMaxConcurrent,
 			}).
 			For(&corev1.Pod{}, builder.WithPredicates(&predicateForPodEvent{})).
 			Complete(&ReconcilePod{
 				client: mgr.GetClient(),
 				scheme: mgr.GetScheme(),
-				record: mgr.GetEventRecorderFor(controllerName),
+				record: mgr.GetEventRecorderFor(ControllerName),
 			})
 	}, false)
 }

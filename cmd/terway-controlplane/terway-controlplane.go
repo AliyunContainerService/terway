@@ -34,6 +34,7 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -56,13 +57,19 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/cert"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/all"
+	multiipnode "github.com/AliyunContainerService/terway/pkg/controller/multi-ip/node"
+	multiippod "github.com/AliyunContainerService/terway/pkg/controller/multi-ip/pod"
+	"github.com/AliyunContainerService/terway/pkg/controller/node"
+	"github.com/AliyunContainerService/terway/pkg/controller/preheating"
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
 	"github.com/AliyunContainerService/terway/pkg/version"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
+	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
+	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
 var (
@@ -124,6 +131,12 @@ func main() {
 			os.Exit(1)
 		}
 	})
+
+	err = detectMultiIP(ctx, directClient, cfg)
+	if err != nil {
+		log.Error(err, "unable to detect multi IP")
+		os.Exit(1)
+	}
 
 	ws := wh.NewServer(wh.Options{
 		Port:    cfg.WebhookPort,
@@ -255,6 +268,13 @@ func main() {
 		}
 	}
 
+	if err = (&preheating.DummyReconcile{
+		RegisterResource: ctrlCtx.RegisterResource,
+	}).SetupWithManager(mgr); err != nil {
+		log.Error(err, "unable to create controller", "controller", "preheating")
+		os.Exit(1)
+	}
+
 	log.Info("controller started")
 	err = mgr.Start(ctx)
 	if err != nil {
@@ -299,4 +319,41 @@ func initOpenTelemetry(ctx context.Context, serviceName, serviceVersion string, 
 	otel.SetTracerProvider(traceProvider)
 
 	return traceProvider, nil
+}
+
+func detectMultiIP(ctx context.Context, directClient client.Client, cfg *controlplane.Config) error {
+	if !lo.Contains(cfg.Controllers, multiipnode.ControllerName) {
+		return nil
+	}
+
+	var daemonConfig *daemon.Config
+	var innerErr error
+	err := wait.PollUntilContextTimeout(ctx, 1*time.Second, 10*time.Second, true, func(ctx context.Context) (done bool, err error) {
+		daemonConfig, innerErr = daemon.ConfigFromConfigMap(ctx, directClient, "")
+		if innerErr != nil {
+			if k8sErr.IsNotFound(innerErr) {
+				return false, nil
+			}
+			log.Error(innerErr, "failed to get ConfigMap eni-config")
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		return fmt.Errorf("error waiting for daemon to be configured: %w, innerErr %s", err, innerErr)
+	}
+	switch daemonConfig.IPAMType {
+	case types.IPAMTypeCRD:
+		return nil
+	}
+
+	cfg.Controllers = lo.Reject(cfg.Controllers, func(item string, index int) bool {
+		switch item {
+		case node.ControllerName, multiipnode.ControllerName, multiippod.ControllerName:
+			return true
+		}
+		return false
+	})
+	log.Info("daemon is not at crd mode, disable v2 ipam")
+	return nil
 }

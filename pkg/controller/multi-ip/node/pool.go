@@ -47,6 +47,8 @@ import (
 )
 
 const (
+	ControllerName = "multi-ip-node"
+
 	finalizer = "network.alibabacloud.com/node-controller"
 
 	batchSize = 10
@@ -55,8 +57,7 @@ const (
 var EventCh = make(chan event.GenericEvent, 1)
 
 func init() {
-	controllerName := "multi-ip-node"
-	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+	register.Add(ControllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		fullSyncPeriod, err := time.ParseDuration(ctrlCtx.Config.MultiIPNodeSyncPeriod)
 		if err != nil {
 			return err
@@ -77,17 +78,17 @@ func init() {
 			return err
 		}
 
-		// metirc and tracer
+		// metric and tracer
 
 		metrics.Registry.MustRegister(ResourcePoolTotal)
-		tracer := ctrlCtx.TracerProvider.Tracer(controllerName)
+		tracer := ctrlCtx.TracerProvider.Tracer(ControllerName)
 
-		ctrl, err := controller.New(controllerName, mgr, controller.Options{
-			MaxConcurrentReconciles: ctrlCtx.Config.MultiIPMaxConcurrent,
+		ctrl, err := controller.New(ControllerName, mgr, controller.Options{
+			MaxConcurrentReconciles: ctrlCtx.Config.MultiIPNodeMaxConcurrent,
 			Reconciler: &ReconcileNode{
 				client:             mgr.GetClient(),
 				scheme:             mgr.GetScheme(),
-				record:             mgr.GetEventRecorderFor(controllerName),
+				record:             mgr.GetEventRecorderFor(ControllerName),
 				aliyun:             ctrlCtx.AliyunClient,
 				vswpool:            ctrlCtx.VSwitchPool,
 				fullSyncNodePeriod: fullSyncPeriod,
@@ -1199,26 +1200,3 @@ func addIPToMap(in map[string]*networkv1beta1.IP, ip *networkv1beta1.IP) {
 		in[ip.IP] = ip
 	}
 }
-
-//
-//func (n *ReconcileNode) loadToMetadata(ctx context.Context, name string) {
-//	prev, ok := n.cache.Load(name)
-//	if !ok {
-//		return
-//	}
-//	status := prev.(*NodeStatus)
-//
-//	ctxMeta := MetaCtx(ctx)
-//	ctxMeta.needSyncOpenAPI.Store(status.NeedSyncOpenAPI)
-//	ctxMeta.lastGCTime = status.LastGCTime
-//	ctxMeta.lastReconcileTime = status.LastReconcileTime
-//}
-//
-//func (n *ReconcileNode) fromMetadata(ctx context.Context, name string) {
-//	ctxMeta := MetaCtx(ctx)
-//
-//	n.cache.Store(name, &NodeStatus{
-//		NeedSyncOpenAPI: ctxMeta.needSyncOpenAPI.Load(),
-//		LastGCTime:      ctxMeta.lastGCTime,
-//	})
-//}

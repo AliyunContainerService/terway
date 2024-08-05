@@ -56,7 +56,3 @@ func (m *ReconcilePod) ParsePodNetworksFromAnnotation(ctx context.Context, zoneI
 
 	return allocs, nil
 }
-
-func (m *ReconcilePod) PostENICreate(ctx context.Context, alloc *v1beta1.Allocation) error {
-	return nil
-}
