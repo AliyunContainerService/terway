@@ -45,6 +45,10 @@ func ISVKNode(n *corev1.Node) bool {
 	return n.Labels["type"] == "virtual-kubelet"
 }
 
+func ISLinJunNode(n *corev1.Node) bool {
+	return n.Labels["alibabacloud.com/lingjun-worker"] == "true"
+}
+
 // PodSandboxExited pod sandbox is exited
 func PodSandboxExited(p *corev1.Pod) bool {
 	switch p.Status.Phase {

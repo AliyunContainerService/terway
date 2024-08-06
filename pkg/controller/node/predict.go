@@ -34,7 +34,7 @@ func (p *predicateForNodeEvent) Create(e event.CreateEvent) bool {
 	if !ok {
 		return false
 	}
-	return !utils.ISVKNode(node)
+	return isECSNode(node)
 }
 
 // Delete returns true if the Delete event should be processed
@@ -43,7 +43,7 @@ func (p *predicateForNodeEvent) Delete(e event.DeleteEvent) bool {
 	if !ok {
 		return false
 	}
-	return !utils.ISVKNode(node)
+	return isECSNode(node)
 }
 
 // Update returns true if the Update event should be processed
@@ -52,7 +52,7 @@ func (p *predicateForNodeEvent) Update(e event.UpdateEvent) bool {
 	if !ok {
 		return false
 	}
-	return !utils.ISVKNode(node)
+	return isECSNode(node)
 }
 
 // Generic returns true if the Generic event should be processed
@@ -61,5 +61,15 @@ func (p *predicateForNodeEvent) Generic(e event.GenericEvent) bool {
 	if !ok {
 		return false
 	}
-	return !utils.ISVKNode(node)
+	return isECSNode(node)
+}
+
+func isECSNode(node *corev1.Node) bool {
+	if utils.ISLinJunNode(node) {
+		return false
+	}
+	if utils.ISVKNode(node) {
+		return false
+	}
+	return true
 }
