@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -119,6 +121,38 @@ func Test_detectMultiIP(t *testing.T) {
 			} else {
 				tt.checkFunc(t, tt.args.cfg)
 			}
+		})
+	}
+}
+
+func Test_newOption(t *testing.T) {
+	type args struct {
+		cfg *controlplane.Config
+	}
+	tests := []struct {
+		name      string
+		args      args
+		checkFunc func(t *testing.T, opt ctrl.Options)
+	}{
+		{
+			name: "new cfg",
+			args: args{
+				cfg: &controlplane.Config{
+					LeaseDuration: "2m",
+					RenewDeadline: "2m",
+					RetryPeriod:   "2m",
+				},
+			},
+			checkFunc: func(t *testing.T, opt ctrl.Options) {
+				assert.Equal(t, 2*time.Minute, *opt.LeaseDuration)
+				assert.Equal(t, 2*time.Minute, *opt.RenewDeadline)
+				assert.Equal(t, 2*time.Minute, *opt.RetryPeriod)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.checkFunc(t, newOption(tt.args.cfg))
 		})
 	}
 }
