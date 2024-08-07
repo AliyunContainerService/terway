@@ -25,7 +25,6 @@ import (
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/controller/multi-ip/node"
-	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 )
@@ -83,7 +82,7 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		}
 		return reconcile.Result{}, err
 	}
-	if utils.ISVKNode(k8sNode) {
+	if !isECSNode(k8sNode) {
 		return reconcile.Result{}, nil
 	}
 	if !k8sNode.DeletionTimestamp.IsZero() {
