@@ -7,7 +7,6 @@ import (
 	"log"
 
 	"github.com/sirupsen/logrus"
-	"k8s.io/client-go/util/flowcontrol"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
@@ -49,9 +48,7 @@ func main() {
 		panic(err)
 	}
 
-	api, err := client.New(c,
-		flowcontrol.NewTokenBucketRateLimiter(8, 10),
-		flowcontrol.NewTokenBucketRateLimiter(4, 5))
+	api, err := client.New(c, nil)
 	if err != nil {
 		panic(err)
 	}

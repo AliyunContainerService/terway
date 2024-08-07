@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
-	"strings"
 	"time"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
@@ -12,7 +11,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/util/flowcontrol"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
@@ -24,28 +22,39 @@ import (
 var _ VPC = &OpenAPI{}
 var _ ECS = &OpenAPI{}
 
+const (
+	APICreateNetworkInterface     = "CreateNetworkInterface"
+	APIDescribeNetworkInterfaces  = "DescribeNetworkInterfaces"
+	APIAttachNetworkInterface     = "AttachNetworkInterface"
+	APIDetachNetworkInterface     = "DetachNetworkInterface"
+	APIDeleteNetworkInterface     = "DeleteNetworkInterface"
+	APIAssignPrivateIPAddress     = "AssignPrivateIpAddresses"
+	APIUnAssignPrivateIPAddresses = "UnAssignPrivateIpAddresses"
+	APIAssignIPv6Addresses        = "AssignIpv6Addresses"
+	APIUnAssignIpv6Addresses      = "UnAssignIpv6Addresses"
+	APIDescribeInstanceTypes      = "DescribeInstanceTypes"
+)
+
 type OpenAPI struct {
 	ClientSet        credential.Client
 	IdempotentKeyGen IdempotentKeyGen
 
-	ReadOnlyRateLimiter flowcontrol.RateLimiter
-	MutatingRateLimiter flowcontrol.RateLimiter
+	RateLimiter *RateLimiter
 
 	Tracer trace.Tracer
 }
 
-func New(c credential.Client, readOnly, mutating flowcontrol.RateLimiter) (*OpenAPI, error) {
+func New(c credential.Client, cfg LimitConfig) (*OpenAPI, error) {
 	return &OpenAPI{
-		ClientSet:           c,
-		IdempotentKeyGen:    NewIdempotentKeyGenerator(),
-		ReadOnlyRateLimiter: readOnly,
-		MutatingRateLimiter: mutating,
-		Tracer:              otel.Tracer("openAPI"),
+		ClientSet:        c,
+		IdempotentKeyGen: NewIdempotentKeyGenerator(),
+		RateLimiter:      NewRateLimiter(cfg),
+		Tracer:           otel.Tracer("openAPI"),
 	}, nil
 }
 
 func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error) {
-	ctx, span := a.Tracer.Start(ctx, "CreateNetworkInterface")
+	ctx, span := a.Tracer.Start(ctx, APICreateNetworkInterface)
 	defer span.End()
 
 	option := &CreateNetworkInterfaceOptions{}
@@ -65,10 +74,13 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, opts ...CreateNetw
 	)
 
 	err = wait.ExponentialBackoffWithContext(ctx, *option.Backoff, func(ctx context.Context) (bool, error) {
-		a.MutatingRateLimiter.Accept()
+		err = a.RateLimiter.Wait(ctx, APICreateNetworkInterface)
+		if err != nil {
+			return false, err
+		}
 		start := time.Now()
 		resp, innerErr = a.ClientSet.ECS().CreateNetworkInterface(req)
-		metric.OpenAPILatency.WithLabelValues("CreateNetworkInterface", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
+		metric.OpenAPILatency.WithLabelValues(APICreateNetworkInterface, fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
 		if innerErr != nil {
 			innerErr = apiErr.WarpError(innerErr)
 			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(innerErr)).Error(innerErr, "failed")
@@ -93,7 +105,7 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, opts ...CreateNetw
 
 // DescribeNetworkInterface list eni
 func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error) {
-	ctx, span := a.Tracer.Start(ctx, "DescribeNetworkInterface")
+	ctx, span := a.Tracer.Start(ctx, APIDescribeNetworkInterfaces)
 	defer span.End()
 
 	var result []*NetworkInterface
@@ -108,6 +120,11 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 	}
 
 	for {
+		err := a.RateLimiter.Wait(ctx, APIDescribeNetworkInterfaces)
+		if err != nil {
+			return nil, err
+		}
+
 		req := ecs.CreateDescribeNetworkInterfacesRequest()
 		req.NextToken = nextToken
 		req.VpcId = vpcID
@@ -123,10 +140,9 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 
 		l := LogFields(logf.FromContext(ctx), req)
 
-		a.ReadOnlyRateLimiter.Accept()
 		start := time.Now()
 		resp, err := a.ClientSet.ECS().DescribeNetworkInterfaces(req)
-		metric.OpenAPILatency.WithLabelValues("DescribeNetworkInterfaces", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+		metric.OpenAPILatency.WithLabelValues(APIDescribeNetworkInterfaces, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 		if err != nil {
 			err = apiErr.WarpError(err)
 			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "error describe eni")
@@ -151,22 +167,24 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 
 // AttachNetworkInterface attach eni
 func (a *OpenAPI) AttachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error {
-	ctx, span := a.Tracer.Start(ctx, "AttachNetworkInterface")
+	ctx, span := a.Tracer.Start(ctx, APIAttachNetworkInterface)
 	defer span.End()
+
+	err := a.RateLimiter.Wait(ctx, APIAttachNetworkInterface)
+	if err != nil {
+		return err
+	}
 
 	req := ecs.CreateAttachNetworkInterfaceRequest()
 	req.NetworkInterfaceId = eniID
 	req.InstanceId = instanceID
 	req.TrunkNetworkInstanceId = trunkENIID
 
-	l := logf.FromContext(ctx).WithValues(LogFieldAPI, "AttachNetworkInterface",
-		LogFieldENIID, eniID,
-		LogFieldInstanceID, instanceID)
+	l := LogFields(logf.FromContext(ctx), req)
 
-	a.MutatingRateLimiter.Accept()
 	start := time.Now()
 	resp, err := a.ClientSet.ECS().AttachNetworkInterface(req)
-	metric.OpenAPILatency.WithLabelValues("AttachNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	metric.OpenAPILatency.WithLabelValues(APIAttachNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "attach eni failed")
@@ -178,7 +196,7 @@ func (a *OpenAPI) AttachNetworkInterface(ctx context.Context, eniID, instanceID,
 
 // DetachNetworkInterface detach eni
 func (a *OpenAPI) DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error {
-	ctx, span := a.Tracer.Start(ctx, "DetachNetworkInterface")
+	ctx, span := a.Tracer.Start(ctx, APIDetachNetworkInterface)
 	defer span.End()
 
 	req := ecs.CreateDetachNetworkInterfaceRequest()
@@ -186,15 +204,15 @@ func (a *OpenAPI) DetachNetworkInterface(ctx context.Context, eniID, instanceID,
 	req.InstanceId = instanceID
 	req.TrunkNetworkInstanceId = trunkENIID
 
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "DetachNetworkInterface",
-		LogFieldENIID, eniID,
-		LogFieldInstanceID, instanceID,
-	)
-	a.MutatingRateLimiter.Accept()
+	l := LogFields(logf.FromContext(ctx), req)
+
+	err := a.RateLimiter.Wait(ctx, APIDetachNetworkInterface)
+	if err != nil {
+		return err
+	}
 	start := time.Now()
 	resp, err := a.ClientSet.ECS().DetachNetworkInterface(req)
-	metric.OpenAPILatency.WithLabelValues("DetachNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	metric.OpenAPILatency.WithLabelValues(APIDetachNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
 		if apiErr.ErrorCodeIs(err, apiErr.ErrInvalidENINotFound, apiErr.ErrInvalidEcsIDNotFound) {
@@ -209,20 +227,21 @@ func (a *OpenAPI) DetachNetworkInterface(ctx context.Context, eniID, instanceID,
 
 // DeleteNetworkInterface del eni by id
 func (a *OpenAPI) DeleteNetworkInterface(ctx context.Context, eniID string) error {
-	ctx, span := a.Tracer.Start(ctx, "DeleteNetworkInterface")
+	ctx, span := a.Tracer.Start(ctx, APIDeleteNetworkInterface)
 	defer span.End()
 
 	req := ecs.CreateDeleteNetworkInterfaceRequest()
 	req.NetworkInterfaceId = eniID
 
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "DeleteNetworkInterface",
-		LogFieldENIID, eniID,
-	)
-	a.MutatingRateLimiter.Accept()
+	l := LogFields(logf.FromContext(ctx), req)
+
+	err := a.RateLimiter.Wait(ctx, APIDeleteNetworkInterface)
+	if err != nil {
+		return err
+	}
 	start := time.Now()
 	resp, err := a.ClientSet.ECS().DeleteNetworkInterface(req)
-	metric.OpenAPILatency.WithLabelValues("DeleteNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	metric.OpenAPILatency.WithLabelValues(APIDeleteNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "delete eni failed")
@@ -268,7 +287,7 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 }
 
 func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]netip.Addr, error) {
-	ctx, span := a.Tracer.Start(ctx, "AssignPrivateIPAddress")
+	ctx, span := a.Tracer.Start(ctx, APIAssignPrivateIPAddress)
 	defer span.End()
 
 	option := &AssignPrivateIPAddressOptions{}
@@ -288,10 +307,13 @@ func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, opts ...AssignPriv
 	)
 
 	err = wait.ExponentialBackoffWithContext(ctx, *option.Backoff, func(ctx context.Context) (bool, error) {
-		a.MutatingRateLimiter.Accept()
+		innerErr = a.RateLimiter.Wait(ctx, APIAssignPrivateIPAddress)
+		if innerErr != nil {
+			return true, innerErr
+		}
 		start := time.Now()
 		resp, innerErr = a.ClientSet.ECS().AssignPrivateIpAddresses(req)
-		metric.OpenAPILatency.WithLabelValues("AssignPrivateIpAddresses", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
+		metric.OpenAPILatency.WithLabelValues(APIAssignPrivateIPAddress, fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
 		if innerErr != nil {
 			innerErr = apiErr.WarpError(innerErr)
 			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(innerErr)).Error(innerErr, "failed")
@@ -324,22 +346,24 @@ func (a *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, 
 		return nil
 	}
 
-	ctx, span := a.Tracer.Start(ctx, "UnAssignPrivateIPAddresses")
+	ctx, span := a.Tracer.Start(ctx, APIUnAssignPrivateIPAddresses)
 	defer span.End()
+
+	err := a.RateLimiter.Wait(ctx, APIUnAssignPrivateIPAddresses)
+	if err != nil {
+		return err
+	}
 
 	req := ecs.CreateUnassignPrivateIpAddressesRequest()
 	req.NetworkInterfaceId = eniID
 	str := ip.IPAddrs2str(ips)
 	req.PrivateIpAddress = &str
 
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "UnassignPrivateIpAddresses",
-		LogFieldENIID, eniID,
-		LogFieldIPs, strings.Join(str, ","),
-	)
+	l := LogFields(logf.FromContext(ctx), req)
+
 	start := time.Now()
 	resp, err := a.ClientSet.ECS().UnassignPrivateIpAddresses(req)
-	metric.OpenAPILatency.WithLabelValues("UnassignPrivateIpAddresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	metric.OpenAPILatency.WithLabelValues(APIUnAssignPrivateIPAddresses, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 	if err != nil {
 		err = apiErr.WarpError(err)
@@ -357,7 +381,7 @@ func (a *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, 
 
 // AssignIpv6Addresses assign ipv6 address
 func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6AddressesOption) ([]netip.Addr, error) {
-	ctx, span := a.Tracer.Start(ctx, "AssignIpv6Addresses")
+	ctx, span := a.Tracer.Start(ctx, APIAssignIPv6Addresses)
 	defer span.End()
 
 	option := &AssignIPv6AddressesOptions{}
@@ -377,10 +401,14 @@ func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6Add
 	)
 
 	err = wait.ExponentialBackoffWithContext(ctx, *option.Backoff, func(ctx context.Context) (bool, error) {
-		a.MutatingRateLimiter.Accept()
+		innerErr = a.RateLimiter.Wait(ctx, APIAssignIPv6Addresses)
+		if err != nil {
+			return true, innerErr
+		}
+
 		start := time.Now()
 		resp, innerErr = a.ClientSet.ECS().AssignIpv6Addresses(req)
-		metric.OpenAPILatency.WithLabelValues("AssignIpv6Addresses", fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
+		metric.OpenAPILatency.WithLabelValues(APIAssignIPv6Addresses, fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
 		if innerErr != nil {
 			innerErr = apiErr.WarpError(innerErr)
 			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(innerErr)).Error(innerErr, "failed")
@@ -408,25 +436,28 @@ func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6Add
 // UnAssignIpv6Addresses remove ip from eni
 // return ok if 1. eni is released 2. ip is already released 3. release success
 func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []netip.Addr) error {
-	ctx, span := a.Tracer.Start(ctx, "UnAssignIpv6Addresses")
+	ctx, span := a.Tracer.Start(ctx, APIUnAssignIpv6Addresses)
 	defer span.End()
 
 	if len(ips) == 0 {
 		return nil
 	}
+
+	err := a.RateLimiter.Wait(ctx, APIUnAssignIpv6Addresses)
+	if err != nil {
+		return err
+	}
+
 	req := ecs.CreateUnassignIpv6AddressesRequest()
 	req.NetworkInterfaceId = eniID
 	str := ip.IPAddrs2str(ips)
 	req.Ipv6Address = &str
 
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "UnassignIpv6Addresses",
-		LogFieldENIID, eniID,
-		LogFieldIPs, strings.Join(str, ","),
-	)
+	l := LogFields(logf.FromContext(ctx), req)
+
 	start := time.Now()
 	resp, err := a.ClientSet.ECS().UnassignIpv6Addresses(req)
-	metric.OpenAPILatency.WithLabelValues("UnassignIpv6Addresses", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	metric.OpenAPILatency.WithLabelValues(APIUnAssignIpv6Addresses, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 	if err != nil {
 		err = apiErr.WarpError(err)
@@ -443,13 +474,18 @@ func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips [
 }
 
 func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error) {
-	ctx, span := a.Tracer.Start(ctx, "DescribeInstanceTypes")
+	ctx, span := a.Tracer.Start(ctx, APIDescribeInstanceTypes)
 	defer span.End()
 
 	var result []ecs.InstanceType
 
 	nextToken := ""
 	for {
+		err := a.RateLimiter.Wait(ctx, APIDescribeInstanceTypes)
+		if err != nil {
+			return nil, err
+		}
+
 		req := ecs.CreateDescribeInstanceTypesRequest()
 		req.NextToken = nextToken
 		// nb(l1b0k): see https://help.aliyun.com/practice_detail/461278.
@@ -459,7 +495,7 @@ func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]
 		}
 		start := time.Now()
 		resp, err := a.ClientSet.ECS().DescribeInstanceTypes(req)
-		metric.OpenAPILatency.WithLabelValues("DescribeInstanceTypes", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+		metric.OpenAPILatency.WithLabelValues(APIDescribeInstanceTypes, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
 		l := LogFields(logf.FromContext(ctx), req)
 
@@ -479,27 +515,4 @@ func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]
 	}
 
 	return result, nil
-}
-
-func (a *OpenAPI) ModifyNetworkInterfaceAttribute(ctx context.Context, eniID string, securityGroupIDs []string) error {
-	ctx, span := a.Tracer.Start(ctx, "ModifyNetworkInterfaceAttribute")
-	defer span.End()
-
-	req := ecs.CreateModifyNetworkInterfaceAttributeRequest()
-	req.NetworkInterfaceId = eniID
-	req.SecurityGroupId = &securityGroupIDs
-	start := time.Now()
-	resp, err := a.ClientSet.ECS().ModifyNetworkInterfaceAttribute(req)
-	metric.OpenAPILatency.WithLabelValues("ModifyNetworkInterfaceAttribute", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
-
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "ModifyNetworkInterfaceAttribute",
-	)
-	if err != nil {
-		err = apiErr.WarpError(err)
-		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "modify securityGroup failed")
-		return err
-	}
-	l.WithValues(LogFieldRequestID, resp.RequestId).Info("modify securityGroup", "ids", strings.Join(securityGroupIDs, ","))
-	return nil
 }

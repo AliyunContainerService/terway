@@ -23,6 +23,5 @@ type ECS interface {
 	UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []netip.Addr) error
 	AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6AddressesOption) ([]netip.Addr, error)
 	UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []netip.Addr) error
-	ModifyNetworkInterfaceAttribute(ctx context.Context, eniID string, securityGroupIDs []string) error
 	DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error)
 }
