@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"k8s.io/client-go/util/flowcontrol"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
@@ -159,9 +158,7 @@ func (b *NetworkServiceBuilder) setupAliyunClient() error {
 		return err
 	}
 
-	aliyunClient, err := client.New(clientSet,
-		flowcontrol.NewTokenBucketRateLimiter(8, 10),
-		flowcontrol.NewTokenBucketRateLimiter(4, 5))
+	aliyunClient, err := client.New(clientSet, client.FromMap(b.config.RateLimit))
 	if err != nil {
 		return err
 	}

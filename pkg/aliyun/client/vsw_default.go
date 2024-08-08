@@ -14,22 +14,28 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/metric"
 )
 
+const (
+	APIDescribeVSwitches = "DescribeVSwitches"
+)
+
 // DescribeVSwitchByID get vsw by id
 func (a *OpenAPI) DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*vpc.VSwitch, error) {
-	ctx, span := a.Tracer.Start(ctx, "DescribeVSwitchByID")
+	ctx, span := a.Tracer.Start(ctx, APIDescribeVSwitches)
 	defer span.End()
+
+	err := a.RateLimiter.Wait(ctx, APIDescribeInstanceTypes)
+	if err != nil {
+		return nil, err
+	}
 
 	req := vpc.CreateDescribeVSwitchesRequest()
 	req.VSwitchId = vSwitchID
 
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "DescribeVSwitches",
-		LogFieldVSwitchID, vSwitchID,
-	)
+	l := LogFields(logf.FromContext(ctx), req)
 
 	start := time.Now()
 	resp, err := a.ClientSet.VPC().DescribeVSwitches(req)
-	metric.OpenAPILatency.WithLabelValues("DescribeVSwitches", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	metric.OpenAPILatency.WithLabelValues(APIDescribeVSwitches, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "DescribeVSwitches failed")

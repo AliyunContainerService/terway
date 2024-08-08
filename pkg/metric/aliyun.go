@@ -21,4 +21,13 @@ var (
 		},
 		[]string{"url", "error"},
 	)
+
+	RateLimiterLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "rate_limiter_latency",
+			Help:    "rate_limiter_latency in ms",
+			Buckets: []float64{200, 400, 800, 1600, 3200, 6400, 12800, 13800, 14800, 16800, 20800, 28800, 44800},
+		},
+		[]string{"api"},
+	)
 )

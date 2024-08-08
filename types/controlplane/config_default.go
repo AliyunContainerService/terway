@@ -60,11 +60,6 @@ type Config struct {
 	KubeClientQPS   float32 `json:"kubeClientQPS" validate:"gt=0,lte=10000" mod:"default=20"`
 	KubeClientBurst int     `json:"kubeClientBurst" validate:"gt=0,lte=10000" mod:"default=30"`
 
-	ReadOnlyQPS   float32 `json:"readOnlyQPS" validate:"gt=0,lte=10000" mod:"default=8"`
-	ReadOnlyBurst int     `json:"readOnlyBurst" validate:"gt=0,lte=10000" mod:"default=10"`
-	MutatingQPS   float32 `json:"mutatingQPS" validate:"gt=0,lte=10000" mod:"default=4"`
-	MutatingBurst int     `json:"mutatingBurst" validate:"gt=0,lte=10000" mod:"default=5"`
-
 	VSwitchPoolSize int    `json:"vSwitchPoolSize" validate:"gt=0" mod:"default=1000"`
 	VSwitchCacheTTL string `json:"vSwitchCacheTTL" mod:"default=20m0s"`
 
@@ -72,6 +67,8 @@ type Config struct {
 
 	BackoffOverride map[string]wait.Backoff `json:"backoffOverride,omitempty"`
 	IPAMType        string                  `json:"ipamType"`
+
+	RateLimit map[string]int `json:"rateLimit"`
 
 	Credential
 }

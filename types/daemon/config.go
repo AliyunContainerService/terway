@@ -58,6 +58,7 @@ type Config struct {
 	KubeClientQPS               float32                 `json:"kube_client_qps"`
 	KubeClientBurst             int                     `json:"kube_client_burst"`
 	ResourceGroupID             string                  `json:"resource_group_id"`
+	RateLimit                   map[string]int          `json:"rate_limit"`
 }
 
 func (c *Config) GetSecurityGroups() []string {
