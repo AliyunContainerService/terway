@@ -667,6 +667,86 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "take over exists pods",
+			args: args{
+				log: logr.Discard(),
+				podsMapper: map[string]*PodRequest{
+
+					"pod-2": {
+						RequireIPv4: true,
+						RequireIPv6: true,
+					},
+
+					"pod-1": {
+						RequireIPv4: true,
+						RequireIPv6: true,
+						IPv4:        "192.168.0.1",
+						IPv6:        "fd00::1",
+					},
+				},
+				ipv4Map: map[string]*EniIP{
+					"192.168.0.1": {
+						IP: &networkv1beta1.IP{
+							IP:     "192.168.0.1",
+							Status: networkv1beta1.IPStatusValid,
+						},
+						NetworkInterface: &networkv1beta1.NetworkInterface{
+							ID:     "eni-1",
+							Status: "InUse",
+						},
+					},
+					"192.168.0.2": {
+						IP: &networkv1beta1.IP{
+							IP:     "192.168.0.2",
+							Status: networkv1beta1.IPStatusValid,
+						},
+						NetworkInterface: &networkv1beta1.NetworkInterface{
+							ID:     "eni-2",
+							Status: "InUse",
+						},
+					},
+				},
+				ipv6Map: map[string]*EniIP{
+					"fd00::1": {
+						IP: &networkv1beta1.IP{
+							IP:     "fd00::1",
+							Status: networkv1beta1.IPStatusValid,
+						},
+						NetworkInterface: &networkv1beta1.NetworkInterface{
+							ID:     "eni-1",
+							Status: "InUse",
+						},
+					},
+					"fd00::2": {
+						IP: &networkv1beta1.IP{
+							IP:     "fd00::2",
+							Status: networkv1beta1.IPStatusValid,
+						},
+						NetworkInterface: &networkv1beta1.NetworkInterface{
+							ID:     "eni-2",
+							Status: "InUse",
+						},
+					},
+				},
+			},
+			checkResultFunc: func(t *testing.T, got map[string]*PodRequest) {
+				assert.Len(t, got, 0)
+			},
+			checkPodsMapFunc: func(t *testing.T, got map[string]*PodRequest) {
+				assert.NotNil(t, got["pod-1"].ipv4Ref)
+				assert.NotNil(t, got["pod-1"].ipv6Ref)
+				assert.NotNil(t, got["pod-2"].ipv4Ref)
+				assert.NotNil(t, got["pod-2"].ipv6Ref)
+				assert.Equal(t, "pod-1", got["pod-1"].ipv4Ref.IP.PodID)
+				assert.Equal(t, "192.168.0.1", got["pod-1"].ipv4Ref.IP.IP)
+				assert.Equal(t, "pod-2", got["pod-2"].ipv4Ref.IP.PodID)
+				assert.Equal(t, "pod-1", got["pod-1"].ipv6Ref.IP.PodID)
+				assert.Equal(t, "pod-2", got["pod-2"].ipv6Ref.IP.PodID)
+				assert.Equal(t, "192.168.0.2", got["pod-2"].ipv4Ref.IP.IP)
+
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2066,12 +2146,11 @@ var _ = Describe("Node Controller", func() {
 		It("Empty eni should be SufficientIP", func() {
 			updateNodeCondition(ctx, k8sClient, "foo", []*eniOptions{
 				{
-					eniTypeKey:     eniTypeKey{},
-					eniRef:         nil,
-					addIPv4N:       0,
-					addIPv6N:       0,
-					insufficientIP: false,
-					errors:         nil,
+					eniTypeKey: eniTypeKey{},
+					eniRef:     nil,
+					addIPv4N:   0,
+					addIPv6N:   0,
+					errors:     nil,
 				},
 			})
 

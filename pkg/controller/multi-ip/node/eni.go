@@ -47,9 +47,8 @@ type eniOptions struct {
 	addIPv4N int
 	addIPv6N int
 
-	isFull         bool
-	insufficientIP bool
-	errors         []error
+	isFull bool
+	errors []error
 }
 
 var EniOptions = map[eniTypeKey]*aliyunClient.CreateNetworkInterfaceOptions{

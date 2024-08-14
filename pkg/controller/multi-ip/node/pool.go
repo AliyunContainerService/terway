@@ -484,9 +484,8 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 
 	unSucceedPods := map[string]*PodRequest{}
 
-	// only pending pods is handled
+	// handle exist pod ip
 	for podID, info := range pendingPods {
-		// choose eni first ...
 		if info.RequireIPv4 && info.ipv4Ref == nil {
 			if info.IPv4 != "" {
 				// for take over case , pod has ip already, we can only assign to previous eni
@@ -494,9 +493,29 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 				if ok && (eniIP.IP.PodID == "" || eniIP.IP.PodID == podID) {
 					info.ipv4Ref = eniIP
 					eniIP.IP.PodID = podID
-					log.Info("assign ip", "pod", podID, "ip", eniIP.IP, "eni", eniIP.NetworkInterface.ID)
+					log.Info("assign ip (from pod status)", "pod", podID, "ip", eniIP.IP, "eni", eniIP.NetworkInterface.ID)
 				}
-			} else {
+			}
+		}
+
+		if info.RequireIPv6 && info.ipv6Ref == nil {
+			if info.IPv6 != "" {
+				// for take over case , pod has ip already, we can only assign to previous eni
+				eniIP, ok := ipv6Map[info.IPv6]
+				if ok && (eniIP.IP.PodID == "" || eniIP.IP.PodID == podID) {
+					info.ipv6Ref = eniIP
+					eniIP.IP.PodID = podID
+					log.Info("assign ip (from pod status)", "pod", podID, "ip", eniIP.IP, "eni", eniIP.NetworkInterface.ID)
+				}
+			}
+		}
+	}
+
+	// only pending pods is handled
+	for podID, info := range pendingPods {
+		// choose eni first ...
+		if info.RequireIPv4 && info.ipv4Ref == nil {
+			if info.IPv4 == "" {
 				for _, v := range ipv4Map {
 					if v.NetworkInterface.Status != aliyunClient.ENIStatusInUse {
 						continue
@@ -529,15 +548,7 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 		}
 
 		if info.RequireIPv6 && info.ipv6Ref == nil {
-			if info.IPv6 != "" {
-				// for take over case , pod has ip already, we can only assign to previous eni
-				eniIP, ok := ipv6Map[info.IPv6]
-				if ok && (eniIP.IP.PodID == "" || eniIP.IP.PodID == podID) {
-					info.ipv6Ref = eniIP
-					eniIP.IP.PodID = podID
-					log.Info("assign ip", "pod", podID, "ip", eniIP.IP, "eni", eniIP.NetworkInterface.ID)
-				}
-			} else {
+			if info.IPv6 == "" {
 				for _, v := range ipv6Map {
 					if v.NetworkInterface.Status != aliyunClient.ENIStatusInUse {
 						continue
@@ -699,12 +710,12 @@ func updateNodeCondition(ctx context.Context, c client.Client, nodeName string, 
 				}
 			}
 		}
-		// 1. vsw is blocked or eni is full
-		if item.insufficientIP || item.isFull {
+		// 1. eni is full
+		if item.isFull {
 			return
 		}
 
-		// 2. call openAPI failed
+		// 2. ip not enough
 		if lo.ContainsBy(item.errors, func(err error) bool {
 			return isIPNotEnough(err)
 		}) {
@@ -770,7 +781,7 @@ func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eni
 		}
 
 		if vsw.AvailableIPCount <= 0 {
-			option.insufficientIP = true
+			option.errors = append(option.errors, vswitch.ErrNoAvailableVSwitch)
 			return false
 		}
 
