@@ -26,8 +26,12 @@ import (
 
 type Config struct {
 	// controller config
-	LeaseLockName       string `json:"leaseLockName" validate:"required" mod:"default=terway-controller-lock"`
-	LeaseLockNamespace  string `json:"leaseLockNamespace" validate:"required" mod:"default=kube-system"`
+	LeaseLockName      string `json:"leaseLockName" validate:"required" mod:"default=terway-controller-lock"`
+	LeaseLockNamespace string `json:"leaseLockNamespace" validate:"required" mod:"default=kube-system"`
+	LeaseDuration      string `json:"leaseDuration"`
+	RenewDeadline      string `json:"renewDeadline"`
+	RetryPeriod        string `json:"retryPeriod"`
+
 	ControllerNamespace string `json:"controllerNamespace" validate:"required" mod:"default=kube-system"`
 	ControllerName      string `json:"controllerName" validate:"required" mod:"default=terway-controlplane"`
 

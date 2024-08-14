@@ -137,53 +137,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	ws := wh.NewServer(wh.Options{
-		Port:    cfg.WebhookPort,
-		CertDir: cfg.CertDir,
-	})
-	options := ctrl.Options{
-		Scheme:                     scheme,
-		HealthProbeBindAddress:     cfg.HealthzBindAddress,
-		WebhookServer:              ws,
-		LeaderElection:             cfg.LeaderElection,
-		LeaderElectionID:           cfg.ControllerName,
-		LeaderElectionNamespace:    cfg.ControllerNamespace,
-		LeaderElectionResourceLock: "leases",
-		MetricsBindAddress:         cfg.MetricsBindAddress,
-		Cache: cache.Options{
-			ByObject: map[client.Object]cache.ByObject{
-				&corev1.Node{}: {
-					Transform: func(i interface{}) (interface{}, error) {
-						if node, ok := i.(*corev1.Node); ok {
-							node.Status.Images = nil
-							node.Status.VolumesInUse = nil
-							node.Status.VolumesAttached = nil
-							return node, nil
-						}
-						return nil, fmt.Errorf("unexpected type %T", i)
-					},
-				},
-				&corev1.Pod{}: {
-					Transform: func(i interface{}) (interface{}, error) {
-						if pod, ok := i.(*corev1.Pod); ok {
-							pod.Spec.Volumes = nil
-							pod.Spec.EphemeralContainers = nil
-							pod.Spec.SecurityContext = nil
-							pod.Spec.ImagePullSecrets = nil
-							pod.Spec.Tolerations = nil
-							pod.Spec.ReadinessGates = nil
-							pod.Spec.PreemptionPolicy = nil
-							pod.Status.InitContainerStatuses = nil
-							pod.Status.ContainerStatuses = nil
-							pod.Status.EphemeralContainerStatuses = nil
-							return pod, nil
-						}
-						return nil, fmt.Errorf("unexpected type %T", i)
-					},
-				},
-			},
-		},
-	}
+	options := newOption(cfg)
 
 	if !cfg.DisableWebhook {
 		err = cert.SyncCert(ctx, directClient, cfg.ControllerNamespace, cfg.ControllerName, cfg.ClusterDomain, cfg.CertDir)
@@ -281,6 +235,78 @@ func main() {
 	}
 
 	wg.Wait()
+}
+
+func newOption(cfg *controlplane.Config) ctrl.Options {
+	ws := wh.NewServer(wh.Options{
+		Port:    cfg.WebhookPort,
+		CertDir: cfg.CertDir,
+	})
+	options := ctrl.Options{
+		Scheme:                     scheme,
+		HealthProbeBindAddress:     cfg.HealthzBindAddress,
+		WebhookServer:              ws,
+		LeaderElection:             cfg.LeaderElection,
+		LeaderElectionID:           cfg.ControllerName,
+		LeaderElectionNamespace:    cfg.ControllerNamespace,
+		LeaderElectionResourceLock: "leases",
+		MetricsBindAddress:         cfg.MetricsBindAddress,
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Node{}: {
+					Transform: func(i interface{}) (interface{}, error) {
+						if node, ok := i.(*corev1.Node); ok {
+							node.Status.Images = nil
+							node.Status.VolumesInUse = nil
+							node.Status.VolumesAttached = nil
+							return node, nil
+						}
+						return nil, fmt.Errorf("unexpected type %T", i)
+					},
+				},
+				&corev1.Pod{}: {
+					Transform: func(i interface{}) (interface{}, error) {
+						if pod, ok := i.(*corev1.Pod); ok {
+							pod.Spec.Volumes = nil
+							pod.Spec.EphemeralContainers = nil
+							pod.Spec.SecurityContext = nil
+							pod.Spec.ImagePullSecrets = nil
+							pod.Spec.Tolerations = nil
+							pod.Spec.ReadinessGates = nil
+							pod.Spec.PreemptionPolicy = nil
+							pod.Status.InitContainerStatuses = nil
+							pod.Status.ContainerStatuses = nil
+							pod.Status.EphemeralContainerStatuses = nil
+							return pod, nil
+						}
+						return nil, fmt.Errorf("unexpected type %T", i)
+					},
+				},
+			},
+		},
+	}
+
+	if cfg.LeaseDuration != "" {
+		d, err := time.ParseDuration(cfg.LeaseDuration)
+		if err == nil {
+			options.LeaseDuration = &d
+		}
+	}
+
+	if cfg.RenewDeadline != "" {
+		d, err := time.ParseDuration(cfg.RenewDeadline)
+		if err == nil {
+			options.RenewDeadline = &d
+		}
+	}
+
+	if cfg.RetryPeriod != "" {
+		d, err := time.ParseDuration(cfg.RetryPeriod)
+		if err == nil {
+			options.RetryPeriod = &d
+		}
+	}
+	return options
 }
 
 // initOpenTelemetry bootstraps the OpenTelemetry pipeline.
