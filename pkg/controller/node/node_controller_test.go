@@ -142,8 +142,14 @@ var _ = Describe("Node Controller", func() {
 						EnableTrunk:         true,
 						VSwitchSelectPolicy: "",
 					},
-					Pool:   nil,
-					Flavor: nil,
+					Pool: nil,
+					Flavor: []networkv1beta1.Flavor{
+						{
+							NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+							Count:                       2,
+						},
+					},
 				},
 			}
 
@@ -185,6 +191,7 @@ var _ = Describe("Node Controller", func() {
 			err = k8sClient.Get(ctx, typeNamespacedName, k8sNode)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sNode.Annotations["k8s.aliyun.com/trunk-on"]).To(Equal("eni-1"))
+			Expect(k8sNode.Annotations["k8s.aliyun.com/max-available-ip"]).To(Equal("20"))
 		})
 	})
 })
