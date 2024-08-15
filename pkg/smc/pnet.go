@@ -15,12 +15,17 @@ const (
 	smcPnet = "smc_pnet"
 )
 
-func supportSMCR() bool {
-	// smc module is load
-	_, err := os.Stat("/proc/sys/net/smc/tcp2smc")
+func ensureSMCR() bool {
+	_, err := exec.Command("modprobe", "smc").CombinedOutput()
 	if err != nil {
 		return false
 	}
+	// smc module is load
+	_, err = os.Stat("/proc/sys/net/smc/tcp2smc")
+	return err == nil
+}
+
+func supportSMCR() bool {
 	// rdma device attached
 	rdmaLink, err := netlink.RdmaLinkList()
 	if err != nil || len(rdmaLink) == 0 {
@@ -28,7 +33,10 @@ func supportSMCR() bool {
 	}
 	// smc-tools installed
 	_, err = exec.LookPath(smcPnet)
-	return err == nil
+	if err != nil {
+		return false
+	}
+	return ensureSMCR()
 }
 
 func pnetID(name string) string {
