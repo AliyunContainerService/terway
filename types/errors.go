@@ -15,6 +15,7 @@ const (
 
 	ErrOpenAPIErr     ErrCode = "OpenAPIErr"
 	ErrPodENINotReady ErrCode = "PodENINotReady"
+	ErrIPNotAllocated ErrCode = "IPNotAllocated"
 
 	ErrIPOutOfSyncErr ErrCode = "OutIPOfSync"
 )

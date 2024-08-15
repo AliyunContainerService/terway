@@ -128,7 +128,11 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 	defer func() {
 		metric.RPCLatency.WithLabelValues("AllocIP", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 
-		l.Info("alloc ip", "reply", fmt.Sprintf("%v", reply), "err", fmt.Sprintf("%v", err))
+		if err != nil {
+			l.Error(err, "alloc ip failed", "reply", fmt.Sprintf("%v", reply))
+		} else {
+			l.Info("alloc ip", "reply", fmt.Sprintf("%v", reply))
+		}
 	}()
 
 	// 0. Get pod Info

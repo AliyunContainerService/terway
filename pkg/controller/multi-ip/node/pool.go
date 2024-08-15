@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -20,6 +21,7 @@ import (
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
@@ -210,7 +212,6 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 
 	ctx = logf.IntoContext(ctx, l.WithValues("rv", node.ResourceVersion))
 
-	//ctx = MetaIntoCtx(ctx)
 	var nodeStatus *NodeStatus
 	prev, ok := n.cache.Load(node.Name)
 	if !ok {
@@ -265,9 +266,9 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{}, err
 	}
 
-	err = n.syncPods(ctx, podRequests, node)
-	if err != nil {
-		return reconcile.Result{}, err
+	syncErr := n.syncPods(ctx, podRequests, node)
+	if syncErr != nil {
+		l.Error(syncErr, "syncPods error")
 	}
 
 	afterStatus, err := runtime.DefaultUnstructuredConverter.ToUnstructured(node.Status.DeepCopy())
@@ -287,7 +288,7 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, err
 	}
 
-	return reconcile.Result{}, nil
+	return reconcile.Result{}, syncErr
 }
 
 // syncWithAPI will sync all eni from openAPI. Need to re-sync with local pods.
@@ -440,15 +441,14 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 
 	// 3. if there is no enough ip, try to allocate from api
 	err := n.addIP(ctx, unSucceedPods, node)
-	if err != nil {
-		return err
-	}
 
 	// 4. after all is assigned , we can re-allocate ip
 	ipv4Map, ipv6Map = buildIPMap(podsMapper, node.Status.NetworkInterfaces)
 	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map)
 
-	err = n.gc(ctx, node)
+	if err == nil {
+		err = n.gc(ctx, node)
+	}
 
 	return err
 }
@@ -484,9 +484,8 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 
 	unSucceedPods := map[string]*PodRequest{}
 
-	// only pending pods is handled
+	// handle exist pod ip
 	for podID, info := range pendingPods {
-		// choose eni first ...
 		if info.RequireIPv4 && info.ipv4Ref == nil {
 			if info.IPv4 != "" {
 				// for take over case , pod has ip already, we can only assign to previous eni
@@ -494,9 +493,29 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 				if ok && (eniIP.IP.PodID == "" || eniIP.IP.PodID == podID) {
 					info.ipv4Ref = eniIP
 					eniIP.IP.PodID = podID
-					log.Info("assign ip", "pod", podID, "ip", eniIP.IP, "eni", eniIP.NetworkInterface.ID)
+					log.Info("assign ip (from pod status)", "pod", podID, "ip", eniIP.IP, "eni", eniIP.NetworkInterface.ID)
 				}
-			} else {
+			}
+		}
+
+		if info.RequireIPv6 && info.ipv6Ref == nil {
+			if info.IPv6 != "" {
+				// for take over case , pod has ip already, we can only assign to previous eni
+				eniIP, ok := ipv6Map[info.IPv6]
+				if ok && (eniIP.IP.PodID == "" || eniIP.IP.PodID == podID) {
+					info.ipv6Ref = eniIP
+					eniIP.IP.PodID = podID
+					log.Info("assign ip (from pod status)", "pod", podID, "ip", eniIP.IP, "eni", eniIP.NetworkInterface.ID)
+				}
+			}
+		}
+	}
+
+	// only pending pods is handled
+	for podID, info := range pendingPods {
+		// choose eni first ...
+		if info.RequireIPv4 && info.ipv4Ref == nil {
+			if info.IPv4 == "" {
 				for _, v := range ipv4Map {
 					if v.NetworkInterface.Status != aliyunClient.ENIStatusInUse {
 						continue
@@ -529,15 +548,7 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 		}
 
 		if info.RequireIPv6 && info.ipv6Ref == nil {
-			if info.IPv6 != "" {
-				// for take over case , pod has ip already, we can only assign to previous eni
-				eniIP, ok := ipv6Map[info.IPv6]
-				if ok && (eniIP.IP.PodID == "" || eniIP.IP.PodID == podID) {
-					info.ipv6Ref = eniIP
-					eniIP.IP.PodID = podID
-					log.Info("assign ip", "pod", podID, "ip", eniIP.IP, "eni", eniIP.NetworkInterface.ID)
-				}
-			} else {
+			if info.IPv6 == "" {
 				for _, v := range ipv6Map {
 					if v.NetworkInterface.Status != aliyunClient.ENIStatusInUse {
 						continue
@@ -579,6 +590,10 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 			}
 		}
 	}
+
+	if len(unSucceedPods) > 0 {
+		log.Info("unSucceedPods pods", "pods", unSucceedPods)
+	}
 	return unSucceedPods
 }
 
@@ -606,7 +621,151 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 		return n.validateENI(ctx, option, []eniTypeKey{rdmaKey})
 	})
 
-	return n.allocateFromOptions(ctx, node, options)
+	err := n.allocateFromOptions(ctx, node, options)
+
+	// update node condition based on eni status
+	updateNodeCondition(ctx, n.client, node.Name, options)
+
+	updateCrCondition(options)
+
+	// the err is kept
+	return err
+}
+
+// updateCrCondition record openAPI error to cr
+func updateCrCondition(options []*eniOptions) {
+	lo.ForEach(options, func(item *eniOptions, index int) {
+		if item.eniRef == nil {
+			return
+		}
+		if len(item.errors) == 0 {
+			item.eniRef.Conditions = nil
+			return
+		}
+
+		if item.eniRef.Conditions == nil {
+			item.eniRef.Conditions = make(map[string]networkv1beta1.Condition)
+		}
+
+		var ipNotEnoughErr []error
+		var otherErr []error
+		for _, err := range item.errors {
+			if isIPNotEnough(err) {
+				ipNotEnoughErr = append(ipNotEnoughErr, err)
+			} else {
+				otherErr = append(otherErr, err)
+			}
+		}
+
+		if len(ipNotEnoughErr) > 0 {
+			prev, ok := item.eniRef.Conditions[ConditionInsufficientIP]
+			if !ok {
+				item.eniRef.Conditions[ConditionInsufficientIP] = networkv1beta1.Condition{
+					ObservedTime: metav1.Now(),
+					Message:      fmt.Sprintf("%s ip is not enough", item.eniRef.VSwitchID),
+				}
+			} else {
+				if prev.ObservedTime.Add(5 * time.Minute).Before(time.Now()) {
+					item.eniRef.Conditions[ConditionInsufficientIP] = networkv1beta1.Condition{
+						ObservedTime: metav1.Now(),
+						Message:      fmt.Sprintf("%s ip is not enough", item.eniRef.VSwitchID)}
+				}
+			}
+		}
+		if len(otherErr) > 0 {
+			str := utilerrors.NewAggregate(otherErr).Error()
+			item.eniRef.Conditions[ConditionOperationErr] = networkv1beta1.Condition{
+				ObservedTime: metav1.Now(),
+				Message:      str[:min(len(str), 256)],
+			}
+		}
+	})
+}
+
+func updateNodeCondition(ctx context.Context, c client.Client, nodeName string, options []*eniOptions) {
+	l := logf.FromContext(ctx)
+	k8sNode := &corev1.Node{}
+	err := c.Get(ctx, client.ObjectKey{Name: nodeName}, k8sNode)
+	if err != nil {
+		l.Error(err, "get node failed", "node", nodeName)
+		return
+	}
+
+	hasIPLeft := false
+	hasAllocatableEND := false
+
+	// here we don't check the pod type is met
+	lo.ForEach(options, func(item *eniOptions, index int) {
+		if hasIPLeft || hasAllocatableEND {
+			return
+		}
+
+		if item.eniRef != nil {
+			for _, v := range item.eniRef.IPv4 {
+				if v != nil {
+					if v.Status == networkv1beta1.IPStatusValid && v.PodID == "" {
+						hasIPLeft = true
+						break
+					}
+				}
+			}
+		}
+		// 1. eni is full
+		if item.isFull {
+			return
+		}
+
+		// 2. ip not enough
+		if lo.ContainsBy(item.errors, func(err error) bool {
+			return isIPNotEnough(err)
+		}) {
+			return
+		}
+
+		hasAllocatableEND = true
+	})
+
+	status := corev1.ConditionTrue
+	reason := types.IPResSufficientReason
+	message := "node has sufficient IP"
+	if !hasIPLeft && !hasAllocatableEND {
+		status = corev1.ConditionFalse
+		reason = types.IPResInsufficientReason
+		message = "node has insufficient IP"
+	}
+
+	transitionTime := metav1.Now()
+	for _, cond := range k8sNode.Status.Conditions {
+		if cond.Type == types.SufficientIPCondition && cond.Status == status &&
+			cond.Reason == reason && cond.Message == message {
+			if cond.LastHeartbeatTime.Add(5 * time.Minute).After(time.Now()) {
+				// refresh condition period 5min
+				return
+			}
+			transitionTime = cond.LastTransitionTime
+		}
+	}
+	now := metav1.Now()
+	ipResCondition := corev1.NodeCondition{
+		Type:               types.SufficientIPCondition,
+		Status:             status,
+		LastHeartbeatTime:  now,
+		LastTransitionTime: transitionTime,
+		Reason:             reason,
+		Message:            message,
+	}
+
+	raw, err := json.Marshal(&[]corev1.NodeCondition{ipResCondition})
+	if err != nil {
+		l.Error(err, "marshal failed")
+		return
+	}
+
+	patch := []byte(fmt.Sprintf(`{"status":{"conditions":%s}}`, raw))
+	err = c.Status().Patch(ctx, k8sNode, client.RawPatch(k8stypes.StrategicMergePatchType, patch))
+	if err != nil {
+		l.Error(err, "patch node failed", "node", nodeName, "patch", patch)
+	}
 }
 
 func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eniTypes []eniTypeKey) bool {
@@ -620,7 +779,9 @@ func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eni
 			logf.FromContext(ctx).Error(err, "failed to get vsw")
 			return false
 		}
+
 		if vsw.AvailableIPCount <= 0 {
+			option.errors = append(option.errors, vswitch.ErrNoAvailableVSwitch)
 			return false
 		}
 
@@ -659,8 +820,9 @@ func assignEniWithOptions(node *networkv1beta1.Node, toAdd int, options []*eniOp
 					if leftQuota > 0 {
 						option.addIPv4N = min(leftQuota, toAddIPv4, batchSize)
 						toAddIPv4 -= option.addIPv4N
+					} else {
+						option.isFull = true
 					}
-					// already full
 				}
 			}
 
@@ -673,6 +835,8 @@ func assignEniWithOptions(node *networkv1beta1.Node, toAdd int, options []*eniOp
 					if leftQuota > 0 {
 						option.addIPv6N = min(leftQuota, toAddIPv6, batchSize)
 						toAddIPv6 -= option.addIPv6N
+					} else {
+						option.isFull = true
 					}
 				}
 			}
@@ -727,6 +891,8 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 			}
 
 			if err != nil {
+				opt.errors = append(opt.errors, err)
+
 				if apiErr.ErrorCodeIs(err, apiErr.ErrEniPerInstanceLimitExceeded, apiErr.ErrIPv4CountExceeded, apiErr.ErrIPv6CountExceeded) {
 					MetaCtx(ctx).NeedSyncOpenAPI.Store(true)
 				}
@@ -1098,24 +1264,6 @@ func getAllocatable(in map[string]*networkv1beta1.IP) map[string]*networkv1beta1
 	})
 }
 
-func hasTrunkENI(node *networkv1beta1.Node) bool {
-	for _, eni := range node.Status.NetworkInterfaces {
-		if eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk {
-			return true
-		}
-	}
-	return false
-}
-
-func hasERDMAENI(node *networkv1beta1.Node) bool {
-	for _, eni := range node.Status.NetworkInterfaces {
-		if eni.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance {
-			return true
-		}
-	}
-	return false
-}
-
 // getEniOptions get the expected eni type and count based on flavor
 func getEniOptions(node *networkv1beta1.Node) []*eniOptions {
 	total := 0
@@ -1127,6 +1275,7 @@ func getEniOptions(node *networkv1beta1.Node) []*eniOptions {
 		}, item.Count
 	})
 
+	// cal exists eni
 	sorted := sortNetworkInterface(node)
 	lo.ForEach(sorted, func(item *networkv1beta1.NetworkInterface, index int) {
 		key := eniTypeKey{
@@ -1140,28 +1289,29 @@ func getEniOptions(node *networkv1beta1.Node) []*eniOptions {
 	})
 
 	result := make([]*eniOptions, 0, total)
+
+	newENILimit := max(total-len(sorted), 0)
 	// range all eni
 	// 1. if we require trunk/erdma, create it
-	if node.Spec.ENISpec.EnableTrunk &&
-		!hasTrunkENI(node) &&
-		flavor[trunkKey] > 0 &&
-		len(node.Status.NetworkInterfaces) < total {
-
-		result = append(result, &eniOptions{
-			eniTypeKey: trunkKey,
-			eniRef:     nil,
-		})
+	if node.Spec.ENISpec.EnableTrunk {
+		cnt := min(flavor[trunkKey], newENILimit)
+		for i := 0; i < cnt; i++ {
+			result = append(result, &eniOptions{
+				eniTypeKey: trunkKey,
+				eniRef:     nil,
+			})
+		}
+		newENILimit -= cnt
 	}
 
-	if node.Spec.ENISpec.EnableERDMA &&
-		!hasERDMAENI(node) &&
-		flavor[rdmaKey] > 0 &&
-		len(node.Status.NetworkInterfaces) < total {
-
-		result = append(result, &eniOptions{
-			eniTypeKey: rdmaKey,
-			eniRef:     nil,
-		})
+	if node.Spec.ENISpec.EnableERDMA {
+		cnt := min(flavor[rdmaKey], newENILimit)
+		for i := 0; i < cnt; i++ {
+			result = append(result, &eniOptions{
+				eniTypeKey: rdmaKey,
+				eniRef:     nil,
+			})
+		}
 	}
 
 	// 2. put current eni to result
@@ -1199,4 +1349,15 @@ func addIPToMap(in map[string]*networkv1beta1.IP, ip *networkv1beta1.IP) {
 	} else {
 		in[ip.IP] = ip
 	}
+}
+
+func isIPNotEnough(err error) bool {
+	if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough) {
+		return true
+	}
+	// can not find vsw
+	if errors.Is(err, vswitch.ErrNoAvailableVSwitch) {
+		return true
+	}
+	return false
 }

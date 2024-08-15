@@ -2,7 +2,11 @@ package node
 
 import (
 	"context"
+	"reflect"
+	"strconv"
 
+	"github.com/go-logr/logr"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -50,6 +54,13 @@ func init() {
 		return ctrl.NewControllerManagedBy(mgr).
 			WithOptions(controller.Options{
 				MaxConcurrentReconciles: controlplane.GetConfig().NodeMaxConcurrent,
+				LogConstructor: func(request *reconcile.Request) logr.Logger {
+					log := mgr.GetLogger()
+					if request != nil {
+						log = log.WithValues("name", request.Name)
+					}
+					return log
+				},
 			}).
 			For(&corev1.Node{}, builder.WithPredicates(&predicateForNodeEvent{})).
 			Watches(&networkv1beta1.Node{}, &handler.EnqueueRequestForObject{}).Complete(&ReconcileNode{
@@ -154,73 +165,6 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 		}
 	}
 
-	// report trunk if node has one
-	if node.Spec.ENISpec != nil &&
-		node.Spec.ENISpec.EnableTrunk {
-		// reconcile with local
-
-		preferID := k8sNode.Annotations[types.TrunkOn]
-		if preferID == "" {
-			found := false
-			for _, eni := range node.Status.NetworkInterfaces {
-				if eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk &&
-					preferID == eni.ID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				trunkID := ""
-				for _, eni := range node.Status.NetworkInterfaces {
-					if eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk {
-						trunkID = eni.ID
-						break
-					}
-				}
-				if trunkID != "" {
-					patch := client.MergeFrom(k8sNode.DeepCopy())
-					if k8sNode.Annotations == nil {
-						k8sNode.Annotations = make(map[string]string)
-					}
-					k8sNode.Annotations[types.TrunkOn] = trunkID
-
-					l := logf.FromContext(ctx)
-					l.Info("report node trunk id", "trunk", trunkID)
-					err = r.client.Patch(ctx, k8sNode, patch)
-					if err != nil {
-						return err
-					}
-				}
-			}
-		}
-
-		members := node.Spec.NodeCap.TotalAdapters - node.Spec.NodeCap.Adapters
-		num := resource.NewQuantity(int64(members), resource.DecimalSI)
-		resName := "aliyun/member-eni"
-
-		prev := k8sNode.Status.Allocatable[corev1.ResourceName(resName)]
-		if !prev.Equal(*num) {
-			patch := client.MergeFrom(k8sNode.DeepCopy())
-
-			if k8sNode.Status.Allocatable == nil {
-				k8sNode.Status.Allocatable = make(corev1.ResourceList)
-			}
-			if k8sNode.Status.Capacity == nil {
-				k8sNode.Status.Capacity = make(corev1.ResourceList)
-			}
-
-			k8sNode.Status.Allocatable[corev1.ResourceName(resName)] = *num
-			k8sNode.Status.Capacity[corev1.ResourceName(resName)] = *num
-
-			l := logf.FromContext(ctx)
-			l.Info("report node member cap", "cap", members, "num", *num)
-			err = r.client.Status().Patch(ctx, k8sNode, patch)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
 	update := node.DeepCopy()
 	_, err = controllerutil.CreateOrPatch(ctx, r.client, update, func() error {
 		update.Status = node.Status
@@ -228,7 +172,10 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 		update.Labels = node.Labels
 		return nil
 	})
-
+	if err != nil {
+		return err
+	}
+	err = r.k8sAnno(ctx, k8sNode, node)
 	return err
 }
 
@@ -245,4 +192,91 @@ func (r *ReconcileNode) notify(ctx context.Context, name string) bool {
 		return false
 	}
 	return true
+}
+
+func (r *ReconcileNode) k8sAnno(ctx context.Context, k8sNode *corev1.Node, node *networkv1beta1.Node) error {
+	if node.Spec.ENISpec == nil {
+		return nil
+	}
+	if k8sNode.Annotations == nil {
+		k8sNode.Annotations = make(map[string]string)
+	}
+	l := logf.FromContext(ctx)
+	base := k8sNode.DeepCopy()
+
+	// nb(l1b0k): those anno should be deprecated after we move to controlpalne
+	secondaryIP := 0
+	lo.ForEach(node.Spec.Flavor, func(item networkv1beta1.Flavor, index int) {
+		if item.NetworkInterfaceType == networkv1beta1.ENITypeSecondary &&
+			item.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeStandard {
+			secondaryIP = item.Count * node.Spec.NodeCap.IPv4PerAdapter
+		}
+	})
+	if secondaryIP > 0 {
+		k8sNode.Annotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(secondaryIP)
+	} else {
+		delete(k8sNode.Annotations, string(types.NormalIPTypeIPs))
+	}
+
+	// report trunk if node has one
+	if node.Spec.ENISpec.EnableTrunk {
+		// reconcile with local
+		members := node.Spec.NodeCap.TotalAdapters - node.Spec.NodeCap.Adapters
+
+		preferID := k8sNode.Annotations[types.TrunkOn]
+		if preferID == "" {
+			_, found := lo.FindKeyBy(node.Status.NetworkInterfaces, func(key string, eni *networkv1beta1.NetworkInterface) bool {
+				return eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk &&
+					preferID == eni.ID
+			})
+
+			if !found {
+				trunkID, _ := lo.FindKeyBy(node.Status.NetworkInterfaces, func(key string, eni *networkv1beta1.NetworkInterface) bool {
+					return eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk
+				})
+
+				if trunkID != "" {
+					k8sNode.Annotations[types.TrunkOn] = trunkID
+				}
+			}
+		}
+
+		// report rse only trunk eni is ready
+		num := resource.NewQuantity(int64(members), resource.DecimalSI)
+		resName := "aliyun/member-eni"
+
+		prev := k8sNode.Status.Allocatable[corev1.ResourceName(resName)]
+		if !prev.Equal(*num) {
+			patch := client.MergeFrom(base)
+
+			if k8sNode.Status.Allocatable == nil {
+				k8sNode.Status.Allocatable = make(corev1.ResourceList)
+			}
+			if k8sNode.Status.Capacity == nil {
+				k8sNode.Status.Capacity = make(corev1.ResourceList)
+			}
+
+			k8sNode.Status.Allocatable[corev1.ResourceName(resName)] = *num
+			k8sNode.Status.Capacity[corev1.ResourceName(resName)] = *num
+
+			l.Info("report node member cap", "cap", members, "num", *num)
+			err := r.client.Status().Patch(ctx, k8sNode, patch)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// update node annotation
+	if !reflect.DeepEqual(k8sNode.Annotations, base.Annotations) {
+		patch := client.MergeFrom(base)
+
+		l.Info("new node annotations", "annotations", k8sNode.Annotations)
+		err := r.client.Patch(ctx, k8sNode, patch)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

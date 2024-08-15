@@ -60,9 +60,9 @@ var backoffMap = map[string]wait.Backoff{
 	},
 	WaitPodENIStatus: {
 		Duration: time.Second * 5,
-		Factor:   2,
+		Factor:   1,
 		Jitter:   0.3,
-		Steps:    3,
+		Steps:    20,
 	},
 	MetaAssignPrivateIP: {
 		Duration: time.Millisecond * 1100,

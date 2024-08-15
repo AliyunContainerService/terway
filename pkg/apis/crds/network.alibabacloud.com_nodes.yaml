@@ -154,9 +154,17 @@ spec:
               networkInterfaces:
                 additionalProperties:
                   properties:
-                    ID:
-                      type: string
-                    VSwitchID:
+                    conditions:
+                      additionalProperties:
+                        properties:
+                          message:
+                            type: string
+                          observedTime:
+                            format: date-time
+                            type: string
+                        type: object
+                      type: object
+                    id:
                       type: string
                     ipv4:
                       additionalProperties:
@@ -234,9 +242,10 @@ spec:
                       type: array
                     status:
                       type: string
+                    vSwitchID:
+                      type: string
                   required:
-                  - ID
-                  - VSwitchID
+                  - id
                   - ipv4CIDR
                   - ipv6CIDR
                   - macAddress
@@ -245,6 +254,7 @@ spec:
                   - primaryIPAddress
                   - securityGroupIDs
                   - status
+                  - vSwitchID
                   type: object
                 type: object
               nextSyncOpenAPITime:

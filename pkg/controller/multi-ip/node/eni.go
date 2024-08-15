@@ -11,6 +11,13 @@ import (
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
 
+type Condition string
+
+const (
+	ConditionInsufficientIP = "InsufficientIP"
+	ConditionOperationErr   = "OperationErr"
+)
+
 type eniTypeKey struct {
 	networkv1beta1.ENIType
 	networkv1beta1.NetworkInterfaceTrafficMode
@@ -39,6 +46,9 @@ type eniOptions struct {
 
 	addIPv4N int
 	addIPv6N int
+
+	isFull bool
+	errors []error
 }
 
 var EniOptions = map[eniTypeKey]*aliyunClient.CreateNetworkInterfaceOptions{
@@ -104,7 +114,7 @@ func releaseUnUsedIP(log logr.Logger, eni *networkv1beta1.NetworkInterface, toDe
 			releasedV6++
 		}
 	}
-	log.Info("release ip", "releasedV4", releasedV4, "releasedV6", releasedV6)
+	log.Info("released ip", "v4", releasedV4, "v6", releasedV6)
 
 	return max(releasedV4, releasedV6)
 }
