@@ -18,6 +18,7 @@ package node
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -30,35 +31,30 @@ type predicateForNodeEvent struct {
 
 // Create returns true if the Create event should be processed
 func (p *predicateForNodeEvent) Create(e event.CreateEvent) bool {
-	node, ok := e.Object.(*corev1.Node)
-	if !ok {
-		return false
-	}
-	return isECSNode(node)
+	return predicateNode(e.Object)
 }
 
 // Delete returns true if the Delete event should be processed
 func (p *predicateForNodeEvent) Delete(e event.DeleteEvent) bool {
-	node, ok := e.Object.(*corev1.Node)
-	if !ok {
-		return false
-	}
-	return isECSNode(node)
+	return predicateNode(e.Object)
 }
 
 // Update returns true if the Update event should be processed
 func (p *predicateForNodeEvent) Update(e event.UpdateEvent) bool {
-	node, ok := e.ObjectNew.(*corev1.Node)
-	if !ok {
-		return false
-	}
-	return isECSNode(node)
+	return predicateNode(e.ObjectNew)
 }
 
 // Generic returns true if the Generic event should be processed
 func (p *predicateForNodeEvent) Generic(e event.GenericEvent) bool {
-	node, ok := e.Object.(*corev1.Node)
+	return predicateNode(e.Object)
+}
+
+func predicateNode(o client.Object) bool {
+	node, ok := o.(*corev1.Node)
 	if !ok {
+		return false
+	}
+	if node.Labels[corev1.LabelTopologyRegion] == "" {
 		return false
 	}
 	return isECSNode(node)
