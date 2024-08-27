@@ -43,9 +43,10 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 	switch name {
 	case CRDPodENI:
 		crdBytes = crdsPodENI
-		version = "v0.1.0"
+		version = "v0.2.0"
 	case CRDPodNetworking:
 		crdBytes = crdsPodNetworking
+		version = "v0.1.0"
 	case CRDNode:
 		crdBytes = crdsNode
 		version = "v0.1.0"
@@ -61,9 +62,8 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 	if ciliumCRD.Annotations == nil {
 		ciliumCRD.Annotations = make(map[string]string)
 	}
-	if version != "" {
-		ciliumCRD.Annotations[crdVersionKey] = version
-	}
+	ciliumCRD.Annotations[crdVersionKey] = version
+
 	return ciliumCRD
 }
 

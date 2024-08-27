@@ -89,12 +89,17 @@ type Route struct {
 
 // ENI eni info
 type ENI struct {
-	ID               string   `json:"id,omitempty"`
-	MAC              string   `json:"mac,omitempty"`
-	Zone             string   `json:"zone,omitempty"`
-	VSwitchID        string   `json:"vSwitchID,omitempty"`
-	ResourceGroupID  string   `json:"resourceGroupID,omitempty"`
-	SecurityGroupIDs []string `json:"securityGroupIDs,omitempty"`
+	ID                string            `json:"id,omitempty"`
+	MAC               string            `json:"mac,omitempty"`
+	Zone              string            `json:"zone,omitempty"`
+	VSwitchID         string            `json:"vSwitchID,omitempty"`
+	ResourceGroupID   string            `json:"resourceGroupID,omitempty"`
+	SecurityGroupIDs  []string          `json:"securityGroupIDs,omitempty"`
+	AttachmentOptions AttachmentOptions `json:"attachmentOptions,omitempty"`
+}
+
+type AttachmentOptions struct {
+	Trunk *bool `json:"trunk,omitempty"`
 }
 
 // AllocationType ip type and release strategy
@@ -230,12 +235,16 @@ type PodNetworkingList struct {
 
 // PodNetworkingSpec defines the desired state of PodNetworking
 type PodNetworkingSpec struct {
+	// +kubebuilder:default={ "eniType": "Default" }
+	ENIOptions     ENIOptions     `json:"eniOptions"`
 	AllocationType AllocationType `json:"allocationType,omitempty"`
 
 	Selector Selector `json:"selector,omitempty"`
 
 	SecurityGroupIDs []string `json:"securityGroupIDs,omitempty"`
 	VSwitchOptions   []string `json:"vSwitchOptions,omitempty"`
+	// +kubebuilder:default={ "vSwitchSelectionPolicy": "ordered" }
+	VSwitchSelectOptions VSwitchSelectOptions `json:"vSwitchSelectOptions,omitempty"`
 }
 
 // PodNetworkingStatus defines the observed state of PodNetworking
@@ -269,4 +278,27 @@ const (
 type Selector struct {
 	PodSelector       *metav1.LabelSelector `json:"podSelector,omitempty"`
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
+}
+
+type ENIOptions struct {
+	// +kubebuilder:default:=Default
+	ENIAttachType ENIAttachType `json:"eniType"`
+}
+
+// ENIAttachType
+// +kubebuilder:validation:Enum=Trunk;ENI;Default
+type ENIAttachType string
+
+const (
+	// ENIOptionTypeDefault follow the cluster config
+	ENIOptionTypeDefault ENIAttachType = "Default"
+	// ENIOptionTypeENI use secondary eni
+	ENIOptionTypeENI ENIAttachType = "ENI"
+	// ENIOptionTypeTrunk use trunk eni
+	ENIOptionTypeTrunk ENIAttachType = "Trunk"
+)
+
+type VSwitchSelectOptions struct {
+	// +kubebuilder:default:=ordered
+	VSwitchSelectionPolicy SelectionPolicy `json:"vSwitchSelectionPolicy,omitempty"`
 }
