@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strconv"
 
@@ -24,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/AliyunContainerService/terway/deviceplugin"
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
@@ -93,7 +95,7 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		}
 		return reconcile.Result{}, err
 	}
-	if !isECSNode(k8sNode) {
+	if !predicateNode(k8sNode) {
 		return reconcile.Result{}, nil
 	}
 	if !k8sNode.DeletionTimestamp.IsZero() {
@@ -137,6 +139,15 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 	}
 	node.Labels["name"] = k8sNode.Name
 
+	prev := node.Labels[types.ExclusiveENIModeLabel]
+	if prev == "" {
+		node.Labels[types.ExclusiveENIModeLabel] = string(types.NodeExclusiveENIMode(k8sNode.Labels))
+	} else if prev != string(types.NodeExclusiveENIMode(k8sNode.Labels)) {
+		err = fmt.Errorf("node exclusive mode changed to %s, this is not allowd", types.NodeExclusiveENIMode(k8sNode.Labels))
+		r.record.Event(k8sNode, "Warning", "ConfigError", err.Error())
+		return err
+	}
+
 	if node.Spec.NodeMetadata.InstanceType != nodeInfo.InstanceType ||
 		node.Spec.NodeMetadata.InstanceID != nodeInfo.InstanceID {
 
@@ -175,7 +186,13 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 	if err != nil {
 		return err
 	}
+
 	err = r.k8sAnno(ctx, k8sNode, node)
+	if err != nil {
+		return err
+	}
+
+	err = r.patchNodeRes(ctx, k8sNode, node)
 	return err
 }
 
@@ -201,38 +218,44 @@ func (r *ReconcileNode) k8sAnno(ctx context.Context, k8sNode *corev1.Node, node 
 	if k8sNode.Annotations == nil {
 		k8sNode.Annotations = make(map[string]string)
 	}
+
 	l := logf.FromContext(ctx)
 	base := k8sNode.DeepCopy()
 
-	// nb(l1b0k): those anno should be deprecated after we move to controlpalne
 	secondaryIP := 0
-	lo.ForEach(node.Spec.Flavor, func(item networkv1beta1.Flavor, index int) {
-		if item.NetworkInterfaceType == networkv1beta1.ENITypeSecondary &&
-			item.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeStandard {
-			secondaryIP = item.Count * node.Spec.NodeCap.IPv4PerAdapter
-		}
-	})
-	if secondaryIP > 0 {
-		k8sNode.Annotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(secondaryIP)
-	} else {
-		delete(k8sNode.Annotations, string(types.NormalIPTypeIPs))
-	}
 
-	// report trunk if node has one
-	if node.Spec.ENISpec.EnableTrunk {
-		// reconcile with local
-		members := node.Spec.NodeCap.TotalAdapters - node.Spec.NodeCap.Adapters
+	switch types.NodeExclusiveENIMode(node.Labels) {
+	case types.ExclusiveENIOnly:
+		lo.ForEach(node.Spec.Flavor, func(item networkv1beta1.Flavor, index int) {
+			if item.NetworkInterfaceType == networkv1beta1.ENITypeSecondary &&
+				item.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeStandard {
+				secondaryIP = item.Count
+			}
+		})
+	default:
+		lo.ForEach(node.Spec.Flavor, func(item networkv1beta1.Flavor, index int) {
+			if item.NetworkInterfaceType == networkv1beta1.ENITypeSecondary &&
+				item.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeStandard {
+				secondaryIP = item.Count * node.Spec.NodeCap.IPv4PerAdapter
+			}
+		})
 
-		preferID := k8sNode.Annotations[types.TrunkOn]
-		if preferID == "" {
+		// handle trunk
+		if node.Spec.ENISpec.EnableTrunk {
+			preferID := k8sNode.Annotations[types.TrunkOn]
+
+			// verify eni is present
 			_, found := lo.FindKeyBy(node.Status.NetworkInterfaces, func(key string, eni *networkv1beta1.NetworkInterface) bool {
 				return eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk &&
 					preferID == eni.ID
 			})
 
 			if !found {
+				// either new node or trunk eni is missing
+
+				// add one
 				trunkID, _ := lo.FindKeyBy(node.Status.NetworkInterfaces, func(key string, eni *networkv1beta1.NetworkInterface) bool {
-					return eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk
+					return eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk && eni.Status == aliyunClient.ENIStatusInUse
 				})
 
 				if trunkID != "" {
@@ -240,31 +263,11 @@ func (r *ReconcileNode) k8sAnno(ctx context.Context, k8sNode *corev1.Node, node 
 				}
 			}
 		}
-
-		// report rse only trunk eni is ready
-		num := resource.NewQuantity(int64(members), resource.DecimalSI)
-		resName := "aliyun/member-eni"
-
-		prev := k8sNode.Status.Allocatable[corev1.ResourceName(resName)]
-		if !prev.Equal(*num) {
-			patch := client.MergeFrom(base)
-
-			if k8sNode.Status.Allocatable == nil {
-				k8sNode.Status.Allocatable = make(corev1.ResourceList)
-			}
-			if k8sNode.Status.Capacity == nil {
-				k8sNode.Status.Capacity = make(corev1.ResourceList)
-			}
-
-			k8sNode.Status.Allocatable[corev1.ResourceName(resName)] = *num
-			k8sNode.Status.Capacity[corev1.ResourceName(resName)] = *num
-
-			l.Info("report node member cap", "cap", members, "num", *num)
-			err := r.client.Status().Patch(ctx, k8sNode, patch)
-			if err != nil {
-				return err
-			}
-		}
+	}
+	if secondaryIP > 0 {
+		k8sNode.Annotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(secondaryIP)
+	} else {
+		delete(k8sNode.Annotations, string(types.NormalIPTypeIPs))
 	}
 
 	// update node annotation
@@ -273,6 +276,73 @@ func (r *ReconcileNode) k8sAnno(ctx context.Context, k8sNode *corev1.Node, node 
 
 		l.Info("new node annotations", "annotations", k8sNode.Annotations)
 		err := r.client.Patch(ctx, k8sNode, patch)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *ReconcileNode) patchNodeRes(ctx context.Context, k8sNode *corev1.Node, node *networkv1beta1.Node) error {
+	if node.Spec.ENISpec == nil {
+		return nil
+	}
+	l := logf.FromContext(ctx)
+	base := k8sNode.DeepCopy()
+
+	var num *resource.Quantity
+	resName := ""
+
+	switch types.NodeExclusiveENIMode(node.Labels) {
+	case types.ExclusiveENIOnly:
+		secondary := 0
+		lo.ForEach(node.Spec.Flavor, func(item networkv1beta1.Flavor, index int) {
+			if item.NetworkInterfaceType == networkv1beta1.ENITypeSecondary &&
+				item.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeStandard {
+				secondary = item.Count
+			}
+		})
+		num = resource.NewQuantity(int64(secondary), resource.DecimalSI)
+		resName = deviceplugin.ENIResName
+	default:
+		// report trunk if node has one
+		if node.Spec.ENISpec.EnableTrunk {
+			// report only when trunk is ready
+			_, found := lo.FindKeyBy(node.Status.NetworkInterfaces, func(key string, eni *networkv1beta1.NetworkInterface) bool {
+				return eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk && eni.Status == aliyunClient.ENIStatusInUse
+			})
+
+			if found {
+				members := node.Spec.NodeCap.TotalAdapters - node.Spec.NodeCap.Adapters
+
+				// report rse only trunk eni is ready
+				num = resource.NewQuantity(int64(members), resource.DecimalSI)
+				resName = deviceplugin.MemberENIResName
+			}
+		}
+	}
+
+	if num == nil {
+		return nil
+	}
+
+	prev := k8sNode.Status.Allocatable[corev1.ResourceName(resName)]
+	if !prev.Equal(*num) {
+		patch := client.MergeFrom(base)
+
+		if k8sNode.Status.Allocatable == nil {
+			k8sNode.Status.Allocatable = make(corev1.ResourceList)
+		}
+		if k8sNode.Status.Capacity == nil {
+			k8sNode.Status.Capacity = make(corev1.ResourceList)
+		}
+
+		k8sNode.Status.Allocatable[corev1.ResourceName(resName)] = *num
+		k8sNode.Status.Capacity[corev1.ResourceName(resName)] = *num
+
+		l.Info("report node cap", resName, *num, "prev", prev.String(), "rv", k8sNode.ResourceVersion)
+		err := r.client.Status().Patch(ctx, k8sNode, patch)
 		if err != nil {
 			return err
 		}

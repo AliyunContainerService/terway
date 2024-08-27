@@ -19,10 +19,11 @@ package podeni
 import (
 	"reflect"
 
-	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
 
 type predicateForPodENIEvent struct {

@@ -36,9 +36,21 @@ func (m *ReconcilePod) ParsePodNetworksFromAnnotation(ctx context.Context, zoneI
 			ExtraConfig: map[string]string{},
 		}
 
-		sw, err := m.swPool.GetOne(ctx, m.aliyun, zoneID, c.VSwitchOptions, &vswitch.SelectOptions{
-			IgnoreZone: false,
-		})
+		vSwitchSelectPolicy := vswitch.VSwitchSelectionPolicyOrdered
+
+		switch c.VSwitchSelectOptions.VSwitchSelectionPolicy {
+		case v1beta1.VSwitchSelectionPolicyRandom:
+			vSwitchSelectPolicy = vswitch.VSwitchSelectionPolicyRandom
+		case v1beta1.VSwitchSelectionPolicyMost:
+			vSwitchSelectPolicy = vswitch.VSwitchSelectionPolicyMost
+		}
+
+		sw, err := m.swPool.GetOne(ctx, m.aliyun, zoneID, c.VSwitchOptions,
+			&vswitch.SelectOptions{
+				IgnoreZone:          false,
+				VSwitchSelectPolicy: vSwitchSelectPolicy,
+			},
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -50,6 +62,16 @@ func (m *ReconcilePod) ParsePodNetworksFromAnnotation(ctx context.Context, zoneI
 			routes = append(routes, v1beta1.Route{Dst: r.Dst})
 		}
 		alloc.ExtraRoutes = routes
+
+		// for default , leave it blank
+		trunk := false
+		switch c.ENIOptions.ENIAttachType {
+		case v1beta1.ENIOptionTypeENI:
+			alloc.ENI.AttachmentOptions.Trunk = &trunk
+		case v1beta1.ENIOptionTypeTrunk:
+			trunk = true
+			alloc.ENI.AttachmentOptions.Trunk = &trunk
+		}
 
 		allocs = append(allocs, alloc)
 	}

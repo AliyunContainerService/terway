@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/samber/lo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
@@ -89,6 +90,8 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		return webhook.Allowed("pod is not managed by terway")
 	}
 
+	config := controlplane.GetConfig()
+
 	if pod.Annotations == nil {
 		pod.Annotations = map[string]string{}
 	}
@@ -125,7 +128,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 			return webhook.Errored(1, err)
 		}
 		if podNetworking == nil {
-			if controlplane.GetConfig().IPAMType != types.IPAMTypeCRD {
+			if config.IPAMType != types.IPAMTypeCRD {
 				if !types.PodUseENI(pod) {
 					l.V(5).Info("no selector is matched or CRD is not ready")
 					return webhook.Allowed("not match")
@@ -138,9 +141,11 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 			// use config from pn
 			pod.Annotations[types.PodNetworking] = podNetworking.Name
 			networks.PodNetworks = append(networks.PodNetworks, controlplane.PodNetworks{
-				Interface:        eth0,
-				VSwitchOptions:   podNetworking.Spec.VSwitchOptions,
-				SecurityGroupIDs: podNetworking.Spec.SecurityGroupIDs,
+				Interface:            eth0,
+				VSwitchOptions:       podNetworking.Spec.VSwitchOptions,
+				SecurityGroupIDs:     podNetworking.Spec.SecurityGroupIDs,
+				ENIOptions:           podNetworking.Spec.ENIOptions,
+				VSwitchSelectOptions: podNetworking.Spec.VSwitchSelectOptions,
 			})
 
 			for _, vsw := range podNetworking.Status.VSwitches {
@@ -153,7 +158,6 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 				return webhook.Errored(1, err)
 			}
 			pod.Annotations[types.PodAllocType] = string(allocBytes)
-
 		}
 	}
 
@@ -182,7 +186,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		iF.Insert(n.Interface)
 
 		// only set prev zone for fixed ip
-		if alloc.Type == v1beta1.IPAllocTypeFixed && needPreviousZoneForAnnotation(previousZone, n) {
+		if alloc.Type == v1beta1.IPAllocTypeFixed && previousZone != "" {
 			prevZone.Insert(previousZone)
 		}
 	}
@@ -216,11 +220,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 	pod.Annotations[types.PodNetworks] = string(pnaBytes)
 	pod.Annotations[types.PodENI] = "true"
 
-	resName := deviceplugin.MemberENIResName
-	if !*controlplane.GetConfig().EnableTrunk {
-		resName = deviceplugin.ENIResName
-	}
-	setResourceRequest(pod, resName, len(networks.PodNetworks))
+	setResourceRequest(pod, networks.PodNetworks, *config.EnableTrunk)
 
 	setNodeAffinityByZones(pod, prevZone.List(), vSwitchZone.List())
 
@@ -234,7 +234,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		l.Error(err, "error create patch")
 		return webhook.Errored(1, err)
 	}
-	l.Info("patch pod for trunking")
+	l.Info("patch pod for trunking", "patch", patches)
 	return webhook.Patched("ok", patches...)
 }
 
@@ -362,14 +362,25 @@ func getPreviousZone(ctx context.Context, client client.Client, pod *corev1.Pod)
 	return podENI.Spec.Zone, nil
 }
 
-func setResourceRequest(pod *corev1.Pod, resName string, count int) {
+func setResourceRequest(pod *corev1.Pod, podNetworks []controlplane.PodNetworks, enableTrunk bool) {
+	count := len(podNetworks)
 	if count == 0 {
 		return
 	}
 	// we only patch one container for res request
-	index := selectContainer(pod)
-	if index < 0 {
-		return
+	index := 0
+
+	resName := deviceplugin.MemberENIResName
+	if enableTrunk {
+		// when user specific stander eni
+		lo.ForEach(podNetworks, func(item controlplane.PodNetworks, index int) {
+			if item.ENIOptions.ENIAttachType == v1beta1.ENIOptionTypeENI {
+				resName = deviceplugin.ENIResName
+			}
+		})
+	} else {
+		// for legacy eniOnly case
+		resName = deviceplugin.ENIResName
 	}
 
 	if pod.Spec.Containers[index].Resources.Requests == nil {

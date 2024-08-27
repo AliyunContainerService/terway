@@ -19,6 +19,7 @@ package types
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -58,9 +59,15 @@ const (
 	ENIRelatedNodeName = AnnotationPrefix + "node"
 
 	PodIPs = AnnotationPrefix + "pod-ips"
+)
 
+// labels
+
+const (
 	// IgnoreByTerway if the label exist , terway will not handle this kind of res
 	IgnoreByTerway = LabelPrefix + "ignore-by-terway"
+
+	ExclusiveENIModeLabel = LabelPrefix + "exclusive-mode-eni-type"
 )
 
 // FinalizerPodENI finalizer for podENI resource
@@ -136,4 +143,20 @@ type IPInsufficientError struct {
 
 func (e *IPInsufficientError) Error() string {
 	return fmt.Sprintf("ip insufficient error: %v with reason: %s", e.Err, e.Reason)
+}
+
+type ExclusiveENI string
+
+const (
+	ExclusiveDefault = ExclusiveENI("default")
+	ExclusiveENIOnly = ExclusiveENI("eniOnly")
+)
+
+func NodeExclusiveENIMode(labels map[string]string) ExclusiveENI {
+	switch strings.ToLower(labels[ExclusiveENIModeLabel]) {
+	case strings.ToLower(string(ExclusiveENIOnly)):
+		return ExclusiveENIOnly
+	default:
+		return ExclusiveDefault
+	}
 }

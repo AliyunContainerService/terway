@@ -107,7 +107,8 @@ type ReconcilePodENI struct {
 	record record.EventRecorder
 
 	trunkMode bool // use trunk mode or secondary eni mode
-	crdMode   bool
+	// deprecated remove after we deprecated eniOnly
+	crdMode bool
 }
 
 type Wrapper struct {
@@ -279,9 +280,26 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 			return reconcile.Result{}, fmt.Errorf("error parse node info %s, %w", pod.Spec.NodeName, err)
 		}
 
-		if m.trunkMode && nodeInfo.TrunkENIID == "" {
+		trunkMode := m.trunkMode
+		if trunkMode {
+			// the switch only happen at trunk on
+			if types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
+				// trunk pods, always has resource request
+				trunkMode = false
+			} else {
+				// reject if a eniOnly pod is trying to use trunk eni
+				for _, alloc := range podENI.Spec.Allocations {
+					if alloc.ENI.AttachmentOptions.Trunk != nil && !*alloc.ENI.AttachmentOptions.Trunk {
+						m.record.Eventf(pod, corev1.EventTypeWarning, types.EventAttachENIFailed, "trunk eni is not allowed for eniOnly pod, you must nodeAffinity to a node with trunk eni")
+						return reconcile.Result{}, fmt.Errorf("trunk eni is not allowed for eniOnly pod")
+					}
+				}
+			}
+		}
+
+		if trunkMode && nodeInfo.TrunkENIID == "" {
 			return reconcile.Result{}, fmt.Errorf("trunk eni id not found, this may due to terway agent is not started")
-		} else if !m.trunkMode && nodeInfo.TrunkENIID != "" {
+		} else if !trunkMode && nodeInfo.TrunkENIID != "" {
 			nodeInfo.TrunkENIID = ""
 		}
 
@@ -324,7 +342,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 
 		// if attach succeed and update status failed , we can not store instance id
 		// so in later detach , we are unable to detach the eni
-		_, err = common.UpdatePodENIStatus(ctx, m.client, podENICopy)
+		err = m.client.Status().Update(ctx, podENICopy)
 		if err != nil {
 			ll.Error(err, "update podENI")
 			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventUpdatePodENIFailed, "%s", err.Error())
@@ -522,7 +540,7 @@ func (m *ReconcilePodENI) gcCRPodENIs(ctx context.Context) {
 
 			// pod exist just update timestamp
 			if err == nil {
-				if podRequirePodENI(p, m.crdMode) {
+				if m.podRequirePodENI(ctx, p) {
 					// for non fixed-ip pod no need to update timeStamp
 					if !podENI.Spec.HaveFixedIP() {
 						return
@@ -591,7 +609,7 @@ func (m *ReconcilePodENI) gcCRPodENIs(ctx context.Context) {
 
 			update := podENI.DeepCopy()
 			update.Status.Phase = v1beta1.ENIPhaseDeleting
-			_, err = common.UpdatePodENIStatus(ctx, m.client, update)
+			err = m.client.Status().Update(ctx, update)
 			if err != nil {
 				ll.Error(err, "error prune eni, %s")
 			}
@@ -616,7 +634,8 @@ func (m *ReconcilePodENI) detach(ctx context.Context, podENI *v1beta1.PodENI) (r
 			podENICopy.Status.ENIInfos[k] = *cp
 		}
 	}
-	_, err = common.UpdatePodENIStatus(ctx, m.client, podENICopy)
+	err = m.client.Status().Update(ctx, podENICopy)
+
 	return reconcile.Result{}, err
 }
 
@@ -787,18 +806,52 @@ func allocIDs(podENI *v1beta1.PodENI) []string {
 	return ids
 }
 
-func podRequirePodENI(pod *corev1.Pod, ignore bool) bool {
+// podRequirePodENI used in gc process.
+func (m *ReconcilePodENI) podRequirePodENI(ctx context.Context, pod *corev1.Pod) bool {
 	if utils.PodSandboxExited(pod) {
 		return false
 	}
 
-	if ignore {
-		return true
-	}
-
-	if !types.PodUseENI(pod) {
+	if pod.Spec.HostNetwork {
 		return false
 	}
 
-	return true
+	if types.IgnoredByTerway(pod.Labels) {
+		return false
+	}
+
+	if m.crdMode {
+		// every pod need podeni
+		return true
+	}
+
+	if types.PodUseENI(pod) {
+		// already specific
+		return true
+	}
+
+	// pod is not scheduled, should keep it
+	if pod.Spec.NodeName == "" {
+		return true
+	}
+
+	// check the node type
+
+	node := &corev1.Node{}
+	err := m.client.Get(ctx, k8stypes.NamespacedName{Name: pod.Spec.NodeName}, node)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to get node", "node", pod.Spec.NodeName)
+		return true
+	}
+
+	if types.IgnoredByTerway(node.Labels) ||
+		utils.ISVKNode(node) {
+		return false
+	}
+
+	if types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
+		return true
+	}
+
+	return false
 }

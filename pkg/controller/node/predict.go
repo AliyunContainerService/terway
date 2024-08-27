@@ -54,9 +54,11 @@ func predicateNode(o client.Object) bool {
 	if !ok {
 		return false
 	}
+
 	if node.Labels[corev1.LabelTopologyRegion] == "" {
 		return false
 	}
+
 	return isECSNode(node)
 }
 

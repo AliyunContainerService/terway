@@ -19,6 +19,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
+	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
@@ -127,6 +128,10 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		if node.Spec.NodeCap.TotalAdapters-node.Spec.NodeCap.Adapters <= 0 {
 			node.Spec.ENISpec.EnableTrunk = false
 			l.Info("instance is not support trunk")
+		}
+		if node.Spec.ENISpec.EnableTrunk && types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
+			node.Spec.ENISpec.EnableTrunk = false
+			l.Info("instance is at exclusive eni mode, trunk is disabled")
 		}
 	}
 
