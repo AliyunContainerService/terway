@@ -7,7 +7,7 @@ replicaCount: 1
 image:
   repository: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway
   pullPolicy: IfNotPresent
-  tag: "v1.6.0"
+  tag: "v1.9.6"
 
 nameOverride: ""
 fullnameOverride: ""
