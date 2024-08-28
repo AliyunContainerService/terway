@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -105,10 +106,25 @@ func (r *CRDV2) Priority() int {
 }
 
 func (r *CRDV2) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace) {
-	if request.ResourceType() != ResourceTypeRDMA && request.ResourceType() != ResourceTypeLocalIP {
+	switch request.ResourceType() {
+	case ResourceTypeLocalIP, ResourceTypeRDMA:
+		return r.multiIP(ctx, cni, request)
+	case ResourceTypeRemoteIP:
+		return r.remote(ctx, cni, request)
+	default:
 		return nil, []Trace{{Condition: ResourceTypeMismatch}}
 	}
+}
 
+func (r *CRDV2) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool {
+	return false
+}
+
+func (r *CRDV2) Dispose(n int) int {
+	return 0
+}
+
+func (r *CRDV2) multiIP(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace) {
 	resp := make(chan *AllocResp)
 
 	go func() {
@@ -226,10 +242,91 @@ func (r *CRDV2) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 	return resp, nil
 }
 
-func (r *CRDV2) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool {
-	return false
+func (r *CRDV2) remote(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace) {
+	remote := &Remote{
+		client: r.client,
+	}
+	trunk, err := r.getTrunkENI(ctx)
+	if err != nil {
+		resp := make(chan *AllocResp)
+
+		go func() {
+			select {
+			case <-ctx.Done():
+				return
+			case resp <- &AllocResp{Err: err}:
+			}
+		}()
+		return resp, nil
+	}
+
+	remote.trunkENI = trunk
+
+	return remote.Allocate(ctx, cni, request)
 }
 
-func (r *CRDV2) Dispose(n int) int {
-	return 0
+func (r *CRDV2) getTrunkENI(ctx context.Context) (*daemon.ENI, error) {
+	var node *networkv1beta1.Node
+
+	var trunkENI *daemon.ENI
+
+	var innerErr error
+	err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.WaitPodENIStatus), func(ctx context.Context) (bool, error) {
+		node = &networkv1beta1.Node{}
+		innerErr = r.client.Get(ctx, client.ObjectKey{Name: r.nodeName}, node)
+		if innerErr != nil {
+			return false, nil
+		}
+		if node.Spec.ENISpec == nil {
+			// cr not ready
+			innerErr = fmt.Errorf("nodes.network.alibabacloud.com %s has not been initialized", r.nodeName)
+			return false, nil
+		}
+		if !node.Spec.ENISpec.EnableTrunk {
+			// trunk is not enabled
+			return true, nil
+		}
+		// nb(l1b0k): we need to deprecate the trunk-on anno on node
+
+		k8sNode := &corev1.Node{}
+		innerErr = r.client.Get(ctx, client.ObjectKey{Name: r.nodeName}, k8sNode)
+		if innerErr != nil {
+			return false, nil
+		}
+		trunkID := k8sNode.Annotations[types.TrunkOn]
+
+		trunk, ok := node.Status.NetworkInterfaces[trunkID]
+		if !ok {
+			innerErr = fmt.Errorf("trunk %s has not been initialized", trunkID)
+			return false, nil
+		}
+
+		trunkENI = &daemon.ENI{
+			ID:               trunk.ID,
+			MAC:              trunk.MacAddress,
+			SecurityGroupIDs: trunk.SecurityGroupIDs,
+			Trunk:            true,
+			ERdma:            false,
+			PrimaryIP:        types.IPSet{},
+			GatewayIP:        types.IPSet{},
+			VSwitchCIDR:      types.IPNetSet{},
+			VSwitchID:        trunk.VSwitchID,
+		}
+		trunkENI.PrimaryIP.SetIP(trunk.PrimaryIPAddress)
+		if node.Spec.ENISpec.EnableIPv4 {
+			trunkENI.GatewayIP.SetIP(terwayIP.DeriveGatewayIP(trunk.IPv4CIDR))
+			trunkENI.VSwitchCIDR.SetIPNet(trunk.IPv4CIDR)
+		}
+		if node.Spec.ENISpec.EnableIPv6 {
+			trunkENI.GatewayIP.SetIP(terwayIP.DeriveGatewayIP(trunk.IPv6CIDR))
+			trunkENI.VSwitchCIDR.SetIPNet(trunk.IPv6CIDR)
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error get trunk eni %w, innerErr %s", err, innerErr)
+	}
+
+	return trunkENI, err
 }

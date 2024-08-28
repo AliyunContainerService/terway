@@ -35,6 +35,7 @@ type nodeReconcile struct {
 func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	l := log.FromContext(ctx)
 	l.Info("Reconcile node")
+
 	node := &networkv1beta1.Node{}
 	err := r.client.Get(ctx, request.NamespacedName, node)
 	if err != nil {
@@ -47,15 +48,18 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{}, nil
 	}
 
+	k8sNode := &corev1.Node{}
+	err = r.client.Get(ctx, request.NamespacedName, k8sNode)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return reconcile.Result{}, nil
+		}
+		return reconcile.Result{}, err
+	}
+
 	eniConfig, err := daemon.ConfigFromConfigMap(ctx, r.client, node.Name)
 	if err != nil {
-		k8sNode := &corev1.Node{}
-		innerErr := r.client.Get(ctx, request.NamespacedName, k8sNode)
-		if innerErr == nil {
-			r.record.Event(k8sNode, "Warning", "ConfigError", err.Error())
-		} else {
-			r.record.Event(node, "Warning", "ConfigError", err.Error())
-		}
+		r.record.Event(k8sNode, "Warning", "ConfigError", err.Error())
 		return reconcile.Result{}, err
 	}
 
