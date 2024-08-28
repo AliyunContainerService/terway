@@ -6,7 +6,7 @@ if [ "$DATASTORE_TYPE" = "kubernetes" ]; then
         exit 1
     fi
     return_code="$(curl -k -o /dev/null -I -L -s -w "%{http_code}" https://"${KUBERNETES_SERVICE_HOST}":"${KUBERNETES_SERVICE_PORT:-443}")"
-    if [ "$return_code" -ne 403 ]&&[ "$return_code" -ne 200 ]&&[ "$return_code" -ne 201 ];then
+    if [ "$return_code" -ne 401 ]&&[ "$return_code" -ne 403 ]&&[ "$return_code" -ne 200 ]&&[ "$return_code" -ne 201 ];then
         echo "can not access kubernetes service, exiting"
         exit 1
     fi
