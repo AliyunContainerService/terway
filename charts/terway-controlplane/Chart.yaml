@@ -2,5 +2,5 @@ apiVersion: v2
 name: terway-controlplane
 description: Terway ControlPlane
 type: application
-version: 1.6.0
-appVersion: "1.6.0"
+version: 1.9.6
+appVersion: "1.9.6"

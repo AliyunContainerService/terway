@@ -37,7 +37,7 @@ spec:
           command:
             - sh
             - "-ce"
-            - "if grep -q IPVlan /etc/eni/10-terway.conf ; then cilium preflight register-crd ;fi;"
+            - "cilium preflight register-crd"
           volumeMounts:
             - name: configvolume
               mountPath: /etc/eni
@@ -105,25 +105,30 @@ spec:
             privileged: true
           command:
             - /bin/init.sh
+          env:
+          - name: DISABLE_POLICY
+            valueFrom:
+              configMapKeyRef:
+                name: eni-config
+                key: disable_network_policy
+                optional: true
           volumeMounts:
-            - name: config
-              mountPath: /etc/eni
-            - name: configvolume
-              mountPath: /tmp/eni
-            - name: cni-config
-              mountPath: /etc/cni/net.d
-            - name: cni-bin
-              mountPath: /opt/cni/bin/
-            - mountPath: /lib/modules
-              name: lib-modules
-            - mountPath: /host
-              name: host-root
-            - mountPath: /var/run/
-              name: eni-run
-            - mountPath: /var-run-eni
-              name: var-run-eni
-            - mountPath: /etc-cni-net.d
-              name: cni-config
+          - name: config
+            mountPath: /etc/eni
+          - mountPath: /var-run-eni
+            name: var-run-eni
+          - name: configvolume
+            mountPath: /tmp/eni
+          - name: cni-bin
+            mountPath: /opt/cni/bin/
+          - name: cni
+            mountPath: /etc/cni/net.d/
+          - mountPath: /lib/modules
+            name: lib-modules
+          - mountPath: /host
+            name: host-root
+          - mountPath: /var/run/
+            name: eni-run
       containers:
         - name: terway
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -153,29 +158,27 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
           volumeMounts:
-            - name: cni-config
-              mountPath: /etc/cni/net.d
-              readOnly: true
-            - name: cni
-              mountPath: /host-etc-net.d
-            - name: config
-              mountPath: /etc/eni
-              readOnly: true
-            - mountPath: /var/run/
-              name: eni-run
-            - mountPath: /lib/modules
-              name: lib-modules
-            - mountPath: /var/lib/cni/networks
-              name: cni-networks
-            - mountPath: /var/lib/cni/terway
-              name: cni-terway
-            - mountPath: /var/lib/kubelet/device-plugins
-              name: device-plugin-path
-            - name: addon-token
-              mountPath: "/var/addon"
-              readOnly: true
-            - mountPath: /host-etc-net.d
-              name: cni
+          - name: config
+            mountPath: /etc/eni
+            readOnly: true
+          - mountPath: /var/run/
+            name: eni-run
+          - mountPath: /lib/modules
+            name: lib-modules
+          - mountPath: /var/lib/cni/networks
+            name: cni-networks
+          - mountPath: /var/lib/cni/terway
+            name: cni-terway
+          - mountPath: /etc/cni/net.d
+            name: cni
+            readOnly: true
+          - mountPath: /host-etc-net.d
+            name: host-cni
+          - mountPath: /var/lib/kubelet/device-plugins
+            name: device-plugin-path
+          - name: addon-token
+            mountPath: "/var/addon"
+            readOnly: true
         - name: policy
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
@@ -270,67 +273,71 @@ spec:
             - mountPath: /run/xtables.lock
               name: xtables-lock
       volumes:
-        - name: cni-config
-          emptyDir: { }
-        - name: config
-          emptyDir: { }
-        - name: var-run-eni
-          emptyDir: { }
-        - name: configvolume
-          configMap:
-            name: eni-config
-            items: null
-        - name: cni-bin
-          hostPath:
-            path: /opt/cni/bin
-            type: "Directory"
-        - name: cni
-          hostPath:
-            path: /etc/cni/net.d
-        - name: eni-run
-          hostPath:
-            path: /var/run/
-            type: "Directory"
-        - name: lib-modules
-          hostPath:
-            path: /lib/modules
-        - name: cni-networks
-          hostPath:
-            path: /var/lib/cni/networks
-        - name: cni-terway
-          hostPath:
-            path: /var/lib/cni/terway
-        - name: device-plugin-path
-          hostPath:
-            path: /var/lib/kubelet/device-plugins
-            type: "Directory"
-        - name: host-root
-          hostPath:
-            path: /
-            type: "Directory"
-        - name: addon-token
-          secret:
-            secretName: addon.network.token
-            items:
-              - key: addon.token.config
-                path: token-config
-            optional: true
-        # used by cilium
-        # To keep state between restarts / upgrades
-        - hostPath:
-            path: /var/run/cilium
-            type: DirectoryOrCreate
-          name: cilium-run
-        # To keep state between restarts / upgrades for bpf maps
-        - hostPath:
-            path: /sys/fs/
-            type: DirectoryOrCreate
-          name: sys-fs
-          # To access iptables concurrently with other processes (e.g. kube-proxy)
-        - hostPath:
-            path: /run/xtables.lock
-            type: FileOrCreate
-          name: xtables-lock
+      - name: config
+        emptyDir: {}
+      - name: var-run-eni
+        emptyDir: { }
+      - name: configvolume
+        configMap:
+          name: eni-config
+          items: null
+      - name: cni-bin
+        hostPath:
+          path: /opt/cni/bin
+          type: "Directory"
+      - name: host-cni
+        hostPath:
+          path: /etc/cni/net.d
+      - name: cni
+        emptyDir: {}
+      - name: eni-run
+        hostPath:
+          path: /var/run/
+          type: "Directory"
+      - name: lib-modules
+        hostPath:
+          path: /lib/modules
+      - name: cni-networks
+        hostPath:
+          path: /var/lib/cni/networks
+      - name: cni-terway
+        hostPath:
+          path: /var/lib/cni/terway
+      - name: device-plugin-path
+        hostPath:
+          path: /var/lib/kubelet/device-plugins
+          type: "Directory"
+      - name: host-root
+        hostPath:
+          path: /
+          type: "Directory"
+      - name: addon-token
+        secret:
+          secretName: addon.network.token
+          items:
+          - key: addon.token.config
+            path: token-config
+          optional: true
+      - name: alibaba-addon-secret
+        secret:
+          secretName: alibaba-addon-secret
+          optional: true
+      # used by cilium
+      # To keep state between restarts / upgrades
+      - hostPath:
+          path: /var/run/cilium
+          type: DirectoryOrCreate
+        name: cilium-run
+      # To keep state between restarts / upgrades for bpf maps
+      - hostPath:
+          path: /sys/fs/
+          type: DirectoryOrCreate
+        name: sys-fs
+        # To access iptables concurrently with other processes (e.g. kube-proxy)
+      - hostPath:
+          path: /run/xtables.lock
+          type: FileOrCreate
+        name: xtables-lock
 
 ---
 
