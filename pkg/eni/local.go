@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/cache"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -26,6 +27,8 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/metric"
 )
+
+const defaultSyncPeriod = 1 * time.Minute
 
 var _ NetworkInterface = &Local{}
 var _ Usage = &Local{}
@@ -178,7 +181,7 @@ func (l *Local) Run(ctx context.Context, podResources []daemon.PodResources, wg 
 
 	go l.notify(ctx)
 
-	go wait.JitterUntil(l.sync, 1*time.Minute, 1.0, true, ctx.Done())
+	go wait.JitterUntil(l.sync, defaultSyncPeriod, 1.0, true, ctx.Done())
 
 	return nil
 }
@@ -371,6 +374,7 @@ func (l *Local) sync() {
 
 	syncIPLocked(l.ipv4, ipv4)
 	syncIPLocked(l.ipv6, ipv6)
+	report()
 
 	l.cond.Broadcast()
 }
@@ -1038,7 +1042,39 @@ func syncIPLocked(lo Set, remote []netip.Addr) {
 			}
 		}
 	}
+	orphanIP(lo, s)
 }
+
+func orphanIP(lo Set, remote sets.Set[netip.Addr]) {
+	for key := range remote {
+		if _, ok := lo[key]; !ok {
+
+			prev, ok := invalidIPCache.Get(key)
+			if !ok {
+				invalidIPCache.Add(key, 1, 5*defaultSyncPeriod)
+			} else {
+				invalidIPCache.Add(key, prev.(int)+1, 5*defaultSyncPeriod)
+			}
+		} else {
+			invalidIPCache.Remove(key)
+		}
+	}
+}
+
+func report() {
+	for _, key := range invalidIPCache.Keys() {
+		count, ok := invalidIPCache.Get(key)
+		if !ok {
+			continue
+		}
+		if count.(int) > 1 {
+			_ = tracing.RecordNodeEvent(corev1.EventTypeWarning, string(types.ErrResourceInvalid), fmt.Sprintf("orphan ip found on ecs metadata, ip: %s", key))
+			logf.Log.Info("orphan ip found on ecs metadata", "ip", key)
+		}
+	}
+}
+
+var invalidIPCache = cache.NewLRUExpireCache(100)
 
 func parseResourceID(id string) (string, string, error) {
 	parts := strings.SplitN(id, ".", 2)
