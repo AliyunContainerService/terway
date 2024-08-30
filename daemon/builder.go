@@ -108,6 +108,11 @@ func (b *NetworkServiceBuilder) InitK8S() *NetworkServiceBuilder {
 		b.err = fmt.Errorf("error init k8s: %w", err)
 		return b
 	}
+
+	if types.NodeExclusiveENIMode(b.service.k8s.Node().Labels) == types.ExclusiveENIOnly {
+		b.service.daemonMode = daemon.ModeENIOnly
+	}
+
 	return b
 }
 

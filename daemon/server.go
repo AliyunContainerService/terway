@@ -68,7 +68,11 @@ func stackTriger() {
 
 // Run terway daemon
 func Run(ctx context.Context, socketFilePath, debugSocketListen, configFilePath, daemonMode string) error {
-	// init.sh already create the /var/run/eni
+	err := os.MkdirAll(filepath.Dir(lockFile), 0700)
+	if err != nil {
+		return err
+	}
+
 	lock, err := filemutex.New(lockFile)
 	if err != nil {
 		return fmt.Errorf("error create lock file: %s, %w", lockFile, err)

@@ -3,17 +3,22 @@
 mount -o remount rw /proc/sys
 
 export DATASTORE_TYPE=kubernetes
-if [ "$DATASTORE_TYPE" = "kubernetes" ]; then
-    if [ -z "$KUBERNETES_SERVICE_HOST" ]; then
-        echo "can not found k8s apiserver service env, exiting"
-        exit 1
+
+masq_eni_only() {
+    if ! "$1" -t nat -L terway-masq; then
+        # Create a new chain in nat table.
+        "$1" -t nat -N terway-masq
     fi
-    return_code="$(curl -k -o /dev/null -I -L -s -w "%{http_code}" https://"${KUBERNETES_SERVICE_HOST}":"${KUBERNETES_SERVICE_PORT:-443}")"
-    if [ "$return_code" -ne 401 ]&&[ "$return_code" -ne 403 ]&&[ "$return_code" -ne 200 ]&&[ "$return_code" -ne 201 ];then
-        echo "can not access kubernetes service, exiting"
-        exit 1
+
+    if ! "$1" -t nat -L POSTROUTING | grep -q terway-masq; then
+        # Append that chain to POSTROUTING table.
+        "$1" -t nat -A POSTROUTING -m comment --comment "terway:masq-outgoing" ! -o lo -j terway-masq
     fi
-fi
+
+    if ! "$1" -t nat -L terway-masq | grep -q MASQUERADE; then
+       "$1" -t nat -A terway-masq -j MASQUERADE
+    fi
+}
 
 terway_config_val() {
   config_key="$1"
@@ -26,6 +31,37 @@ network_policy_provider=$(terway_config_val 'network_policy_provider')
 
 KERNEL_MAJOR_VERSION=$(uname -r | awk -F . '{print $1}')
 KERNEL_MINOR_VERSION=$(uname -r | awk -F . '{print $2}')
+
+node_capabilities=/var-run-eni/node_capabilities
+datapath_mode=ipvlan
+
+if [ ! -f "$node_capabilities" ]; then
+  echo "Init node capabilities not finished, exiting"
+  exit 1
+fi
+
+if grep -q "cni_exclusive_eni *= *eniOnly" "$node_capabilities"; then
+  # write terway snat rule
+
+  masq_eni_only iptables
+
+  if grep -q "cni_ipv6_stack *= *true" "$node_capabilities"; then
+    masq_eni_only ip6tables
+  fi
+
+  # for health check
+  if [ "$FELIX_HEALTHPORT" != "" ]; then
+      # shellcheck disable=SC2016
+      exec socat TCP-LISTEN:"$FELIX_HEALTHPORT",bind=127.0.0.1,fork,reuseaddr system:'sleep 2;kill -9 $SOCAT_PID 2>/dev/null'
+  else
+      # shellcheck disable=SC2016
+      exec socat TCP-LISTEN:9099,bind=127.0.0.1,fork,reuseaddr system:'sleep 2;kill -9 $SOCAT_PID 2>/dev/null'
+  fi
+fi
+
+if grep -q "datapath *= *datapathv2" "$node_capabilities"; then
+      datapath_mode=veth
+fi
 
 # kernel version has already checked in initContainer, so just determine whether plugin chaining exists
 if [ "$virtyal_type" = "ipvlan" ] || [ "$virtyal_type" = "datapathv2" ]; then
@@ -69,18 +105,6 @@ if [ "$virtyal_type" = "ipvlan" ] || [ "$virtyal_type" = "datapathv2" ]; then
 		fi
 
     echo "using cilium as network routing & policy"
-
-    node_capabilities=/var-run-eni/node_capabilities
-    datapath_mode=ipvlan
-
-    if [ ! -f "$node_capabilities" ]; then
-      echo "Init node capabilities not finished, exiting"
-      exit 1
-    fi
-
-    if grep -q "datapath *= *datapathv2" "$node_capabilities"; then
-          datapath_mode=veth
-    fi
 
     # shellcheck disable=SC2086
     exec cilium-agent --tunnel=disabled --enable-ipv4-masquerade=false --enable-ipv6-masquerade=false \
