@@ -191,6 +191,19 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		return r, nil, nil, err
 	}
 
+	// wait mac
+	err = wait.PollUntilContextTimeout(ctx, metadataPollInterval, metadataWaitTimeout, true, func(ctx context.Context) (bool, error) {
+		macs, err := metadata.GetENIsMAC()
+		if err != nil {
+			klog.Errorf("metadata: error get mac: %v", err)
+			return false, nil
+		}
+		return sets.NewString(macs...).Has(r.MAC), nil
+	})
+	if err != nil {
+		return r, nil, nil, err
+	}
+
 	prefix, err := metadata.GetVSwitchCIDR(eni.MacAddress)
 	if err != nil {
 		return r, nil, nil, err
