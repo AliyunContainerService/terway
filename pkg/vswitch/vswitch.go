@@ -26,12 +26,14 @@ import (
 
 	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/util/cache"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 )
 
 var ErrNoAvailableVSwitch = errors.New("no available vSwitch")
+var ErrIPNotEnough = errors.New("no ip left")
 
 // Switch hole all switch info from both terway config and podNetworking
 type Switch struct {
@@ -89,12 +91,6 @@ func (s *SwitchPool) GetOne(ctx context.Context, client client.VPC, zone string,
 				continue
 			}
 
-			if vsw.Zone != zone {
-				continue
-			}
-			if vsw.AvailableIPCount == 0 {
-				continue
-			}
 			byAvailableIP = append(byAvailableIP, *vsw)
 		}
 
@@ -106,6 +102,8 @@ func (s *SwitchPool) GetOne(ctx context.Context, client client.VPC, zone string,
 		}
 		ids = newOrder
 	}
+
+	var errs []error
 
 	// lookup all vsw in cache and get one matched
 	for _, id := range ids {
@@ -122,6 +120,7 @@ func (s *SwitchPool) GetOne(ctx context.Context, client client.VPC, zone string,
 			continue
 		}
 		if vsw.AvailableIPCount == 0 {
+			errs = append(errs, fmt.Errorf("%s %w", vsw.ID, ErrIPNotEnough))
 			continue
 		}
 		return vsw, nil
@@ -129,12 +128,14 @@ func (s *SwitchPool) GetOne(ctx context.Context, client client.VPC, zone string,
 
 	for _, vsw := range fallBackSwitches {
 		if vsw.AvailableIPCount == 0 {
+			errs = append(errs, fmt.Errorf("%s %w", vsw.ID, ErrIPNotEnough))
 			continue
 		}
 		return vsw, nil
 	}
+	errs = append(errs, fmt.Errorf("%w for zone %s, vswList %v", ErrNoAvailableVSwitch, zone, ids))
 
-	return nil, fmt.Errorf("no available vSwitch for zone %s, vswList %v, %w", zone, ids, ErrNoAvailableVSwitch)
+	return nil, utilerrors.NewAggregate(errs)
 }
 
 // GetByID will get vSwitch info from local store or openAPI

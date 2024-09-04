@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
@@ -656,6 +657,11 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 			}
 			eni, err := m.aliyun.CreateNetworkInterface(ctx, option)
 			if err != nil {
+
+				if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough) {
+					m.swPool.Block(alloc.ENI.VSwitchID)
+				}
+
 				return fmt.Errorf("create eni with openAPI err, %w", err)
 			}
 

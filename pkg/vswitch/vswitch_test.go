@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -30,6 +31,11 @@ import (
 
 func TestSwitchPool_GetOne(t *testing.T) {
 	openAPI := mocks.NewVPC(t)
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-0").Return(&vpc.VSwitch{
+		VSwitchId:               "vsw-0",
+		ZoneId:                  "zone-0",
+		AvailableIpAddressCount: 0,
+	}, nil).Maybe()
 	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
 		VSwitchId:               "vsw-1",
 		ZoneId:                  "zone-1",
@@ -69,6 +75,22 @@ func TestSwitchPool_GetOne(t *testing.T) {
 	}
 
 	assert.Equal(t, 2, len(ids))
+
+	_, err = switchPool.GetOne(context.Background(), openAPI, "zone-x", []string{"vsw-2", "vsw-3"}, &SelectOptions{
+		IgnoreZone:          false,
+		VSwitchSelectPolicy: VSwitchSelectionPolicyRandom,
+	})
+
+	assert.True(t, errors.Is(err, ErrNoAvailableVSwitch))
+	assert.False(t, errors.Is(err, ErrIPNotEnough))
+
+	_, err = switchPool.GetOne(context.Background(), openAPI, "zone-0", []string{"vsw-0"}, &SelectOptions{
+		IgnoreZone:          false,
+		VSwitchSelectPolicy: VSwitchSelectionPolicyRandom,
+	})
+
+	assert.True(t, errors.Is(err, ErrNoAvailableVSwitch))
+	assert.True(t, errors.Is(err, ErrIPNotEnough))
 }
 
 func TestGetByID(t *testing.T) {
