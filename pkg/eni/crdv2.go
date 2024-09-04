@@ -45,7 +45,7 @@ func NewCRDV2(nodeName string) *CRDV2 {
 		Cache: cache.Options{
 			HTTPClient:           nil,
 			Scheme:               nil,
-			Mapper:               nil,
+			Mapper:               types.NewRESTMapper(),
 			SyncPeriod:           nil,
 			Namespaces:           nil,
 			DefaultLabelSelector: nil,

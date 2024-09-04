@@ -81,7 +81,7 @@ var rootScopedKinds = map[schema.GroupKind]bool{
 
 	{Group: "metrics.k8s.io", Kind: "NodeMetrics"}: true,
 
-	{Group: "wardle.example.com", Kind: "Fischer"}: true,
-
 	{Group: "network.alibabacloud.com", Kind: "PodNetworking"}: true,
+
+	{Group: "network.alibabacloud.com", Kind: "Node"}: true,
 }
