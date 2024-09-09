@@ -4,15 +4,16 @@ import (
 	"fmt"
 	"net"
 
+	cniTypes "github.com/containernetworking/cni/pkg/types"
+	"github.com/containernetworking/plugins/pkg/ip"
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/vishvananda/netlink"
+
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/plugin/driver/nic"
 	"github.com/AliyunContainerService/terway/plugin/driver/types"
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 	"github.com/AliyunContainerService/terway/plugin/driver/veth"
-	cniTypes "github.com/containernetworking/cni/pkg/types"
-	"github.com/containernetworking/plugins/pkg/ip"
-	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/vishvananda/netlink"
 )
 
 const defaultVethForENI = "veth1"
@@ -216,6 +217,30 @@ func generateVeth1Cfg(cfg *types.SetupConfig, link netlink.Link, peerMAC net.Har
 			r.GW = LinkIPv6
 		}
 		extraRoutes = append(extraRoutes, r)
+	}
+
+	//  add eth0 ip to the route
+	if cfg.HostIPSet != nil {
+		if cfg.HostIPSet.IPv4 != nil {
+			routes = append(routes, &netlink.Route{
+				LinkIndex: link.Attrs().Index,
+				Dst: &net.IPNet{
+					IP:   cfg.HostIPSet.IPv4.IP,
+					Mask: net.CIDRMask(32, 32),
+				},
+				Gw: LinkIP,
+			})
+		}
+		if cfg.HostIPSet.IPv6 != nil {
+			routes = append(routes, &netlink.Route{
+				LinkIndex: link.Attrs().Index,
+				Dst: &net.IPNet{
+					IP:   cfg.HostIPSet.IPv6.IP,
+					Mask: net.CIDRMask(128, 128),
+				},
+				Gw: LinkIPv6,
+			})
+		}
 	}
 
 	for i := range extraRoutes {
