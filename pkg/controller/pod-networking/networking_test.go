@@ -35,6 +35,9 @@ var _ = Describe("Networking controller", func() {
 					AllocationType: networkv1beta1.AllocationType{},
 					Selector:       networkv1beta1.Selector{},
 					VSwitchOptions: []string{"vsw-1"},
+					ENIOptions: networkv1beta1.ENIOptions{
+						ENIAttachType: networkv1beta1.ENIOptionTypeDefault,
+					},
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
@@ -89,6 +92,9 @@ var _ = Describe("Networking controller", func() {
 					AllocationType: networkv1beta1.AllocationType{},
 					Selector:       networkv1beta1.Selector{},
 					VSwitchOptions: []string{"vsw-not-exist"},
+					ENIOptions: networkv1beta1.ENIOptions{
+						ENIAttachType: networkv1beta1.ENIOptionTypeDefault,
+					},
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
@@ -139,6 +145,9 @@ var _ = Describe("Networking controller", func() {
 					AllocationType: networkv1beta1.AllocationType{},
 					Selector:       networkv1beta1.Selector{},
 					VSwitchOptions: []string{"vsw-1", "vsw-2", "vsw-3"},
+					ENIOptions: networkv1beta1.ENIOptions{
+						ENIAttachType: networkv1beta1.ENIOptionTypeDefault,
+					},
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())

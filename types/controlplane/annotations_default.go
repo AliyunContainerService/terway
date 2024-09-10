@@ -19,12 +19,15 @@ limitations under the License.
 package controlplane
 
 import (
+	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/types/route"
 )
 
 type PodNetworks struct {
-	VSwitchOptions   []string      `json:"vSwitchOptions"`
-	SecurityGroupIDs []string      `json:"securityGroupIDs"`
-	Interface        string        `json:"interface"`
-	ExtraRoutes      []route.Route `json:"extraRoutes"`
+	VSwitchOptions       []string                     `json:"vSwitchOptions"`
+	SecurityGroupIDs     []string                     `json:"securityGroupIDs"`
+	Interface            string                       `json:"interface"`
+	ExtraRoutes          []route.Route                `json:"extraRoutes,omitempty"`
+	ENIOptions           v1beta1.ENIOptions           `json:"eniOptions,omitempty"`
+	VSwitchSelectOptions v1beta1.VSwitchSelectOptions `json:"vSwitchSelectOptions,omitempty"`
 }

@@ -164,6 +164,14 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 	}
 	broadcaster.StartRecordingToSink(sink)
 
+	// mode
+	if daemonMode == daemon.ModeENIMultiIP {
+		if types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
+			klog.Infof("node %s is in exclusive eni mode, force to use eni only mode", nodeName)
+			daemonMode = daemon.ModeENIOnly
+		}
+	}
+
 	k8sObj := &k8s{
 		client:          c,
 		mode:            daemonMode,
@@ -259,9 +267,6 @@ func (k *k8s) PatchNodeAnnotations(anno map[string]string) error {
 	}
 
 	node, err := getNode(context.Background(), k.client, k.nodeName)
-	if err != nil || node == nil {
-		return err
-	}
 	if err != nil || node == nil {
 		return err
 	}

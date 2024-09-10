@@ -58,6 +58,21 @@ spec:
                     - Fixed
                     type: string
                 type: object
+              eniOptions:
+                default:
+                  eniType: Default
+                properties:
+                  eniType:
+                    default: Default
+                    description: ENIAttachType
+                    enum:
+                    - Trunk
+                    - ENI
+                    - Default
+                    type: string
+                required:
+                - eniType
+                type: object
               securityGroupIDs:
                 items:
                   type: string
@@ -164,6 +179,20 @@ spec:
                 items:
                   type: string
                 type: array
+              vSwitchSelectOptions:
+                default:
+                  vSwitchSelectionPolicy: ordered
+                properties:
+                  vSwitchSelectionPolicy:
+                    default: ordered
+                    enum:
+                    - ordered
+                    - random
+                    - most
+                    type: string
+                type: object
+            required:
+            - eniOptions
             type: object
           status:
             description: PodNetworkingStatus defines the observed state of PodNetworking

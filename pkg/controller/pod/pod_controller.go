@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
@@ -82,7 +83,7 @@ func init() {
 			source.Kind(mgr.GetCache(), &corev1.Pod{}),
 			&handler.EnqueueRequestForObject{},
 			&predicate.ResourceVersionChangedPredicate{},
-			&predicateForPodEvent{crdMode: crdMode},
+			&predicateForPodEvent{},
 		)
 	}, true)
 }
@@ -101,6 +102,8 @@ type ReconcilePod struct {
 	//record event recorder
 	record record.EventRecorder
 
+	trunkMode bool // use trunk mode or secondary eni mode
+	// deprecated
 	crdMode bool
 }
 
@@ -127,12 +130,13 @@ func (w *Wrapper) NeedLeaderElection() bool {
 // NewReconcilePod watch pod lifecycle events and sync to podENI resource
 func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool, crdMode bool) *ReconcilePod {
 	r := &ReconcilePod{
-		client:  mgr.GetClient(),
-		scheme:  mgr.GetScheme(),
-		record:  mgr.GetEventRecorderFor("TerwayPodController"),
-		aliyun:  aliyunClient,
-		swPool:  swPool,
-		crdMode: crdMode,
+		client:    mgr.GetClient(),
+		scheme:    mgr.GetScheme(),
+		record:    mgr.GetEventRecorderFor("TerwayPodController"),
+		aliyun:    aliyunClient,
+		swPool:    swPool,
+		trunkMode: *controlplane.GetConfig().EnableTrunk,
+		crdMode:   crdMode,
 	}
 	return r
 }
@@ -182,20 +186,23 @@ func (m *ReconcilePod) NeedLeaderElection() bool {
 func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	l := log.FromContext(ctx)
 
-	if pod.Spec.NodeName == "" {
+	// check pods
+	if !processPod(pod) {
 		return reconcile.Result{}, nil
 	}
-	// ignore all create for eci pod
+
 	node, err := m.getNode(ctx, pod.Spec.NodeName)
 	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("error get node %s, %w", node.Name, err)
+		return reconcile.Result{}, fmt.Errorf("error get node %s, %w", pod.Spec.NodeName, err)
 	}
 
-	if types.IgnoredByTerway(node.Labels) {
+	if !processNode(node) {
 		return reconcile.Result{}, nil
 	}
 
-	if utils.ISVKNode(node) {
+	if !types.PodUseENI(pod) &&
+		types.NodeExclusiveENIMode(node.Labels) != types.ExclusiveENIOnly &&
+		!m.crdMode {
 		return reconcile.Result{}, nil
 	}
 
@@ -223,7 +230,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 			if prePodENI.Spec.HaveFixedIP() {
 				prePodENICopy := prePodENI.DeepCopy()
 				prePodENICopy.Status.Phase = v1beta1.ENIPhaseDetaching
-				_, err = common.UpdatePodENIStatus(ctx, m.client, prePodENICopy)
+				err = m.client.Status().Update(ctx, prePodENICopy)
 				return reconcile.Result{RequeueAfter: 5 * time.Second}, err
 			}
 			return reconcile.Result{RequeueAfter: 5 * time.Second}, m.client.Delete(ctx, prePodENI)
@@ -342,14 +349,14 @@ func (m *ReconcilePod) podDelete(ctx context.Context, namespacedName client.Obje
 		}
 		prePodENICopy := prePodENI.DeepCopy()
 		prePodENICopy.Status.Phase = v1beta1.ENIPhaseDetaching
-		_, err = common.UpdatePodENIStatus(ctx, m.client, prePodENICopy)
+		err = m.client.Status().Update(ctx, prePodENICopy)
 		return reconcile.Result{}, err
 	}
 
 	// for non fixed ip, update status to v1beta1.ENIPhaseDeleting
 	update := prePodENI.DeepCopy()
 	update.Status.Phase = v1beta1.ENIPhaseDeleting
-	_, err = common.UpdatePodENIStatus(ctx, m.client, update)
+	err = m.client.Status().Update(ctx, update)
 
 	return reconcile.Result{}, err
 }
@@ -400,7 +407,8 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 
 		podNetwokingName := pod.Annotations[types.PodNetworking]
 		if podNetwokingName == "" {
-			if m.crdMode {
+			if m.crdMode ||
+				types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
 				// fall back policy , if webhook not enabled
 
 				cfg, err := daemon.ConfigFromConfigMap(ctx, m.client, "")
@@ -467,6 +475,27 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 		return nil, nil, nil, fmt.Errorf("allocType is nil")
 	}
 
+	// set the attachment type
+	lo.ForEach(allocs, func(item *v1beta1.Allocation, index int) {
+		if item.ENI.AttachmentOptions.Trunk == nil {
+			// user the cluster value
+			trunk := false
+			if m.trunkMode {
+				if types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
+					log.FromContext(ctx).Info("node is at exclusive eni mode, use eniOnly")
+					trunk = false
+				} else {
+					trunk = true
+				}
+			} else {
+				// eniOnly
+				trunk = false
+			}
+
+			item.ENI.AttachmentOptions.Trunk = &trunk
+		}
+	})
+
 	return nodeInfo, allocType, allocs, nil
 }
 
@@ -496,7 +525,8 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 
 	if prePodENI.Annotations[types.PodUID] == string(pod.UID) {
 		update.Status.Phase = v1beta1.ENIPhaseBinding
-		_, err := common.UpdatePodENIStatus(ctx, m.client, update)
+		err := m.client.Status().Update(ctx, update)
+
 		return reconcile.Result{}, err
 	}
 
@@ -507,12 +537,14 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 
 	if pod.Annotations[types.PodNetworking] != "" {
 		l.V(5).Info("using podNetworking will not re-config", types.PodNetworking, pod.Annotations[types.PodNetworking])
-		_, err := common.UpdatePodENI(ctx, m.client, update)
+		err := m.client.Update(ctx, update)
+
 		return reconcile.Result{Requeue: true}, err
 	}
 
 	if _, ok := prePodENI.Annotations[types.ENIAllocFromPool]; ok {
-		_, err := common.UpdatePodENI(ctx, m.client, update)
+		err := m.client.Update(ctx, update)
+
 		return reconcile.Result{Requeue: true}, err
 	}
 
@@ -584,7 +616,8 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	_, err = common.UpdatePodENI(ctx, m.client, update)
+	err = m.client.Update(ctx, update)
+
 	return reconcile.Result{Requeue: true}, err
 }
 

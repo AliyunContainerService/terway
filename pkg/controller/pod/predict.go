@@ -17,99 +17,57 @@ limitations under the License.
 package pod
 
 import (
-	"reflect"
-
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 )
 
 type predicateForPodEvent struct {
 	predicate.Funcs
-
-	crdMode bool
 }
 
 func (p *predicateForPodEvent) Create(e event.CreateEvent) bool {
-	return OKToProcess(e.Object, p.crdMode)
+	return processPod(e.Object)
 }
 
 func (p *predicateForPodEvent) Update(e event.UpdateEvent) bool {
-	oldPod, ok := e.ObjectOld.(*corev1.Pod)
-	if !ok {
-		return false
-	}
-	newPod, ok := e.ObjectNew.(*corev1.Pod)
-	if !ok {
-		return false
-	}
-
-	if newPod.Spec.HostNetwork {
-		return false
-	}
-	if newPod.Spec.NodeName == "" {
-		return false
-	}
-
-	if types.IgnoredByTerway(newPod.Labels) {
-		return false
-	}
-
-	if !p.crdMode {
-		if !types.PodUseENI(oldPod) {
-			return false
-		}
-		if !types.PodUseENI(newPod) {
-			return false
-		}
-	}
-
-	oldPodCopy := oldPod.DeepCopy()
-	newPodCopy := newPod.DeepCopy()
-
-	oldPodCopy.ResourceVersion = ""
-	newPodCopy.ResourceVersion = ""
-
-	oldPodCopy.Status = corev1.PodStatus{Phase: oldPod.Status.Phase}
-	newPodCopy.Status = corev1.PodStatus{Phase: newPod.Status.Phase}
-
-	return !reflect.DeepEqual(&oldPodCopy, &newPodCopy)
+	return processPod(e.ObjectNew)
 }
 
 func (p *predicateForPodEvent) Delete(e event.DeleteEvent) bool {
-	return OKToProcess(e.Object, p.crdMode)
+	return processPod(e.Object)
 }
 
 func (p *predicateForPodEvent) Generic(e event.GenericEvent) bool {
-	return OKToProcess(e.Object, p.crdMode)
+	return processPod(e.Object)
 }
 
-// OKToProcess filter pod which is ready to process
-func OKToProcess(obj interface{}, crdMode bool) bool {
-	pod, ok := obj.(*corev1.Pod)
+func processPod(o client.Object) bool {
+	pod, ok := o.(*corev1.Pod)
 	if !ok {
 		return false
 	}
-	if pod.Spec.NodeName == "" {
-		return false
-	}
 
-	if pod.Spec.HostNetwork {
+	if pod.Spec.NodeName == "" ||
+		pod.Spec.HostNetwork {
 		return false
 	}
 
 	if types.IgnoredByTerway(pod.Labels) {
 		return false
 	}
+	return true
+}
 
-	if crdMode {
-		return true
+func processNode(node *corev1.Node) bool {
+	if types.IgnoredByTerway(node.Labels) ||
+		utils.ISVKNode(node) {
+		return false
 	}
 
-	// 1. process pods only enable trunk
-	// 2. if pod turn from trunk to normal pod, assume delete is called
-	// 3. podENI will do remain GC if resource is leaked
-	return types.PodUseENI(pod)
+	return true
 }

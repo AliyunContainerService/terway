@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/Jeffail/gabs/v2"
-	"github.com/docker/docker/pkg/parsers/kernel"
 	"github.com/spf13/cobra"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	cliflag "k8s.io/component-base/cli/flag"
@@ -71,7 +70,7 @@ var cniCmd = &cobra.Command{
 func processCNIConfig(cmd *cobra.Command, args []string) error {
 	flag.Parse()
 
-	_checkKernelVersion = kernel.CheckKernelVersion
+	_checkKernelVersion = checkKernelVersion
 
 	_switchDataPathV2 = switchDataPathV2
 

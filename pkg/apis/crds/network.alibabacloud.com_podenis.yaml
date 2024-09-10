@@ -69,6 +69,11 @@ spec:
                     eni:
                       description: ENI eni info
                       properties:
+                        attachmentOptions:
+                          properties:
+                            trunk:
+                              type: boolean
+                          type: object
                         id:
                           type: string
                         mac:

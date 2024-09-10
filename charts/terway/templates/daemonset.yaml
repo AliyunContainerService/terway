@@ -106,6 +106,12 @@ spec:
           command:
             - /bin/init.sh
           env:
+          - name: TERWAY_DAEMON_MODE
+            value: "{{.Values.daemonMode}}"
+          - name: K8S_NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
           - name: DISABLE_POLICY
             valueFrom:
               configMapKeyRef:

@@ -210,6 +210,10 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{}, nil
 	}
 
+	if types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
+		return reconcile.Result{}, nil
+	}
+
 	ctx = logf.IntoContext(ctx, l.WithValues("rv", node.ResourceVersion))
 
 	var nodeStatus *NodeStatus
@@ -687,6 +691,9 @@ func updateNodeCondition(ctx context.Context, c client.Client, nodeName string, 
 	k8sNode := &corev1.Node{}
 	err := c.Get(ctx, client.ObjectKey{Name: nodeName}, k8sNode)
 	if err != nil {
+		if k8sErr.IsNotFound(err) {
+			return
+		}
 		l.Error(err, "get node failed", "node", nodeName)
 		return
 	}
