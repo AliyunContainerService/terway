@@ -48,16 +48,6 @@ func TestInitService(t *testing.T) {
 			expectedError: false,
 		},
 		{
-			name:          "Valid daemon mode VPC",
-			daemonMode:    daemon.ModeVPC,
-			expectedError: false,
-		},
-		{
-			name:          "Valid daemon mode ENIOnly",
-			daemonMode:    daemon.ModeENIOnly,
-			expectedError: false,
-		},
-		{
 			name:          "Unsupported daemon mode",
 			daemonMode:    "unsupported",
 			expectedError: true,

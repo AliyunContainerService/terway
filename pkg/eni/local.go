@@ -226,7 +226,7 @@ func (l *Local) load(podResources []daemon.PodResources) error {
 
 		for _, res := range podResource.Resources {
 			switch res.Type {
-			case daemon.ResourceTypeENIIP, daemon.ResourceTypeENI:
+			case daemon.ResourceTypeENIIP:
 			default:
 				continue
 			}
@@ -250,27 +250,6 @@ func (l *Local) load(podResources []daemon.PodResources) error {
 						logf.Log.Info("existed pod", "pod", podID, "ipv4", ipStr, "eni", l.eni.ID)
 
 						ip, err := netip.ParseAddr(ipStr)
-						if err != nil {
-							return &types.Error{
-								Code: types.ErrInvalidDataType,
-								Msg:  err.Error(),
-								R:    err,
-							}
-						}
-						v, ok := l.ipv4[ip]
-						if !ok {
-							continue
-						}
-						v.Allocate(podID)
-						metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv4)).Dec()
-					case daemon.PodNetworkTypeVPCENI:
-						if res.ID != l.eni.MAC {
-							continue
-						}
-						primaryIP := l.eni.PrimaryIP.IPv4.String()
-						logf.Log.Info("existed pod", "pod", podID, "ipv4", primaryIP, "eni", l.eni.ID)
-
-						ip, err := netip.ParseAddr(primaryIP)
 						if err != nil {
 							return &types.Error{
 								Code: types.ErrInvalidDataType,

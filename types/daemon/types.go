@@ -7,8 +7,6 @@ import (
 )
 
 const (
-	PodNetworkTypeVPCIP      = "VPCIP"
-	PodNetworkTypeVPCENI     = "VPCENI"
 	PodNetworkTypeENIMultiIP = "ENIMultiIP"
 )
 
@@ -17,10 +15,8 @@ type InternetChargeType string
 
 // network resource type
 const (
-	ResourceTypeVeth  = "veth"
 	ResourceTypeENI   = "eni"
 	ResourceTypeENIIP = "eniIp"
-	ResourceTypeEIP   = "eip"
 )
 const (
 	ModeVPC        = "VPC"
@@ -32,15 +28,6 @@ const (
 const (
 	VSwitchSelectionPolicyRandom  = "random"
 	VSwitchSelectionPolicyOrdered = "ordered"
-)
-
-// ENICapPolicy how eni cap is calculated
-type ENICapPolicy string
-
-// how eni cap is calculated
-const (
-	ENICapPolicyPreferTrunk = "preferTrunk"
-	ENICapPolicyDefault     = ""
 )
 
 // ENI aliyun ENI resource
@@ -108,30 +95,6 @@ func (e *ENIIP) ToResItems() []ResourceItem {
 			ENIMAC: e.ENI.MAC,
 			IPv4:   e.IPSet.GetIPv4(),
 			IPv6:   e.IPSet.GetIPv6(),
-		},
-	}
-}
-
-// Veth veth pair resource on system
-type Veth struct {
-	HostVeth string
-}
-
-// GetResourceID return host veth name of veth resource
-func (e *Veth) GetResourceID() string {
-	return e.HostVeth
-}
-
-// GetType return type name
-func (e *Veth) GetType() string {
-	return ResourceTypeVeth
-}
-
-func (e *Veth) ToResItems() []ResourceItem {
-	return []ResourceItem{
-		{
-			Type: e.GetType(),
-			ID:   e.GetResourceID(),
 		},
 	}
 }

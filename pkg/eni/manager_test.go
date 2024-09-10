@@ -175,11 +175,6 @@ func (f *FakeK8s) GetServiceCIDR() *types.IPNetSet {
 	panic("implement me")
 }
 
-func (f *FakeK8s) GetNodeCidr() *types.IPNetSet {
-	//TODO implement me
-	panic("implement me")
-}
-
 func (f *FakeK8s) SetNodeAllocatablePod(count int) error {
 	//TODO implement me
 	panic("implement me")
@@ -221,11 +216,6 @@ func (f *FakeK8s) GetDynamicConfigWithName(ctx context.Context, name string) (st
 }
 
 func (f *FakeK8s) SetCustomStatefulWorkloadKinds(kinds []string) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) WaitTrunkReady() (string, error) {
 	//TODO implement me
 	panic("implement me")
 }

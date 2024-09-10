@@ -22,8 +22,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -32,7 +30,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
-	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/pkg/utils"
@@ -48,7 +45,6 @@ const (
 	k8sKubeadmConfigmapNetworking           = "MasterConfiguration"
 	k8sKubeadmConfigmapClusterconfiguration = "ClusterConfiguration"
 
-	podNeedEni          = "k8s.aliyun.com/ENI"
 	podIngressBandwidth = "k8s.aliyun.com/ingress-bandwidth" //deprecated
 	podEgressBandwidth  = "k8s.aliyun.com/egress-bandwidth"  //deprecated
 
@@ -87,7 +83,6 @@ type Kubernetes interface {
 	PodExist(namespace, name string) (bool, error)
 
 	GetServiceCIDR() *types.IPNetSet
-	GetNodeCidr() *types.IPNetSet
 	SetNodeAllocatablePod(count int) error
 
 	PatchNodeAnnotations(anno map[string]string) error
@@ -98,7 +93,6 @@ type Kubernetes interface {
 	GetNodeDynamicConfigLabel() string
 	GetDynamicConfigWithName(ctx context.Context, name string) (string, error)
 	SetCustomStatefulWorkloadKinds(kinds []string) error
-	WaitTrunkReady() (string, error)
 
 	GetTrunkID() string
 
@@ -141,15 +135,6 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 		return nil, fmt.Errorf("error retrieving node spec for '%s': %w", nodeName, err)
 	}
 
-	var nodeCidr *types.IPNetSet
-	if daemonMode == daemon.ModeVPC {
-		// vpc mode not support ipv6
-		nodeCidr, err = nodeCidrFromAPIServer(k8sclient.K8sClient, nodeName)
-		if err != nil {
-			return nil, fmt.Errorf("error retrieving node cidr for '%s': %w", nodeName, err)
-		}
-	}
-
 	storage, err := storage.NewDiskStorage(dbName, utils.NormalizePath(dbPath), serialize, deserialize)
 	if err != nil {
 		return nil, fmt.Errorf("error creating storage: %w", err)
@@ -177,7 +162,6 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 		mode:            daemonMode,
 		node:            node,
 		nodeName:        nodeName,
-		nodeCIDR:        nodeCidr,
 		daemonNamespace: daemonNamespace,
 		storage:         storage,
 		broadcaster:     broadcaster,
@@ -217,7 +201,6 @@ type k8s struct {
 	mode                    string
 	nodeName                string
 	daemonNamespace         string
-	nodeCIDR                *types.IPNetSet
 	node                    *corev1.Node
 	svcCIDR                 *types.IPNetSet
 	statefulWorkloadKindSet sets.Set[string]
@@ -342,22 +325,6 @@ func (k *k8s) PatchPodIPInfo(info *daemon.PodInfo, ips string) error {
 	return k.client.Patch(context.Background(), pod, client.RawPatch(k8stypes.MergePatchType, []byte(annotationPatchStr)))
 }
 
-func (k *k8s) WaitTrunkReady() (string, error) {
-	id := ""
-	err := wait.ExponentialBackoff(backoff.Backoff(backoff.DefaultKey), func() (bool, error) {
-		node, err := getNode(context.Background(), k.client, k.nodeName)
-		if err != nil {
-			return false, err
-		}
-		if node.GetAnnotations()[types.TrunkOn] != "" {
-			id = node.GetAnnotations()[types.TrunkOn]
-			return true, nil
-		}
-		return false, nil
-	})
-	return id, err
-}
-
 func (k *k8s) GetTrunkID() string {
 	return k.node.Annotations[types.TrunkOn]
 }
@@ -407,10 +374,6 @@ func (k *k8s) PodExist(namespace, name string) (bool, error) {
 	}
 
 	return true, nil
-}
-
-func (k *k8s) GetNodeCidr() *types.IPNetSet {
-	return k.nodeCIDR
 }
 
 func (k *k8s) GetLocalPods() ([]*daemon.PodInfo, error) {
@@ -564,26 +527,6 @@ func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 	switch daemonMode {
 	case daemon.ModeENIMultiIP:
 		return daemon.PodNetworkTypeENIMultiIP
-	case daemon.ModeVPC:
-		podAnnotation := pod.GetAnnotations()
-		useENI := false
-		if needEni, ok := podAnnotation[podNeedEni]; ok && (needEni != "" && needEni != ConditionFalse && needEni != "0") {
-			useENI = true
-		}
-
-		for _, c := range pod.Spec.Containers {
-			if _, ok := c.Resources.Requests[deviceplugin.ENIResName]; ok {
-				useENI = true
-				break
-			}
-		}
-
-		if useENI {
-			return daemon.PodNetworkTypeVPCENI
-		}
-		return daemon.PodNetworkTypeVPCIP
-	case daemon.ModeENIOnly:
-		return daemon.PodNetworkTypeVPCENI
 	}
 
 	panic(fmt.Errorf("unknown daemon mode %s", daemonMode))
@@ -704,23 +647,6 @@ func deserialize(data []byte) (interface{}, error) {
 		return nil, err
 	}
 	return item, nil
-}
-
-func nodeCidrFromAPIServer(client kubernetes.Interface, nodeName string) (*types.IPNetSet, error) {
-	node, err := client.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving node spec for '%s': %v", nodeName, err)
-	}
-	if node.Spec.PodCIDR == "" {
-		return nil, fmt.Errorf("node %q pod cidr not assigned", nodeName)
-	}
-	podCIDR := &types.IPNetSet{}
-	for _, cidr := range node.Spec.PodCIDRs {
-		podCIDR.SetIPNet(cidr)
-	}
-	podCIDR.SetIPNet(node.Spec.PodCIDR)
-
-	return podCIDR, nil
 }
 
 func parseCidr(cidrString string) (*net.IPNet, error) {

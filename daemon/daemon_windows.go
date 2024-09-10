@@ -24,23 +24,6 @@ func preStartResourceManager(daemonMode string, k8s k8s.Kubernetes) error {
 	}
 
 	switch daemonMode {
-	case daemon.ModeVPC:
-		var nwIface, err = iface.GetInterfaceByMAC(primaryMac, true)
-		if err != nil {
-			return errors.Wrap(err, "error getting interface")
-		}
-		var nwSubnet = ip.FromIPNet(k8s.GetNodeCidr().IPv4).Network().ToIPNet()
-		var nw = &apis.Network{
-			Name:        "cb0",
-			AdapterName: nwIface.Alias,
-			AdapterMAC:  nwIface.MacAddress,
-			Subnet:      *nwSubnet,
-			Gateway:     apis.GetDefaultNetworkGateway(nwSubnet),
-		}
-		err = apis.AddBridgeHNSNetwork(ctx, nw)
-		if err != nil {
-			return errors.Wrapf(err, "error adding network: %s", nw.Format(apis.HNS))
-		}
 	case daemon.ModeENIOnly, daemon.ModeENIMultiIP:
 		// NB(thxCode): create a fake network to allow service connection
 		var assistantIface, err = iface.GetInterfaceByMAC(primaryMac, true)

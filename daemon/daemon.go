@@ -195,24 +195,7 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 
 			resourceRequests = append(resourceRequests, req)
 		}
-	case daemon.PodNetworkTypeVPCENI:
-		reply.IPType = rpc.IPType_TypeVPCENI
 
-		if pod.PodENI || n.ipamType == types.IPAMTypeCRD {
-			resourceRequests = append(resourceRequests, &eni.RemoteIPRequest{})
-		} else {
-			req := &eni.LocalIPRequest{}
-
-			if len(oldRes.GetResourceItemByType(daemon.ResourceTypeENI)) == 1 {
-				old := oldRes.GetResourceItemByType(daemon.ResourceTypeENI)[0]
-
-				setRequest(req, old)
-			}
-			resourceRequests = append(resourceRequests, req)
-		}
-	case daemon.PodNetworkTypeVPCIP:
-		reply.IPType = rpc.IPType_TypeVPCIP
-		resourceRequests = append(resourceRequests, &eni.VethRequest{})
 	default:
 		return nil, &types.Error{
 			Code: types.ErrInternalError,
@@ -242,9 +225,7 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 			c.BasicInfo = &rpc.BasicInfo{}
 		}
 		c.BasicInfo.ServiceCIDR = n.k8s.GetServiceCIDR().ToRPC()
-		if pod.PodNetworkType == daemon.PodNetworkTypeVPCIP {
-			c.BasicInfo.PodCIDR = n.k8s.GetNodeCidr().ToRPC()
-		}
+
 		c.Pod = &rpc.Pod{
 			Ingress:         pod.TcIngress,
 			Egress:          pod.TcEgress,
@@ -421,10 +402,6 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 	switch pod.PodNetworkType {
 	case daemon.PodNetworkTypeENIMultiIP:
 		reply.IPType = rpc.IPType_TypeENIMultiIP
-	case daemon.PodNetworkTypeVPCIP:
-		reply.IPType = rpc.IPType_TypeVPCIP
-	case daemon.PodNetworkTypeVPCENI:
-		reply.IPType = rpc.IPType_TypeVPCENI
 
 	default:
 		return nil, &types.Error{
@@ -499,12 +476,7 @@ func (n *networkService) RecordEvent(_ context.Context, r *rpc.EventRequest) (*r
 }
 
 func (n *networkService) verifyPodNetworkType(podNetworkMode string) bool {
-	return (n.daemonMode == daemon.ModeVPC && //vpc
-		(podNetworkMode == daemon.PodNetworkTypeVPCENI || podNetworkMode == daemon.PodNetworkTypeVPCIP)) ||
-		// eni-multi-ip
-		(n.daemonMode == daemon.ModeENIMultiIP && podNetworkMode == daemon.PodNetworkTypeENIMultiIP) ||
-		// eni-only
-		(n.daemonMode == daemon.ModeENIOnly && podNetworkMode == daemon.PodNetworkTypeVPCENI)
+	return n.daemonMode == daemon.ModeENIMultiIP && podNetworkMode == daemon.PodNetworkTypeENIMultiIP // eni-multi-ip
 }
 
 func (n *networkService) startGarbageCollectionLoop(ctx context.Context) {
@@ -801,9 +773,6 @@ func initTrunk(config *daemon.Config, poolConfig *types.PoolConfig, k8sClient k8
 
 func runDevicePlugin(daemonMode string, config *daemon.Config, poolConfig *types.PoolConfig) {
 	switch daemonMode {
-	case daemon.ModeVPC, daemon.ModeENIOnly:
-		dp := deviceplugin.NewENIDevicePlugin(poolConfig.MaxENI, deviceplugin.ENITypeENI)
-		go dp.Serve()
 	case daemon.ModeENIMultiIP:
 		if config.EnableENITrunking {
 			dp := deviceplugin.NewENIDevicePlugin(poolConfig.MaxMemberENI, deviceplugin.ENITypeMember)
@@ -833,7 +802,7 @@ func getPodResources(list []interface{}) []daemon.PodResources {
 
 func parseNetworkResource(item daemon.ResourceItem) eni.NetworkResource {
 	switch item.Type {
-	case daemon.ResourceTypeENIIP, daemon.ResourceTypeENI:
+	case daemon.ResourceTypeENIIP:
 		var v4, v6 netip.Addr
 		if item.IPv4 != "" {
 			v4, _ = netip.ParseAddr(item.IPv4)
@@ -950,8 +919,7 @@ func getPodIPs(netConfs []*rpc.NetConf) []string {
 func filterENINotFound(podResources []daemon.PodResources, attachedENIID map[string]*daemon.ENI) []daemon.PodResources {
 	for i := range podResources {
 		for j := 0; j < len(podResources[i].Resources); j++ {
-			if podResources[i].Resources[j].Type == daemon.ResourceTypeENI ||
-				podResources[i].Resources[j].Type == daemon.ResourceTypeENIIP {
+			if podResources[i].Resources[j].Type == daemon.ResourceTypeENIIP {
 
 				eniID := podResources[i].Resources[j].ENIID
 				if eniID == "" {
