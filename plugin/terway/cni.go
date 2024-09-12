@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"runtime"
@@ -9,6 +10,8 @@ import (
 
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/plugin/datapath"
@@ -295,7 +298,17 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 	if alloc.GetENIInfo() != nil {
 		mac := alloc.GetENIInfo().GetMAC()
 		if mac != "" {
-			deviceID, err = link.GetDeviceNumber(mac)
+			err = retry.OnError(wait.Backoff{
+				Steps:    10,
+				Duration: 1 * time.Second,
+				Factor:   1.0,
+				Jitter:   0,
+			}, func(err error) bool {
+				return errors.Is(err, link.ErrNotFound)
+			}, func() error {
+				deviceID, err = link.GetDeviceNumber(mac)
+				return err
+			})
 			if err != nil {
 				return nil, err
 			}
