@@ -49,8 +49,7 @@ type Config struct {
 	EnableENITrunking           bool                    `yaml:"enable_eni_trunking" json:"enable_eni_trunking"`
 	EnableERDMA                 bool                    `yaml:"enable_erdma" json:"enable_erdma"`
 	CustomStatefulWorkloadKinds []string                `yaml:"custom_stateful_workload_kinds" json:"custom_stateful_workload_kinds"`
-	IPAMType                    types.IPAMType          `yaml:"ipam_type" json:"ipam_type"`           // crd or default
-	ENICapPolicy                ENICapPolicy            `yaml:"eni_cap_policy" json:"eni_cap_policy"` // prefer trunk or secondary
+	IPAMType                    types.IPAMType          `yaml:"ipam_type" json:"ipam_type"` // crd or default
 	BackoffOverride             map[string]wait.Backoff `json:"backoff_override,omitempty"`
 	ExtraRoutes                 []route.Route           `json:"extra_routes,omitempty"`
 	DisableDevicePlugin         bool                    `json:"disable_device_plugin"`

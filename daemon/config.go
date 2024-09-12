@@ -89,42 +89,6 @@ func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *client.Limits) 
 	maxMemberENI := 0
 
 	switch daemonMode {
-	case daemon.ModeVPC, daemon.ModeENIOnly:
-		maxENI = limit.Adapters
-		maxENI = int(float64(maxENI)*cfg.EniCapRatio) + cfg.EniCapShift - 1
-
-		// set max eni node can use
-		if cfg.MaxENI > 0 && cfg.MaxENI < maxENI {
-			maxENI = cfg.MaxENI
-		}
-
-		capacity = maxENI
-
-		if cfg.MaxPoolSize > maxENI {
-			poolConfig.MaxPoolSize = maxENI
-		} else {
-			poolConfig.MaxPoolSize = cfg.MaxPoolSize
-		}
-
-		poolConfig.MinPoolSize = cfg.MinPoolSize
-
-		if cfg.MinENI > 0 {
-			poolConfig.MinPoolSize = cfg.MinENI
-		}
-
-		if poolConfig.MinPoolSize > poolConfig.MaxPoolSize {
-			poolConfig.MinPoolSize = poolConfig.MaxPoolSize
-		}
-
-		maxMemberENI = limit.MemberAdapterLimit
-		if cfg.ENICapPolicy == daemon.ENICapPolicyPreferTrunk {
-			maxMemberENI = limit.MaxMemberAdapterLimit
-		}
-
-		poolConfig.MaxIPPerENI = 1
-		if cfg.EnableERDMA {
-			poolConfig.ERdmaCapacity = limit.ERdmaAdapters
-		}
 	case daemon.ModeENIMultiIP:
 		maxENI = limit.Adapters
 		maxENI = int(float64(maxENI)*cfg.EniCapRatio) + cfg.EniCapShift - 1

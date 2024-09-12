@@ -99,26 +99,6 @@ func (_m *Kubernetes) GetLocalPods() ([]*daemon.PodInfo, error) {
 	return r0, r1
 }
 
-// GetNodeCidr provides a mock function with given fields:
-func (_m *Kubernetes) GetNodeCidr() *types.IPNetSet {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetNodeCidr")
-	}
-
-	var r0 *types.IPNetSet
-	if rf, ok := ret.Get(0).(func() *types.IPNetSet); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.IPNetSet)
-		}
-	}
-
-	return r0
-}
-
 // GetNodeDynamicConfigLabel provides a mock function with given fields:
 func (_m *Kubernetes) GetNodeDynamicConfigLabel() string {
 	ret := _m.Called()
@@ -382,34 +362,6 @@ func (_m *Kubernetes) SetNodeAllocatablePod(count int) error {
 	}
 
 	return r0
-}
-
-// WaitTrunkReady provides a mock function with given fields:
-func (_m *Kubernetes) WaitTrunkReady() (string, error) {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for WaitTrunkReady")
-	}
-
-	var r0 string
-	var r1 error
-	if rf, ok := ret.Get(0).(func() (string, error)); ok {
-		return rf()
-	}
-	if rf, ok := ret.Get(0).(func() string); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
 }
 
 // NewKubernetes creates a new instance of Kubernetes. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
