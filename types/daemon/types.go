@@ -7,6 +7,7 @@ import (
 )
 
 const (
+	PodNetworkTypeVPCENI     = "VPCENI"
 	PodNetworkTypeENIMultiIP = "ENIMultiIP"
 )
 
