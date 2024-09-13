@@ -351,7 +351,11 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	}
 
 	if cfg.ERDMA {
-		err = smc.ConfigSMCForDevice("erdma_0", cfg.ContainerIfName, netNS)
+		rdmaDev, err := utils.GetERdmaFromLink(eni)
+		if err != nil {
+			return fmt.Errorf("error get erdma device: %w", err)
+		}
+		err = smc.ConfigSMCForDevice(rdmaDev.Attrs.Name, cfg.ContainerIfName, netNS)
 		if err != nil {
 			return fmt.Errorf("error setup pnet config for pod: %w", err)
 		}

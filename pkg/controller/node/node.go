@@ -144,7 +144,7 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 			InstanceBandwidthTx:   limit.InstanceBandwidthTx,
 			InstanceBandwidthRx:   limit.InstanceBandwidthRx,
 			Adapters:              limit.Adapters,
-			EriQuantity:           limit.ERdmaAdapters,
+			EriQuantity:           limit.ERDMARes(),
 			TotalAdapters:         limit.TotalAdapters,
 			IPv6PerAdapter:        limit.IPv6PerAdapter,
 			MemberAdapterLimit:    limit.MemberAdapterLimit,
