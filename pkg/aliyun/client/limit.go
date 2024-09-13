@@ -66,7 +66,16 @@ func (l *Limits) MultiIPPod() int {
 }
 
 func (l *Limits) ERDMARes() int {
-	return l.ERdmaAdapters
+	if l.ERdmaAdapters <= 0 || l.Adapters <= 2 {
+		return 0
+	}
+	// limit adapters
+	if l.Adapters >= 8 {
+		// for multi physical network card instance
+		return min(2, l.ERdmaAdapters)
+	}
+	// limit normal ecs eri to 1, to avoid too many normal multiip pod quota consume
+	return min(1, l.ERdmaAdapters)
 }
 
 func (l *Limits) ExclusiveENIPod() int {

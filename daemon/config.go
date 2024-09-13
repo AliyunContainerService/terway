@@ -123,7 +123,7 @@ func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *client.Limits) 
 
 		poolConfig.MaxIPPerENI = 1
 		if cfg.EnableERDMA {
-			poolConfig.ERdmaCapacity = limit.ERdmaAdapters
+			poolConfig.ERdmaCapacity = limit.ERDMARes()
 		}
 	case daemon.ModeENIMultiIP:
 		maxENI = limit.Adapters
@@ -161,7 +161,7 @@ func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *client.Limits) 
 		poolConfig.MaxIPPerENI = ipPerENI
 
 		if cfg.EnableERDMA {
-			poolConfig.ERdmaCapacity = limit.ERdmaAdapters * limit.IPv4PerAdapter
+			poolConfig.ERdmaCapacity = limit.ERDMARes() * limit.IPv4PerAdapter
 		}
 	}
 
