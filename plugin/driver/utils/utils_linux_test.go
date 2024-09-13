@@ -293,3 +293,9 @@ var _ = Describe("Test TC filter", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 })
+
+func TestParseERdmaLinkHwAddr(t *testing.T) {
+	hwaddr, err := parseERdmaLinkHwAddr("0d:d3:04:fe:ff:3e:16:02")
+	Expect(err).Should(BeNil())
+	Expect(hwaddr.String()).Should(Equal("00:16:3e:04:d3:0d"))
+}

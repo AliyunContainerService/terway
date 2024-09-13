@@ -72,6 +72,92 @@ func TestGetInstanceType(t *testing.T) {
 	}
 }
 
+func TestGetERIRes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    *ecs.InstanceType
+		expected int
+	}{
+		{
+			name: "not support instance type",
+			input: &ecs.InstanceType{
+				EniQuantity:                 2,
+				EniPrivateIpAddressQuantity: 5,
+				EniIpv6AddressQuantity:      10,
+				EniTotalQuantity:            6,
+				EriQuantity:                 0,
+				InstanceBandwidthRx:         1000,
+				InstanceBandwidthTx:         500,
+				EniTrunkSupported:           true,
+			},
+			expected: 0,
+		},
+		{
+			name: "Small instance type",
+			input: &ecs.InstanceType{
+				EniQuantity:                 2,
+				EniPrivateIpAddressQuantity: 5,
+				EniIpv6AddressQuantity:      10,
+				EniTotalQuantity:            6,
+				EriQuantity:                 2,
+				InstanceBandwidthRx:         1000,
+				InstanceBandwidthTx:         500,
+				EniTrunkSupported:           true,
+			},
+			expected: 0,
+		},
+		{
+			name: "Basic instance type",
+			input: &ecs.InstanceType{
+				EniQuantity:                 4,
+				EniPrivateIpAddressQuantity: 5,
+				EniIpv6AddressQuantity:      10,
+				EniTotalQuantity:            6,
+				EriQuantity:                 2,
+				InstanceBandwidthRx:         1000,
+				InstanceBandwidthTx:         500,
+				EniTrunkSupported:           true,
+			},
+			expected: 1,
+		},
+		{
+			name: "giant instance type only one eri",
+			input: &ecs.InstanceType{
+				EniQuantity:                 8,
+				EniPrivateIpAddressQuantity: 5,
+				EniIpv6AddressQuantity:      10,
+				EniTotalQuantity:            10,
+				EriQuantity:                 1,
+				InstanceBandwidthRx:         1000,
+				InstanceBandwidthTx:         500,
+				EniTrunkSupported:           true,
+			},
+			expected: 1,
+		},
+		{
+			name: "giant instance type",
+			input: &ecs.InstanceType{
+				EniQuantity:                 8,
+				EniPrivateIpAddressQuantity: 5,
+				EniIpv6AddressQuantity:      10,
+				EniTotalQuantity:            10,
+				EriQuantity:                 4,
+				InstanceBandwidthRx:         1000,
+				InstanceBandwidthTx:         500,
+				EniTrunkSupported:           true,
+			},
+			expected: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := getInstanceType(tt.input)
+			assert.Equal(t, tt.expected, actual.ERDMARes())
+		})
+	}
+}
+
 func TestECSLimitProvider_GetLimitFromAnno(t *testing.T) {
 
 	type args struct {
