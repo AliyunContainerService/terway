@@ -195,7 +195,21 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 
 			resourceRequests = append(resourceRequests, req)
 		}
+	case daemon.PodNetworkTypeVPCENI:
+		reply.IPType = rpc.IPType_TypeVPCENI
 
+		if pod.PodENI || n.ipamType == types.IPAMTypeCRD {
+			resourceRequests = append(resourceRequests, &eni.RemoteIPRequest{})
+		} else {
+			req := &eni.LocalIPRequest{}
+
+			if len(oldRes.GetResourceItemByType(daemon.ResourceTypeENI)) == 1 {
+				old := oldRes.GetResourceItemByType(daemon.ResourceTypeENI)[0]
+
+				setRequest(req, old)
+			}
+			resourceRequests = append(resourceRequests, req)
+		}
 	default:
 		return nil, &types.Error{
 			Code: types.ErrInternalError,
@@ -402,7 +416,8 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 	switch pod.PodNetworkType {
 	case daemon.PodNetworkTypeENIMultiIP:
 		reply.IPType = rpc.IPType_TypeENIMultiIP
-
+	case daemon.PodNetworkTypeVPCENI:
+		reply.IPType = rpc.IPType_TypeVPCENI
 	default:
 		return nil, &types.Error{
 			Code: types.ErrInternalError,
@@ -476,7 +491,9 @@ func (n *networkService) RecordEvent(_ context.Context, r *rpc.EventRequest) (*r
 }
 
 func (n *networkService) verifyPodNetworkType(podNetworkMode string) bool {
-	return n.daemonMode == daemon.ModeENIMultiIP && podNetworkMode == daemon.PodNetworkTypeENIMultiIP // eni-multi-ip
+	return (n.daemonMode == daemon.ModeENIMultiIP && podNetworkMode == daemon.PodNetworkTypeENIMultiIP) || // eni-multi-ip
+		// eni-only
+		(n.daemonMode == daemon.ModeENIOnly && podNetworkMode == daemon.PodNetworkTypeVPCENI)
 }
 
 func (n *networkService) startGarbageCollectionLoop(ctx context.Context) {
@@ -802,7 +819,7 @@ func getPodResources(list []interface{}) []daemon.PodResources {
 
 func parseNetworkResource(item daemon.ResourceItem) eni.NetworkResource {
 	switch item.Type {
-	case daemon.ResourceTypeENIIP:
+	case daemon.ResourceTypeENIIP, daemon.ResourceTypeENI:
 		var v4, v6 netip.Addr
 		if item.IPv4 != "" {
 			v4, _ = netip.ParseAddr(item.IPv4)
