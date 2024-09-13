@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
@@ -843,4 +845,40 @@ func CleanIPRules() (err error) {
 	}
 
 	return nil
+}
+
+func GetERdmaFromLink(link netlink.Link) (*netlink.RdmaLink, error) {
+	rdmaLinks, err := netlink.RdmaLinkList()
+	if err != nil {
+		return nil, fmt.Errorf("error list rdma links, %v", err)
+	}
+	for _, rl := range rdmaLinks {
+		rdmaHwAddr, err := parseERdmaLinkHwAddr(rl.Attrs.NodeGuid)
+		if err != nil {
+			return nil, err
+		}
+		linkHwAddr := link.Attrs().HardwareAddr
+		// erdma guid first byte is ^= 0x2
+		linkHwAddr[0] ^= 0x2
+		if rdmaHwAddr.String() == linkHwAddr.String() {
+			return rl, nil
+		}
+	}
+	return nil, fmt.Errorf("cannot found rdma link for %s", link.Attrs().Name)
+}
+
+func parseERdmaLinkHwAddr(guid string) (net.HardwareAddr, error) {
+	hwAddrSlice := make([]byte, 8)
+	guidSlice := strings.Split(guid, ":")
+	if len(guidSlice) != 8 {
+		return nil, fmt.Errorf("invalid rdma guid: %s", guid)
+	}
+	for i, s := range guidSlice {
+		sint, err := strconv.ParseUint(s, 16, 8)
+		if err != nil {
+			return nil, fmt.Errorf("invalid rdma guid: %s, err: %v", guid, err)
+		}
+		hwAddrSlice[7-i] = uint8(sint)
+	}
+	return append(hwAddrSlice[0:3], hwAddrSlice[5:8]...), nil
 }

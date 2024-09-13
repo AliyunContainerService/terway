@@ -275,7 +275,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 		return err
 	}
 	realRdmaCount := b.limit.ERDMARes()
-	if b.config.EnableERDMA && len(attached) >= b.limit.Adapters-1-b.limit.ERdmaAdapters {
+	if b.config.EnableERDMA && len(attached) >= b.limit.Adapters-1-b.limit.ERDMARes() {
 		attachedERdma := lo.Filter(attached, func(ni *daemon.ENI, idx int) bool { return ni.ERdma })
 		if len(attachedERdma) <= 0 {
 			// turn off only when no one use it
@@ -344,8 +344,8 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 	}
 	normalENINeeded := poolConfig.MaxENI - normalENICount
 	if b.config.EnableERDMA {
-		normalENINeeded = poolConfig.MaxENI - b.limit.ERdmaAdapters - normalENICount
-		for i := 0; i < b.limit.ERdmaAdapters-erdmaENICount; i++ {
+		normalENINeeded = poolConfig.MaxENI - b.limit.ERDMARes() - normalENICount
+		for i := 0; i < b.limit.ERDMARes()-erdmaENICount; i++ {
 			eniList = append(eniList, eni.NewLocal(nil, "erdma", factory, poolConfig))
 		}
 	}
