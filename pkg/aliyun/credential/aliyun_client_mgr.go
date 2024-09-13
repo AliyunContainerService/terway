@@ -181,7 +181,7 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		c.ecs.SetEndpointRules(c.ecs.EndpointMap, "regional", "public")
+		c.ecs.SetEndpointRules(c.ecs.EndpointMap, "regional", "vpc")
 
 		if c.ecsDomainOverride != "" {
 			c.ecs.Domain = c.ecsDomainOverride
@@ -191,7 +191,7 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		c.vpc.SetEndpointRules(c.vpc.EndpointMap, "regional", "public")
+		c.vpc.SetEndpointRules(c.vpc.EndpointMap, "regional", "vpc")
 
 		if c.vpcDomainOverride != "" {
 			c.vpc.Domain = c.vpcDomainOverride
@@ -201,7 +201,7 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		c.eflo.SetEndpointRules(c.eflo.EndpointMap, "regional", "public")
+		c.eflo.SetEndpointRules(c.eflo.EndpointMap, "regional", "vpc")
 
 		if c.efloDomainOverride != "" {
 			c.eflo.Domain = c.efloDomainOverride
