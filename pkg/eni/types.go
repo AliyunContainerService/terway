@@ -94,7 +94,7 @@ func (ip *IP) Allocatable() bool {
 	return ip.Valid() && !ip.InUse()
 }
 
-type Set map[any]*IP
+type Set map[netip.Addr]*IP
 
 func (s Set) Idles() []*IP {
 	var result []*IP

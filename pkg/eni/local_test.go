@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/time/rate"
+	"k8s.io/apimachinery/pkg/util/cache"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/AliyunContainerService/terway/pkg/factory"
 	"github.com/AliyunContainerService/terway/types"
@@ -308,4 +310,31 @@ func Test_parseResourceID(t *testing.T) {
 			assert.Equalf(t, tt.want1, got1, "parseResourceID(%v)", tt.args.id)
 		})
 	}
+}
+
+func Test_orphanIP(t *testing.T) {
+	invalidIPCache = cache.NewLRUExpireCache(100)
+
+	lo1 := map[netip.Addr]*IP{
+		netip.MustParseAddr("127.0.0.1"): {
+			ip: netip.MustParseAddr("127.0.0.1"),
+		},
+	}
+
+	remote1 := sets.Set[netip.Addr]{
+		netip.MustParseAddr("127.0.0.1"): {},
+		netip.MustParseAddr("127.0.0.2"): {},
+	}
+
+	orphanIP(lo1, remote1)
+
+	v, _ := invalidIPCache.Get(netip.MustParseAddr("127.0.0.1"))
+	assert.Equal(t, nil, v)
+
+	v, _ = invalidIPCache.Get(netip.MustParseAddr("127.0.0.2"))
+	assert.Equal(t, 1, v)
+
+	orphanIP(lo1, remote1)
+	v, _ = invalidIPCache.Get(netip.MustParseAddr("127.0.0.2"))
+	assert.Equal(t, 2, v)
 }
