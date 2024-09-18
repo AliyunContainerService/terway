@@ -224,7 +224,7 @@ func (r *CRDV2) multiIP(ctx context.Context, cni *daemon.CNI, request ResourceRe
 			if wait.Interrupted(err) {
 				allocResp.Err = &types.Error{
 					Code: types.ErrIPNotAllocated,
-					Msg:  fmt.Sprintf("timed out waiting for ip allocated. Use 'kubectl get nodes.network.alibabacloud.com %s' to see more detail", r.nodeName),
+					Msg:  fmt.Sprintf("timed out waiting for ip allocated. Use 'kubectl describe nodes.network.alibabacloud.com %s' to see more detail", r.nodeName),
 					R:    err,
 				}
 			} else {
