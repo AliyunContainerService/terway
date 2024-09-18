@@ -632,6 +632,10 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 
 	updateCrCondition(options)
 
+	if err != nil {
+		n.record.Event(node, corev1.EventTypeWarning, "AllocIPFailed", err.Error())
+	}
+
 	// the err is kept
 	return err
 }
