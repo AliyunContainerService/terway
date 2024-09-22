@@ -194,6 +194,84 @@ var _ = Describe("Node Controller", func() {
 			Expect(k8sNode.Annotations["k8s.aliyun.com/trunk-on"]).To(Equal("eni-1"))
 			Expect(k8sNode.Annotations["k8s.aliyun.com/max-available-ip"]).To(Equal("20"))
 		})
+
+		It("should successfully create cr", func() {
+			resource := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: resourceName,
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{},
+					NodeCap:      networkv1beta1.NodeCap{},
+					ENISpec: &networkv1beta1.ENISpec{
+						Tag:                 nil,
+						TagFilter:           nil,
+						VSwitchOptions:      nil,
+						SecurityGroupIDs:    nil,
+						ResourceGroupID:     "",
+						EnableIPv4:          true,
+						EnableIPv6:          false,
+						EnableERDMA:         false,
+						EnableTrunk:         true,
+						VSwitchSelectPolicy: "",
+					},
+					Pool: nil,
+					Flavor: []networkv1beta1.Flavor{
+						{
+							NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+							Count:                       2,
+						},
+						{
+							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
+							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+							Count:                       1,
+						},
+					},
+				},
+			}
+
+			By("create cr")
+			err := k8sClient.Create(ctx, resource)
+			Expect(err).NotTo(HaveOccurred())
+
+			update := resource.DeepCopy()
+			_, err = controllerutil.CreateOrPatch(ctx, k8sClient, update, func() error {
+				update.Status = networkv1beta1.NodeStatus{
+					NextSyncOpenAPITime: metav1.Time{},
+					LastSyncOpenAPITime: metav1.Time{},
+					NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+						"eni-1": {
+							ID:                          "eni-1",
+							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
+							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+							SecurityGroupIDs:            []string{"ff"},
+							Status:                      "InUse",
+						},
+					},
+				}
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Reconciling the created resource")
+			controllerReconciler := &ReconcileNode{
+				client: k8sClient,
+				scheme: k8sClient.Scheme(),
+				aliyun: aliyun,
+			}
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			k8sNode := &corev1.Node{}
+			err = k8sClient.Get(ctx, typeNamespacedName, k8sNode)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sNode.Annotations["k8s.aliyun.com/trunk-on"]).To(Equal("eni-1"))
+			Expect(k8sNode.Annotations["k8s.aliyun.com/max-available-ip"]).To(Equal("30"))
+		})
 	})
 })
 

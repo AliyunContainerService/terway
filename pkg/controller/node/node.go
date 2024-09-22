@@ -236,7 +236,10 @@ func (r *ReconcileNode) k8sAnno(ctx context.Context, k8sNode *corev1.Node, node 
 		lo.ForEach(node.Spec.Flavor, func(item networkv1beta1.Flavor, index int) {
 			if item.NetworkInterfaceType == networkv1beta1.ENITypeSecondary &&
 				item.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeStandard {
-				secondaryIP = item.Count * node.Spec.NodeCap.IPv4PerAdapter
+				secondaryIP += item.Count * node.Spec.NodeCap.IPv4PerAdapter
+			}
+			if item.NetworkInterfaceType == networkv1beta1.ENITypeTrunk {
+				secondaryIP += item.Count * node.Spec.NodeCap.IPv4PerAdapter
 			}
 		})
 
