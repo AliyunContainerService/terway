@@ -18,6 +18,7 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -35,7 +36,7 @@ import (
 
 	"gomodules.xyz/jsonpatch/v2"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
@@ -101,7 +102,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 	if err != nil {
 		msg := fmt.Sprintf("error get previous podENI conf, %s", err)
 		l.Error(err, msg)
-		return webhook.Errored(1, fmt.Errorf(msg))
+		return webhook.Errored(1, errors.New(msg))
 	}
 
 	// 1. check pod annotation config first
@@ -348,7 +349,7 @@ func getPreviousZone(ctx context.Context, client client.Client, pod *corev1.Pod)
 		Name:      pod.Name,
 	}, podENI)
 	if err != nil {
-		if errors.IsNotFound(err) {
+		if k8sErr.IsNotFound(err) {
 			return "", nil
 		}
 		return "", err
