@@ -1,8 +1,8 @@
-FROM --platform=$BUILDPLATFORM golang:1.21.3 as builder
+FROM --platform=$BUILDPLATFORM golang:1.23.2 AS builder
 ARG GOPROXY
 ARG TARGETOS
 ARG TARGETARCH
-ENV GOPROXY $GOPROXY
+ENV GOPROXY=$GOPROXY
 WORKDIR /go/src/github.com/AliyunContainerService/terway/
 COPY go.sum go.mod ./
 RUN go mod download
@@ -15,7 +15,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags default_build
     -X \"github.com/AliyunContainerService/terway/pkg/aliyun/credential.kubernetesAlicloudIdentity=terway-controlplane/`git rev-parse --short HEAD 2>/dev/null`\"" \
     -o terway-controlplane  cmd/terway-controlplane/terway-controlplane.go
 
-FROM --platform=$TARGETPLATFORM debian:stable-slim as cert
+FROM --platform=$TARGETPLATFORM debian:stable-slim AS cert
 RUN apt-get update && apt-get -uy upgrade
 RUN apt-get -y install ca-certificates && update-ca-certificates
 

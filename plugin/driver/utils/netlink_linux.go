@@ -33,7 +33,7 @@ func NetlinkFamily(ip net.IP) int {
 
 func LinkSetName(link netlink.Link, name string) error {
 	cmd := fmt.Sprintf("ip link set %s name %s", link.Attrs().Name, name)
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.LinkSetName(link, name)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -43,7 +43,7 @@ func LinkSetName(link netlink.Link, name string) error {
 
 func LinkAdd(link netlink.Link) error {
 	cmd := fmt.Sprintf("ip link add %s type %s", link.Attrs().Name, link.Type())
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.LinkAdd(link)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -53,7 +53,7 @@ func LinkAdd(link netlink.Link) error {
 
 func LinkSetUp(link netlink.Link) error {
 	cmd := fmt.Sprintf("ip link set %s up", link.Attrs().Name)
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.LinkSetUp(link)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -63,7 +63,7 @@ func LinkSetUp(link netlink.Link) error {
 
 func LinkSetDown(link netlink.Link) error {
 	cmd := fmt.Sprintf("ip link set %s down", link.Attrs().Name)
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.LinkSetDown(link)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -73,7 +73,7 @@ func LinkSetDown(link netlink.Link) error {
 
 func LinkDel(link netlink.Link) error {
 	cmd := fmt.Sprintf("ip link del %s", link.Attrs().Name)
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.LinkDel(link)
 	if err != nil {
 		if _, ok := err.(netlink.LinkNotFoundError); ok {
@@ -86,7 +86,7 @@ func LinkDel(link netlink.Link) error {
 
 func LinkSetMTU(link netlink.Link, mtu int) error {
 	cmd := fmt.Sprintf("ip link set %s mtu %d", link.Attrs().Name, mtu)
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.LinkSetMTU(link, mtu)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -96,7 +96,7 @@ func LinkSetMTU(link netlink.Link, mtu int) error {
 
 func AddrDel(link netlink.Link, addr *netlink.Addr) error {
 	cmd := fmt.Sprintf("ip addr del %s dev %s", addr.IPNet.String(), link.Attrs().Name)
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.AddrDel(link, addr)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -106,7 +106,7 @@ func AddrDel(link netlink.Link, addr *netlink.Addr) error {
 
 func AddrReplace(link netlink.Link, addr *netlink.Addr) error {
 	cmd := fmt.Sprintf("ip addr replace %s dev %s", addr.IPNet.String(), link.Attrs().Name)
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.AddrReplace(link, addr)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -116,7 +116,7 @@ func AddrReplace(link netlink.Link, addr *netlink.Addr) error {
 
 func RouteReplace(route *netlink.Route) error {
 	cmd := fmt.Sprintf("ip route replace %s", route.String())
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.RouteReplace(route)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -126,7 +126,7 @@ func RouteReplace(route *netlink.Route) error {
 
 func RouteDel(route *netlink.Route) error {
 	cmd := fmt.Sprintf("ip route del %s", route.String())
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.RouteDel(route)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -136,7 +136,7 @@ func RouteDel(route *netlink.Route) error {
 
 func NeighSet(neigh *netlink.Neigh) error {
 	cmd := fmt.Sprintf("ip neigh replace %s", neigh.String())
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.NeighSet(neigh)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -146,7 +146,7 @@ func NeighSet(neigh *netlink.Neigh) error {
 
 func RuleAdd(rule *netlink.Rule) error {
 	cmd := fmt.Sprintf("ip rule add %s", rule.String())
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.RuleAdd(rule)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -156,7 +156,7 @@ func RuleAdd(rule *netlink.Rule) error {
 
 func RuleDel(rule *netlink.Rule) error {
 	cmd := fmt.Sprintf("ip rule del %s", rule.String())
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.RuleDel(rule)
 	if err != nil {
 		rule.IifName = ""
@@ -172,7 +172,7 @@ func RuleDel(rule *netlink.Rule) error {
 
 func LinkSetNsFd(link netlink.Link, netNS ns.NetNS) error {
 	cmd := fmt.Sprintf("ip link set %s netns %s", link.Attrs().Name, netNS.Path())
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.LinkSetNsFd(link, int(netNS.Fd()))
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -182,7 +182,7 @@ func LinkSetNsFd(link netlink.Link, netNS ns.NetNS) error {
 
 func QdiscReplace(qdisc netlink.Qdisc) error {
 	cmd := fmt.Sprintf("tc qdisc replace %s", qdisc.Attrs().String())
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.QdiscReplace(qdisc)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -191,7 +191,7 @@ func QdiscReplace(qdisc netlink.Qdisc) error {
 }
 func QdiscDel(qdisc netlink.Qdisc) error {
 	cmd := fmt.Sprintf("tc qdisc del %s", qdisc.Attrs().String())
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.QdiscDel(qdisc)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
