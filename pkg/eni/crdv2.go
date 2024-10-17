@@ -208,10 +208,11 @@ func (r *CRDV2) multiIP(ctx context.Context, cni *daemon.CNI, request ResourceRe
 					MAC:              eniInfo.MacAddress,
 					SecurityGroupIDs: eniInfo.SecurityGroupIDs,
 					Trunk:            false,
-					ERdma:            eniInfo.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance,
-					GatewayIP:        gw,
-					VSwitchCIDR:      vsw,
-					VSwitchID:        eniInfo.VSwitchID,
+					ERdma: node.Spec.ENISpec.EnableERDMA &&
+						eniInfo.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance,
+					GatewayIP:   gw,
+					VSwitchCIDR: vsw,
+					VSwitchID:   eniInfo.VSwitchID,
 				},
 				IP: ip,
 			})

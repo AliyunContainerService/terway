@@ -441,14 +441,14 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	releasePodNotFound(l, podsMapper, ipv4Map, ipv6Map)
 
 	// 2. assign ip from local pool
-	unSucceedPods := assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map)
+	unSucceedPods := assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA)
 
 	// 3. if there is no enough ip, try to allocate from api
 	err := n.addIP(ctx, unSucceedPods, node)
 
 	// 4. after all is assigned , we can re-allocate ip
 	ipv4Map, ipv6Map = buildIPMap(podsMapper, node.Status.NetworkInterfaces)
-	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map)
+	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA)
 
 	if err == nil {
 		err = n.gc(ctx, node)
@@ -475,7 +475,7 @@ func releasePodNotFound(log logr.Logger, podsMapper map[string]*PodRequest, ipMa
 }
 
 // DO NOT assign pod ip if pod already has one
-func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, ipv4Map, ipv6Map map[string]*EniIP) map[string]*PodRequest {
+func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, ipv4Map, ipv6Map map[string]*EniIP, enableEDRMA bool) map[string]*PodRequest {
 	pendingPods := lo.PickBy(podsMapper, func(key string, value *PodRequest) bool {
 		if value.RequireIPv4 && value.ipv4Ref == nil {
 			return true
@@ -525,8 +525,16 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 						continue
 					}
 
+					// schedule to erdma card
 					if info.RequireERDMA &&
 						v.NetworkInterface.NetworkInterfaceTrafficMode != networkv1beta1.NetworkInterfaceTrafficModeHighPerformance {
+						continue
+					}
+
+					// do not schedule to erdma if node has erdma enable
+					if !info.RequireERDMA &&
+						enableEDRMA &&
+						v.NetworkInterface.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance {
 						continue
 					}
 
@@ -560,6 +568,12 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 
 					if info.RequireERDMA &&
 						v.NetworkInterface.NetworkInterfaceTrafficMode != networkv1beta1.NetworkInterfaceTrafficModeHighPerformance {
+						continue
+					}
+
+					if !info.RequireERDMA &&
+						enableEDRMA &&
+						v.NetworkInterface.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance {
 						continue
 					}
 
