@@ -750,7 +750,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resul := assignIPFromLocalPool(tt.args.log, tt.args.podsMapper, tt.args.ipv4Map, tt.args.ipv6Map)
+			resul := assignIPFromLocalPool(tt.args.log, tt.args.podsMapper, tt.args.ipv4Map, tt.args.ipv6Map, false)
 			tt.checkResultFunc(t, resul)
 			tt.checkPodsMapFunc(t, tt.args.podsMapper)
 		})
