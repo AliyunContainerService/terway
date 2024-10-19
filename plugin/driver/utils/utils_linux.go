@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -41,41 +42,41 @@ func EnsureHostNsConfig(ipv4, ipv6 bool) error {
 }
 
 // EnsureLinkUp set link up,return changed and err
-func EnsureLinkUp(link netlink.Link) (bool, error) {
+func EnsureLinkUp(ctx context.Context, link netlink.Link) (bool, error) {
 	if link.Attrs().Flags&net.FlagUp != 0 {
 		return false, nil
 	}
-	return true, LinkSetUp(link)
+	return true, LinkSetUp(ctx, link)
 }
 
 // EnsureLinkMTU set link mtu,return changed and err
-func EnsureLinkMTU(link netlink.Link, mtu int) (bool, error) {
+func EnsureLinkMTU(ctx context.Context, link netlink.Link, mtu int) (bool, error) {
 	if link.Attrs().MTU == mtu {
 		return false, nil
 	}
-	return true, LinkSetMTU(link, mtu)
+	return true, LinkSetMTU(ctx, link, mtu)
 }
 
-func EnsureLinkName(link netlink.Link, name string) (bool, error) {
+func EnsureLinkName(ctx context.Context, link netlink.Link, name string) (bool, error) {
 	if link.Attrs().Name == name {
 		return false, nil
 	}
-	return true, LinkSetName(link, name)
+	return true, LinkSetName(ctx, link, name)
 }
 
 // DelLinkByName del by name and ignore if link not present
-func DelLinkByName(ifName string) error {
+func DelLinkByName(ctx context.Context, ifName string) error {
 	contLink, err := netlink.LinkByName(ifName)
 	if err != nil {
 		if _, ok := err.(netlink.LinkNotFoundError); ok { //nolint
 			return nil
 		}
 	}
-	return LinkDel(contLink)
+	return LinkDel(ctx, contLink)
 }
 
 // EnsureAddr ensure only one IP for each family is present on link
-func EnsureAddr(link netlink.Link, expect *netlink.Addr) (bool, error) {
+func EnsureAddr(ctx context.Context, link netlink.Link, expect *netlink.Addr) (bool, error) {
 	var changed bool
 
 	addrList, err := netlink.AddrList(link, NetlinkFamily(expect.IP))
@@ -94,7 +95,7 @@ func EnsureAddr(link netlink.Link, expect *netlink.Addr) (bool, error) {
 			continue
 		}
 
-		err := AddrDel(link, &addr)
+		err := AddrDel(ctx, link, &addr)
 		if err != nil {
 			return false, err
 		}
@@ -103,7 +104,7 @@ func EnsureAddr(link netlink.Link, expect *netlink.Addr) (bool, error) {
 	if found {
 		return changed, nil
 	}
-	return true, AddrReplace(link, expect)
+	return true, AddrReplace(ctx, link, expect)
 }
 
 // FoundRoutes look up routes
@@ -134,7 +135,7 @@ func FoundRoutes(expected *netlink.Route) ([]netlink.Route, error) {
 }
 
 // EnsureRoute will call ip route replace if route is not found
-func EnsureRoute(expected *netlink.Route) (bool, error) {
+func EnsureRoute(ctx context.Context, expected *netlink.Route) (bool, error) {
 	routes, err := FoundRoutes(expected)
 	if err != nil {
 		return false, fmt.Errorf("error list expected: %v", err)
@@ -143,7 +144,7 @@ func EnsureRoute(expected *netlink.Route) (bool, error) {
 		return false, nil
 	}
 
-	return true, RouteReplace(expected)
+	return true, RouteReplace(ctx, expected)
 }
 
 func NewIPNetWithMaxMask(ipNet *net.IPNet) *net.IPNet {
@@ -220,7 +221,7 @@ func FindIPRule(rule *netlink.Rule) ([]netlink.Rule, error) {
 	return netlink.RuleListFiltered(family, rule, filterMask)
 }
 
-func EnsureIPRule(expected *netlink.Rule) (bool, error) {
+func EnsureIPRule(ctx context.Context, expected *netlink.Rule) (bool, error) {
 	changed := false
 
 	// 1. clean exist rules if needed
@@ -242,7 +243,7 @@ func EnsureIPRule(expected *netlink.Rule) (bool, error) {
 		}
 		if del {
 			changed = true
-			err = RuleDel(&rule)
+			err = RuleDel(ctx, &rule)
 			if err != nil {
 				return changed, err
 			}
@@ -253,7 +254,7 @@ func EnsureIPRule(expected *netlink.Rule) (bool, error) {
 	if found {
 		return changed, nil
 	}
-	return true, RuleAdd(expected)
+	return true, RuleAdd(ctx, expected)
 }
 
 func GenerateIPv6Sysctl(ifName string, disableRA, enableForward bool) map[string][]string {
@@ -311,7 +312,7 @@ func GetHostIP(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
 	}, nil
 }
 
-func EnsureNeigh(neigh *netlink.Neigh) (bool, error) {
+func EnsureNeigh(ctx context.Context, neigh *netlink.Neigh) (bool, error) {
 	var neighs []netlink.Neigh
 	var err error
 	if terwayIP.IPv6(neigh.IP) {
@@ -330,7 +331,7 @@ func EnsureNeigh(neigh *netlink.Neigh) (bool, error) {
 		}
 	}
 	if !found {
-		return true, NeighSet(neigh)
+		return true, NeighSet(ctx, neigh)
 	}
 	return false, err
 }
@@ -377,8 +378,8 @@ func EnsureNetConfSet(ipv4, ipv6 bool) error {
 	return err
 }
 
-func EnsureVlanUntagger(link netlink.Link) error {
-	if err := EnsureClsActQdsic(link); err != nil {
+func EnsureVlanUntagger(ctx context.Context, link netlink.Link) error {
+	if err := EnsureClsActQdsic(ctx, link); err != nil {
 		return fmt.Errorf("error ensure cls act qdisc for %s vlan untag, %w", link.Attrs().Name, err)
 	}
 	filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_INGRESS)
@@ -430,8 +431,8 @@ func EnsureVlanUntagger(link netlink.Link) error {
 }
 
 // EnsureVlanTag use tc-vlan set vlan tag
-func EnsureVlanTag(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, vid uint16) error {
-	err := EnsureClsActQdsic(link)
+func EnsureVlanTag(ctx context.Context, link netlink.Link, ipNetSet *terwayTypes.IPNetSet, vid uint16) error {
+	err := EnsureClsActQdsic(ctx, link)
 	if err != nil {
 		return fmt.Errorf("error ensure cls act qdisc for %s vlan tag, %w", link.Attrs().Name, err)
 	}
@@ -500,7 +501,7 @@ func EnsureVlanTag(link netlink.Link, ipNetSet *terwayTypes.IPNetSet, vid uint16
 	return err
 }
 
-func EnsureClsActQdsic(link netlink.Link) error {
+func EnsureClsActQdsic(ctx context.Context, link netlink.Link) error {
 	qds, err := netlink.QdiscList(link)
 	if err != nil {
 		return fmt.Errorf("list qdisc for dev %s error, %w", link.Attrs().Name, err)
@@ -519,14 +520,14 @@ func EnsureClsActQdsic(link netlink.Link) error {
 		},
 		QdiscType: "clsact",
 	}
-	if err := QdiscReplace(qdisc); err != nil {
+	if err := QdiscReplace(ctx, qdisc); err != nil {
 		return fmt.Errorf("replace clsact qdisc for dev %s error, %w", link.Attrs().Name, err)
 	}
 	return nil
 }
 
 // EnsurePrioQdiscAt10 write qdisc  attach under mq
-func EnsurePrioQdiscAt10(link netlink.Link) error {
+func EnsurePrioQdiscAt10(ctx context.Context, link netlink.Link) error {
 	qds, err := netlink.QdiscList(link)
 	if err != nil {
 		return fmt.Errorf("list qdisc for dev %s error, %w", link.Attrs().Name, err)
@@ -540,7 +541,7 @@ func EnsurePrioQdiscAt10(link netlink.Link) error {
 
 		_, ok := q.(*netlink.Prio)
 		if !ok {
-			err = QdiscReplace(netlink.NewPrio(netlink.QdiscAttrs{
+			err = QdiscReplace(ctx, netlink.NewPrio(netlink.QdiscAttrs{
 				LinkIndex: link.Attrs().Index,
 				Parent:    q.Attrs().Parent,
 			}))
@@ -553,7 +554,7 @@ func EnsurePrioQdiscAt10(link netlink.Link) error {
 }
 
 // EnsureMQQdisc write qdisc
-func EnsureMQQdisc(link netlink.Link) error {
+func EnsureMQQdisc(ctx context.Context, link netlink.Link) error {
 	qds, err := netlink.QdiscList(link)
 	if err != nil {
 		return fmt.Errorf("list qdisc for dev %s error, %w", link.Attrs().Name, err)
@@ -570,10 +571,10 @@ func EnsureMQQdisc(link netlink.Link) error {
 		}
 	}
 	if prev != nil {
-		_ = QdiscDel(prev)
+		_ = QdiscDel(ctx, prev)
 	}
 
-	return QdiscReplace(&netlink.GenericQdisc{
+	return QdiscReplace(ctx, &netlink.GenericQdisc{
 		QdiscAttrs: netlink.QdiscAttrs{
 			LinkIndex: link.Attrs().Index,
 			Parent:    netlink.HANDLE_ROOT,
@@ -677,12 +678,12 @@ func DelFilter(link netlink.Link, parentID uint32, ipNetSet *terwayTypes.IPNetSe
 }
 
 // SetEgressPriority write egress priority rule for pod
-func SetEgressPriority(link netlink.Link, classID uint32, ipNetSet *terwayTypes.IPNetSet) error {
-	err := EnsureMQQdisc(link)
+func SetEgressPriority(ctx context.Context, link netlink.Link, classID uint32, ipNetSet *terwayTypes.IPNetSet) error {
+	err := EnsureMQQdisc(ctx, link)
 	if err != nil {
 		return err
 	}
-	err = EnsurePrioQdiscAt10(link)
+	err = EnsurePrioQdiscAt10(ctx, link)
 	if err != nil {
 		return err
 	}
@@ -730,7 +731,7 @@ func SetupTC(link netlink.Link, bandwidthInBytes uint64) error {
 }
 
 // GenericTearDown target to clean all related resource as much as possible
-func GenericTearDown(netNS ns.NetNS) error {
+func GenericTearDown(ctx context.Context, netNS ns.NetNS) error {
 	var errList []error
 	hostNetNS, err := ns.GetCurrentNS()
 	if err != nil {
@@ -745,18 +746,18 @@ func GenericTearDown(netNS ns.NetNS) error {
 			if l.Attrs().Name == "lo" {
 				continue
 			}
-			_ = LinkSetDown(l)
+			_ = LinkSetDown(ctx, l)
 			switch l.(type) {
 			case *netlink.IPVlan, *netlink.Vlan, *netlink.Veth, *netlink.Ifb, *netlink.Dummy:
-				errList = append(errList, LinkDel(l))
+				errList = append(errList, LinkDel(ctx, l))
 			case *netlink.Device:
 				name, err := ip.RandomVethName()
 				if err != nil {
 					errList = append(errList, err)
 					continue
 				}
-				errList = append(errList, LinkSetName(l, name))
-				errList = append(errList, LinkSetNsFd(l, hostNetNS))
+				errList = append(errList, LinkSetName(ctx, l, name))
+				errList = append(errList, LinkSetNsFd(ctx, l, hostNetNS))
 			default:
 				continue
 			}
@@ -768,12 +769,12 @@ func GenericTearDown(netNS ns.NetNS) error {
 			errList = append(errList, err)
 		}
 	}
-	errList = append(errList, CleanIPRules())
+	errList = append(errList, CleanIPRules(ctx))
 	return k8sErr.NewAggregate(errList)
 }
 
 // CleanIPRules del ip rule for detached devs
-func CleanIPRules() (err error) {
+func CleanIPRules(ctx context.Context) (err error) {
 	var rules []netlink.Rule
 	rules, err = netlink.RuleList(netlink.FAMILY_ALL)
 	if err != nil {
@@ -808,7 +809,7 @@ func CleanIPRules() (err error) {
 			if !found {
 				continue
 			}
-			_ = RuleDel(&r)
+			_ = RuleDel(ctx, &r)
 		}
 	}()
 	for _, r := range rules {
@@ -827,7 +828,7 @@ func CleanIPRules() (err error) {
 			if _, ok := err.(netlink.LinkNotFoundError); !ok {
 				return err
 			}
-			err = RuleDel(&r)
+			err = RuleDel(ctx, &r)
 			if err != nil {
 				return err
 			}

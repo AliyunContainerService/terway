@@ -18,8 +18,8 @@ import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/samber/lo"
-	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
 
 	"go.uber.org/atomic"
 	corev1 "k8s.io/api/core/v1"
@@ -175,7 +175,7 @@ func installDriversByOOS(ctx context.Context, config *envconf.Config) error {
 	for _, node := range nodeList.Items {
 		providerID := strings.Split(node.Spec.ProviderID, ".")
 		if len(providerID) != 2 {
-			logrus.Warnf("error parse providerID: %v", node.Spec.ProviderID)
+			klog.Warningf("error parse providerID: %v", providerID)
 			continue
 		}
 		instanceIDs = append(instanceIDs, providerID[1])

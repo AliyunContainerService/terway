@@ -1,6 +1,7 @@
 package datapath
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -304,7 +305,7 @@ func generateENICfgForPolicy(cfg *types.SetupConfig, link netlink.Link, table in
 	return contCfg
 }
 
-func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
+func (d *PolicyRoute) Setup(ctx context.Context, cfg *types.SetupConfig, netNS ns.NetNS) error {
 	eni, err := netlink.LinkByIndex(cfg.ENIIndex)
 	if err != nil {
 		return err
@@ -318,7 +319,7 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	if cfg.ERDMA {
 		vethCfg.HwAddr = eni.Attrs().HardwareAddr
 	}
-	err = veth.Setup(vethCfg, netNS)
+	err = veth.Setup(ctx, vethCfg, netNS)
 	if err != nil {
 		return err
 	}
@@ -337,7 +338,7 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 		}
 
 		contCfg := generateContCfgForPolicy(cfg, contLink, hostVETH.Attrs().HardwareAddr)
-		err = nic.Setup(contLink, contCfg)
+		err = nic.Setup(ctx, contLink, contCfg)
 		if err != nil {
 			return err
 		}
@@ -362,7 +363,7 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	}
 
 	if cfg.EnableNetworkPriority {
-		err = utils.SetEgressPriority(eni, cfg.NetworkPriority, cfg.ContainerIPNet)
+		err = utils.SetEgressPriority(ctx, eni, cfg.NetworkPriority, cfg.ContainerIPNet)
 		if err != nil {
 			return err
 		}
@@ -371,20 +372,20 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	table := utils.GetRouteTableID(eni.Attrs().Index)
 
 	eniCfg := generateENICfgForPolicy(cfg, eni, table)
-	err = nic.Setup(eni, eniCfg)
+	err = nic.Setup(ctx, eni, eniCfg)
 	if err != nil {
 		return fmt.Errorf("setup eni config, %w", err)
 	}
 
 	if cfg.StripVlan {
-		err = utils.EnsureVlanTag(eni, cfg.ContainerIPNet, uint16(cfg.Vid))
+		err = utils.EnsureVlanTag(ctx, eni, cfg.ContainerIPNet, uint16(cfg.Vid))
 		if err != nil {
 			return err
 		}
 	}
 
 	hostVETHCfg := generateHostPeerCfgForPolicy(cfg, hostVETH, table)
-	err = nic.Setup(hostVETH, hostVETHCfg)
+	err = nic.Setup(ctx, hostVETH, hostVETHCfg)
 	if err != nil {
 		return fmt.Errorf("setup host veth config, %w", err)
 	}
@@ -395,20 +396,20 @@ func (d *PolicyRoute) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	return nil
 }
 
-func (d *PolicyRoute) Check(cfg *types.CheckConfig) error {
+func (d *PolicyRoute) Check(ctx context.Context, cfg *types.CheckConfig) error {
 	err := cfg.NetNS.Do(func(netNS ns.NetNS) error {
 		link, err := netlink.LinkByName(cfg.ContainerIfName)
 		if err != nil {
 			return err
 		}
-		changed, err := utils.EnsureLinkUp(link)
+		changed, err := utils.EnsureLinkUp(ctx, link)
 		if err != nil {
 			return err
 		}
 		if changed {
 			cfg.RecordPodEvent(fmt.Sprintf("link %s set up", cfg.ContainerIfName))
 		}
-		changed, err = utils.EnsureLinkMTU(link, cfg.MTU)
+		changed, err = utils.EnsureLinkMTU(ctx, link, cfg.MTU)
 		if err != nil {
 			return err
 		}
@@ -421,7 +422,7 @@ func (d *PolicyRoute) Check(cfg *types.CheckConfig) error {
 	return err
 }
 
-func (d *PolicyRoute) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
+func (d *PolicyRoute) Teardown(ctx context.Context, cfg *types.TeardownCfg, netNS ns.NetNS) error {
 	if cfg.ContainerIPNet == nil {
 		return nil
 	}
@@ -434,7 +435,7 @@ func (d *PolicyRoute) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
 			return err
 		}
 		for _, r := range rules {
-			err = utils.RuleDel(&r)
+			err = utils.RuleDel(ctx, &r)
 			if err != nil {
 				return err
 			}

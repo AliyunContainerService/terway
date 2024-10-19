@@ -3,6 +3,7 @@
 package datapath
 
 import (
+	"context"
 	"net"
 	"runtime"
 	"testing"
@@ -188,7 +189,7 @@ func TestDataPathIPvlanL2(t *testing.T) {
 	}
 	d := NewIPVlanDriver()
 
-	err = d.Setup(cfg, containerNS)
+	err = d.Setup(context.Background(), cfg, containerNS)
 	assert.NoError(t, err)
 
 	_ = containerNS.Do(func(netNS ns.NetNS) error {
@@ -275,10 +276,10 @@ func TestDataPathIPvlanL2(t *testing.T) {
 	assert.NoError(t, err)
 
 	// tear down
-	err = utils.GenericTearDown(containerNS)
+	err = utils.GenericTearDown(context.Background(), containerNS)
 	assert.NoError(t, err)
 
-	err = d.Teardown(&types2.TeardownCfg{
+	err = d.Teardown(context.Background(), &types2.TeardownCfg{
 		HostVETHName:    cfg.HostVETHName,
 		ContainerIfName: cfg.ContainerIfName,
 		ContainerIPNet: &types.IPNetSet{

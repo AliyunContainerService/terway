@@ -6,8 +6,6 @@ import (
 	"io"
 	"log"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
@@ -34,7 +32,6 @@ func init() {
 func main() {
 	flag.Parse()
 	log.SetOutput(io.Discard)
-	logrus.SetOutput(io.Discard)
 	ins := instance.GetInstanceMeta()
 
 	providers := []credential.Interface{

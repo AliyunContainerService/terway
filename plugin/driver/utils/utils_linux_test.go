@@ -3,6 +3,7 @@
 package utils
 
 import (
+	"context"
 	"net"
 	"runtime"
 	"testing"
@@ -59,7 +60,7 @@ func TestEnsureVlanUntagger(t *testing.T) {
 	eni, err := netlink.LinkByName("eni")
 	assert.NoError(t, err)
 
-	err = EnsureVlanUntagger(eni)
+	err = EnsureVlanUntagger(context.Background(), eni)
 	if err != nil {
 		t.Errorf("error ensure vlan untagger, %v", err)
 		t.Fail()
@@ -108,7 +109,7 @@ var _ = Describe("Test TC filter", func() {
 			eni, err := netlink.LinkByName(nicName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = EnsureMQQdisc(eni)
+			err = EnsureMQQdisc(context.Background(), eni)
 			Expect(err).NotTo(HaveOccurred())
 
 			qds, err := netlink.QdiscList(eni)
@@ -137,7 +138,7 @@ var _ = Describe("Test TC filter", func() {
 			eni, err := netlink.LinkByName(nicName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = SetEgressPriority(eni, netlink.MakeHandle(1, 1), &terwayTypes.IPNetSet{
+			err = SetEgressPriority(context.Background(), eni, netlink.MakeHandle(1, 1), &terwayTypes.IPNetSet{
 				IPv4: &net.IPNet{
 					IP:   net.ParseIP("192.168.1.1"),
 					Mask: net.CIDRMask(32, 32),
@@ -184,7 +185,7 @@ var _ = Describe("Test TC filter", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("add new ip", func() {
-				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
+				err = EnsureVlanTag(context.Background(), eni, &terwayTypes.IPNetSet{
 					IPv4: &net.IPNet{
 						IP:   net.ParseIP("192.168.1.1"),
 						Mask: net.CIDRMask(32, 32),
@@ -203,7 +204,7 @@ var _ = Describe("Test TC filter", func() {
 			})
 
 			By("re-add same ip shoud succeed", func() {
-				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
+				err = EnsureVlanTag(context.Background(), eni, &terwayTypes.IPNetSet{
 					IPv4: &net.IPNet{
 						IP:   net.ParseIP("192.168.1.1"),
 						Mask: net.CIDRMask(32, 32),
@@ -222,7 +223,7 @@ var _ = Describe("Test TC filter", func() {
 			})
 
 			By("add new rule should success", func() {
-				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
+				err = EnsureVlanTag(context.Background(), eni, &terwayTypes.IPNetSet{
 					IPv4: &net.IPNet{
 						IP:   net.ParseIP("192.168.1.2"),
 						Mask: net.CIDRMask(32, 32),
@@ -260,7 +261,7 @@ var _ = Describe("Test TC filter", func() {
 			})
 
 			By("add same ip vid should be updated", func() {
-				err = EnsureVlanTag(eni, &terwayTypes.IPNetSet{
+				err = EnsureVlanTag(context.Background(), eni, &terwayTypes.IPNetSet{
 					IPv4: &net.IPNet{
 						IP:   net.ParseIP("192.168.1.1"),
 						Mask: net.CIDRMask(32, 32),

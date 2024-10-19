@@ -3,6 +3,7 @@
 package datapath
 
 import (
+	"context"
 	"net"
 	"runtime"
 	"testing"
@@ -81,7 +82,7 @@ func TestDataPathPolicyRoute(t *testing.T) {
 
 	d := &PolicyRoute{}
 
-	err = d.Setup(cfg, containerNS)
+	err = d.Setup(context.Background(), cfg, containerNS)
 	assert.NoError(t, err)
 
 	_ = containerNS.Do(func(netNS ns.NetNS) error {
@@ -175,10 +176,10 @@ func TestDataPathPolicyRoute(t *testing.T) {
 
 	// tear down
 
-	err = utils.GenericTearDown(containerNS)
+	err = utils.GenericTearDown(context.Background(), containerNS)
 	assert.NoError(t, err)
 
-	err = d.Teardown(&types.TeardownCfg{
+	err = d.Teardown(context.Background(), &types.TeardownCfg{
 		HostVETHName:    cfg.HostVETHName,
 		ContainerIfName: cfg.ContainerIfName,
 		ContainerIPNet: &terwayTypes.IPNetSet{

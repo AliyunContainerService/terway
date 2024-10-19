@@ -8,10 +8,8 @@ import (
 
 	"github.com/containernetworking/cni/pkg/skel"
 	cniTypes "github.com/containernetworking/cni/pkg/types"
-	current "github.com/containernetworking/cni/pkg/types/100"
-	"github.com/containernetworking/plugins/pkg/ipam"
 	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/sirupsen/logrus"
+	"github.com/go-logr/logr"
 
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/plugin/datapath"
@@ -98,8 +96,10 @@ func isNSPathNotExist(err error) bool {
 	return ok
 }
 
-func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) (containerIPNet *terwayTypes.IPNetSet, gatewayIPSet *terwayTypes.IPSet, err error) {
+func doCmdAdd(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) (containerIPNet *terwayTypes.IPNetSet, gatewayIPSet *terwayTypes.IPSet, err error) {
 	var conf, cniNetns, k8sConfig, args = cmdArgs.conf, cmdArgs.netNS, cmdArgs.k8sArgs, cmdArgs.inputArgs
+
+	log := logr.FromContextOrDiscard(ctx)
 
 	start := time.Now()
 	defer func() {
@@ -144,7 +144,7 @@ func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 
 	defer func() {
 		if err != nil {
-			logger.Error(err)
+			log.Error(err, "failed to allocate IP")
 			releaseCtx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout)
 			defer cancel()
 			_, _ = client.ReleaseIP(releaseCtx, &rpc.ReleaseIPRequest{
@@ -192,55 +192,10 @@ func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 		setupCfg.HostVETHName, _ = link.VethNameForPod(string(k8sConfig.K8S_POD_NAME), string(k8sConfig.K8S_POD_NAMESPACE), netConf.IfName, defaultVethPrefix)
 		setupCfg.HostIPSet = hostIPSet
 		setupCfg.MultiNetwork = multiNetwork
-		logger.Debugf("setupCfg %#v", setupCfg)
+		log.V(4).Info("setupCfg", "cfg", setupCfg)
 
 		switch setupCfg.DP {
-		case types.VPCRoute:
-			utils.Hook.AddExtraInfo("dp", "vpcRoute")
-
-			var r cniTypes.Result
-			r, err = ipam.ExecAdd(delegateIpam, []byte(fmt.Sprintf(delegateConf, setupCfg.ContainerIPNet.IPv4)))
-			if err != nil {
-				err = fmt.Errorf("error allocate ip from delegate ipam %v: %v", delegateIpam, err)
-				return
-			}
-			var ipamResult *current.Result
-			ipamResult, err = current.NewResultFromResult(r)
-			if err != nil {
-				err = fmt.Errorf("error get result from delegate ipam result %v: %v", delegateIpam, err)
-				return
-			}
-
-			err = func() (err error) {
-				defer func() {
-					if err != nil {
-						err = ipam.ExecDel(delegateIpam, []byte(fmt.Sprintf(delegateConf, setupCfg.ContainerIPNet.IPv4)))
-					}
-				}()
-				if len(ipamResult.IPs) != 1 {
-					return fmt.Errorf("error get result from delegate ipam result %v: ipam result is not one ip", delegateIpam)
-				}
-				podIPAddr := ipamResult.IPs[0].Address
-				gateway := ipamResult.IPs[0].Gateway
-
-				containerIPNet = &terwayTypes.IPNetSet{
-					IPv4: &podIPAddr,
-				}
-				gatewayIPSet = &terwayTypes.IPSet{
-					IPv4: gateway,
-				}
-
-				setupCfg.ContainerIPNet = containerIPNet
-				setupCfg.GatewayIP = gatewayIPSet
-
-				return datapath.NewVPCRoute().Setup(setupCfg, cniNetns)
-			}()
-			if err != nil {
-				return
-			}
 		case types.IPVlan:
-			utils.Hook.AddExtraInfo("dp", "ipvlan")
-
 			if conf.IPVlan() {
 				available := false
 				available, err = datapath.CheckIPVLanAvailable()
@@ -252,7 +207,8 @@ func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 						containerIPNet = setupCfg.ContainerIPNet
 						gatewayIPSet = setupCfg.GatewayIP
 					}
-					err = datapath.NewIPVlanDriver().Setup(setupCfg, cniNetns)
+					ctx = logr.NewContext(ctx, log.WithValues("dp", "ipvlan"))
+					err = datapath.NewIPVlanDriver().Setup(ctx, setupCfg, cniNetns)
 					if err != nil {
 						return
 					}
@@ -269,36 +225,35 @@ func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 			}
 			fallthrough
 		case types.PolicyRoute:
-			utils.Hook.AddExtraInfo("dp", "policyRoute")
+			ctx = logr.NewContext(ctx, log.WithValues("dp", "policyRoute"))
 
 			if setupCfg.ContainerIfName == args.IfName {
 				containerIPNet = setupCfg.ContainerIPNet
 				gatewayIPSet = setupCfg.GatewayIP
 			}
-			err = datapath.NewPolicyRoute().Setup(setupCfg, cniNetns)
+			err = datapath.NewPolicyRoute().Setup(ctx, setupCfg, cniNetns)
 			if err != nil {
 				return
 			}
 		case types.ExclusiveENI:
-			utils.Hook.AddExtraInfo("dp", "exclusiveENI")
-
+			ctx = logr.NewContext(ctx, log.WithValues("dp", "exclusiveENI"))
 			if setupCfg.ContainerIfName == args.IfName {
 				containerIPNet = setupCfg.ContainerIPNet
 				gatewayIPSet = setupCfg.GatewayIP
 			}
 
-			err = datapath.NewExclusiveENIDriver().Setup(setupCfg, cniNetns)
+			err = datapath.NewExclusiveENIDriver().Setup(ctx, setupCfg, cniNetns)
 			if err != nil {
 				return
 			}
 		case types.Vlan:
-			utils.Hook.AddExtraInfo("dp", "vlan")
+			ctx = logr.NewContext(ctx, log.WithValues("dp", "vlan"))
 
 			if setupCfg.ContainerIfName == args.IfName {
 				containerIPNet = setupCfg.ContainerIPNet
 				gatewayIPSet = setupCfg.GatewayIP
 			}
-			err = datapath.NewVlan().Setup(setupCfg, cniNetns)
+			err = datapath.NewVlan().Setup(ctx, setupCfg, cniNetns)
 			if err != nil {
 				err = fmt.Errorf("setup, %w", err)
 				return
@@ -316,8 +271,10 @@ func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 	return
 }
 
-func doCmdDel(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
+func doCmdDel(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
 	var conf, cniNetns, k8sConfig = cmdArgs.conf, cmdArgs.netNS, cmdArgs.k8sArgs
+
+	log := logr.FromContextOrDiscard(ctx)
 
 	l, err := utils.GrabFileLock(terwayCNILock)
 	if err != nil {
@@ -325,10 +282,10 @@ func doCmdDel(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 	}
 
 	// try cleanup all resource
-	err = utils.GenericTearDown(cniNetns)
+	err = utils.GenericTearDown(ctx, cniNetns)
 	if err != nil {
 		_ = l.Close()
-		logger.Errorf("error teardown %s", err.Error())
+		log.Error(err, "error teardown")
 		return nil // swallow the error in case of containerd using
 	}
 	_ = l.Close()
@@ -355,21 +312,12 @@ func doCmdDel(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 			var teardownCfg *types.TeardownCfg
 			teardownCfg, err = parseTearDownConf(netConf, conf, getResult.IPType)
 			if err != nil {
-				logger.Errorf("error parse config, %s", err.Error())
+				log.Error(err, "error parse config")
 				return nil
 			}
 
 			switch teardownCfg.DP {
-			case types.VPCRoute:
-				utils.Hook.AddExtraInfo("dp", "vpcRoute")
-
-				err = ipam.ExecDel(delegateIpam, []byte(fmt.Sprintf(delegateConf, teardownCfg.ContainerIPNet.IPv4)))
-				if err != nil {
-					return fmt.Errorf("teardown network ipam for pod: %s-%s, %w", string(k8sConfig.K8S_POD_NAMESPACE), string(k8sConfig.K8S_POD_NAME), err)
-				}
 			case types.IPVlan:
-				utils.Hook.AddExtraInfo("dp", "ipvlan")
-
 				if conf.IPVlan() {
 					available := false
 					available, err = datapath.CheckIPVLanAvailable()
@@ -377,7 +325,8 @@ func doCmdDel(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 						return err
 					}
 					if available {
-						err = datapath.NewIPVlanDriver().Teardown(teardownCfg, cniNetns)
+						ctx = logr.NewContext(ctx, log.WithValues("dp", "ipvlan"))
+						err = datapath.NewIPVlanDriver().Teardown(ctx, teardownCfg, cniNetns)
 						if err != nil {
 							return err
 						}
@@ -386,8 +335,9 @@ func doCmdDel(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 				}
 				fallthrough
 			case types.PolicyRoute:
-				utils.Hook.AddExtraInfo("dp", "policyRoute")
-				err = datapath.NewPolicyRoute().Teardown(teardownCfg, cniNetns)
+				ctx = logr.NewContext(ctx, log.WithValues("dp", "policyRoute"))
+
+				err = datapath.NewPolicyRoute().Teardown(ctx, teardownCfg, cniNetns)
 				if err != nil {
 					return err
 				}
@@ -412,8 +362,9 @@ func doCmdDel(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 	return nil
 }
 
-func doCmdCheck(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
+func doCmdCheck(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
 	var conf, cniNetns, k8sConfig, args = cmdArgs.conf, cmdArgs.netNS, cmdArgs.k8sArgs, cmdArgs.inputArgs
+	log := logr.FromContextOrDiscard(ctx)
 
 	getResult, err := client.GetIPInfo(ctx, &rpc.GetInfoRequest{
 		K8SPodName:             string(k8sConfig.K8S_POD_NAME),
@@ -421,7 +372,7 @@ func doCmdCheck(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBack
 		K8SPodInfraContainerId: string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID),
 	})
 	if err != nil {
-		logger.Debug(err)
+		log.V(4).Error(err, "cni check filed")
 		return nil
 	}
 
@@ -470,7 +421,7 @@ func doCmdCheck(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBack
 
 		switch checkCfg.DP {
 		case types.IPVlan:
-			utils.Hook.AddExtraInfo("dp", "ipvlan")
+			log = log.WithValues("dp", "ipvlan")
 
 			if conf.IPVlan() {
 				available := false
@@ -479,7 +430,7 @@ func doCmdCheck(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBack
 					return err
 				}
 				if available {
-					err = datapath.NewIPVlanDriver().Check(checkCfg)
+					err = datapath.NewIPVlanDriver().Check(ctx, checkCfg)
 					if err != nil {
 						return err
 					}
@@ -488,23 +439,21 @@ func doCmdCheck(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBack
 			}
 			fallthrough
 		case types.PolicyRoute:
-			utils.Hook.AddExtraInfo("dp", "policyRoute")
-
-			err = datapath.NewPolicyRoute().Check(checkCfg)
+			ctx = logr.NewContext(ctx, log.WithValues("dp", "policyRoute"))
+			err = datapath.NewPolicyRoute().Check(ctx, checkCfg)
 			if err != nil {
 				return err
 			}
 		case types.ExclusiveENI:
-			utils.Hook.AddExtraInfo("dp", "exclusiveENI")
-
-			err = datapath.NewExclusiveENIDriver().Check(checkCfg)
+			ctx = logr.NewContext(ctx, log.WithValues("dp", "exclusiveENI"))
+			err = datapath.NewExclusiveENIDriver().Check(ctx, checkCfg)
 			if err != nil {
 				return err
 			}
 		case types.Vlan:
-			utils.Hook.AddExtraInfo("dp", "vlan")
+			ctx = logr.NewContext(ctx, log.WithValues("dp", "vlan"))
 
-			err = datapath.NewVlan().Check(checkCfg)
+			err = datapath.NewVlan().Check(ctx, checkCfg)
 			if err != nil {
 				return err
 			}
