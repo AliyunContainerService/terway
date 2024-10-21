@@ -75,7 +75,7 @@ type ReportStatus interface {
 }
 type NetworkInterface interface {
 	Allocate(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace)
-	Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool
+	Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) (bool, error)
 	Priority() int
 	Dispose(n int) int
 	Run(ctx context.Context, podResources []daemon.PodResources, wg *sync.WaitGroup) error
@@ -237,7 +237,11 @@ func (m *Manager) Release(ctx context.Context, cni *daemon.CNI, req *ReleaseRequ
 
 	for _, networkResource := range req.NetworkResources {
 		for _, ni := range m.networkInterfaces {
-			ok := ni.Release(ctx, cni, networkResource)
+			ok, err := ni.Release(ctx, cni, networkResource)
+			if err != nil {
+				return err
+			}
+
 			if ok {
 				if networkResource.ResourceType() == ResourceTypeLocalIP {
 					m.node.UnsetIPExhaustive()

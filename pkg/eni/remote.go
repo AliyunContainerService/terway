@@ -206,8 +206,8 @@ func (r *Remote) Allocate(ctx context.Context, cni *daemon.CNI, request Resource
 	return resp, nil
 }
 
-func (r *Remote) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool {
-	return false
+func (r *Remote) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) (bool, error) {
+	return false, nil
 }
 
 func (r *Remote) Dispose(n int) int {

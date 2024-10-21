@@ -447,9 +447,9 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 }
 
 // Release take the cni Del request and release resource to pool
-func (l *Local) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool {
+func (l *Local) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) (bool, error) {
 	if request.ResourceType() != ResourceTypeLocalIP {
-		return false
+		return false, nil
 	}
 
 	l.cond.L.Lock()
@@ -458,7 +458,7 @@ func (l *Local) Release(ctx context.Context, cni *daemon.CNI, request NetworkRes
 	res := request.(*LocalIPResource)
 
 	if l.eni == nil || l.eni.ID != res.ENI.ID {
-		return false
+		return false, nil
 	}
 
 	log := logf.FromContext(ctx)
@@ -478,7 +478,7 @@ func (l *Local) Release(ctx context.Context, cni *daemon.CNI, request NetworkRes
 		log.Info("release ipv6", "ipv6", res.IP.IPv6)
 	}
 
-	return true
+	return true, nil
 }
 
 // Priority for local resource only

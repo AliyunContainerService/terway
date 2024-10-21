@@ -33,8 +33,8 @@ type PodInfo struct {
 	PodIP           string      // used for eip and mip
 	PodIPs          types.IPSet // used for eip and mip
 	SandboxExited   bool
-	EipInfo         PodEipInfo // deprecated
-	IPStickTime     time.Duration
+	EipInfo         PodEipInfo    // deprecated
+	IPStickTime     time.Duration // deprecated
 	PodENI          bool
 	PodUID          string
 	NetworkPriority string

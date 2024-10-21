@@ -47,14 +47,14 @@ func (r *Trunk) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 	}
 }
 
-func (r *Trunk) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool {
+func (r *Trunk) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) (bool, error) {
 	switch request.ResourceType() {
 	case ResourceTypeLocalIP:
 		return r.local.Release(ctx, cni, request)
 	case ResourceTypeRemoteIP:
 		return r.remote.Release(ctx, cni, request)
 	default:
-		return false
+		return false, nil
 	}
 }
 

@@ -116,8 +116,8 @@ func (r *CRDV2) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 	}
 }
 
-func (r *CRDV2) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) bool {
-	return false
+func (r *CRDV2) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) (bool, error) {
+	return false, nil
 }
 
 func (r *CRDV2) Dispose(n int) int {

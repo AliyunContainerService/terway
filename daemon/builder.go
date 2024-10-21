@@ -400,7 +400,10 @@ func (b *NetworkServiceBuilder) PostInitForCRDV2() *NetworkServiceBuilder {
 	crdv2 := eni.NewCRDV2(b.service.k8s.NodeName())
 	mgr := eni.NewManager(0, 0, 0, 0, []eni.NetworkInterface{crdv2}, types.EniSelectionPolicy(b.config.EniSelectionPolicy), nil)
 
-	return b.RunENIMgr(b.ctx, mgr)
+	svc := b.RunENIMgr(b.ctx, mgr)
+	go b.service.startGarbageCollectionLoop(b.ctx)
+
+	return svc
 }
 
 func (b *NetworkServiceBuilder) InitResourceDB() *NetworkServiceBuilder {

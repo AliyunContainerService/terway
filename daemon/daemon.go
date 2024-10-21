@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -135,8 +136,8 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 		}
 	}()
 
-	// 0. Get pod Info
-	pod, err := n.k8s.GetPod(ctx, r.K8SPodNamespace, r.K8SPodName, true)
+	// 0. Get pod Info, change the req to no cache , we want to get the exact pod uid
+	pod, err := n.k8s.GetPod(ctx, r.K8SPodNamespace, r.K8SPodName, false)
 	if err != nil {
 		return nil, &types.Error{
 			Code: types.ErrInvalidArgsErrCode,
@@ -352,7 +353,11 @@ func (n *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest)
 			return reply, nil
 		}
 	}
-	if pod.IPStickTime == 0 {
+	if oldRes.PodInfo != nil && oldRes.PodInfo.PodUID != "" {
+		cni.PodUID = oldRes.PodInfo.PodUID
+	}
+
+	if n.ipamType == types.IPAMTypeCRD || pod.IPStickTime == 0 {
 		for _, resource := range oldRes.Resources {
 			res := parseNetworkResource(resource)
 			if res == nil {
@@ -510,6 +515,8 @@ func (n *networkService) gcPods(ctx context.Context) error {
 	n.Lock()
 	defer n.Unlock()
 
+	serviceLog.V(4).WithName("gc").Info("gcPods")
+
 	pods, err := n.k8s.GetLocalPods()
 	if err != nil {
 		return err
@@ -540,10 +547,15 @@ func (n *networkService) gcPods(ctx context.Context) error {
 			}
 		}
 
+		if serviceLog.V(4).Enabled() {
+			serviceLog.Info("pod res", "pod", podRes)
+		}
+
 		podID := utils.PodInfoKey(podRes.PodInfo.Namespace, podRes.PodInfo.Name)
 		if _, ok := exist[podID]; ok {
 			continue
 		}
+
 		// check kube-api again
 		ok, err := n.k8s.PodExist(podRes.PodInfo.Namespace, podRes.PodInfo.Name)
 		if err != nil || ok {
@@ -551,7 +563,7 @@ func (n *networkService) gcPods(ctx context.Context) error {
 		}
 
 		// that is old logic ... keep it
-		if podRes.PodInfo.IPStickTime != 0 {
+		if n.ipamType != types.IPAMTypeCRD && podRes.PodInfo.IPStickTime != 0 {
 			podRes.PodInfo.IPStickTime = 0
 
 			err = n.resourceDB.Put(podID, podRes)
@@ -566,6 +578,34 @@ func (n *networkService) gcPods(ctx context.Context) error {
 			if res == nil {
 				continue
 			}
+			// clean up rules
+			switch res.ResourceType() {
+			case eni.ResourceTypeLocalIP, eni.ResourceTypeRemoteIP, eni.ResourceTypeRDMA:
+
+				for _, v := range res.ToRPC() {
+					if v.ENIInfo == nil ||
+						v.BasicInfo == nil ||
+						v.BasicInfo.PodIP == nil {
+						continue
+					}
+
+					containerIP := &types.IPNetSet{}
+					if v.BasicInfo.PodIP.IPv4 != "" {
+						containerIP.SetIPNet(v.BasicInfo.PodIP.IPv4 + "/32")
+					}
+
+					if v.BasicInfo.PodIP.IPv6 != "" {
+						containerIP.SetIPNet(v.BasicInfo.PodIP.IPv6 + "/128")
+					}
+
+					ctx = logr.NewContext(ctx, serviceLog)
+					err = gcPolicyRoutes(ctx, v.ENIInfo.MAC, containerIP, podRes.PodInfo.Namespace, podRes.PodInfo.Name)
+					if err != nil {
+						return err
+					}
+				}
+			}
+
 			err = n.eniMgr.Release(ctx, &daemon.CNI{
 				PodName:      podRes.PodInfo.Name,
 				PodNamespace: podRes.PodInfo.Namespace,
