@@ -39,13 +39,16 @@ func MetaIntoCtx(ctx context.Context) context.Context {
 func Test_releaseUnWanted(t *testing.T) {
 	log := logr.Discard()
 	podsMapper := map[string]*PodRequest{
-		"pod2": &PodRequest{},
+		"pod2": &PodRequest{
+			PodUID: "uid_pod2",
+		},
 	}
 	enis := map[string]*networkv1beta1.NetworkInterface{
 		"eni": {
 			IPv4: map[string]*networkv1beta1.IP{
 				"v4": {
-					PodID: "pod1",
+					PodID:  "pod1",
+					PodUID: "pod1",
 				},
 				"11": {
 					PodID: "",
@@ -53,7 +56,8 @@ func Test_releaseUnWanted(t *testing.T) {
 			},
 			IPv6: map[string]*networkv1beta1.IP{
 				"v6": {
-					PodID: "pod2",
+					PodID:  "pod2",
+					PodUID: "foo",
 				},
 			},
 		},
@@ -63,7 +67,9 @@ func Test_releaseUnWanted(t *testing.T) {
 	releasePodNotFound(log, podsMapper, ipv4Map, ipv6Map)
 
 	assert.Empty(t, enis["eni"].IPv4["v4"].PodID)
+	assert.Empty(t, enis["eni"].IPv4["v4"].PodUID)
 	assert.Equal(t, "pod2", enis["eni"].IPv6["v6"].PodID)
+	assert.Equal(t, "uid_pod2", enis["eni"].IPv6["v6"].PodUID)
 }
 
 func Test_getEniOptions(t *testing.T) {
