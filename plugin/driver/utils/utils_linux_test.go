@@ -242,7 +242,7 @@ var _ = Describe("Test TC filter", func() {
 			})
 
 			By("delete filter should clean up", func() {
-				err = DelFilter(eni, netlink.HANDLE_MIN_EGRESS, &terwayTypes.IPNetSet{
+				err = DelFilter(context.Background(), eni, netlink.HANDLE_MIN_EGRESS, &terwayTypes.IPNetSet{
 					IPv4: &net.IPNet{
 						IP:   net.ParseIP("192.168.1.2"),
 						Mask: net.CIDRMask(32, 32),

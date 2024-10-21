@@ -330,7 +330,7 @@ func (d *IPvlanDriver) Teardown(ctx context.Context, cfg *types.TeardownCfg, net
 				return err
 			}
 		} else {
-			err = utils.DelEgressPriority(link, cfg.ContainerIPNet)
+			err = utils.DelEgressPriority(ctx, link, cfg.ContainerIPNet)
 			if err != nil {
 				return err
 			}
@@ -345,7 +345,7 @@ func (d *IPvlanDriver) Teardown(ctx context.Context, cfg *types.TeardownCfg, net
 			}
 			return nil
 		}
-		return utils.DelFilter(link, netlink.HANDLE_MIN_EGRESS, cfg.ContainerIPNet)
+		return utils.DelFilter(ctx, link, netlink.HANDLE_MIN_EGRESS, cfg.ContainerIPNet)
 	}()
 	if err != nil {
 		return err
@@ -447,7 +447,7 @@ func (d *IPvlanDriver) createSlaveIfNotExist(ctx context.Context, parentLink net
 	return link, nil
 }
 
-func (d *IPvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIndex int) error {
+func (d *IPvlanDriver) setupFilters(ctx context.Context, link netlink.Link, cidrs []*net.IPNet, dstIndex int) error {
 	parent := uint32(netlink.HANDLE_CLSACT&0xffff0000 | netlink.HANDLE_MIN_EGRESS&0x0000ffff)
 	filters, err := netlink.FilterList(link, parent)
 	if err != nil {
@@ -478,7 +478,7 @@ func (d *IPvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIn
 		if filter.Attrs() != nil && filter.Attrs().Priority != 4000 {
 			continue
 		}
-		if err := utils.FilterDel(filter); err != nil {
+		if err := utils.FilterDel(ctx, filter); err != nil {
 			return fmt.Errorf("delete filter of %s error, %w", link.Attrs().Name, err)
 		}
 	}
@@ -487,7 +487,7 @@ func (d *IPvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIn
 		if !in {
 			u32 := rule.toU32Filter()
 			u32.Parent = parent
-			if err := utils.FilterAdd(u32); err != nil {
+			if err := utils.FilterAdd(ctx, u32); err != nil {
 				return fmt.Errorf("add filter for %s error, %w", link.Attrs().Name, err)
 			}
 		}
@@ -521,7 +521,7 @@ func (d *IPvlanDriver) setupInitNamespace(ctx context.Context, parentLink netlin
 	}
 
 	redirectCIDRs := append(cfg.HostStackCIDRs, cfg.ServiceCIDR.IPv4)
-	err = d.setupFilters(parentLink, redirectCIDRs, slaveLink.Attrs().Index)
+	err = d.setupFilters(ctx, parentLink, redirectCIDRs, slaveLink.Attrs().Index)
 	if err != nil {
 		return err
 	}
