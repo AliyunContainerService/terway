@@ -427,6 +427,13 @@ func (d *PolicyRoute) Teardown(ctx context.Context, cfg *types.TeardownCfg, netN
 		return nil
 	}
 
+	if cfg.HostVETHName != "" {
+		err := utils.DelLinkByName(ctx, cfg.HostVETHName)
+		if err != nil {
+			return err
+		}
+	}
+
 	extender := utils.NewIPNet(cfg.ContainerIPNet)
 	// delete ip rule by ip
 	exec := func(rule *netlink.Rule) error {
@@ -471,7 +478,7 @@ func (d *PolicyRoute) Teardown(ctx context.Context, cfg *types.TeardownCfg, netN
 		return nil
 	}
 
-	err = utils.DelFilter(link, netlink.HANDLE_MIN_EGRESS, cfg.ContainerIPNet)
+	err = utils.DelFilter(ctx, link, netlink.HANDLE_MIN_EGRESS, cfg.ContainerIPNet)
 	if err != nil {
 		return err
 	}
@@ -480,5 +487,5 @@ func (d *PolicyRoute) Teardown(ctx context.Context, cfg *types.TeardownCfg, netN
 		return nil
 	}
 
-	return utils.DelEgressPriority(link, cfg.ContainerIPNet)
+	return utils.DelEgressPriority(ctx, link, cfg.ContainerIPNet)
 }

@@ -1,13 +1,37 @@
 package daemon
 
 import (
+	"context"
 	"encoding/binary"
 	"net"
 
 	"github.com/samber/lo"
 	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/AliyunContainerService/terway/pkg/link"
+	"github.com/AliyunContainerService/terway/plugin/datapath"
+	cnitypes "github.com/AliyunContainerService/terway/plugin/driver/types"
+	"github.com/AliyunContainerService/terway/types"
 )
+
+func gcPolicyRoutes(ctx context.Context, mac string, containerIPNet *types.IPNetSet, namespace, name string) error {
+	index, err := link.GetDeviceNumber(mac)
+	if err != nil {
+		if _, ok := err.(netlink.LinkNotFoundError); ok {
+			return nil
+		}
+		return err
+	}
+	vethName, _ := link.VethNameForPod(name, namespace, "", "cali")
+	p := &datapath.PolicyRoute{}
+	err = p.Teardown(ctx, &cnitypes.TeardownCfg{
+		HostVETHName:   vethName,
+		ContainerIPNet: containerIPNet,
+		ENIIndex:       int(index),
+	}, nil)
+	return err
+}
 
 func gcLeakedRules(existIP sets.Set[string]) {
 	links, err := netlink.LinkList()

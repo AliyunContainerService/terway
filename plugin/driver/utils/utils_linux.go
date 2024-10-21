@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-logr/logr"
+
 	terwayIP "github.com/AliyunContainerService/terway/pkg/ip"
 	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
 	"github.com/AliyunContainerService/terway/pkg/tc"
@@ -477,7 +479,7 @@ func EnsureVlanTag(ctx context.Context, link netlink.Link, ipNetSet *terwayTypes
 				continue
 			}
 			if act.Vid != vid {
-				err = FilterDel(u32)
+				err = FilterDel(ctx, u32)
 				if err != nil {
 					return err
 				}
@@ -486,7 +488,7 @@ func EnsureVlanTag(ctx context.Context, link netlink.Link, ipNetSet *terwayTypes
 			return nil
 		}
 
-		return FilterAdd(expect)
+		return FilterAdd(ctx, expect)
 	}
 
 	if ipNetSet.IPv4 != nil {
@@ -584,9 +586,9 @@ func EnsureMQQdisc(ctx context.Context, link netlink.Link) error {
 	})
 }
 
-func FilterAdd(filter *netlink.U32) error {
+func FilterAdd(ctx context.Context, filter *netlink.U32) error {
 	cmd := fmt.Sprintf("tc filter add %s", filter.String())
-	Log.Info(cmd)
+	logr.FromContextOrDiscard(ctx).Info(cmd)
 	err := netlink.FilterAdd(filter)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -594,9 +596,9 @@ func FilterAdd(filter *netlink.U32) error {
 	return nil
 }
 
-func FilterDel(filter netlink.Filter) error {
+func FilterDel(ctx context.Context, filter netlink.Filter) error {
 	cmd := fmt.Sprintf("tc filter del %s", filter.Attrs().String())
-	Log.Info(cmd)
+	logr.FromContextOrDiscard(ctx).Info(cmd)
 	err := netlink.FilterDel(filter)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -605,7 +607,7 @@ func FilterDel(filter netlink.Filter) error {
 }
 
 // SetFilter write u32 filter
-func SetFilter(link netlink.Link, parentID, classID uint32, ipNetSet *terwayTypes.IPNetSet) error {
+func SetFilter(ctx context.Context, link netlink.Link, parentID, classID uint32, ipNetSet *terwayTypes.IPNetSet) error {
 	exec := func(ipNet *net.IPNet) error {
 		found, err := tc.FilterBySrcIP(link, parentID, ipNet)
 		if err != nil {
@@ -626,7 +628,7 @@ func SetFilter(link netlink.Link, parentID, classID uint32, ipNetSet *terwayType
 		}
 		tc.MatchSrc(u32, ipNet)
 
-		return FilterAdd(u32)
+		return FilterAdd(ctx, u32)
 	}
 
 	if ipNetSet.IPv4 != nil {
@@ -645,7 +647,7 @@ func SetFilter(link netlink.Link, parentID, classID uint32, ipNetSet *terwayType
 }
 
 // DelFilter del u32 filter by pod ip
-func DelFilter(link netlink.Link, parentID uint32, ipNetSet *terwayTypes.IPNetSet) error {
+func DelFilter(ctx context.Context, link netlink.Link, parentID uint32, ipNetSet *terwayTypes.IPNetSet) error {
 	exec := func(ipNet *net.IPNet) error {
 		found, err := tc.FilterBySrcIP(link, parentID, ipNet)
 		if err != nil {
@@ -654,7 +656,7 @@ func DelFilter(link netlink.Link, parentID uint32, ipNetSet *terwayTypes.IPNetSe
 		if found == nil {
 			return nil
 		}
-		err = FilterDel(found)
+		err = FilterDel(ctx, found)
 		if err != nil {
 			return err
 		}
@@ -697,7 +699,7 @@ func SetEgressPriority(ctx context.Context, link netlink.Link, classID uint32, i
 			continue
 		}
 
-		err = SetFilter(link, q.Attrs().Handle, classID, ipNetSet)
+		err = SetFilter(ctx, link, q.Attrs().Handle, classID, ipNetSet)
 		if err != nil {
 			return err
 		}
@@ -705,7 +707,7 @@ func SetEgressPriority(ctx context.Context, link netlink.Link, classID uint32, i
 	return nil
 }
 
-func DelEgressPriority(link netlink.Link, ipNetSet *terwayTypes.IPNetSet) error {
+func DelEgressPriority(ctx context.Context, link netlink.Link, ipNetSet *terwayTypes.IPNetSet) error {
 	qds, err := netlink.QdiscList(link)
 	if err != nil {
 		return err
@@ -715,7 +717,7 @@ func DelEgressPriority(link netlink.Link, ipNetSet *terwayTypes.IPNetSet) error 
 		if !ok {
 			continue
 		}
-		err = DelFilter(link, q.Attrs().Handle, ipNetSet)
+		err = DelFilter(ctx, link, q.Attrs().Handle, ipNetSet)
 		if err != nil {
 			return err
 		}

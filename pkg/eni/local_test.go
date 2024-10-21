@@ -50,7 +50,8 @@ func TestLocal_Release_ValidIPv4(t *testing.T) {
 	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
 	local.ipv4[netip.MustParseAddr("192.0.2.1")].Allocate("pod-1")
 
-	assert.True(t, local.Release(context.Background(), cni, request))
+	ok, _ := local.Release(context.Background(), cni, request)
+	assert.True(t, ok)
 }
 
 func TestLocal_Release_ValidIPv6(t *testing.T) {
@@ -64,7 +65,8 @@ func TestLocal_Release_ValidIPv6(t *testing.T) {
 	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00:46dd:e::1"), false))
 	local.ipv6[netip.MustParseAddr("fd00:46dd:e::1")].Allocate("pod-1")
 
-	assert.True(t, local.Release(context.Background(), cni, request))
+	ok, _ := local.Release(context.Background(), cni, request)
+	assert.True(t, ok)
 }
 
 func TestLocal_Release_NilENI(t *testing.T) {
@@ -75,7 +77,8 @@ func TestLocal_Release_NilENI(t *testing.T) {
 	}
 	cni := &daemon.CNI{PodID: "pod-1"}
 
-	assert.False(t, local.Release(context.Background(), cni, request))
+	ok, _ := local.Release(context.Background(), cni, request)
+	assert.False(t, ok)
 }
 
 func TestLocal_Release_DifferentENIID(t *testing.T) {
@@ -86,7 +89,8 @@ func TestLocal_Release_DifferentENIID(t *testing.T) {
 	}
 	cni := &daemon.CNI{PodID: "pod-1"}
 
-	assert.False(t, local.Release(context.Background(), cni, request))
+	ok, _ := local.Release(context.Background(), cni, request)
+	assert.False(t, ok)
 }
 
 func TestLocal_Release_ValidIPv4_ReleaseIPv6(t *testing.T) {
@@ -103,7 +107,8 @@ func TestLocal_Release_ValidIPv4_ReleaseIPv6(t *testing.T) {
 	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00:46dd:e::1"), false))
 	local.ipv6[netip.MustParseAddr("fd00:46dd:e::1")].Allocate("pod-1")
 
-	assert.True(t, local.Release(context.Background(), cni, request))
+	ok, _ := local.Release(context.Background(), cni, request)
+	assert.True(t, ok)
 
 	assert.Equal(t, ipStatusValid, local.ipv4[netip.MustParseAddr("192.0.2.1")].status)
 	assert.Equal(t, "", local.ipv4[netip.MustParseAddr("192.0.2.1")].podID)
