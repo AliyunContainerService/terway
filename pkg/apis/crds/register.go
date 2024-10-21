@@ -49,7 +49,7 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 		version = "v0.1.0"
 	case CRDNode:
 		crdBytes = crdsNode
-		version = "v0.1.0"
+		version = "v0.2.0"
 	default:
 		panic(fmt.Sprintf("crd %s name not exist", name))
 	}

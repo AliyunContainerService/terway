@@ -8,6 +8,7 @@ import (
 
 type PodRequest struct {
 	// requirements
+	PodUID string
 
 	RequireIPv4 bool
 	RequireIPv6 bool

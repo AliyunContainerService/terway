@@ -418,6 +418,7 @@ func (n *ReconcileNode) getPods(ctx context.Context, node *networkv1beta1.Node) 
 		}
 
 		podsMapper[pod.Namespace+"/"+pod.Name] = &PodRequest{
+			PodUID:       string(pod.UID),
 			RequireIPv4:  node.Spec.ENISpec.EnableIPv4,
 			RequireIPv6:  node.Spec.ENISpec.EnableIPv6,
 			RequireERDMA: requireERDMA,
@@ -464,12 +465,14 @@ func releasePodNotFound(log logr.Logger, podsMapper map[string]*PodRequest, ipMa
 			if v.IP.PodID == "" {
 				continue
 			}
-			_, ok := podsMapper[v.IP.PodID]
+			info, ok := podsMapper[v.IP.PodID]
 			if ok {
+				v.IP.PodUID = info.PodUID
 				continue
 			}
 			log.Info("pod released", "pod", v.IP.PodID, "ip", v.IP.IP)
 			v.IP.PodID = ""
+			v.IP.PodUID = ""
 		}
 	}
 }
@@ -497,6 +500,7 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 				if ok && (eniIP.IP.PodID == "" || eniIP.IP.PodID == podID) {
 					info.ipv4Ref = eniIP
 					eniIP.IP.PodID = podID
+					eniIP.IP.PodUID = info.PodUID
 					log.Info("assign ip (from pod status)", "pod", podID, "ip", eniIP.IP, "eni", eniIP.NetworkInterface.ID)
 				}
 			}
@@ -509,6 +513,7 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 				if ok && (eniIP.IP.PodID == "" || eniIP.IP.PodID == podID) {
 					info.ipv6Ref = eniIP
 					eniIP.IP.PodID = podID
+					eniIP.IP.PodUID = info.PodUID
 					log.Info("assign ip (from pod status)", "pod", podID, "ip", eniIP.IP, "eni", eniIP.NetworkInterface.ID)
 				}
 			}
@@ -544,7 +549,7 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 							IP:               v.IP,
 						}
 						v.IP.PodID = podID
-
+						v.IP.PodUID = info.PodUID
 						log.Info("assign ip", "pod", podID, "ip", v.IP.IP, "eni", v.NetworkInterface.ID)
 						break
 					}
@@ -588,6 +593,7 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 							IP:               v.IP,
 						}
 						v.IP.PodID = podID
+						v.IP.PodUID = info.PodUID
 						log.Info("assign ip", "pod", podID, "ip", v.IP.IP, "eni", v.NetworkInterface.ID)
 
 						break
@@ -600,6 +606,7 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 					log.Info("failed to get ipv6 addr, roll back ipv4", "pod", podID, "ip", info.ipv4Ref.IP)
 
 					info.ipv4Ref.IP.PodID = ""
+					info.ipv4Ref.IP.PodUID = ""
 					info.ipv4Ref = nil
 				}
 				unSucceedPods[podID] = info
@@ -1370,6 +1377,7 @@ func addIPToMap(in map[string]*networkv1beta1.IP, ip *networkv1beta1.IP) {
 		v.Primary = ip.Primary
 		if v.PodID == "" {
 			v.PodID = ip.PodID
+			v.PodUID = ip.PodUID
 		}
 	} else {
 		in[ip.IP] = ip

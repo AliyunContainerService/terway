@@ -152,6 +152,9 @@ func (r *CRDV2) multiIP(ctx context.Context, cni *daemon.CNI, request ResourceRe
 						ip.PodID != cni.PodID {
 						continue
 					}
+					if ip.PodUID != "" && ip.PodUID != cni.PodUID {
+						continue
+					}
 					addr, err := netip.ParseAddr(ip.IP)
 					if err != nil {
 						return false, err
@@ -162,6 +165,9 @@ func (r *CRDV2) multiIP(ctx context.Context, cni *daemon.CNI, request ResourceRe
 				for _, ip := range eni.IPv6 {
 					if ip.Status != networkv1beta1.IPStatusValid ||
 						ip.PodID != cni.PodID {
+						continue
+					}
+					if ip.PodUID != "" && ip.PodUID != cni.PodUID {
 						continue
 					}
 					addr, err := netip.ParseAddr(ip.IP)

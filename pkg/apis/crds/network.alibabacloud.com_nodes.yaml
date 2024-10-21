@@ -174,6 +174,9 @@ spec:
                           podID:
                             description: Add the pod ID
                             type: string
+                          podUID:
+                            description: Add pod UID for validate
+                            type: string
                           primary:
                             type: boolean
                           status:
@@ -198,6 +201,9 @@ spec:
                             type: string
                           podID:
                             description: Add the pod ID
+                            type: string
+                          podUID:
+                            description: Add pod UID for validate
                             type: string
                           primary:
                             type: boolean

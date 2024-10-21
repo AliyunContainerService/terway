@@ -122,6 +122,8 @@ type IP struct {
 	Status IPStatus `json:"status"`
 	// Add the pod ID
 	PodID string `json:"podID,omitempty"`
+	// Add pod UID for validate
+	PodUID string `json:"podUID,omitempty"`
 }
 
 type IPMap map[string]*IP
