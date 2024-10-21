@@ -3,6 +3,7 @@
 package datapath
 
 import (
+	"context"
 	"net"
 	"runtime"
 	"testing"
@@ -79,7 +80,7 @@ func TestDataPathExclusiveENI(t *testing.T) {
 	}
 
 	d := NewExclusiveENIDriver()
-	err = d.Setup(cfg, containerNS)
+	err = d.Setup(context.Background(), cfg, containerNS)
 	assert.NoError(t, err)
 
 	_ = containerNS.Do(func(netNS ns.NetNS) error {
@@ -162,7 +163,7 @@ func TestDataPathExclusiveENI(t *testing.T) {
 	err = netlink.RuleAdd(dummyRule)
 	assert.NoError(t, err)
 	// tear down
-	err = utils.GenericTearDown(containerNS)
+	err = utils.GenericTearDown(context.Background(), containerNS)
 	assert.NoError(t, err)
 
 	_, err = netlink.LinkByName(cfg.HostVETHName)

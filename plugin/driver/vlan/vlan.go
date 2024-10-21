@@ -17,6 +17,7 @@ limitations under the License.
 package vlan
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
@@ -32,7 +33,7 @@ type Vlan struct {
 	MTU    int
 }
 
-func Setup(cfg *Vlan, netNS ns.NetNS) error {
+func Setup(ctx context.Context, cfg *Vlan, netNS ns.NetNS) error {
 	master, err := netlink.LinkByName(cfg.Master)
 	if err != nil {
 		return fmt.Errorf("cannot found master link by name %s", master)
@@ -44,7 +45,7 @@ func Setup(cfg *Vlan, netNS ns.NetNS) error {
 	peer, err := netlink.LinkByName(peerName)
 	if err == nil {
 		// del pre link
-		err = utils.LinkDel(peer)
+		err = utils.LinkDel(ctx, peer)
 		if err != nil {
 			return err
 		}
@@ -63,7 +64,7 @@ func Setup(cfg *Vlan, netNS ns.NetNS) error {
 		},
 		VlanId: cfg.Vid,
 	}
-	err = utils.LinkAdd(v)
+	err = utils.LinkAdd(ctx, v)
 	if err != nil {
 		return err
 	}
@@ -73,7 +74,7 @@ func Setup(cfg *Vlan, netNS ns.NetNS) error {
 		if innerErr != nil {
 			return innerErr
 		}
-		_, innerErr = utils.EnsureLinkName(contLink, cfg.IfName)
+		_, innerErr = utils.EnsureLinkName(ctx, contLink, cfg.IfName)
 		return innerErr
 	})
 }

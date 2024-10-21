@@ -17,6 +17,7 @@ limitations under the License.
 package nic
 
 import (
+	"context"
 	"fmt"
 
 	terwaySysctl "github.com/AliyunContainerService/terway/pkg/sysctl"
@@ -40,10 +41,10 @@ type Conf struct {
 	StripVlan bool
 }
 
-func Setup(link netlink.Link, conf *Conf) error {
+func Setup(ctx context.Context, link netlink.Link, conf *Conf) error {
 	var err error
 	if conf.IfName != "" {
-		changed, err := utils.EnsureLinkName(link, conf.IfName)
+		changed, err := utils.EnsureLinkName(ctx, link, conf.IfName)
 		if err != nil {
 			return err
 		}
@@ -56,7 +57,7 @@ func Setup(link netlink.Link, conf *Conf) error {
 	}
 
 	if conf.MTU > 0 {
-		_, err = utils.EnsureLinkMTU(link, conf.MTU)
+		_, err = utils.EnsureLinkMTU(ctx, link, conf.MTU)
 		if err != nil {
 			return err
 		}
@@ -73,40 +74,40 @@ func Setup(link netlink.Link, conf *Conf) error {
 	}
 
 	for _, addr := range conf.Addrs {
-		_, err = utils.EnsureAddr(link, addr)
+		_, err = utils.EnsureAddr(ctx, link, addr)
 		if err != nil {
 			return err
 		}
 	}
 
-	_, err = utils.EnsureLinkUp(link)
+	_, err = utils.EnsureLinkUp(ctx, link)
 	if err != nil {
 		return err
 	}
 
 	for _, neigh := range conf.Neighs {
-		_, err = utils.EnsureNeigh(neigh)
+		_, err = utils.EnsureNeigh(ctx, neigh)
 		if err != nil {
 			return err
 		}
 	}
 
 	for _, route := range conf.Routes {
-		_, err = utils.EnsureRoute(route)
+		_, err = utils.EnsureRoute(ctx, route)
 		if err != nil {
 			return err
 		}
 	}
 
 	for _, rule := range conf.Rules {
-		_, err = utils.EnsureIPRule(rule)
+		_, err = utils.EnsureIPRule(ctx, rule)
 		if err != nil {
 			return err
 		}
 	}
 
 	if conf.StripVlan {
-		return utils.EnsureVlanUntagger(link)
+		return utils.EnsureVlanUntagger(ctx, link)
 	}
 	return nil
 }

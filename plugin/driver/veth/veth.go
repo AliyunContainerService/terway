@@ -1,6 +1,7 @@
 package veth
 
 import (
+	"context"
 	"net"
 
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
@@ -17,11 +18,11 @@ type Veth struct {
 	MTU      int
 }
 
-func Setup(cfg *Veth, netNS ns.NetNS) error {
+func Setup(ctx context.Context, cfg *Veth, netNS ns.NetNS) error {
 	peer, err := netlink.LinkByName(cfg.PeerName)
 	if err == nil {
 		// del pre link
-		err = utils.LinkDel(peer)
+		err = utils.LinkDel(ctx, peer)
 		if err != nil {
 			return err
 		}
@@ -45,7 +46,7 @@ func Setup(cfg *Veth, netNS ns.NetNS) error {
 	if cfg.HwAddr != nil {
 		v.HardwareAddr = cfg.HwAddr
 	}
-	err = utils.LinkAdd(v)
+	err = utils.LinkAdd(ctx, v)
 	if err != nil {
 		return err
 	}
@@ -55,7 +56,7 @@ func Setup(cfg *Veth, netNS ns.NetNS) error {
 		if innerErr != nil {
 			return innerErr
 		}
-		_, innerErr = utils.EnsureLinkName(contLink, cfg.IfName)
+		_, innerErr = utils.EnsureLinkName(ctx, contLink, cfg.IfName)
 		return innerErr
 	})
 }

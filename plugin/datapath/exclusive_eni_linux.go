@@ -1,6 +1,7 @@
 package datapath
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -313,7 +314,7 @@ func generateHostSlaveCfg(cfg *types.SetupConfig, link netlink.Link) *nic.Conf {
 	return contCfg
 }
 
-func (r *ExclusiveENI) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
+func (r *ExclusiveENI) Setup(ctx context.Context, cfg *types.SetupConfig, netNS ns.NetNS) error {
 	// 1. move link in
 	nicLink, err := netlink.LinkByIndex(cfg.ENIIndex)
 	if err != nil {
@@ -325,7 +326,7 @@ func (r *ExclusiveENI) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	}
 	defer hostNetNS.Close()
 
-	err = utils.LinkSetNsFd(nicLink, netNS)
+	err = utils.LinkSetNsFd(ctx, nicLink, netNS)
 	if err != nil {
 		return fmt.Errorf("error set nic %s to container, %w", nicLink.Attrs().Name, err)
 	}
@@ -339,7 +340,7 @@ func (r *ExclusiveENI) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 					if err1 != nil {
 						return err1
 					}
-					err = utils.LinkSetName(nicLink, nicName)
+					err = utils.LinkSetName(ctx, nicLink, nicName)
 					if err != nil {
 						return err
 					}
@@ -350,8 +351,8 @@ func (r *ExclusiveENI) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 					nicLink, err = netlink.LinkByName(nicLink.Attrs().Name)
 				}
 				if err == nil {
-					err = utils.LinkSetDown(nicLink)
-					return utils.LinkSetNsFd(nicLink, hostNetNS)
+					err = utils.LinkSetDown(ctx, nicLink)
+					return utils.LinkSetNsFd(ctx, nicLink, hostNetNS)
 				}
 				return err
 			})
@@ -366,7 +367,7 @@ func (r *ExclusiveENI) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 		}
 
 		contCfg := generateContCfgForExclusiveENI(cfg, contLink)
-		err = nic.Setup(contLink, contCfg)
+		err = nic.Setup(ctx, contLink, contCfg)
 		if err != nil {
 			return err
 		}
@@ -380,7 +381,7 @@ func (r *ExclusiveENI) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 
 		// for now we only create slave link for eth0
 		if !cfg.DisableCreatePeer && cfg.ContainerIfName == "eth0" {
-			err = veth.Setup(&veth.Veth{
+			err = veth.Setup(ctx, &veth.Veth{
 				IfName:   cfg.HostVETHName, // name for host ns side
 				PeerName: defaultVethForENI,
 			}, hostNetNS)
@@ -406,7 +407,7 @@ func (r *ExclusiveENI) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 				return err
 			}
 			veth1Cfg := generateVeth1Cfg(cfg, veth1, mac)
-			return nic.Setup(veth1, veth1Cfg)
+			return nic.Setup(ctx, veth1, veth1Cfg)
 		}
 		return nil
 	})
@@ -423,7 +424,7 @@ func (r *ExclusiveENI) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 		return fmt.Errorf("error get host veth %s, %w", cfg.HostVETHName, err)
 	}
 	hostPeerCfg := generateHostSlaveCfg(cfg, hostPeer)
-	err = nic.Setup(hostPeer, hostPeerCfg)
+	err = nic.Setup(ctx, hostPeer, hostPeerCfg)
 	if err != nil {
 		return fmt.Errorf("error set up hostpeer, %w", err)
 	}
@@ -431,20 +432,20 @@ func (r *ExclusiveENI) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	return nil
 }
 
-func (r *ExclusiveENI) Check(cfg *types.CheckConfig) error {
+func (r *ExclusiveENI) Check(ctx context.Context, cfg *types.CheckConfig) error {
 	err := cfg.NetNS.Do(func(netNS ns.NetNS) error {
 		link, err := netlink.LinkByName(cfg.ContainerIfName)
 		if err != nil {
 			return err
 		}
-		changed, err := utils.EnsureLinkUp(link)
+		changed, err := utils.EnsureLinkUp(ctx, link)
 		if err != nil {
 			return err
 		}
 		if changed {
 			cfg.RecordPodEvent(fmt.Sprintf("link %s set up", cfg.ContainerIfName))
 		}
-		changed, err = utils.EnsureLinkMTU(link, cfg.MTU)
+		changed, err = utils.EnsureLinkMTU(ctx, link, cfg.MTU)
 		if err != nil {
 			return err
 		}

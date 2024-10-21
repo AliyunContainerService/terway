@@ -11,7 +11,6 @@ import (
 	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/plugins/pkg/ipam"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/pkg/windows/ip"
@@ -86,7 +85,7 @@ func isNSPathNotExist(err error) bool {
 
 var errHostNetworkNotSupport = errors.New("host network is not support")
 
-func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) (containerIPNet *terwayTypes.IPNetSet, gatewayIPSet *terwayTypes.IPSet, err error) {
+func doCmdAdd(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) (containerIPNet *terwayTypes.IPNetSet, gatewayIPSet *terwayTypes.IPSet, err error) {
 	var conf, k8sConfig, args = cmdArgs.conf, cmdArgs.k8sArgs, cmdArgs.inputArgs
 
 	defer func() {
@@ -324,7 +323,7 @@ func doCmdAdd(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 	return
 }
 
-func doCmdDel(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
+func doCmdDel(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
 	var conf, k8sConfig, args = cmdArgs.conf, cmdArgs.k8sArgs, cmdArgs.inputArgs
 
 	infoResult, err := client.GetIPInfo(ctx, &rpc.GetInfoRequest{
@@ -417,7 +416,7 @@ func doCmdDel(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBacken
 	return nil
 }
 
-func doCmdCheck(ctx context.Context, logger *logrus.Entry, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
+func doCmdCheck(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
 	var conf, k8sConfig, args = cmdArgs.conf, cmdArgs.k8sArgs, cmdArgs.inputArgs
 
 	getResult, err := client.GetIPInfo(ctx, &rpc.GetInfoRequest{

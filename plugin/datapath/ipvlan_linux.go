@@ -1,6 +1,7 @@
 package datapath
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -249,7 +250,7 @@ func generateSlaveLinkCfgForIPVlan(cfg *types.SetupConfig, link netlink.Link) *n
 	return contCfg
 }
 
-func (d *IPvlanDriver) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
+func (d *IPvlanDriver) Setup(ctx context.Context, cfg *types.SetupConfig, netNS ns.NetNS) error {
 	var err error
 
 	parentLink, err := netlink.LinkByIndex(cfg.ENIIndex)
@@ -257,26 +258,26 @@ func (d *IPvlanDriver) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 		return fmt.Errorf("error get eni by index %d, %w", cfg.ENIIndex, err)
 	}
 	eniCfg := generateENICfgForIPVlan(cfg, parentLink)
-	err = nic.Setup(parentLink, eniCfg)
+	err = nic.Setup(ctx, parentLink, eniCfg)
 	if err != nil {
 		return err
 	}
 
 	if cfg.EnableNetworkPriority {
-		err = utils.SetEgressPriority(parentLink, cfg.NetworkPriority, cfg.ContainerIPNet)
+		err = utils.SetEgressPriority(ctx, parentLink, cfg.NetworkPriority, cfg.ContainerIPNet)
 		if err != nil {
 			return err
 		}
 	}
 
 	if cfg.StripVlan {
-		err = utils.EnsureVlanTag(parentLink, cfg.ContainerIPNet, uint16(cfg.Vid))
+		err = utils.EnsureVlanTag(ctx, parentLink, cfg.ContainerIPNet, uint16(cfg.Vid))
 		if err != nil {
 			return err
 		}
 	}
 
-	err = ipvlan.Setup(&ipvlan.IPVlan{
+	err = ipvlan.Setup(ctx, &ipvlan.IPVlan{
 		Parent:  parentLink.Attrs().Name,
 		PreName: cfg.HostVETHName,
 		IfName:  cfg.ContainerIfName,
@@ -293,7 +294,7 @@ func (d *IPvlanDriver) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 			return fmt.Errorf("error find link %s in container, %w", cfg.ContainerIfName, err)
 		}
 		contCfg := generateContCfgForIPVlan(cfg, contLink)
-		err = nic.Setup(contLink, contCfg)
+		err = nic.Setup(ctx, contLink, contCfg)
 		if err != nil {
 			return err
 		}
@@ -301,7 +302,7 @@ func (d *IPvlanDriver) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 			return nil
 		}
 		if cfg.BandwidthMode == "edt" {
-			return ensureFQ(contLink)
+			return ensureFQ(ctx, contLink)
 		}
 		return utils.SetupTC(contLink, cfg.Egress)
 	})
@@ -309,15 +310,15 @@ func (d *IPvlanDriver) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 		return fmt.Errorf("error set container link/address/route, %w", err)
 	}
 
-	if err := d.setupInitNamespace(parentLink, cfg); err != nil {
+	if err := d.setupInitNamespace(ctx, parentLink, cfg); err != nil {
 		return fmt.Errorf("error set init namespace, %w", err)
 	}
 
 	return nil
 }
 
-func (d *IPvlanDriver) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
-	err := utils.DelLinkByName(cfg.HostVETHName)
+func (d *IPvlanDriver) Teardown(ctx context.Context, cfg *types.TeardownCfg, netNS ns.NetNS) error {
+	err := utils.DelLinkByName(ctx, cfg.HostVETHName)
 	if err != nil {
 		return err
 	}
@@ -351,10 +352,10 @@ func (d *IPvlanDriver) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
 	}
 
 	// del route to container
-	return d.teardownInitNamespace(cfg.ContainerIPNet)
+	return d.teardownInitNamespace(ctx, cfg.ContainerIPNet)
 }
 
-func (d *IPvlanDriver) Check(cfg *types.CheckConfig) error {
+func (d *IPvlanDriver) Check(ctx context.Context, cfg *types.CheckConfig) error {
 	parentLinkIndex := 0
 	// 1. check addr and default route
 	err := cfg.NetNS.Do(func(netNS ns.NetNS) error {
@@ -363,7 +364,7 @@ func (d *IPvlanDriver) Check(cfg *types.CheckConfig) error {
 			return err
 		}
 		parentLinkIndex = link.Attrs().ParentIndex
-		changed, err := utils.EnsureLinkUp(link)
+		changed, err := utils.EnsureLinkUp(ctx, link)
 		if err != nil {
 			return err
 		}
@@ -372,7 +373,7 @@ func (d *IPvlanDriver) Check(cfg *types.CheckConfig) error {
 			cfg.RecordPodEvent(fmt.Sprintf("link %s set to up", cfg.ContainerIfName))
 		}
 
-		changed, err = utils.EnsureLinkMTU(link, cfg.MTU)
+		changed, err = utils.EnsureLinkMTU(ctx, link, cfg.MTU)
 		if err != nil {
 			return err
 		}
@@ -390,19 +391,18 @@ func (d *IPvlanDriver) Check(cfg *types.CheckConfig) error {
 		return err
 	}
 	// 2. check parent link ( this is called in every setup it is safe)
-	utils.Log.Debugf("parent link is %d", parentLinkIndex)
 	parentLink, err := netlink.LinkByIndex(parentLinkIndex)
 	if err != nil {
 		return fmt.Errorf("error get parent link, %w", err)
 	}
-	changed, err := utils.EnsureLinkUp(parentLink)
+	changed, err := utils.EnsureLinkUp(ctx, parentLink)
 	if err != nil {
 		return err
 	}
 	if changed {
 		cfg.RecordPodEvent(fmt.Sprintf("parent link id %d set to up", int(cfg.ENIIndex)))
 	}
-	changed, err = utils.EnsureLinkMTU(parentLink, cfg.MTU)
+	changed, err = utils.EnsureLinkMTU(ctx, parentLink, cfg.MTU)
 	if err != nil {
 		return err
 	}
@@ -414,21 +414,21 @@ func (d *IPvlanDriver) Check(cfg *types.CheckConfig) error {
 	return nil
 }
 
-func (d *IPvlanDriver) createSlaveIfNotExist(parentLink netlink.Link, slaveName string, mtu int) (netlink.Link, error) {
+func (d *IPvlanDriver) createSlaveIfNotExist(ctx context.Context, parentLink netlink.Link, slaveName string, mtu int) (netlink.Link, error) {
 	slaveLink, err := netlink.LinkByName(slaveName)
 	if err != nil {
 		if _, ok := err.(netlink.LinkNotFoundError); !ok {
 			return nil, fmt.Errorf("get device %s error, %w", slaveName, err)
 		}
 	} else {
-		_, err = utils.EnsureLinkMTU(slaveLink, mtu)
+		_, err = utils.EnsureLinkMTU(ctx, slaveLink, mtu)
 		if err != nil {
 			return nil, err
 		}
 		return slaveLink, nil
 	}
 
-	err = utils.LinkAdd(&netlink.IPVlan{
+	err = utils.LinkAdd(ctx, &netlink.IPVlan{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:        slaveName,
 			ParentIndex: parentLink.Attrs().Index,
@@ -495,10 +495,10 @@ func (d *IPvlanDriver) setupFilters(link netlink.Link, cidrs []*net.IPNet, dstIn
 	return nil
 }
 
-func (d *IPvlanDriver) setupInitNamespace(parentLink netlink.Link, cfg *types.SetupConfig) error {
+func (d *IPvlanDriver) setupInitNamespace(ctx context.Context, parentLink netlink.Link, cfg *types.SetupConfig) error {
 	// setup slave nic
 	slaveName := d.initSlaveName(parentLink.Attrs().Index)
-	slaveLink, err := d.createSlaveIfNotExist(parentLink, slaveName, cfg.MTU)
+	slaveLink, err := d.createSlaveIfNotExist(ctx, parentLink, slaveName, cfg.MTU)
 	if err != nil {
 		return err
 	}
@@ -509,13 +509,13 @@ func (d *IPvlanDriver) setupInitNamespace(parentLink netlink.Link, cfg *types.Se
 		}
 	}
 	slaveCfg := generateSlaveLinkCfgForIPVlan(cfg, slaveLink)
-	err = nic.Setup(slaveLink, slaveCfg)
+	err = nic.Setup(ctx, slaveLink, slaveCfg)
 	if err != nil {
 		return err
 	}
 
 	// check tc rule
-	err = utils.EnsureClsActQdsic(parentLink)
+	err = utils.EnsureClsActQdsic(ctx, parentLink)
 	if err != nil {
 		return err
 	}
@@ -529,7 +529,7 @@ func (d *IPvlanDriver) setupInitNamespace(parentLink netlink.Link, cfg *types.Se
 	return nil
 }
 
-func (d *IPvlanDriver) teardownInitNamespace(containerIP *terwayTypes.IPNetSet) error {
+func (d *IPvlanDriver) teardownInitNamespace(ctx context.Context, containerIP *terwayTypes.IPNetSet) error {
 	if containerIP == nil {
 		return nil
 	}
@@ -542,7 +542,7 @@ func (d *IPvlanDriver) teardownInitNamespace(containerIP *terwayTypes.IPNetSet) 
 			return err
 		}
 		for _, route := range routes {
-			err = utils.RouteDel(&route)
+			err = utils.RouteDel(ctx, &route)
 			if err != nil {
 				return err
 			}
@@ -743,7 +743,7 @@ func CheckIPVLanAvailable() (bool, error) {
 		major > ipVlanRequirementMajor, nil
 }
 
-func ensureFQ(link netlink.Link) error {
+func ensureFQ(ctx context.Context, link netlink.Link) error {
 	fq := &netlink.GenericQdisc{
 		QdiscAttrs: netlink.QdiscAttrs{
 			LinkIndex: link.Attrs().Index,
@@ -775,5 +775,5 @@ func ensureFQ(link netlink.Link) error {
 	if found {
 		return nil
 	}
-	return utils.QdiscReplace(fq)
+	return utils.QdiscReplace(ctx, fq)
 }

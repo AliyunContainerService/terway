@@ -8,10 +8,12 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/go-logr/logr"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/plugin/datapath"
@@ -58,11 +60,11 @@ func init() {
 }
 
 func main() {
+	defer klog.Flush()
 	skel.PluginMain(cmdAdd, cmdCheck, cmdDel, version.PluginSupports("0.3.0", "0.3.1", "0.4.0", "1.0.0"), bv.BuildString("terway"))
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
-	utils.Hook.AddExtraInfo("cmd", "add")
 
 	cmdArgs, err := getCmdArgs(args)
 	if err != nil {
@@ -71,19 +73,16 @@ func cmdAdd(args *skel.CmdArgs) error {
 	defer cmdArgs.Close()
 	conf, k8sConfig := cmdArgs.GetCNIConf(), cmdArgs.GetK8SConfig()
 
-	if conf.Debug {
-		utils.SetLogDebug()
-	}
-	logger := utils.Log.WithFields(map[string]interface{}{
-		"netns":        args.Netns,
-		"podName":      string(k8sConfig.K8S_POD_NAME),
-		"podNamespace": string(k8sConfig.K8S_POD_NAMESPACE),
-		"containerID":  string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID),
-	})
-	logger.Debugf("args: %s", utils.JSONStr(args))
-	logger.Debugf("ns %s , k8s %s, cni std %s", cmdArgs.GetNetNSPath(), utils.JSONStr(k8sConfig), utils.JSONStr(conf))
+	l := utils.InitLog(conf.Debug).WithName("terway-cni add").
+		WithValues("netns", args.Netns,
+			"podName", string(k8sConfig.K8S_POD_NAME),
+			"podNamespace", string(k8sConfig.K8S_POD_NAMESPACE),
+			"containerID", string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID))
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout)
+	l.V(4).Info("", "args", utils.JSONStr(args),
+		"ns", cmdArgs.GetNetNSPath(), "k8s", utils.JSONStr(k8sConfig), "cni", utils.JSONStr(conf))
+
+	ctx, cancel := context.WithTimeout(logr.NewContext(context.Background(), l), defaultCniTimeout)
 	defer cancel()
 
 	client, conn, err := getNetworkClient(ctx)
@@ -96,9 +95,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 		containerIPNet *terwayTypes.IPNetSet
 		gatewayIPSet   *terwayTypes.IPSet
 	)
-	containerIPNet, gatewayIPSet, err = doCmdAdd(ctx, logger, client, cmdArgs)
+	containerIPNet, gatewayIPSet, err = doCmdAdd(ctx, client, cmdArgs)
 	if err != nil {
-		logger.WithError(err).Error("error adding")
+		l.Error(err, "error adding")
 		return cniTypes.NewError(cniTypes.ErrTryAgainLater, "failed to do add", err.Error())
 	}
 
@@ -127,7 +126,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 }
 
 func cmdDel(args *skel.CmdArgs) error {
-	utils.Hook.AddExtraInfo("cmd", "del")
 	if args.Netns == "" {
 		return nil
 	}
@@ -139,17 +137,14 @@ func cmdDel(args *skel.CmdArgs) error {
 	defer cmdArgs.Close()
 	conf, k8sConfig := cmdArgs.GetCNIConf(), cmdArgs.GetK8SConfig()
 
-	if conf.Debug {
-		utils.SetLogDebug()
-	}
-	logger := utils.Log.WithFields(map[string]interface{}{
-		"netns":        args.Netns,
-		"podName":      string(k8sConfig.K8S_POD_NAME),
-		"podNamespace": string(k8sConfig.K8S_POD_NAMESPACE),
-		"containerID":  string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID),
-	})
-	logger.Debugf("args: %s", utils.JSONStr(args))
-	logger.Debugf("ns %s , k8s %s, cni std %s", cmdArgs.GetNetNSPath(), utils.JSONStr(k8sConfig), utils.JSONStr(conf))
+	l := utils.InitLog(conf.Debug).WithName("terway-cni del").
+		WithValues("netns", args.Netns,
+			"podName", string(k8sConfig.K8S_POD_NAME),
+			"podNamespace", string(k8sConfig.K8S_POD_NAMESPACE),
+			"containerID", string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID))
+
+	l.V(4).Info("", "args", utils.JSONStr(args),
+		"ns", cmdArgs.GetNetNSPath(), "k8s", utils.JSONStr(k8sConfig), "cni", utils.JSONStr(conf))
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout)
 	defer cancel()
@@ -160,9 +155,9 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 	defer conn.Close()
 
-	err = doCmdDel(ctx, logger, client, cmdArgs)
+	err = doCmdDel(ctx, client, cmdArgs)
 	if err != nil {
-		logger.WithError(err).Error("error deleting")
+		l.Error(err, "error deleting")
 		return cniTypes.NewError(cniTypes.ErrTryAgainLater, "failed to do del", err.Error())
 	}
 
@@ -172,7 +167,6 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func cmdCheck(args *skel.CmdArgs) error {
-	utils.Hook.AddExtraInfo("cmd", "check")
 	if args.Netns == "" {
 		return nil
 	}
@@ -187,18 +181,14 @@ func cmdCheck(args *skel.CmdArgs) error {
 	defer cmdArgs.Close()
 	conf, k8sConfig := cmdArgs.GetCNIConf(), cmdArgs.GetK8SConfig()
 
-	if conf.Debug {
-		utils.SetLogDebug()
-	}
-	logger := utils.Log.WithFields(map[string]interface{}{
-		"netns":        args.Netns,
-		"podName":      string(k8sConfig.K8S_POD_NAME),
-		"podNamespace": string(k8sConfig.K8S_POD_NAMESPACE),
-		"containerID":  string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID),
-	})
-	logger.Debugf("args: %s", utils.JSONStr(args))
-	logger.Debugf("ns %s , k8s %s, cni std %s", cmdArgs.GetNetNSPath(), utils.JSONStr(k8sConfig), utils.JSONStr(conf))
+	l := utils.InitLog(conf.Debug).WithName("terway-cni check").
+		WithValues("netns", args.Netns,
+			"podName", string(k8sConfig.K8S_POD_NAME),
+			"podNamespace", string(k8sConfig.K8S_POD_NAMESPACE),
+			"containerID", string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID))
 
+	l.V(4).Info("", "args", utils.JSONStr(args),
+		"ns", cmdArgs.GetNetNSPath(), "k8s", utils.JSONStr(k8sConfig), "cni", utils.JSONStr(conf))
 	ctx, cancel := context.WithTimeout(context.Background(), defaultCniTimeout)
 	defer cancel()
 
@@ -208,9 +198,9 @@ func cmdCheck(args *skel.CmdArgs) error {
 	}
 	defer conn.Close()
 
-	err = doCmdCheck(ctx, logger, client, cmdArgs)
+	err = doCmdCheck(ctx, client, cmdArgs)
 	if err != nil {
-		logger.WithError(err).Error("error checking")
+		l.Error(err, "error checking")
 		return err
 	}
 	return nil

@@ -1,6 +1,8 @@
 package ipvlan
 
 import (
+	"context"
+
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -14,7 +16,7 @@ type IPVlan struct {
 	MTU     int
 }
 
-func Setup(cfg *IPVlan, netNS ns.NetNS) error {
+func Setup(ctx context.Context, cfg *IPVlan, netNS ns.NetNS) error {
 	parentLink, err := netlink.LinkByName(cfg.Parent)
 	if err != nil {
 		return err
@@ -23,7 +25,7 @@ func Setup(cfg *IPVlan, netNS ns.NetNS) error {
 	pre, err := netlink.LinkByName(cfg.PreName)
 	if err == nil {
 		// del pre link
-		err = utils.LinkDel(pre)
+		err = utils.LinkDel(ctx, pre)
 		if err != nil {
 			return err
 		}
@@ -42,7 +44,7 @@ func Setup(cfg *IPVlan, netNS ns.NetNS) error {
 		},
 		Mode: netlink.IPVLAN_MODE_L2,
 	}
-	err = utils.LinkAdd(v)
+	err = utils.LinkAdd(ctx, v)
 	if err != nil {
 		return err
 	}
@@ -52,7 +54,7 @@ func Setup(cfg *IPVlan, netNS ns.NetNS) error {
 		if innerErr != nil {
 			return innerErr
 		}
-		_, innerErr = utils.EnsureLinkName(contLink, cfg.IfName)
+		_, innerErr = utils.EnsureLinkName(ctx, contLink, cfg.IfName)
 		return innerErr
 	})
 }

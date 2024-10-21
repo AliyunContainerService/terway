@@ -5,8 +5,9 @@ package datapath
 import (
 	"net"
 
-	terwayTypes "github.com/AliyunContainerService/terway/types"
 	"github.com/vishvananda/netlink"
+
+	terwayTypes "github.com/AliyunContainerService/terway/types"
 )
 
 var containerIPNet = &net.IPNet{

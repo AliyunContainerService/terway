@@ -3,16 +3,19 @@ package utils
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/alexflint/go-filemutex"
-	"github.com/sirupsen/logrus"
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
+	"k8s.io/klog/v2/klogr"
 
-	"github.com/AliyunContainerService/terway/pkg/logger"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 )
 
@@ -20,50 +23,26 @@ const (
 	fileLockTimeOut = 11 * time.Second
 )
 
-// Log for default log
-var Log = DefaultLogger.WithField("subSys", "terway-cni")
+var Log = logr.Discard()
+var once sync.Once
 
-// Hook for log
-var Hook = &PodInfoHook{ExtraInfo: make(map[string]string)}
-var DefaultLogger = func() *logrus.Logger {
-	l := logger.NewDefaultLogger()
-	l.AddHook(Hook)
-	return l
-}()
+func InitLog(debug bool) logr.Logger {
+	once.Do(func() {
+		if debug {
+			fs := flag.NewFlagSet("log", flag.ContinueOnError)
+			klog.InitFlags(fs)
+			_ = fs.Set("v", "4")
+			_ = fs.Set("logtostderr", "false")
+			var file, err = os.OpenFile(utils.NormalizePath("/var/log/terway.cni.log"), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+			if err != nil {
+				panic(err)
+			}
+			klog.SetOutput(io.MultiWriter(file, os.Stderr))
+		}
+		Log = klogr.New()
+	})
 
-type PodInfoHook struct {
-	ExtraInfo map[string]string
-}
-
-func (p *PodInfoHook) Levels() []logrus.Level {
-	return logrus.AllLevels
-}
-
-func (p *PodInfoHook) Fire(e *logrus.Entry) error {
-	for k, v := range p.ExtraInfo {
-		e.Data[k] = v
-	}
-	return nil
-}
-
-func (p *PodInfoHook) AddExtraInfo(k, v string) {
-	p.ExtraInfo[k] = v
-}
-
-func (p *PodInfoHook) AddExtraInfos(e map[string]string) {
-	for k, v := range e {
-		p.ExtraInfo[k] = v
-	}
-}
-
-func SetLogDebug() {
-	DefaultLogger.SetLevel(logrus.DebugLevel)
-
-	var file, err = os.OpenFile(utils.NormalizePath("/var/log/terway.cni.log"), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		panic(err)
-	}
-	DefaultLogger.SetOutput(io.MultiWriter(file, os.Stderr))
+	return Log
 }
 
 // JSONStr json to str

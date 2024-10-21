@@ -1,6 +1,7 @@
 package datapath
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/AliyunContainerService/terway/plugin/driver/nic"
@@ -147,21 +148,21 @@ func generateENICfgForVlan(cfg *types.SetupConfig) *nic.Conf {
 	return contCfg
 }
 
-func (d *Vlan) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
+func (d *Vlan) Setup(ctx context.Context, cfg *types.SetupConfig, netNS ns.NetNS) error {
 	master, err := netlink.LinkByIndex(cfg.ENIIndex)
 	if err != nil {
 		return fmt.Errorf("error get link by index %d, %w", cfg.ENIIndex, err)
 	}
 
 	if cfg.EnableNetworkPriority {
-		err = utils.SetEgressPriority(master, cfg.NetworkPriority, cfg.ContainerIPNet)
+		err = utils.SetEgressPriority(ctx, master, cfg.NetworkPriority, cfg.ContainerIPNet)
 		if err != nil {
 			return err
 		}
 	}
 
 	eniCfg := generateENICfgForVlan(cfg)
-	err = nic.Setup(master, eniCfg)
+	err = nic.Setup(ctx, master, eniCfg)
 	if err != nil {
 		return fmt.Errorf("setup eni config, %w", err)
 	}
@@ -172,7 +173,7 @@ func (d *Vlan) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 		Vid:    cfg.Vid,
 		MTU:    cfg.MTU,
 	}
-	err = vlan.Setup(vlanCfg, netNS)
+	err = vlan.Setup(ctx, vlanCfg, netNS)
 	if err != nil {
 		return fmt.Errorf("error setup vlan, %w", err)
 	}
@@ -185,7 +186,7 @@ func (d *Vlan) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 		}
 
 		contCfg := generateContCfgForVlan(cfg, contLink)
-		err = nic.Setup(contLink, contCfg)
+		err = nic.Setup(ctx, contLink, contCfg)
 		if err != nil {
 			return err
 		}
@@ -200,20 +201,20 @@ func (d *Vlan) Setup(cfg *types.SetupConfig, netNS ns.NetNS) error {
 	return nil
 }
 
-func (d *Vlan) Check(cfg *types.CheckConfig) error {
+func (d *Vlan) Check(ctx context.Context, cfg *types.CheckConfig) error {
 	err := cfg.NetNS.Do(func(netNS ns.NetNS) error {
 		link, err := netlink.LinkByName(cfg.ContainerIfName)
 		if err != nil {
 			return err
 		}
-		changed, err := utils.EnsureLinkUp(link)
+		changed, err := utils.EnsureLinkUp(ctx, link)
 		if err != nil {
 			return err
 		}
 		if changed {
 			cfg.RecordPodEvent(fmt.Sprintf("link %s set up", cfg.ContainerIfName))
 		}
-		changed, err = utils.EnsureLinkMTU(link, cfg.MTU)
+		changed, err = utils.EnsureLinkMTU(ctx, link, cfg.MTU)
 		if err != nil {
 			return err
 		}
