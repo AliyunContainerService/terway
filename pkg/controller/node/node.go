@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -19,7 +18,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -43,7 +41,7 @@ const (
 
 func init() {
 	register.Add(ControllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
-		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &corev1.Node{}, &networkv1beta1.Node{})
+		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &corev1.Node{}, &networkv1beta1.Node{}, &networkv1beta1.NodeRuntime{})
 
 		err := mgr.GetFieldIndexer().IndexField(ctrlCtx.Context, &corev1.Pod{}, "spec.nodeName", func(object client.Object) []string {
 			pod := object.(*corev1.Pod)
@@ -65,12 +63,14 @@ func init() {
 				},
 			}).
 			For(&corev1.Node{}, builder.WithPredicates(&predicateForNodeEvent{})).
-			Watches(&networkv1beta1.Node{}, &handler.EnqueueRequestForObject{}).Complete(&ReconcileNode{
-			client: mgr.GetClient(),
-			scheme: mgr.GetScheme(),
-			record: mgr.GetEventRecorderFor(ControllerName),
-			aliyun: ctrlCtx.AliyunClient,
-		})
+			Watches(&networkv1beta1.Node{}, &handler.EnqueueRequestForObject{}).
+			Watches(&networkv1beta1.NodeRuntime{}, &handler.EnqueueRequestForObject{}).
+			Complete(&ReconcileNode{
+				client: mgr.GetClient(),
+				scheme: mgr.GetScheme(),
+				record: mgr.GetEventRecorderFor(ControllerName),
+				aliyun: ctrlCtx.AliyunClient,
+			})
 	}, false)
 }
 
@@ -85,7 +85,7 @@ type ReconcileNode struct {
 }
 
 func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-	r.notify(ctx, request.Name)
+	defer node.Notify(ctx, request.Name)
 
 	k8sNode := &corev1.Node{}
 	err := r.client.Get(ctx, request.NamespacedName, k8sNode)
@@ -194,21 +194,6 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 
 	err = r.patchNodeRes(ctx, k8sNode, node)
 	return err
-}
-
-func (r *ReconcileNode) notify(ctx context.Context, name string) bool {
-	select {
-	case node.EventCh <- event.GenericEvent{
-		Object: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}},
-	}:
-		if logf.FromContext(ctx).V(4).Enabled() {
-			logf.FromContext(ctx).Info("notify node event")
-		}
-	default:
-		logf.FromContext(ctx).Info("event chan is full")
-		return false
-	}
-	return true
 }
 
 func (r *ReconcileNode) k8sAnno(ctx context.Context, k8sNode *corev1.Node, node *networkv1beta1.Node) error {

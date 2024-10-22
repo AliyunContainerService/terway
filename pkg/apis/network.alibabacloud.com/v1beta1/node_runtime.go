@@ -20,10 +20,14 @@ const (
 	CNIStatusDeleted CNIStatus = "deleted"
 )
 
+type CNIStatusInfo struct {
+	LastUpdateTime metav1.Time `json:"lastUpdateTime"`
+}
+
 type RuntimePodStatus struct {
 	PodID string `json:"podID"`
 	// when pod is added
-	Status CNIStatus `json:"status"`
+	Status map[CNIStatus]*CNIStatusInfo `json:"status"`
 }
 
 type NodeRuntimeSpec struct {

@@ -46,11 +46,16 @@ spec:
                     podID:
                       type: string
                     status:
+                      additionalProperties:
+                        properties:
+                          lastUpdateTime:
+                            format: date-time
+                            type: string
+                        required:
+                        - lastUpdateTime
+                        type: object
                       description: when pod is added
-                      enum:
-                      - initial
-                      - deleted
-                      type: string
+                      type: object
                   required:
                   - podID
                   - status

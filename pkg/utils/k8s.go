@@ -6,6 +6,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+
+	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
 
 var stsKinds = []string{"StatefulSet"}
@@ -72,3 +74,25 @@ var (
 		Jitter:   1.1,
 	}
 )
+
+// RuntimeFinalStatus return the latest ts, return false if not found
+func RuntimeFinalStatus(status map[v1beta1.CNIStatus]*v1beta1.CNIStatusInfo) (cniStatus v1beta1.CNIStatus, cniStatusInfo *v1beta1.CNIStatusInfo, ok bool) {
+	for cni, statusInfo := range status {
+		if statusInfo == nil {
+			continue
+		}
+		if cniStatusInfo == nil {
+			cniStatusInfo = statusInfo
+			cniStatus = cni
+			ok = true
+		} else {
+			// statusInfo.LastUpdateTime
+			if cniStatusInfo.LastUpdateTime.Before(&statusInfo.LastUpdateTime) {
+				cniStatusInfo = statusInfo
+				cniStatus = cni
+				ok = true
+			}
+		}
+	}
+	return
+}

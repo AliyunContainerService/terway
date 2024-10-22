@@ -56,7 +56,18 @@ const (
 	batchSize = 10
 )
 
-var EventCh = make(chan event.GenericEvent, 1)
+var EventCh = make(chan event.GenericEvent, 1000)
+
+func Notify(ctx context.Context, name string) {
+	select {
+	case EventCh <- event.GenericEvent{
+		Object: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}},
+	}:
+		if logf.FromContext(ctx).V(4).Enabled() {
+			logf.FromContext(ctx).Info("notify node event")
+		}
+	}
+}
 
 func init() {
 	register.Add(ControllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
@@ -439,7 +450,7 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	ipv4Map, ipv6Map := buildIPMap(podsMapper, node.Status.NetworkInterfaces)
 
 	// 1. delete unwanted
-	releasePodNotFound(l, podsMapper, ipv4Map, ipv6Map)
+	releasePodNotFound(ctx, n.client, node.Name, podsMapper, ipv4Map, ipv6Map)
 
 	// 2. assign ip from local pool
 	unSucceedPods := assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA)
@@ -459,7 +470,15 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 }
 
 // releasePodNotFound release ip if there is no pod found
-func releasePodNotFound(log logr.Logger, podsMapper map[string]*PodRequest, ipMapper ...map[string]*EniIP) {
+func releasePodNotFound(ctx context.Context, c client.Client, nodeName string, podsMapper map[string]*PodRequest, ipMapper ...map[string]*EniIP) {
+	l := logf.FromContext(ctx)
+
+	nodeRuntime := &networkv1beta1.NodeRuntime{}
+	err := c.Get(ctx, client.ObjectKey{Name: nodeName}, nodeRuntime)
+	if err != nil {
+		l.Error(err, "failed to get node runtime, ignore ipam release ip")
+		return
+	}
 	for _, ipMap := range ipMapper {
 		for _, v := range ipMap {
 			if v.IP.PodID == "" {
@@ -470,7 +489,21 @@ func releasePodNotFound(log logr.Logger, podsMapper map[string]*PodRequest, ipMa
 				v.IP.PodUID = info.PodUID
 				continue
 			}
-			log.Info("pod released", "pod", v.IP.PodID, "ip", v.IP.IP)
+
+			if v.IP.PodUID != "" {
+				// check cni has finished
+				runtimePodStatus, ok := nodeRuntime.Status.Pods[v.IP.PodUID]
+				if !ok {
+					continue
+				}
+
+				status, _, ok := utils.RuntimeFinalStatus(runtimePodStatus.Status)
+				if !ok || status != networkv1beta1.CNIStatusDeleted {
+					continue
+				}
+				// we are certain ip is released
+			}
+			l.Info("pod released", "pod", v.IP.PodID, "ip", v.IP.IP)
 			v.IP.PodID = ""
 			v.IP.PodUID = ""
 		}
