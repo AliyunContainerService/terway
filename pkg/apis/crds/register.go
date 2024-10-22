@@ -22,6 +22,7 @@ const (
 	CRDPodENI        = "podenis.network.alibabacloud.com"
 	CRDPodNetworking = "podnetworkings.network.alibabacloud.com"
 	CRDNode          = "nodes.network.alibabacloud.com"
+	CRDNodeRuntime   = "noderuntimes.network.alibabacloud.com"
 
 	crdVersionKey = "crd.network.alibabacloud.com/version"
 )
@@ -35,6 +36,9 @@ var (
 
 	//go:embed network.alibabacloud.com_nodes.yaml
 	crdsNode []byte
+
+	//go:embed network.alibabacloud.com_noderuntimes.yaml
+	crdsNodeRuntime []byte
 )
 
 func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
@@ -50,6 +54,9 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 	case CRDNode:
 		crdBytes = crdsNode
 		version = "v0.2.0"
+	case CRDNodeRuntime:
+		crdBytes = crdsNodeRuntime
+		version = "v0.1.0"
 	default:
 		panic(fmt.Sprintf("crd %s name not exist", name))
 	}

@@ -53,6 +53,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&PodNetworkingList{},
 		&Node{},
 		&NodeList{},
+		&NodeRuntime{},
+		&NodeRuntimeList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
