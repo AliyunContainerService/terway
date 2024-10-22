@@ -59,13 +59,11 @@ const (
 var EventCh = make(chan event.GenericEvent, 1000)
 
 func Notify(ctx context.Context, name string) {
-	select {
-	case EventCh <- event.GenericEvent{
+	EventCh <- event.GenericEvent{
 		Object: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}},
-	}:
-		if logf.FromContext(ctx).V(4).Enabled() {
-			logf.FromContext(ctx).Info("notify node event")
-		}
+	}
+	if logf.FromContext(ctx).V(4).Enabled() {
+		logf.FromContext(ctx).Info("notify node event")
 	}
 }
 

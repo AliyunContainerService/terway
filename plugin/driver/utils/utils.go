@@ -3,7 +3,6 @@ package utils
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -13,8 +12,7 @@ import (
 	"github.com/alexflint/go-filemutex"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/klog/v2"
-	"k8s.io/klog/v2/klogr"
+	"k8s.io/klog/v2/textlogger"
 
 	"github.com/AliyunContainerService/terway/pkg/utils"
 )
@@ -27,19 +25,17 @@ var Log = logr.Discard()
 var once sync.Once
 
 func InitLog(debug bool) logr.Logger {
+	var opts []textlogger.ConfigOption
 	once.Do(func() {
 		if debug {
-			fs := flag.NewFlagSet("log", flag.ContinueOnError)
-			klog.InitFlags(fs)
-			_ = fs.Set("v", "4")
-			_ = fs.Set("logtostderr", "false")
 			var file, err = os.OpenFile(utils.NormalizePath("/var/log/terway.cni.log"), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 			if err != nil {
 				panic(err)
 			}
-			klog.SetOutput(io.MultiWriter(file, os.Stderr))
+			opts = append(opts, textlogger.Verbosity(4), textlogger.Output(io.MultiWriter(file, os.Stderr)))
+
 		}
-		Log = klogr.New()
+		Log = textlogger.NewLogger(textlogger.NewConfig(opts...))
 	})
 
 	return Log
