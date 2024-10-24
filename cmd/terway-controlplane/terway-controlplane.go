@@ -39,8 +39,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/klog/v2"
-	"k8s.io/klog/v2/klogr"
+	"k8s.io/klog/v2/textlogger"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -92,12 +91,13 @@ func main() {
 	)
 	flag.StringVar(&configFilePath, "config", "/etc/config/ctrl-config.yaml", "config file for controlplane")
 	flag.StringVar(&credentialFilePath, "credential", "/etc/credential/ctrl-secret.yaml", "secret file for controlplane")
-	klog.InitFlags(nil)
-	defer klog.Flush()
+
+	logCfg := textlogger.NewConfig()
+	logCfg.AddFlags(flag.CommandLine)
 
 	flag.Parse()
 
-	ctrl.SetLogger(klogr.New())
+	ctrl.SetLogger(textlogger.NewLogger(textlogger.NewConfig()))
 	log.Info(version.Version)
 
 	ctx := ctrl.SetupSignalHandler()
@@ -123,7 +123,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	lo.ForEach([]string{crds.CRDPodENI, crds.CRDPodNetworking, crds.CRDNode}, func(item string, index int) {
+	lo.ForEach([]string{crds.CRDPodENI, crds.CRDPodNetworking, crds.CRDNode, crds.CRDNodeRuntime}, func(item string, index int) {
 		err = crds.CreateOrUpdateCRD(ctx, directClient, item)
 		if err != nil {
 			log.Error(err, "unable sync crd")

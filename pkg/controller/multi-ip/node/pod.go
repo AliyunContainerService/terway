@@ -15,7 +15,7 @@ type PodRequest struct {
 
 	RequireERDMA bool
 
-	// status
+	// status form pod status, only used in takeover
 	IPv4 string
 	IPv6 string
 

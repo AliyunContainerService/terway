@@ -20,7 +20,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
@@ -36,40 +38,131 @@ func MetaIntoCtx(ctx context.Context) context.Context {
 	})
 }
 
-func Test_releaseUnWanted(t *testing.T) {
-	log := logr.Discard()
-	podsMapper := map[string]*PodRequest{
-		"pod2": &PodRequest{
-			PodUID: "uid_pod2",
-		},
-	}
-	enis := map[string]*networkv1beta1.NetworkInterface{
-		"eni": {
-			IPv4: map[string]*networkv1beta1.IP{
-				"v4": {
-					PodID:  "pod1",
-					PodUID: "pod1",
-				},
-				"11": {
-					PodID: "",
+// TestReleasePodNotFound tests the releasePodNotFound function
+func TestReleasePodNotFound(t *testing.T) {
+
+	now := metav1.Now()
+	last := metav1.NewTime(now.Add(-time.Minute))
+
+	tests := []struct {
+		name        string
+		nodeName    string
+		podsMapper  map[string]*PodRequest
+		ipMapper    map[string]*EniIP
+		nodeRuntime *networkv1beta1.NodeRuntime
+		expectPods  map[string]*EniIP
+	}{
+		{
+			name:       "Node not found, will not release ipam",
+			nodeName:   "test-node",
+			podsMapper: map[string]*PodRequest{},
+			ipMapper: map[string]*EniIP{
+				"ip1": {
+					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					IP: &networkv1beta1.IP{
+						PodID: "pod-id",
+					},
 				},
 			},
-			IPv6: map[string]*networkv1beta1.IP{
-				"v6": {
-					PodID:  "pod2",
-					PodUID: "foo",
+			nodeRuntime: &networkv1beta1.NodeRuntime{
+				ObjectMeta: metav1.ObjectMeta{Name: "other-node"},
+				Status: networkv1beta1.NodeRuntimeStatus{
+					Pods: map[string]*networkv1beta1.RuntimePodStatus{},
+				},
+			},
+			expectPods: map[string]*EniIP{
+				"ip1": {
+					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					IP: &networkv1beta1.IP{
+						PodID: "pod-id",
+					},
+				},
+			},
+		},
+		{
+			name:     "Allow update pod uid",
+			nodeName: "test-node",
+			podsMapper: map[string]*PodRequest{
+				"pod-id": {PodUID: "pod-uid-1"},
+			},
+			ipMapper: map[string]*EniIP{
+				"ip1": {
+					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					IP: &networkv1beta1.IP{
+						PodID:  "pod-id",
+						PodUID: "old",
+					},
+				},
+			},
+			nodeRuntime: &networkv1beta1.NodeRuntime{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+				Spec:       networkv1beta1.NodeRuntimeSpec{},
+				Status: networkv1beta1.NodeRuntimeStatus{
+					Pods: map[string]*networkv1beta1.RuntimePodStatus{},
+				},
+			},
+			expectPods: map[string]*EniIP{
+				"ip1": {
+					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					IP: &networkv1beta1.IP{
+						PodID:  "pod-id",
+						PodUID: "pod-uid-1",
+					},
+				},
+			},
+		},
+		{
+			name:       "Valid IP release",
+			nodeName:   "test-node",
+			podsMapper: map[string]*PodRequest{},
+			ipMapper: map[string]*EniIP{
+				"ip1": {
+					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					IP: &networkv1beta1.IP{
+						PodID:  "pod-id",
+						PodUID: "pod-uid-1",
+					},
+				},
+			},
+			nodeRuntime: &networkv1beta1.NodeRuntime{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+				Status: networkv1beta1.NodeRuntimeStatus{
+					Pods: map[string]*networkv1beta1.RuntimePodStatus{
+						"pod-uid-1": {Status: map[networkv1beta1.CNIStatus]*networkv1beta1.CNIStatusInfo{
+							networkv1beta1.CNIStatusDeleted: {LastUpdateTime: last},
+						}},
+					},
+				},
+			},
+			expectPods: map[string]*EniIP{
+				"ip1": {
+					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					IP:               &networkv1beta1.IP{},
 				},
 			},
 		},
 	}
 
-	ipv4Map, ipv6Map := buildIPMap(podsMapper, enis)
-	releasePodNotFound(log, podsMapper, ipv4Map, ipv6Map)
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			scheme := runtime.NewScheme()
+			// Add networkv1beta1 scheme
+			_ = networkv1beta1.AddToScheme(scheme)
 
-	assert.Empty(t, enis["eni"].IPv4["v4"].PodID)
-	assert.Empty(t, enis["eni"].IPv4["v4"].PodUID)
-	assert.Equal(t, "pod2", enis["eni"].IPv6["v6"].PodID)
-	assert.Equal(t, "uid_pod2", enis["eni"].IPv6["v6"].PodUID)
+			// Build the fake client with scheme and objects
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(tests[i].nodeRuntime).
+				Build()
+
+			// Call the function we're testing
+			releasePodNotFound(ctx, fakeClient, tests[i].nodeName, tests[i].podsMapper, tests[i].ipMapper)
+
+			// Assertions
+			assert.Equal(t, tests[i].expectPods, tests[i].ipMapper)
+		})
+	}
 }
 
 func Test_getEniOptions(t *testing.T) {

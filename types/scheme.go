@@ -83,5 +83,6 @@ var rootScopedKinds = map[schema.GroupKind]bool{
 
 	{Group: "network.alibabacloud.com", Kind: "PodNetworking"}: true,
 
-	{Group: "network.alibabacloud.com", Kind: "Node"}: true,
+	{Group: "network.alibabacloud.com", Kind: "Node"}:        true,
+	{Group: "network.alibabacloud.com", Kind: "NodeRuntime"}: true,
 }

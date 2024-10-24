@@ -1,0 +1,70 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: noderuntimes.network.alibabacloud.com
+spec:
+  group: network.alibabacloud.com
+  names:
+    kind: NodeRuntime
+    listKind: NodeRuntimeList
+    plural: noderuntimes
+    singular: noderuntime
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: NodeRuntime is the Schema for the per node runtime API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+          status:
+            properties:
+              pods:
+                additionalProperties:
+                  properties:
+                    podID:
+                      type: string
+                    status:
+                      additionalProperties:
+                        properties:
+                          lastUpdateTime:
+                            format: date-time
+                            type: string
+                        required:
+                        - lastUpdateTime
+                        type: object
+                      description: when pod is added
+                      type: object
+                  required:
+                  - podID
+                  - status
+                  type: object
+                description: runtime status, indexed by pod uid
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

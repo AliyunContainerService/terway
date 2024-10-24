@@ -12,11 +12,17 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+
+	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/eni"
 	"github.com/AliyunContainerService/terway/pkg/factory"
 	"github.com/AliyunContainerService/terway/pkg/k8s"
@@ -540,8 +546,12 @@ func (n *networkService) gcPods(ctx context.Context) error {
 	}
 	podResources := getPodResources(objList)
 
+	uidInLocal := sets.New[string]()
 	for _, podRes := range podResources {
 		if podRes.PodInfo != nil {
+			if podRes.PodInfo.PodUID != "" {
+				uidInLocal.Insert(podRes.PodInfo.PodUID)
+			}
 			if podRes.PodInfo.PodIPs.IPv4 != nil {
 				existIPs.Insert(podRes.PodInfo.PodIPs.IPv4.String())
 			}
@@ -623,6 +633,7 @@ func (n *networkService) gcPods(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		uidInLocal.Delete(podRes.PodInfo.PodUID)
 		serviceLog.Info("removed pod", "pod", podID)
 	}
 
@@ -632,6 +643,68 @@ func (n *networkService) gcPods(ctx context.Context) error {
 		})
 	}
 
+	// clean runtime node records
+	err = n.cleanRuntimeNode(ctx, uidInLocal)
+	if err != nil {
+		serviceLog.Error(err, "error cleaning runtime node")
+	}
+	return nil
+}
+
+// cleanRuntimeNode localUIDs is the pod uid stored in db, so those pods should not be release in ipam
+func (n *networkService) cleanRuntimeNode(ctx context.Context, localUIDs sets.Set[string]) error {
+	if n.ipamType != types.IPAMTypeCRD || n.daemonMode != daemon.ModeENIMultiIP {
+		return nil
+	}
+	nodeRuntime := &networkv1beta1.NodeRuntime{}
+	err := n.k8s.GetClient().Get(ctx, ctrlclient.ObjectKey{Name: n.k8s.NodeName()}, nodeRuntime)
+	if err != nil {
+		return err
+	}
+	l := logf.FromContext(ctx)
+
+	if l.V(4).Enabled() {
+		l.Info("clean runtime node", "localUIDs", localUIDs, nodeRuntime)
+	}
+
+	for uid, status := range nodeRuntime.Status.Pods {
+		if localUIDs.Has(uid) {
+			continue
+		}
+		// pod don't have record in local, need to delete it
+
+		s, last, ok := utils.RuntimeFinalStatus(status.Status)
+		if ok && s == networkv1beta1.CNIStatusInitial {
+			if time.Now().Before(last.LastUpdateTime.Add(30 * time.Second)) {
+				continue
+			}
+
+			list := strings.Split(status.PodID, "/")
+			if len(list) != 2 {
+				l.Info("invalid pod id format", "podID", status.PodID)
+				continue
+			}
+			ok, err := n.k8s.PodExist(list[0], list[1])
+			if err != nil || ok {
+				continue
+			}
+			l.Info("clean runtime pod", "pod", s, "uid", uid)
+			status.Status[networkv1beta1.CNIStatusDeleted] = &networkv1beta1.CNIStatusInfo{
+				LastUpdateTime: metav1.NewTime(time.Now()),
+			}
+		}
+	}
+	update := nodeRuntime.DeepCopy()
+	_, err = controllerutil.CreateOrPatch(ctx, n.k8s.GetClient(), update, func() error {
+		update.Status = nodeRuntime.Status
+		update.Spec = nodeRuntime.Spec
+		update.Labels = nodeRuntime.Labels
+		update.Name = nodeRuntime.Name
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to save node runtime status %w", err)
+	}
 	return nil
 }
 
