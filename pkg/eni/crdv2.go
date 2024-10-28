@@ -456,6 +456,9 @@ func (r *CRDV2) syncNodeRuntime(ctx context.Context) error {
 			v = &networkv1beta1.RuntimePodStatus{
 				PodID: pod.PodID,
 			}
+			if nodeRuntime.Status.Pods == nil {
+				nodeRuntime.Status.Pods = make(map[string]*networkv1beta1.RuntimePodStatus)
+			}
 			nodeRuntime.Status.Pods[k] = v
 		}
 		// cni del is called
