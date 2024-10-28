@@ -9,6 +9,8 @@ import (
 
 	"k8s.io/klog/v2/textlogger"
 
+	_ "go.uber.org/automaxprocs"
+
 	"github.com/AliyunContainerService/terway/daemon"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/version"
