@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -75,10 +76,17 @@ var eniCfg *daemon.Config
 
 func getENIConfig(cmd *cobra.Command, args []string) error {
 	var err error
-	eniCfg, err = daemon.GetConfigFromFileWithMerge("/etc/eni/eni.json", nil)
+	terwayConfig, err := getAllConfig(eniConfBasePath)
 	if err != nil {
 		return err
 	}
+
+	cfg := daemon.Config{}
+	err = json.Unmarshal(terwayConfig.eniConfig, &cfg)
+	if err != nil {
+		return err
+	}
+	eniCfg = &cfg
 
 	fmt.Printf("eni config: %+v\n", eniCfg)
 	return nil

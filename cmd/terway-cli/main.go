@@ -94,7 +94,7 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(listCmd, showCmd, mappingCmd, executeCmd, metadataCmd, cniCmd, nodeconfigCmd)
+	rootCmd.AddCommand(listCmd, showCmd, mappingCmd, executeCmd, metadataCmd, cniCmd, nodeconfigCmd, policyCmd)
 }
 
 func main() {

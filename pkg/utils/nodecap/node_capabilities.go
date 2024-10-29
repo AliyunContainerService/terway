@@ -10,10 +10,13 @@ import (
 )
 
 const (
-	nodeCapabilitiesFile       = "/var/run/eni/node_capabilities"
-	NodeCapabilityERDMA        = "erdma"
-	NodeCapabilityExclusiveENI = "cni_exclusive_eni"
-	NodeCapabilityIPv6         = "cni_ipv6_stack"
+	nodeCapabilitiesFile = "/var/run/eni/node_capabilities"
+
+	NodeCapabilityERDMA                 = "erdma"
+	NodeCapabilityExclusiveENI          = "cni_exclusive_eni"
+	NodeCapabilityIPv6                  = "cni_ipv6_stack"
+	NodeCapabilityDataPath              = "datapath"
+	NodeCapabilityNetworkPolicyProvider = "network_policy_provider"
 )
 
 // NodeCapabilitiesStore defines an interface for node capabilities operations
