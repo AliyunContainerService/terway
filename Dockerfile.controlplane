@@ -1,3 +1,7 @@
+ARG TERWAY_POLICY_IMAGE=registry-cn-zhangjiakou.ack.aliyuncs.com/acs/terway:policy-b43ee76b@sha256:398acf199f395d3571d2bd305f4e6625ec28fd9ebf462c7a7565f6f7e36b5b4b
+
+FROM --platform=$TARGETPLATFORM ${TERWAY_POLICY_IMAGE} AS policy-dist
+
 FROM --platform=$BUILDPLATFORM golang:1.23.2 AS builder
 ARG GOPROXY
 ARG TARGETOS
@@ -23,6 +27,7 @@ FROM --platform=$TARGETPLATFORM scratch
 WORKDIR /
 COPY --from=cert /etc/ssl/certs /etc/ssl/certs
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terway-controlplane /usr/bin/terway-controlplane
+COPY --from=policy-dist /tmp/install/usr/bin/cilium-operator-generic /usr/bin/cilium-operator-generic
 USER 1000:1000
 
 ENTRYPOINT  ["/usr/bin/terway-controlplane"]
