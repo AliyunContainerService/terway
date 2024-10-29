@@ -1,0 +1,183 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Mon, 28 Oct 2024 17:22:26 +0800
+Subject: remove run operator in agent
+
+Revert "add cmd to register crd"
+
+This reverts commit b8df7e2a
+
+Revert "run operator"
+
+This reverts commit 75805868
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ cilium/cmd/preflight.go   | 43 ---------------------------------------
+ daemon/cmd/daemon_main.go | 25 +++++++----------------
+ operator/main.go          | 18 ++++++++--------
+ 3 files changed, 17 insertions(+), 69 deletions(-)
+
+diff --git a/cilium/cmd/preflight.go b/cilium/cmd/preflight.go
+index 3e5bd7c5d4..5057987ae4 100644
+--- a/cilium/cmd/preflight.go
++++ b/cilium/cmd/preflight.go
+@@ -10,12 +10,7 @@ import (
+ 	"os"
+ 	"time"
+ 
+-	"github.com/cilium/cilium/pkg/k8s"
+-	ciliumClient "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/client"
+-	k8sconfig "github.com/cilium/cilium/pkg/k8s/config"
+-	"github.com/cilium/cilium/pkg/logging"
+ 	"github.com/spf13/cobra"
+-	"github.com/spf13/viper"
+ 
+ 	"github.com/cilium/cilium/pkg/fqdn"
+ 	"github.com/cilium/cilium/pkg/fqdn/matchpattern"
+@@ -59,16 +54,6 @@ enough to be used by toFQDNs policy rules`,
+ 	},
+ }
+ 
+-// register crd
+-var registerCRDCmd = &cobra.Command{
+-	Use:   "register-crd",
+-	Short: "Register CRD",
+-	Long:  `Register CRD cilium needed`,
+-	Run: func(cmd *cobra.Command, args []string) {
+-		registerCRD()
+-	},
+-}
+-
+ func init() {
+ 	pollerCmd.Flags().StringVar(&toFQDNsPreCachePath, toFQDNsPreCachePathOption, "", "The path to write serialized ToFQDNs pre-cache information. stdout is the default")
+ 	pollerCmd.Flags().IntVar(&toFQDNsPreCacheTTL, toFQDNsPreCacheTTLOption, 604800, "TTL, in seconds, to set on generated ToFQDNs pre-cache information")
+@@ -85,10 +70,6 @@ func init() {
+ 	validateCNP.Flags().StringVar(&k8sKubeConfigPath, "k8s-kubeconfig-path", "", "Absolute path of the kubernetes kubeconfig file")
+ 	preflightCmd.AddCommand(validateCNP)
+ 
+-	preflightCmd.Flags().StringVar(&k8sAPIServer, "k8s-api-server", "", "Kubernetes api address server (for https use --k8s-kubeconfig-path instead)")
+-	preflightCmd.Flags().StringVar(&k8sKubeConfigPath, "k8s-kubeconfig-path", "", "Absolute path of the kubernetes kubeconfig file")
+-	preflightCmd.AddCommand(registerCRDCmd)
+-
+ 	rootCmd.AddCommand(preflightCmd)
+ }
+ 
+@@ -175,27 +156,3 @@ func getDNSMappings() (DNSData map[string][]net.IP, err error) {
+ 
+ 	return DNSData, nil
+ }
+-
+-func registerCRD() {
+-	logging.DefaultLogger.SetFormatter(log.Formatter)
+-
+-	k8sClientQPSLimit := viper.GetFloat64(option.K8sClientQPSLimit)
+-	k8sClientBurst := viper.GetInt(option.K8sClientBurst)
+-
+-	k8s.Configure(k8sAPIServer, k8sKubeConfigPath, float32(k8sClientQPSLimit), k8sClientBurst)
+-
+-	if err := k8s.Init(k8sconfig.NewDefaultConfiguration()); err != nil {
+-		log.WithError(err).Fatal("Unable to connect to Kubernetes apiserver")
+-	}
+-	option.Config.EnableEnvoyConfig = false
+-	option.Config.DisableCiliumEndpointCRD = false
+-	option.Config.EnableCiliumEndpointSlice = true
+-	option.Config.EnableBGPControlPlane = false
+-	option.Config.EnableIPv4EgressGateway = false
+-	option.Config.EnableHubble = true
+-	// Update CRDs to ensure ciliumIdentity is present
+-	err := ciliumClient.RegisterCRDs()
+-	if err != nil {
+-		log.WithError(err).Fatal("Unable to register crd")
+-	}
+-}
+diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
+index 8b495d972f..4812da39c7 100644
+--- a/daemon/cmd/daemon_main.go
++++ b/daemon/cmd/daemon_main.go
+@@ -14,6 +14,13 @@ import (
+ 	"strings"
+ 	"time"
+ 
++	"github.com/go-openapi/loads"
++	gops "github.com/google/gops/agent"
++	"github.com/sirupsen/logrus"
++	"github.com/spf13/cobra"
++	"github.com/spf13/viper"
++	"google.golang.org/grpc"
++
+ 	"github.com/cilium/cilium/api/v1/server"
+ 	"github.com/cilium/cilium/api/v1/server/restapi"
+ 	"github.com/cilium/cilium/pkg/aws/eni"
+@@ -21,7 +28,6 @@ import (
+ 	"github.com/cilium/cilium/pkg/bgpv1/gobgp"
+ 	"github.com/cilium/cilium/pkg/bpf"
+ 	"github.com/cilium/cilium/pkg/cgroups"
+-	"github.com/cilium/cilium/pkg/command/exec"
+ 	"github.com/cilium/cilium/pkg/common"
+ 	"github.com/cilium/cilium/pkg/components"
+ 	"github.com/cilium/cilium/pkg/controller"
+@@ -69,12 +75,6 @@ import (
+ 	"github.com/cilium/cilium/pkg/version"
+ 	wireguard "github.com/cilium/cilium/pkg/wireguard/agent"
+ 	wireguardTypes "github.com/cilium/cilium/pkg/wireguard/types"
+-	"github.com/go-openapi/loads"
+-	gops "github.com/google/gops/agent"
+-	"github.com/sirupsen/logrus"
+-	"github.com/spf13/cobra"
+-	"github.com/spf13/viper"
+-	"google.golang.org/grpc"
+ )
+ 
+ const (
+@@ -1635,17 +1635,6 @@ func (d *Daemon) initKVStore() {
+ }
+ 
+ func runDaemon() {
+-	go func() {
+-		if os.Getenv("DISABLE_CILIUM_OPERATOR") == "true" {
+-			return
+-		}
+-		cmd := exec.CommandContext(server.ServerCtx, "cilium-operator-generic", "--skip-crd-creation", "--k8s-namespace", os.Getenv("CILIUM_K8S_NAMESPACE"), "--identity-gc-interval", "10m", "--identity-heartbeat-timeout", "20m")
+-		cmd.Stdout = os.Stdout
+-		cmd.Stderr = os.Stderr
+-		err := cmd.Run()
+-		log.Fatal(fmt.Errorf("cilium-operator exited, %w", err))
+-	}()
+-
+ 	datapathConfig := linuxdatapath.DatapathConfiguration{
+ 		HostDevice: defaults.HostDevice,
+ 		ProcFs:     option.Config.ProcFs,
+diff --git a/operator/main.go b/operator/main.go
+index ec71d565dc..ec0a329109 100644
+--- a/operator/main.go
++++ b/operator/main.go
+@@ -63,15 +63,17 @@ var (
+ 			}
+ 
+ 			// Open socket for using gops to get stacktraces of the agent.
+-			addr := fmt.Sprintf("127.0.0.1:%d", viper.GetInt(option.GopsPort))
+-			addrField := logrus.Fields{"address": addr}
+-			if err := gops.Listen(gops.Options{
+-				Addr:                   addr,
+-				ReuseSocketAddrAndPort: true,
+-			}); err != nil {
+-				log.WithError(err).WithFields(addrField).Fatal("Cannot start gops server")
++			if viper.GetInt(option.GopsPort) > 0 {
++				addr := fmt.Sprintf("127.0.0.1:%d", viper.GetInt(option.GopsPort))
++				addrField := logrus.Fields{"address": addr}
++				if err := gops.Listen(gops.Options{
++					Addr:                   addr,
++					ReuseSocketAddrAndPort: true,
++				}); err != nil {
++					log.WithError(err).WithFields(addrField).Fatal("Cannot start gops server")
++				}
++				log.WithFields(addrField).Info("Started gops server")
+ 			}
+-			log.WithFields(addrField).Info("Started gops server")
+ 
+ 			initEnv()
+ 			runOperator()
+-- 
+2.47.0
+
