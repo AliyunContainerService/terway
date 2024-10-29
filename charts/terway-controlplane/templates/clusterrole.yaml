@@ -50,6 +50,13 @@ rules:
       - podnetworkings.network.alibabacloud.com
       - podenis.network.alibabacloud.com
       - nodes.network.alibabacloud.com
+      - ciliumclusterwidenetworkpolicies.cilium.io
+      - ciliumendpoints.cilium.io
+      - ciliumendpointslices.cilium.io
+      - ciliumexternalworkloads.cilium.io
+      - ciliumidentities.cilium.io
+      - ciliumnetworkpolicies.cilium.io
+      - ciliumnodes.cilium.io
   - apiGroups:
       - admissionregistration.k8s.io
     resources:
@@ -60,3 +67,9 @@ rules:
       - get
     resourceNames:
       - {{ .Release.Name }}
+  - apiGroups:
+      - cilium.io
+    resources:
+      - "*"
+    verbs:
+      - "*"
