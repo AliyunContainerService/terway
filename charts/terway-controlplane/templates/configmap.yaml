@@ -5,6 +5,11 @@ metadata:
   labels:
   {{- include "terway-controlplane.labels" . | nindent 4 }}
 data:
+  cilium-config.yaml: |
+    k8s-namespace: kube-system
+    identity-gc-interval: 10m
+    identity-heartbeat-timeout: 20m
+    k8s-kubeconfig-path: /etc/kubernetes/config/kubeconfig
   ctrl-config.yaml: |
     leaseLockName: "terway-controller-lock"
     leaseLockNamespace: "kube-system"
