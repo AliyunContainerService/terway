@@ -17,7 +17,7 @@ func switchDataPathV2() bool {
 		return false
 	}
 
-	prevDatapath := nodecap.GetNodeCapabilities(nodeCapabilityDatapath)
+	prevDatapath := nodecap.GetNodeCapabilities(nodecap.NodeCapabilityDataPath)
 	if prevDatapath == dataPathV2 {
 		fmt.Println("datapath is already v2")
 		return true

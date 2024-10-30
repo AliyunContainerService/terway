@@ -1,5 +1,21 @@
 #!/bin/sh
 
+masq_eni_only() {
+  if ! "$1" -t nat -L terway-masq; then
+    # Create a new chain in nat table.
+    "$1" -t nat -N terway-masq
+  fi
+
+  if ! "$1" -t nat -L POSTROUTING | grep -q terway-masq; then
+    # Append that chain to POSTROUTING table.
+    "$1" -t nat -A POSTROUTING -m comment --comment "terway:masq-outgoing" ! -o lo -j terway-masq
+  fi
+
+  if ! "$1" -t nat -L terway-masq | grep -q MASQUERADE; then
+    "$1" -t nat -A terway-masq -j MASQUERADE
+  fi
+}
+
 cleanup_rules(){
   # Set FORWARD action to ACCEPT so outgoing packets can go through POSTROUTING chains.
   echo "Setting default FORWARD action to ACCEPT..."
@@ -31,34 +47,6 @@ cleanup_rules(){
 
   echo "Cleaning up calico rules from the filter table..."
   "$1"-save -t filter | grep -e '--comment "cali:' | cut -c 3- | sed 's/^ *//;s/ *$//' | xargs -l1 "$1" -t filter -D
-}
-
-config_masquerade() {
-    # Set the CALICO_IPV4POOL_CIDR environment variable to the appropriate CIDR for this cluster if Calico is adding the traffic.
-    if [ "$CALICO_IPV4POOL_CIDR" != "" ]; then
-        clusterCIDR=$CALICO_IPV4POOL_CIDR
-
-        # Set up NAT rule so traffic gets masqueraded if it is going to any subnet other than cluster-cidr.
-        echo "Adding masquerade rule for traffic going from $clusterCIDR to ! $clusterCIDR"
-
-        if ! iptables -t nat -L terway-brb-masq; then
-            # Create a new chain in nat table.
-            iptables -t nat -N terway-brb-masq
-        fi
-
-        if ! iptables -t nat -L POSTROUTING | grep -q terway-brb; then
-            # Append that chain to POSTROUTING table.
-            iptables -t nat -A POSTROUTING -m comment --comment "terway:masq-outgoing" -j terway-brb-masq
-        fi
-
-        if ! iptables -t nat -L terway-brb-masq | grep -q "$clusterCIDR"; then
-            # Add MASQUERADE rule for traffic from clusterCIDR to non-clusterCIDR.
-            if ! iptables -t nat -A terway-brb-masq -s "$clusterCIDR" ! -d "$clusterCIDR" -j MASQUERADE --random-fully; then
-                # fallback to no random-fully
-                iptables -t nat -A terway-brb-masq -s "$clusterCIDR" ! -d "$clusterCIDR" -j MASQUERADE
-            fi
-        fi
-    fi
 }
 
 cleanup_felix() {
