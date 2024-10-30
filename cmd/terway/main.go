@@ -23,7 +23,6 @@ var (
 	log = ctrl.Log.WithName("setup")
 )
 
-const defaultConfigPath = "/etc/eni/eni.json"
 const defaultSocketPath = "/var/run/eni/eni.socket"
 const debugSocketPath = "unix:///var/run/eni/eni_debug.socket"
 
@@ -31,6 +30,7 @@ var (
 	logLevel       string
 	daemonMode     string
 	readonlyListen string
+	configFilePath string
 )
 
 func main() {
@@ -40,6 +40,7 @@ func main() {
 	fs.StringVar(&daemonMode, "daemon-mode", "VPC", "terway network mode")
 	fs.StringVar(&logLevel, "log-level", "info", "terway log level")
 	fs.StringVar(&readonlyListen, "readonly-listen", utils.NormalizePath(debugSocketPath), "terway readonly listen")
+	fs.StringVar(&configFilePath, "config", "/etc/eni/eni.json", "terway config file")
 	ctrl.RegisterFlags(fs)
 
 	err := fs.Parse(os.Args[1:])
@@ -56,7 +57,7 @@ func main() {
 	log.Info(version.Version)
 
 	ctx := ctrl.SetupSignalHandler()
-	err = daemon.Run(ctx, utils.NormalizePath(defaultSocketPath), readonlyListen, utils.NormalizePath(defaultConfigPath), daemonMode)
+	err = daemon.Run(ctx, utils.NormalizePath(defaultSocketPath), readonlyListen, utils.NormalizePath(configFilePath), daemonMode)
 
 	if err != nil {
 		klog.Fatal(err)
