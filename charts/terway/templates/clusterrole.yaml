@@ -100,9 +100,3 @@ rules:
       - '*'
     verbs:
       - '*'
-  - apiGroups:
-      - alibabacloud.com
-    resources:
-      - '*'
-    verbs:
-      - '*'

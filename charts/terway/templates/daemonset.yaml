@@ -1,59 +1,4 @@
 ---
-{{if .Values.enableIPvlan }}
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: terway-preflight
-spec:
-  ttlSecondsAfterFinished: 300
-  backoffLimit: 10
-  template:
-    spec:
-      hostNetwork: true
-      priorityClassName: system-node-critical
-      tolerations:
-        - operator: "Exists"
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: type
-                    operator: NotIn
-                    values:
-                      - virtual-kubelet
-                  - key: kubernetes.io/arch
-                    operator: In
-                    values:
-                      - amd64
-                      - arm64
-                  - key: kubernetes.io/os
-                    operator: In
-                    values:
-                      - linux
-      containers:
-        - name: preflight
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          command:
-            - sh
-            - "-ce"
-            - "cilium preflight register-crd"
-          volumeMounts:
-            - name: configvolume
-              mountPath: /etc/eni
-      restartPolicy: OnFailure
-      serviceAccountName: terway
-      volumes:
-        - name: configvolume
-          configMap:
-            name: eni-config
-            items:
-              - key: eni_conf
-                path: eni.json
-              - key: 10-terway.conf
-                path: 10-terway.conf
-{{end}}
----
 
 apiVersion: apps/v1
 kind: DaemonSet
@@ -106,40 +51,43 @@ spec:
           command:
             - /bin/init.sh
           env:
-          - name: TERWAY_DAEMON_MODE
-            value: "{{.Values.daemonMode}}"
-          - name: K8S_NODE_NAME
-            valueFrom:
-              fieldRef:
-                fieldPath: spec.nodeName
-          - name: DISABLE_POLICY
-            valueFrom:
-              configMapKeyRef:
-                name: eni-config
-                key: disable_network_policy
-                optional: true
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: DISABLE_POLICY
+              valueFrom:
+                configMapKeyRef:
+                  name: eni-config
+                  key: disable_network_policy
+                  optional: true
           volumeMounts:
-          - name: config
-            mountPath: /etc/eni
-          - mountPath: /var-run-eni
-            name: var-run-eni
-          - name: configvolume
-            mountPath: /tmp/eni
-          - name: cni-bin
-            mountPath: /opt/cni/bin/
-          - name: cni
-            mountPath: /etc/cni/net.d/
-          - mountPath: /lib/modules
-            name: lib-modules
-          - mountPath: /host
-            name: host-root
-          - mountPath: /var/run/
-            name: eni-run
+            - name: eni-config
+              mountPath: /etc/eni
+            - mountPath: /var-run-eni
+              name: var-run-eni
+            - name: cni-bin
+              mountPath: /opt/cni/bin/
+            - name: cni-config-project
+              mountPath: /etc/cni/net.d/
+            - mountPath: /lib/modules
+              name: lib-modules
+            - mountPath: /host
+              name: host-root
+            - mountPath: /var/run/
+              name: eni-run
       containers:
         - name: terway
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
-          command: [ "/usr/bin/terwayd", "-log-level", "info", "-daemon-mode", "{{.Values.daemonMode}}" ]
+          command:
+            - "/usr/bin/terwayd"
+            - "-log-level"
+            - "info"
+            - "-daemon-mode"
+            - "{{.Values.daemonMode}}"
+            - "-config"
+            - "/etc/eni/eni_conf"
           securityContext:
             capabilities:
               add:
@@ -164,27 +112,25 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
           volumeMounts:
-          - name: config
-            mountPath: /etc/eni
-            readOnly: true
-          - mountPath: /var/run/
-            name: eni-run
-          - mountPath: /lib/modules
-            name: lib-modules
-          - mountPath: /var/lib/cni/networks
-            name: cni-networks
-          - mountPath: /var/lib/cni/terway
-            name: cni-terway
-          - mountPath: /etc/cni/net.d
-            name: cni
-            readOnly: true
-          - mountPath: /host-etc-net.d
-            name: host-cni
-          - mountPath: /var/lib/kubelet/device-plugins
-            name: device-plugin-path
-          - name: addon-token
-            mountPath: "/var/addon"
-            readOnly: true
+            - name: configvolume
+              mountPath: /etc/eni
+              readOnly: true
+            - mountPath: /var/run/
+              name: eni-run
+            - mountPath: /lib/modules
+              name: lib-modules
+            - mountPath: /var/lib/cni/terway
+              name: cni-terway
+            - mountPath: /etc/cni/net.d
+              name: cni-config-project
+              readOnly: true
+            - mountPath: /host-etc-net.d
+              name: cni-config
+            - mountPath: /var/lib/kubelet/device-plugins
+              name: device-plugin-path
+            - name: addon-token
+              mountPath: "/var/addon"
+              readOnly: true
         - name: policy
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
@@ -218,12 +164,6 @@ spec:
                   fieldPath: metadata.namespace
             - name: CILIUM_CNI_CHAINING_MODE
               value: terway-chainer
-            - name: IN_CLUSTER_LOADBALANCE
-              valueFrom:
-                configMapKeyRef:
-                  name: eni-config
-                  key: in_cluster_loadbalance
-                  optional: true
           securityContext:
             privileged: false
             capabilities:
@@ -233,7 +173,7 @@ spec:
                 - SYS_ADMIN
                 - NET_RAW
                 - SYS_MODULE
-{{if .Values.enableIPvlan }}
+{{- if .Values.enableIPvlan }}
                 - CHOWN
                 - KILL
                 - IPC_LOCK
@@ -263,12 +203,15 @@ spec:
               host: 127.0.0.1
             periodSeconds: 10
           volumeMounts:
+            - mountPath: /etc/eni
+              name: configvolume
+              readOnly: true
             - mountPath: /var-run-eni
               name: var-run-eni
             - mountPath: /lib/modules
               name: lib-modules
             - mountPath: /etc/cni/net.d
-              name: cni
+              name: cni-config-project
               readOnly: true
             # volumes use by cilium
             - mountPath: /sys/fs
@@ -279,71 +222,62 @@ spec:
             - mountPath: /run/xtables.lock
               name: xtables-lock
       volumes:
-      - name: config
-        emptyDir: {}
-      - name: var-run-eni
-        emptyDir: { }
-      - name: configvolume
-        configMap:
-          name: eni-config
-          items: null
-      - name: cni-bin
-        hostPath:
-          path: /opt/cni/bin
-          type: "Directory"
-      - name: host-cni
-        hostPath:
-          path: /etc/cni/net.d
-      - name: cni
-        emptyDir: {}
-      - name: eni-run
-        hostPath:
-          path: /var/run/
-          type: "Directory"
-      - name: lib-modules
-        hostPath:
-          path: /lib/modules
-      - name: cni-networks
-        hostPath:
-          path: /var/lib/cni/networks
-      - name: cni-terway
-        hostPath:
-          path: /var/lib/cni/terway
-      - name: device-plugin-path
-        hostPath:
-          path: /var/lib/kubelet/device-plugins
-          type: "Directory"
-      - name: host-root
-        hostPath:
-          path: /
-          type: "Directory"
-      - name: addon-token
-        secret:
-          secretName: addon.network.token
-          items:
-          - key: addon.token.config
-            path: token-config
-          optional: true
-      - name: alibaba-addon-secret
-        secret:
-          secretName: alibaba-addon-secret
-          optional: true
-      # used by cilium
-      # To keep state between restarts / upgrades
-      - hostPath:
-          path: /var/run/cilium
-          type: DirectoryOrCreate
-        name: cilium-run
-      # To keep state between restarts / upgrades for bpf maps
-      - hostPath:
-          path: /sys/fs/
-          type: DirectoryOrCreate
-        name: sys-fs
-        # To access iptables concurrently with other processes (e.g. kube-proxy)
-      - hostPath:
-          path: /run/xtables.lock
-          type: FileOrCreate
-        name: xtables-lock
+        - name: var-run-eni
+          emptyDir: { }
+        - name: configvolume
+          configMap:
+            name: eni-config
+            items: null
+        - name: cni-bin
+          hostPath:
+            path: /opt/cni/bin
+            type: "Directory"
+        - name: cni-config
+          hostPath:
+            path: /etc/cni/net.d
+        - name: cni-config-project
+          emptyDir: { }
+        - name: eni-run
+          hostPath:
+            path: /var/run/
+            type: "Directory"
+        - name: lib-modules
+          hostPath:
+            path: /lib/modules
+        - name: cni-terway
+          hostPath:
+            path: /var/lib/cni/terway
+        - name: device-plugin-path
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+            type: "Directory"
+        - name: host-root
+          hostPath:
+            path: /
+            type: "Directory"
+        - name: addon-token
+          secret:
+            secretName: addon.network.token
+            items:
+              - key: addon.token.config
+                path: token-config
+            optional: true
+        # used by cilium
+        # To keep state between restarts / upgrades
+        - hostPath:
+            path: /var/run/cilium
+            type: DirectoryOrCreate
+          name: cilium-run
+        # To keep state between restarts / upgrades for bpf maps
+        - hostPath:
+            path: /sys/fs/
+            type: DirectoryOrCreate
+          name: sys-fs
+          # To access iptables concurrently with other processes (e.g. kube-proxy)
+        - hostPath:
+            path: /run/xtables.lock
+            type: FileOrCreate
+          name: xtables-lock
 
 ---
 
