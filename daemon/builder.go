@@ -155,7 +155,7 @@ func (b *NetworkServiceBuilder) setupAliyunClient() error {
 	if string(b.config.AccessID) != "" && string(b.config.AccessSecret) != "" {
 		providers = append(providers, credential.NewAKPairProvider(string(b.config.AccessID), string(b.config.AccessSecret)))
 	}
-	providers = append(providers, credential.NewEncryptedCredentialProvider(utils.NormalizePath(b.config.CredentialPath), "", ""))
+	providers = append(providers, credential.NewEncryptedCredentialProvider(utils.NormalizePath(b.config.CredentialPath)))
 	providers = append(providers, credential.NewMetadataProvider())
 
 	clientSet, err := credential.NewClientMgr(meta.RegionID, providers...)

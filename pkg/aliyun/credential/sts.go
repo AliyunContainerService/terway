@@ -1,7 +1,6 @@
 package credential
 
 import (
-	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
@@ -11,14 +10,8 @@ import (
 	"time"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth/credentials"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/util/retry"
 
-	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/utils"
-	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
 )
 
 type EncryptedCredentialInfo struct {
@@ -30,65 +23,37 @@ type EncryptedCredentialInfo struct {
 }
 
 type EncryptedCredentialProvider struct {
-	credentialPath  string
-	secretNamespace string
-	secretName      string
+	credentialPath string
 }
 
-// NewEncryptedCredentialProvider get token from file or secret. default filepath /var/addon/token-config
-func NewEncryptedCredentialProvider(credentialPath, secretNamespace, secretName string) *EncryptedCredentialProvider {
-	return &EncryptedCredentialProvider{credentialPath: credentialPath, secretNamespace: secretNamespace, secretName: secretName}
+// NewEncryptedCredentialProvider get token from file. default filepath /var/addon/token-config
+func NewEncryptedCredentialProvider(credentialPath string) *EncryptedCredentialProvider {
+	return &EncryptedCredentialProvider{credentialPath: credentialPath}
 }
 
 func (e *EncryptedCredentialProvider) Resolve() (*Credential, error) {
-	if e.credentialPath == "" && e.secretNamespace == "" && e.secretName == "" {
+	if e.credentialPath == "" {
 		return nil, nil
 	}
 	var encodeTokenCfg []byte
 	var err error
 	var akInfo EncryptedCredentialInfo
 
-	if e.credentialPath != "" {
-		log.Info("resolve encrypted credential", "path", e.credentialPath)
-		if utils.IsWindowsOS() {
-			// NB(thxCode): since os.Stat has not worked as expected,
-			// we use os.Lstat instead of os.Stat here,
-			// ref to https://github.com/microsoft/Windows-Containers/issues/97#issuecomment-887713195.
-			_, err = os.Lstat(e.credentialPath)
-		} else {
-			_, err = os.Stat(e.credentialPath)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to read config %s, err: %w", e.credentialPath, err)
-		}
-		encodeTokenCfg, err = os.ReadFile(e.credentialPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read token config, err: %w", err)
-		}
+	log.Info("resolve encrypted credential", "path", e.credentialPath)
+	if utils.IsWindowsOS() {
+		// NB(thxCode): since os.Stat has not worked as expected,
+		// we use os.Lstat instead of os.Stat here,
+		// ref to https://github.com/microsoft/Windows-Containers/issues/97#issuecomment-887713195.
+		_, err = os.Lstat(e.credentialPath)
 	} else {
-		log.Info(fmt.Sprintf("resolve secret %s/%s", e.secretNamespace, e.secretName))
-
-		var secret *corev1.Secret
-		err = retry.OnError(backoff.Backoff(backoff.WaitStsTokenReady), func(err error) bool {
-			if errors.IsNotFound(err) || errors.IsTooManyRequests(err) {
-				return true
-			}
-			return false
-		}, func() error {
-			secret, err = k8sclient.K8sClient.CoreV1().Secrets(e.secretNamespace).Get(context.Background(), e.secretName, metav1.GetOptions{})
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		var ok bool
-		encodeTokenCfg, ok = secret.Data["addon.token.config"]
-		if !ok {
-			return nil, fmt.Errorf("token is not found in addon.network.token")
-		}
+		_, err = os.Stat(e.credentialPath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config %s, err: %w", e.credentialPath, err)
+	}
+	encodeTokenCfg, err = os.ReadFile(e.credentialPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read token config, err: %w", err)
 	}
 
 	err = json.Unmarshal(encodeTokenCfg, &akInfo)
