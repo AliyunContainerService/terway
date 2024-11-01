@@ -36,7 +36,7 @@ func main() {
 
 	providers := []credential.Interface{
 		credential.NewAKPairProvider(accessKeyID, accessKeySecret),
-		credential.NewEncryptedCredentialProvider(credentialPath, "", ""),
+		credential.NewEncryptedCredentialProvider(credentialPath),
 		credential.NewMetadataProvider(),
 	}
 

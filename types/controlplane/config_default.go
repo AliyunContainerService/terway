@@ -78,13 +78,11 @@ type Config struct {
 }
 
 type Credential struct {
-	AccessKey       secret.Secret `json:"accessKey" validate:"required_with=AccessSecret"`
-	AccessSecret    secret.Secret `json:"accessSecret" validate:"required_with=AccessKey"`
-	CredentialPath  string        `json:"credentialPath"`
-	SecretNamespace string        `json:"secretNamespace" validate:"required_with=SecretName"`
-	SecretName      string        `json:"secretName" validate:"required_with=SecretNamespace"`
-	OtelEndpoint    string        `json:"otelEndpoint"`
-	OtelToken       secret.Secret `json:"otelToken"`
+	AccessKey      secret.Secret `json:"accessKey" validate:"required_with=AccessSecret"`
+	AccessSecret   secret.Secret `json:"accessSecret" validate:"required_with=AccessKey"`
+	CredentialPath string        `json:"credentialPath"`
+	OtelEndpoint   string        `json:"otelEndpoint"`
+	OtelToken      secret.Secret `json:"otelToken"`
 }
 
 type MultiIPController struct {

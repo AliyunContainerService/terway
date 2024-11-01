@@ -151,7 +151,7 @@ func main() {
 	if string(cfg.Credential.AccessKey) != "" && string(cfg.Credential.AccessSecret) != "" {
 		providers = append(providers, credential.NewAKPairProvider(string(cfg.Credential.AccessKey), string(cfg.Credential.AccessSecret)))
 	}
-	providers = append(providers, credential.NewEncryptedCredentialProvider(cfg.CredentialPath, cfg.SecretNamespace, cfg.SecretName))
+	providers = append(providers, credential.NewEncryptedCredentialProvider(cfg.CredentialPath))
 	providers = append(providers, credential.NewMetadataProvider())
 
 	clientSet, err := credential.NewClientMgr(cfg.RegionID, providers...)

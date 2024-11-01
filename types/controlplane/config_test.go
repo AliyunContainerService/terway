@@ -63,16 +63,6 @@ func TestParseAndValidateCredential(t *testing.T) {
 				CredentialPath: "foo",
 			},
 			wantErr: true,
-		}, {
-			name: "use secret",
-			credential: Credential{
-				AccessKey:       "",
-				AccessSecret:    "",
-				CredentialPath:  "",
-				SecretNamespace: "foo",
-				SecretName:      "foo",
-			},
-			wantErr: false,
 		},
 		{
 			name: "miss all",
