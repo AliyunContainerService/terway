@@ -98,6 +98,20 @@ func Test_predicateNode(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			name: "normal node but has exclude rule",
+			args: args{
+				o: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"topology.kubernetes.io/region":   "cn-hangzhou",
+							"k8s.aliyun.com/ignore-by-terway": "true",
+						},
+					},
+				},
+			},
+			want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

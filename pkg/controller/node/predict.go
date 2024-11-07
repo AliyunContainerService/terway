@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/types"
 )
 
 type predicateForNodeEvent struct {
@@ -56,6 +57,10 @@ func predicateNode(o client.Object) bool {
 	}
 
 	if node.Labels[corev1.LabelTopologyRegion] == "" {
+		return false
+	}
+
+	if types.IgnoredByTerway(node.Labels) {
 		return false
 	}
 
