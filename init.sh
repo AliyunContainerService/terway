@@ -11,8 +11,9 @@ cp -f /usr/bin/cilium-cni /opt/cni/bin/
 chmod +x /opt/cni/bin/cilium-cni
 
 # init cni config
-terway-cli cni /etc/eni/10-terway.conflist /etc/eni/10-terway.conf --output /etc/cni/net.d/10-terway.conflist
+terway-cli cni --output /etc/cni/net.d/10-terway.conflist
 terway-cli nodeconfig
+cat /etc/cni/net.d/10-terway.conflist
 
 node_capabilities=/var/run/eni/node_capabilities
 if [ ! -f "$node_capabilities" ]; then

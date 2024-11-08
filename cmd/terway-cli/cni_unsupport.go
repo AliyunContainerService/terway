@@ -9,3 +9,7 @@ func switchDataPathV2() bool {
 func checkKernelVersion(k, major, minor int) bool {
 	return false
 }
+
+func allowEBPFNetworkPolicy(enable bool) (bool, error) {
+	return enable, nil
+}
