@@ -63,3 +63,15 @@ func allowEBPFNetworkPolicy(require bool) (bool, error) {
 func checkKernelVersion(k, major, minor int) bool {
 	return kernel.CheckKernelVersion(k, major, minor)
 }
+
+func isOldNode() (bool, error) {
+	_, err := netlink.LinkByName("cilium_net")
+	if err == nil {
+		fmt.Printf("link cilium_net exist\n")
+		return true, nil
+	}
+	if !errors.As(err, &netlink.LinkNotFoundError{}) {
+		return false, err
+	}
+	return false, nil
+}
