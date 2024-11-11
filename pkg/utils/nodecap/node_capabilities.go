@@ -17,6 +17,7 @@ const (
 	NodeCapabilityIPv6                  = "cni_ipv6_stack"
 	NodeCapabilityDataPath              = "datapath"
 	NodeCapabilityNetworkPolicyProvider = "network_policy_provider"
+	NodeCapabilityHasCiliumChainer      = "has_cilium_chainer"
 )
 
 // NodeCapabilitiesStore defines an interface for node capabilities operations

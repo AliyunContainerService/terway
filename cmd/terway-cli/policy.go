@@ -24,6 +24,7 @@ type PolicyConfig struct {
 	HealthCheckPort      string
 	IPv6                 bool
 	InClusterLoadBalance bool
+	HasCiliumChainer     bool
 }
 
 type CNIConfig struct {
@@ -61,7 +62,7 @@ func getPolicyConfig(capFilePath string) (*PolicyConfig, error) {
 		return nil, err
 	}
 
-	if store.Get(nodecap.NodeCapabilityIPv6) == ("true") {
+	if store.Get(nodecap.NodeCapabilityIPv6) == True {
 		cfg.IPv6 = true
 	}
 
@@ -70,6 +71,7 @@ func getPolicyConfig(capFilePath string) (*PolicyConfig, error) {
 	}
 	cfg.Datapath = store.Get(nodecap.NodeCapabilityDataPath)
 	cfg.PolicyProvider = store.Get(nodecap.NodeCapabilityNetworkPolicyProvider)
+	cfg.HasCiliumChainer = store.Get(nodecap.NodeCapabilityHasCiliumChainer) == True
 
 	cfg.HealthCheckPort = os.Getenv("FELIX_HEALTHPORT")
 	if cfg.HealthCheckPort == "" {
@@ -105,6 +107,9 @@ func initPolicy(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return err
 			}
+			return runSocat(cfg)
+		}
+		if !cfg.HasCiliumChainer {
 			return runSocat(cfg)
 		}
 		fmt.Printf("enable ebpf provider, run cilium")
@@ -167,6 +172,10 @@ func runCalico(cfg *PolicyConfig) error {
 }
 
 func runCilium(cfg *PolicyConfig) error {
+	if !cfg.HasCiliumChainer {
+		return fmt.Errorf("no cilium chainer is installed")
+	}
+
 	extraArgs, err := parsePolicyConfig()
 	if err != nil {
 		return err
@@ -193,7 +202,6 @@ func runCilium(cfg *PolicyConfig) error {
 		"--enable-l7-proxy=false",
 		"--ipam=cluster-pool",
 		"--enable-runtime-device-detection=true",
-		"--enable-policy=" + fmt.Sprintf("%t", cfg.EnableNetworkPolicy),
 		"--agent-health-port=" + cfg.HealthCheckPort,
 	}
 	if cfg.EnableNetworkPolicy {

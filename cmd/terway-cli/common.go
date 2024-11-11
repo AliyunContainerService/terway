@@ -11,6 +11,11 @@ const (
 )
 const eniConfBasePath = "/etc/eni"
 
+const (
+	True  = "true"
+	False = "false"
+)
+
 type TerwayConfig struct {
 	enableNetworkPolicy bool
 	enableInClusterLB   bool
@@ -71,7 +76,7 @@ func getAllConfig(base string) (*TerwayConfig, error) {
 			return nil, err
 		}
 	}
-	if string(r) == "true" {
+	if string(r) == True {
 		cfg.enableInClusterLB = true
 	}
 

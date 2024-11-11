@@ -38,6 +38,8 @@ const (
 type feature struct {
 	EBPF bool
 	EDT  bool
+
+	EnableNetworkPolicy bool
 }
 
 var (
@@ -56,7 +58,6 @@ func init() {
 var cniCmd = &cobra.Command{
 	Use:          "cni",
 	SilenceUsage: true,
-	Args:         cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		err := processCNIConfig(cmd, args)
 		if err != nil {
@@ -78,12 +79,11 @@ func processCNIConfig(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to set feature gates: %v", err)
 	}
 
-	err = processInput(args)
+	err = processInput()
 	if err != nil {
 		return fmt.Errorf("failed process input: %v", err)
 	}
 
-	// mount bpf fs if needed
 	cni, err := os.ReadFile(outPutPath)
 	if err != nil {
 		return err
@@ -92,43 +92,34 @@ func processCNIConfig(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	for _, plugin := range cniJSON.Path("plugins").Children() {
-		if plugin.Path("type").Data().(string) == "cilium-cni" {
-			err = mountHostBpf()
-			if err != nil {
-				return err
-			}
-		}
-	}
 
 	return storeRuntimeConfig(nodeCapabilitiesFile, cniJSON)
 }
 
-func processInput(files []string) error {
-	var configs [][]byte
-	for _, file := range files {
-		out, err := os.ReadFile(file)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return err
-		}
-		c, err := gabs.ParseJSON(out)
-		if err != nil {
-			return err
-		}
-		if c.Exists("plugins") {
-			for _, cc := range c.Path("plugins").Children() {
-				configs = append(configs, cc.Bytes())
-			}
-		} else {
-			configs = append(configs, out)
-		}
-		break
+func processInput() error {
+	cm, err := getAllConfig(eniConfBasePath)
+	if err != nil {
+		return err
 	}
 
-	var err error
+	input := cm.cniConfig
+	if cm.cniConfigList != nil {
+		input = cm.cniConfigList
+	}
+
+	var configs [][]byte
+	c, err := gabs.ParseJSON(input)
+	if err != nil {
+		return err
+	}
+	if c.Exists("plugins") {
+		for _, cc := range c.Path("plugins").Children() {
+			configs = append(configs, cc.Bytes())
+		}
+	} else {
+		configs = append(configs, input)
+	}
+
 	f := feature{}
 	f.EBPF = _checkKernelVersion(4, 19, 0)
 
@@ -138,6 +129,9 @@ func processInput(files []string) error {
 			return err
 		}
 	}
+
+	f.EnableNetworkPolicy = cm.enableNetworkPolicy
+
 	out, err := mergeConfigList(configs, &f)
 	if err != nil {
 		return err
@@ -211,65 +205,62 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 					return "", fmt.Errorf("network_policy_provider type error")
 				}
 			}
-			if plugin.Exists("eniip_virtual_type") {
-				virtualType, ok := plugin.Path("eniip_virtual_type").Data().(string)
-				if !ok {
-					return "", fmt.Errorf("eniip_virtual_type not found")
-				}
-				if !ebpfSupport {
-					err = plugin.Delete("eniip_virtual_type")
-					if err != nil {
-						return "", err
-					}
-				} else {
-					requireIPvlan := false
 
-					switch strings.ToLower(virtualType) {
-					case dataPathVeth, dataPathDefault:
-						datapath = dataPathVeth
+			virtualType, ok := plugin.Path("eniip_virtual_type").Data().(string)
+			if !ok {
+				virtualType = dataPathVeth
+			}
+			if !ebpfSupport {
+				_ = plugin.Delete("eniip_virtual_type")
+			} else {
+				requireIPvlan := false
 
-						// only for terway-eniip
-						if ebpfSupport && networkPolicyProvider == NetworkPolicyProviderEBPF {
-							requireEBPFChainer = true
-						}
-					case dataPathIPvlan:
-						requireIPvlan = true
-						datapath = dataPathIPvlan
+				switch strings.ToLower(virtualType) {
+				case dataPathVeth, dataPathDefault:
+					datapath = dataPathVeth
 
-						fallthrough
-					case dataPathV2:
-						requireEBPFChainer = true
-
-						if requireIPvlan && !_switchDataPathV2() {
-							fmt.Printf("keep ipvlan mode %v %v\n", requireIPvlan, !_switchDataPathV2())
-							_, err = plugin.Set(dataPathIPvlan, "eniip_virtual_type")
-							if err != nil {
-								return "", err
-							}
-						} else {
-							fmt.Printf("datapathv2 enabled\n")
-							_, err = plugin.Set(dataPathV2, "eniip_virtual_type")
-							if err != nil {
-								return "", err
-							}
-
-							datapath = dataPathV2
-						}
-
-						if edtSupport {
-							_, err = plugin.Set("edt", "bandwidth_mode")
-						} else {
-							_, err = plugin.Set("tc", "bandwidth_mode")
-						}
+					// only for terway-eniip
+					if ebpfSupport && networkPolicyProvider == NetworkPolicyProviderEBPF {
+						allow, err := allowEBPFNetworkPolicy(f.EnableNetworkPolicy)
 						if err != nil {
 							return "", err
 						}
+						if allow {
+							requireEBPFChainer = true
+						}
 					}
-				}
-			} else {
-				datapath = dataPathVeth
-				if ebpfSupport && networkPolicyProvider == NetworkPolicyProviderEBPF {
+				case dataPathIPvlan:
+					requireIPvlan = true
+					datapath = dataPathIPvlan
+
+					fallthrough
+				case dataPathV2:
 					requireEBPFChainer = true
+
+					if requireIPvlan && !_switchDataPathV2() {
+						fmt.Printf("keep ipvlan mode %v %v\n", requireIPvlan, !_switchDataPathV2())
+						_, err = plugin.Set(dataPathIPvlan, "eniip_virtual_type")
+						if err != nil {
+							return "", err
+						}
+					} else {
+						fmt.Printf("datapathv2 enabled\n")
+						_, err = plugin.Set(dataPathV2, "eniip_virtual_type")
+						if err != nil {
+							return "", err
+						}
+
+						datapath = dataPathV2
+					}
+
+					if edtSupport {
+						_, err = plugin.Set("edt", "bandwidth_mode")
+					} else {
+						_, err = plugin.Set("tc", "bandwidth_mode")
+					}
+					if err != nil {
+						return "", err
+					}
 				}
 			}
 		}
@@ -315,19 +306,37 @@ func storeRuntimeConfig(filePath string, container *gabs.Container) error {
 		return err
 	}
 
+	hasCilium := false
 	// write back current runtime config
 	for _, plugin := range container.Path("plugins").Children() {
-		if plugin.Path("type").Data().(string) != pluginTypeTerway {
-			continue
+		pluginType, ok := plugin.Path("type").Data().(string)
+		if !ok {
+			return fmt.Errorf("type must be string")
 		}
-		if plugin.Exists("network_policy_provider") {
-			networkPolicyProvider := plugin.Path("network_policy_provider").Data().(string)
-			store.Set(nodecap.NodeCapabilityNetworkPolicyProvider, networkPolicyProvider)
+		switch pluginType {
+		case pluginTypeCilium:
+			// mount bpf fs if needed
+
+			err = mountHostBpf()
+			if err != nil {
+				return err
+			}
+			hasCilium = true
+		case pluginTypeTerway:
+			if plugin.Exists("network_policy_provider") {
+				networkPolicyProvider := plugin.Path("network_policy_provider").Data().(string)
+				store.Set(nodecap.NodeCapabilityNetworkPolicyProvider, networkPolicyProvider)
+			}
+			if plugin.Exists("eniip_virtual_type") {
+				datapath := plugin.Path("eniip_virtual_type").Data().(string)
+				store.Set(nodecap.NodeCapabilityDataPath, datapath)
+			}
 		}
-		if plugin.Exists("eniip_virtual_type") {
-			datapath := plugin.Path("eniip_virtual_type").Data().(string)
-			store.Set(nodecap.NodeCapabilityDataPath, datapath)
-		}
+	}
+	if hasCilium {
+		store.Set(nodecap.NodeCapabilityHasCiliumChainer, True)
+	} else {
+		store.Set(nodecap.NodeCapabilityHasCiliumChainer, False)
 	}
 
 	return store.Save()

@@ -166,9 +166,9 @@ func dualStack(cmd *cobra.Command, args []string) error {
 	val := ""
 	switch eniCfg.IPStack {
 	case "dual", "ipv6":
-		val = "true"
+		val = True
 	default:
-		val = "false"
+		val = False
 	}
 
 	err := store.Load()
