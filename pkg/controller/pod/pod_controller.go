@@ -503,8 +503,6 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 // 1. update pod uid
 // 2. re-generate the target spec
 func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI *v1beta1.PodENI) (reconcile.Result, error) {
-	l := log.FromContext(ctx).WithName("re-config")
-
 	update := prePodENI.DeepCopy()
 
 	if prePodENI.Labels[types.ENIRelatedNodeName] != "" {
@@ -535,88 +533,7 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 	}
 	update.Annotations[types.PodUID] = string(pod.UID)
 
-	if pod.Annotations[types.PodNetworking] != "" {
-		l.V(5).Info("using podNetworking will not re-config", types.PodNetworking, pod.Annotations[types.PodNetworking])
-		err := m.client.Update(ctx, update)
-
-		return reconcile.Result{Requeue: true}, err
-	}
-
-	if _, ok := prePodENI.Annotations[types.ENIAllocFromPool]; ok {
-		err := m.client.Update(ctx, update)
-
-		return reconcile.Result{Requeue: true}, err
-	}
-
-	// TODO check and update podENI spec
-	anno, err := controlplane.ParsePodNetworksFromAnnotation(pod)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	targets := make(map[string]int, len(anno.PodNetworks))
-	for i, n := range anno.PodNetworks {
-		name := n.Interface
-		if name == "" {
-			name = defaultInterface
-		}
-		targets[name] = i
-	}
-
-	// del unexpected config
-	for i := range update.Spec.Allocations {
-		alloc := update.Spec.Allocations[i]
-		name := alloc.Interface
-		if name == "" {
-			name = defaultInterface
-		}
-
-		if _, ok := targets[name]; ok {
-			delete(targets, name)
-			continue
-		}
-		delete(targets, name)
-		l.Info("changed remove eni", "if", name, "eni", alloc.ENI.ID)
-
-		if alloc.ENI.ID != "" {
-			err = m.aliyun.DeleteNetworkInterface(common.WithCtx(context.Background(), &alloc), alloc.ENI.ID)
-			if err != nil {
-				m.record.Eventf(prePodENI, corev1.EventTypeWarning, types.EventDeleteENIFailed, err.Error())
-				return reconcile.Result{}, err
-			}
-		}
-		update.Spec.Allocations = append(update.Spec.Allocations[:i], update.Spec.Allocations[i+1:]...)
-	}
-
-	allocType, err := controlplane.ParsePodIPTypeFromAnnotation(pod)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-	// add new config
-	newAnno := &controlplane.PodNetworksAnnotation{}
-	for _, i := range targets {
-		newAnno.PodNetworks = append(newAnno.PodNetworks, anno.PodNetworks[i])
-	}
-
-	node, err := m.getNode(ctx, pod.Spec.NodeName)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("error get node %s, %w", node.Name, err)
-	}
-	nodeInfo, err := common.NewNodeInfo(node)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	allocs, err := m.ParsePodNetworksFromAnnotation(ctx, nodeInfo.ZoneID, newAnno)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	err = m.createENI(ctx, &allocs, allocType, pod, update)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-	err = m.client.Update(ctx, update)
+	err := m.client.Update(ctx, update)
 
 	return reconcile.Result{Requeue: true}, err
 }
