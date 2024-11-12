@@ -13,3 +13,7 @@ func checkKernelVersion(k, major, minor int) bool {
 func allowEBPFNetworkPolicy(enable bool) (bool, error) {
 	return enable, nil
 }
+
+func isOldNode() (bool, error) {
+	return false, nil
+}

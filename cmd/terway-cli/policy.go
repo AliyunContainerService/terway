@@ -284,6 +284,18 @@ func policyConfig(container *gabs.Container) ([]string, error) {
 		ciliumArgs = append(ciliumArgs, extractArgs(h.CiliumExtraArgs)...)
 	}
 
+	old, err := isOldNode()
+	if err != nil {
+		return nil, err
+	}
+
+	// check the extra args
+	lo.Filter(ciliumArgs, func(item string, index int) bool {
+		if strings.Contains(item, "disable-per-package-lb") {
+			return old
+		}
+		return true
+	})
 	return ciliumArgs, nil
 }
 
