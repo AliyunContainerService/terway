@@ -68,30 +68,30 @@ build: manifests generate fmt vet build-terway build-terway-controlplane
 
 .PHONY: build-policy
 build-policy:
-	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:policy-$(GIT_COMMIT_SHORT) -f Dockerfile.policy .
+	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:policy-$(GIT_COMMIT_SHORT) -f deploy/images/policy/Dockerfile .
 
 .PHONY: build-terway
 build-terway:
-	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:$(GIT_COMMIT_SHORT) -f Dockerfile .
+	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:$(GIT_COMMIT_SHORT) -f deploy/images/terway/Dockerfile .
 
 .PHONY: build-terway-controlplane
 build-terway-controlplane:
-	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway-controlplane:$(GIT_COMMIT_SHORT) -f Dockerfile.controlplane .
+	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway-controlplane:$(GIT_COMMIT_SHORT) -f deploy/images/terway-controlplane/Dockerfile .
 
 .PHONY: build-push
 build-push: build-push-terway build-push-terway-controlplane
 
 .PHONY: build-push-policy
 build-push-policy:
-	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:policy-$(GIT_COMMIT_SHORT) -f Dockerfile.policy .
+	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:policy-$(GIT_COMMIT_SHORT) -f deploy/images/policy/Dockerfile .
 
 .PHONY: build-push-terway
 build-push-terway:
-	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:$(GIT_COMMIT_SHORT) -f Dockerfile .
+	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:$(GIT_COMMIT_SHORT) -f deploy/images/terway/Dockerfile .
 
 .PHONY: build-terway-controlplane
 build-push-terway-controlplane:
-	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway-controlplane:$(GIT_COMMIT_SHORT) -f Dockerfile.controlplane .
+	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway-controlplane:$(GIT_COMMIT_SHORT) -f deploy/images/terway-controlplane/Dockerfile .
 
 ##@ Dependencies
 .PHONY: go-generate

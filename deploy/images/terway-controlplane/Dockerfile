@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1-labs
 ARG TERWAY_POLICY_IMAGE=registry-cn-zhangjiakou.ack.aliyuncs.com/acs/terway:policy-b43ee76b@sha256:398acf199f395d3571d2bd305f4e6625ec28fd9ebf462c7a7565f6f7e36b5b4b
 
 FROM --platform=$TARGETPLATFORM ${TERWAY_POLICY_IMAGE} AS policy-dist
@@ -8,9 +9,7 @@ ARG TARGETOS
 ARG TARGETARCH
 ENV GOPROXY=$GOPROXY
 WORKDIR /go/src/github.com/AliyunContainerService/terway/
-COPY go.sum go.mod ./
-RUN go mod download
-COPY . .
+COPY --parents go.mod go.sum .git cmd daemon deploy deviceplugin pkg plugin rpc tests types ./
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags default_build \
     -ldflags \
     "-X \"github.com/AliyunContainerService/terway/pkg/version.gitCommit=`git rev-parse HEAD`\" \

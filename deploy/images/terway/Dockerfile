@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1-labs
 ARG TERWAY_POLICY_IMAGE=registry-cn-zhangjiakou.ack.aliyuncs.com/acs/terway:policy-b43ee76b@sha256:398acf199f395d3571d2bd305f4e6625ec28fd9ebf462c7a7565f6f7e36b5b4b
 ARG UBUNTU_IMAGE=registry.cn-hangzhou.aliyuncs.com/acs/ubuntu:22.04-update
 ARG CILIUM_LLVM_IMAGE=quay.io/cilium/cilium-llvm:547db7ec9a750b8f888a506709adb41f135b952e@sha256:4d6fa0aede3556c5fb5a9c71bc6b9585475ac9b1064f516d4c45c8fb691c9d9e
@@ -17,9 +18,7 @@ ARG TARGETOS
 ARG TARGETARCH
 ENV GOPROXY=$GOPROXY
 WORKDIR /go/src/github.com/AliyunContainerService/terway/
-COPY go.sum go.mod ./
-RUN go mod download
-COPY . .
+COPY --parents go.mod go.sum .git cmd daemon deploy deviceplugin pkg plugin rpc tests types ./
 RUN cd cmd/terway && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags default_build \
     -ldflags \
     "-s -w -X \"github.com/AliyunContainerService/terway/pkg/version.gitCommit=`git rev-parse HEAD`\" \
@@ -41,12 +40,10 @@ COPY --from=policy-dist /bin/calico-felix /bin/calico-felix
 COPY --from=iptables-dist /iptables /iptables
 RUN dpkg -i /iptables/*\.deb && rm -rf /iptables
 
-COPY policy/policyinit.sh /bin/
-COPY policy/uninstall_policy.sh /bin/
-COPY init.sh /bin/
+COPY ../../../policy/policyinit.sh ./../../policy/uninstall_policy.sh ../../../hack/init.sh /bin/
 COPY --from=policy-dist /tmp/install/ /
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cmd/terway/terwayd /go/src/github.com/AliyunContainerService/terway/plugin/terway/terway /go/src/github.com/AliyunContainerService/terway/cmd/terway-cli/terway-cli /usr/bin/
-COPY hack/iptables-wrapper-installer.sh /iptables-wrapper-installer.sh
+COPY ../../../hack/iptables-wrapper-installer.sh /iptables-wrapper-installer.sh
 RUN /iptables-wrapper-installer.sh --no-sanity-check
 RUN rm -f /usr/bin/cilium-operator-generic /usr/bin/cilium-health*
 ENTRYPOINT ["/usr/bin/terwayd"]
