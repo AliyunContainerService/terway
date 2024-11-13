@@ -19,6 +19,8 @@ type ENIConfig struct {
 
 	EnableIPv4 bool
 	EnableIPv6 bool
+
+	TagFilter map[string]string
 }
 
 // PoolConfig configuration of pool and resource factory
