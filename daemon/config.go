@@ -49,6 +49,7 @@ func getENIConfig(cfg *daemon.Config) *types.ENIConfig {
 		EniSelectionPolicy:     eniSelectionPolicy,
 		ResourceGroupID:        cfg.ResourceGroupID,
 		EniTypeAttr:            0,
+		TagFilter:              cfg.ENITagFilter,
 	}
 
 	if cfg.VSwitches != nil {
