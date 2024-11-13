@@ -1152,6 +1152,12 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 	}
 	bo := backoff.Backoff(backoff.ENICreate)
 
+	tags := node.Spec.ENISpec.Tag
+	if tags == nil {
+		tags = map[string]string{}
+	}
+	// keep the ds behave
+	tags[types.NetworkInterfaceTagCreatorKey] = types.NetworkInterfaceTagCreatorValue
 	createOpts := &aliyunClient.CreateNetworkInterfaceOptions{
 		NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
 			VSwitchID:        vsw.ID,
