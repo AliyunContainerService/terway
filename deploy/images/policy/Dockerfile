@@ -20,7 +20,7 @@ RUN cd /go/src/github.com/projectcalico/calico && \
     ( ! $(readelf -d bin/calico-felix | grep -q NEEDED) || ( echo "Error: bin/calico-felix was not statically linked"; false )) \
     && chmod +x /go/src/github.com/projectcalico/calico/bin/calico-felix
 
-FROM --platform=$TARGETPLATFORM quay.io/cilium/cilium-builder:1d3ec0f0b74a32048a9716c7a8ce1eee851ca0ec@sha256:9fab9eb021456705d99b014d2f9e59aff9f50aa1a296aa55e984f3e947a62120 as cilium-builder
+FROM --platform=$TARGETPLATFORM quay.io/cilium/cilium-builder:86e436425fc11708b65423805e3b9939071e55e9@sha256:a440f8ca734205b5d61a483f0ac99aaf758ba89f1d2a8892219b6c0f8c475695 as cilium-builder
 ARG GOPROXY
 ENV GOPROXY=$GOPROXY
 ARG CILIUM_SHA=""
@@ -29,8 +29,8 @@ LABEL cilium-sha=${CILIUM_SHA}
 LABEL maintainer="maintainer@cilium.io"
 WORKDIR /go/src/github.com/cilium
 RUN rm -rf cilium
-ENV GIT_TAG=v1.12.7
-ENV GIT_COMMIT=67190636f1d5a7a443ea0bda585b215e7650dd25
+ENV GIT_TAG=v1.16.8
+ENV GIT_COMMIT=dc65ba9bb5f8201e0f51babfb6e7a02de2527460
 RUN git clone -b $GIT_TAG --depth 1 https://github.com/cilium/cilium.git && \
     cd cilium && git config --global user.email terway && git config --global user.name terway && \
     [ "`git rev-parse HEAD`" = "${GIT_COMMIT}" ]

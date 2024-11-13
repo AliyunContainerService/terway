@@ -111,6 +111,10 @@ func processInput() error {
 		configs = append(configs, input)
 	}
 
+	if !_checkKernelVersion(5, 10, 0) {
+		return fmt.Errorf("unsupport kernel version, require >=5.10")
+	}
+
 	f := feature{}
 	f.EBPF = _checkKernelVersion(4, 19, 0)
 

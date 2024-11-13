@@ -1,0 +1,925 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Wed, 27 Nov 2024 14:30:20 +0800
+Subject: bandwidth: support ingress QoS using eBPF token bucket
+
+This commit adds ingress bandwidth rate limiting support using an eBPF token bucket
+implementation. This complements the existing egress bandwidth management and allows
+for bidirectional traffic shaping of Cilium endpoints.
+
+Key changes:
+- Implements a token bucket rate limiter in eBPF (bpf/lib/tb.h)
+- Adds a new BPF map (cilium_ingress_throttle) to store per-endpoint rate limits
+- Extends the bandwidth manager to handle ingress bandwidth annotations
+- Updates the CLI to display both ingress and egress bandwidth limits
+- Adds support for the kubernetes.io/ingress-bandwidth annotation
+
+The ingress rate limiting is implemented directly in the datapath using a token
+bucket algorithm. Each endpoint can have its own rate limit configured via
+annotations. The implementation:
+
+1. Creates a token bucket for each endpoint in the ingress throttle map
+2. Tokens are replenished based on the configured rate limit
+3. Packets consume tokens based on their size
+4. Packets are dropped when insufficient tokens are available
+
+This provides more precise rate limiting compared to TC/qdisc based approaches
+and integrates cleanly with Cilium's existing bandwidth management infrastructure.
+
+The feature can be enabled alongside the existing bandwidth manager and uses
+the same configuration mechanisms.
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ bpf/bpf_alignchecker.c                    |  2 +
+ bpf/bpf_host.c                            |  8 +-
+ bpf/lib/common.h                          | 11 +++
+ bpf/lib/tb.h                              | 72 +++++++++++++++++
+ bpf/node_config.h                         |  1 +
+ bugtool/cmd/configuration.go              |  1 +
+ cilium-dbg/cmd/bpf_bandwidth_list.go      | 25 +++++-
+ daemon/cmd/endpoint.go                    |  5 +-
+ pkg/datapath/alignchecker/alignchecker.go |  3 +
+ pkg/datapath/fake/types/bandwidth.go      |  4 +
+ pkg/datapath/linux/bandwidth/bandwidth.go | 25 ++++++
+ pkg/datapath/linux/bandwidth/cell.go      | 14 ++--
+ pkg/datapath/maps/map.go                  |  2 +-
+ pkg/datapath/types/bandwidth.go           |  3 +
+ pkg/endpoint/bpf.go                       |  3 +
+ pkg/endpoint/endpoint.go                  |  5 +-
+ pkg/endpoint/events.go                    | 93 +++++++++++++++------
+ pkg/k8s/watchers/pod.go                   |  4 +-
+ pkg/maps/cells.go                         |  4 +
+ pkg/maps/ibwmap/bwmap.go                  | 71 ++++++++++++++++
+ pkg/maps/ibwmap/cell.go                   | 57 +++++++++++++
+ pkg/maps/ibwmap/doc.go                    |  7 ++
+ pkg/maps/ibwmap/table.go                  | 98 +++++++++++++++++++++++
+ 23 files changed, 475 insertions(+), 43 deletions(-)
+ create mode 100644 bpf/lib/tb.h
+ create mode 100644 pkg/maps/ibwmap/bwmap.go
+ create mode 100644 pkg/maps/ibwmap/cell.go
+ create mode 100644 pkg/maps/ibwmap/doc.go
+ create mode 100644 pkg/maps/ibwmap/table.go
+
+diff --git a/bpf/bpf_alignchecker.c b/bpf/bpf_alignchecker.c
+index 4916cc7668..abafd6b01e 100644
+--- a/bpf/bpf_alignchecker.c
++++ b/bpf/bpf_alignchecker.c
+@@ -70,6 +70,8 @@ add_type(struct lb4_src_range_key);
+ add_type(struct lb6_src_range_key);
+ add_type(struct edt_id);
+ add_type(struct edt_info);
++add_type(struct throttle_id);
++add_type(struct throttle_info);
+ add_type(struct egress_gw_policy_key);
+ add_type(struct egress_gw_policy_entry);
+ add_type(struct vtep_key);
+diff --git a/bpf/bpf_host.c b/bpf/bpf_host.c
+index 27de726b02..1b2cdc4ca9 100644
+--- a/bpf/bpf_host.c
++++ b/bpf/bpf_host.c
+@@ -54,6 +54,7 @@
+ #include "lib/encrypt.h"
+ #include "lib/wireguard.h"
+ #include "lib/vxlan.h"
++#include "lib/tb.h"
+ 
+  #define host_egress_policy_hook(ctx, src_sec_identity, ext_err) CTX_ACT_OK
+ 
+@@ -348,6 +349,9 @@ handle_ipv6_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
+ 			l3_off += __ETH_HLEN;
+ 		}
+ #endif
++		ret = accept(ctx,ep->lxc_id);
++		if (IS_ERR(ret))
++			return ret;
+ 		return ipv6_local_delivery(ctx, l3_off, secctx, magic, ep,
+ 					   METRIC_INGRESS, from_host, false);
+ 	}
+@@ -779,7 +783,9 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
+ 				return DROP_INVALID;
+ 		}
+ #endif
+-
++		ret = accept(ctx,ep->lxc_id);
++		if (IS_ERR(ret))
++			return ret;
+ 		return ipv4_local_delivery(ctx, l3_off, secctx, magic, ip4, ep,
+ 					   METRIC_INGRESS, from_host, false, 0);
+ 	}
+diff --git a/bpf/lib/common.h b/bpf/lib/common.h
+index 3e93b47cc2..7b32f32756 100644
+--- a/bpf/lib/common.h
++++ b/bpf/lib/common.h
+@@ -352,6 +352,17 @@ struct edt_info {
+ 	__u64		pad[4];
+ };
+ 
++struct throttle_id {
++	__u64		id;
++};
++
++struct throttle_info {
++	__u64		bps;
++	__u64		t_last;
++	__u64		tokens;
++	__u64		pad[4];
++};
++
+ struct remote_endpoint_info {
+ 	__u32		sec_identity;
+ 	__u32		tunnel_endpoint;
+diff --git a/bpf/lib/tb.h b/bpf/lib/tb.h
+new file mode 100644
+index 0000000000..d983e26292
+--- /dev/null
++++ b/bpf/lib/tb.h
+@@ -0,0 +1,72 @@
++/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
++/* Copyright Authors of Cilium */
++
++#pragma once
++
++#ifndef __TB_H_
++#define __TB_H_
++
++#include <bpf/ctx/ctx.h>
++#include <linux/bpf.h>
++
++#include "common.h"
++#include "time.h"
++#include "maps.h"
++
++/* For now the map is not thread safe, may add spin lock in the future */
++
++#if defined(ENABLE_BANDWIDTH_MANAGER) && __ctx_is == __ctx_skb
++struct {
++	__uint(type, BPF_MAP_TYPE_HASH);
++	__type(key, struct throttle_id);
++	__type(value, struct throttle_info);
++	__uint(pinning, LIBBPF_PIN_BY_NAME);
++	__uint(max_entries, INGRESS_THROTTLE_MAP_SIZE);
++	__uint(map_flags, BPF_F_NO_PREALLOC);
++} INGRESS_THROTTLE_MAP __section_maps_btf;
++
++static __always_inline int accept(struct __ctx_buff *ctx,
++					      __u32 ep_id)
++{
++    __u64 tokens, now, t_last, elapsed_time, bps;
++	struct throttle_id aggregate;
++	struct throttle_info *info;
++	__u32 ret = CTX_ACT_OK;
++
++	aggregate.id = ep_id;
++	if (!aggregate.id)
++		return CTX_ACT_OK;
++
++	info = map_lookup_elem(&INGRESS_THROTTLE_MAP, &aggregate);
++	if (!info)
++		return CTX_ACT_OK;
++
++	now = ktime_get_ns();
++
++	bps = READ_ONCE(info->bps);
++	t_last = READ_ONCE(info->t_last);
++	tokens = READ_ONCE(info->tokens);
++	elapsed_time = now - t_last; // ns
++	if (elapsed_time > 0) {
++		tokens += (bps * elapsed_time / NSEC_PER_SEC);
++		if (tokens > bps) {
++			tokens = bps;
++		}
++    }
++	if (tokens >= ctx_wire_len(ctx)) {
++		tokens -= ctx_wire_len(ctx);
++	}else {
++		ret = CTX_ACT_DROP;
++	}
++	WRITE_ONCE(info->t_last, now);
++	WRITE_ONCE(info->tokens, tokens);
++	return ret;
++}
++#else
++static __always_inline int accept(struct __ctx_buff *ctx __maybe_unused,
++                                   		  __u32 ep_id __maybe_unused)
++{
++	return CTX_ACT_OK;
++}
++#endif /* ENABLE_BANDWIDTH_MANAGER */
++#endif /* __TB_H_ */
+\ No newline at end of file
+diff --git a/bpf/node_config.h b/bpf/node_config.h
+index 636f45f12a..c82b4c2bad 100644
+--- a/bpf/node_config.h
++++ b/bpf/node_config.h
+@@ -179,6 +179,7 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
+ #define LB6_SKIP_MAP test_cilium_skip_lb6
+ #define THROTTLE_MAP test_cilium_throttle
+ #define THROTTLE_MAP_SIZE 65536
++#define INGRESS_THROTTLE_MAP_SIZE 65536
+ #define ENABLE_ARP_RESPONDER
+ #define TUNNEL_ENDPOINT_MAP_SIZE 65536
+ #define VTEP_MAP_SIZE 8
+diff --git a/bugtool/cmd/configuration.go b/bugtool/cmd/configuration.go
+index 3a05765764..ee5d2a5f4c 100644
+--- a/bugtool/cmd/configuration.go
++++ b/bugtool/cmd/configuration.go
+@@ -158,6 +158,7 @@ func defaultCommands(confDir string, cmdDir string, k8sPods []string) []string {
+ 		"tc/globals/cilium_ipmasq_v6",
+ 		"tc/globals/cilium_ipv4_frag_datagrams",
+ 		"tc/globals/cilium_throttle",
++		"tc/globals/cilium_ingress_throttle",
+ 		"tc/globals/cilium_encrypt_state",
+ 		"tc/globals/cilium_egress_gw_policy_v4",
+ 		"tc/globals/cilium_srv6_vrf_v4",
+diff --git a/cilium-dbg/cmd/bpf_bandwidth_list.go b/cilium-dbg/cmd/bpf_bandwidth_list.go
+index 73f17c9278..b828e5bada 100644
+--- a/cilium-dbg/cmd/bpf_bandwidth_list.go
++++ b/cilium-dbg/cmd/bpf_bandwidth_list.go
+@@ -17,6 +17,7 @@ import (
+ 	"github.com/cilium/cilium/pkg/command"
+ 	"github.com/cilium/cilium/pkg/common"
+ 	"github.com/cilium/cilium/pkg/maps/bwmap"
++	ibwmap "github.com/cilium/cilium/pkg/maps/ibwmap"
+ )
+ 
+ var bpfBandwidthListCmd = &cobra.Command{
+@@ -39,11 +40,27 @@ var bpfBandwidthListCmd = &cobra.Command{
+ 			return
+ 		}
+ 
+-		listBandwidth(bpfBandwidthList)
++		listBandwidth(bpfBandwidthList, "EGRESS")
++
++		bpfBandwidthList = make(map[string][]string)
++		if err := ibwmap.ThrottleMap().Dump(bpfBandwidthList); err != nil {
++			fmt.Fprintf(os.Stderr, "error dumping contents of map: %s\n", err)
++			os.Exit(1)
++		}
++
++		if command.OutputOption() {
++			if err := command.PrintOutput(bpfBandwidthList); err != nil {
++				fmt.Fprintf(os.Stderr, "error getting output of map in %s: %s\n", command.OutputOptionString(), err)
++				os.Exit(1)
++			}
++			return
++		}
++
++		listBandwidth(bpfBandwidthList, "INGRESS")
+ 	},
+ }
+ 
+-func listBandwidth(bpfBandwidthList map[string][]string) {
++func listBandwidth(bpfBandwidthList map[string][]string, direction string) {
+ 	if len(bpfBandwidthList) == 0 {
+ 		fmt.Fprintf(os.Stderr, "No entries found.\n")
+ 		return
+@@ -51,11 +68,11 @@ func listBandwidth(bpfBandwidthList map[string][]string) {
+ 
+ 	const (
+ 		labelsIDTitle   = "IDENTITY"
+-		labelsBandwidth = "EGRESS BANDWIDTH (BitsPerSec)"
++		labelsBandwidth = "BANDWIDTH (BitsPerSec)"
+ 	)
+ 
+ 	w := tabwriter.NewWriter(os.Stdout, 5, 0, 3, ' ', 0)
+-	fmt.Fprintf(w, "%s\t%s\n", labelsIDTitle, labelsBandwidth)
++	fmt.Fprintf(w, "%s\t%s\n", labelsIDTitle, direction+" "+labelsBandwidth)
+ 
+ 	const numColumns = 2
+ 	rows := [][numColumns]string{}
+diff --git a/daemon/cmd/endpoint.go b/daemon/cmd/endpoint.go
+index 082378a708..9ab9d35b71 100644
+--- a/daemon/cmd/endpoint.go
++++ b/daemon/cmd/endpoint.go
+@@ -475,11 +475,12 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
+ 			ep.SetK8sMetadata(k8sMetadata.ContainerPorts)
+ 			identityLbls.MergeLabels(k8sMetadata.IdentityLabels)
+ 			infoLabels.MergeLabels(k8sMetadata.InfoLabels)
+-			if _, ok := k8sMetadata.Annotations[bandwidth.IngressBandwidth]; ok {
++
++			if _, ok := k8sMetadata.Annotations[bandwidth.IngressBandwidth]; ok && !d.bwManager.Enabled() {
+ 				log.WithFields(logrus.Fields{
+ 					logfields.K8sPodName:  epTemplate.K8sNamespace + "/" + epTemplate.K8sPodName,
+ 					logfields.Annotations: logfields.Repr(k8sMetadata.Annotations),
+-				}).Warningf("Endpoint has %s annotation which is unsupported. This annotation is ignored.",
++				}).Warningf("Endpoint has %s annotation, but BPF bandwidth manager is disabled. This annotation is ignored.",
+ 					bandwidth.IngressBandwidth)
+ 			}
+ 			if _, ok := k8sMetadata.Annotations[bandwidth.EgressBandwidth]; ok && !d.bwManager.Enabled() {
+diff --git a/pkg/datapath/alignchecker/alignchecker.go b/pkg/datapath/alignchecker/alignchecker.go
+index dd735bffca..709d060f31 100644
+--- a/pkg/datapath/alignchecker/alignchecker.go
++++ b/pkg/datapath/alignchecker/alignchecker.go
+@@ -12,6 +12,7 @@ import (
+ 	"github.com/cilium/cilium/pkg/maps/egressmap"
+ 	"github.com/cilium/cilium/pkg/maps/eventsmap"
+ 	"github.com/cilium/cilium/pkg/maps/fragmap"
++	"github.com/cilium/cilium/pkg/maps/ibwmap"
+ 	ipcachemap "github.com/cilium/cilium/pkg/maps/ipcache"
+ 	"github.com/cilium/cilium/pkg/maps/lbmap"
+ 	"github.com/cilium/cilium/pkg/maps/lxcmap"
+@@ -105,6 +106,8 @@ func init() {
+ 		"lb6_src_range_key":      {lbmap.SourceRangeKey6{}},
+ 		"edt_id":                 {bwmap.EdtId{}},
+ 		"edt_info":               {bwmap.EdtInfo{}},
++		"throttle_id":            {ibwmap.ThrottleID{}},
++		"throttle_info":          {ibwmap.ThrottleInfo{}},
+ 		"egress_gw_policy_key":   {egressmap.EgressPolicyKey4{}},
+ 		"egress_gw_policy_entry": {egressmap.EgressPolicyVal4{}},
+ 		"srv6_vrf_key4":          {srv6map.VRFKey4{}},
+diff --git a/pkg/datapath/fake/types/bandwidth.go b/pkg/datapath/fake/types/bandwidth.go
+index de194c3a0c..4fad77ec95 100644
+--- a/pkg/datapath/fake/types/bandwidth.go
++++ b/pkg/datapath/fake/types/bandwidth.go
+@@ -15,6 +15,10 @@ func (fbm *BandwidthManager) DeleteBandwidthLimit(endpointID uint16) {
+ func (fbm *BandwidthManager) UpdateBandwidthLimit(endpointID uint16, bytesPerSecond uint64) {
+ }
+ 
++func (fbm *BandwidthManager) UpdateIngressBandwidthLimit(endpointID uint16, bytesPerSecond uint64){}
++
++func (fbm *BandwidthManager) DeleteIngressBandwidthLimit(endpointID uint16){}
++
+ func (fbm *BandwidthManager) BBREnabled() bool {
+ 	return false
+ }
+diff --git a/pkg/datapath/linux/bandwidth/bandwidth.go b/pkg/datapath/linux/bandwidth/bandwidth.go
+index 0c778ed9c5..b3855a72dd 100644
+--- a/pkg/datapath/linux/bandwidth/bandwidth.go
++++ b/pkg/datapath/linux/bandwidth/bandwidth.go
+@@ -22,6 +22,7 @@ import (
+ 	"github.com/cilium/cilium/pkg/datapath/types"
+ 	"github.com/cilium/cilium/pkg/logging/logfields"
+ 	"github.com/cilium/cilium/pkg/maps/bwmap"
++	"github.com/cilium/cilium/pkg/maps/ibwmap"
+ )
+ 
+ const (
+@@ -64,6 +65,8 @@ func (m *manager) defines() (defines.Map, error) {
+ 		cDefinesMap["ENABLE_BANDWIDTH_MANAGER"] = "1"
+ 		cDefinesMap["THROTTLE_MAP"] = bwmap.MapName
+ 		cDefinesMap["THROTTLE_MAP_SIZE"] = fmt.Sprintf("%d", bwmap.MapSize)
++		cDefinesMap["INGRESS_THROTTLE_MAP"] = ibwmap.MapName
++		cDefinesMap["INGRESS_THROTTLE_MAP_SIZE"] = fmt.Sprintf("%d", ibwmap.MapSize)
+ 	}
+ 
+ 	return cDefinesMap, nil
+@@ -91,6 +94,28 @@ func (m *manager) DeleteBandwidthLimit(epID uint16) {
+ 	}
+ }
+ 
++func (m *manager) UpdateIngressBandwidthLimit(epID uint16, bytesPerSecond uint64) {
++	if m.enabled {
++		txn := m.params.DB.WriteTxn(m.params.IngressThrottleTable)
++		m.params.IngressThrottleTable.Insert(
++			txn,
++			ibwmap.NewIngressThrottle(epID, bytesPerSecond),
++		)
++		txn.Commit()
++	}
++}
++
++func (m *manager) DeleteIngressBandwidthLimit(epID uint16) {
++	if m.enabled {
++		txn := m.params.DB.WriteTxn(m.params.IngressThrottleTable)
++		obj, _, found := m.params.IngressThrottleTable.Get(txn, ibwmap.ThrottleIDIndex.Query(epID))
++		if found {
++			m.params.IngressThrottleTable.Delete(txn, obj)
++		}
++		txn.Commit()
++	}
++}
++
+ func GetBytesPerSec(bandwidth string) (uint64, error) {
+ 	res, err := resource.ParseQuantity(bandwidth)
+ 	if err != nil {
+diff --git a/pkg/datapath/linux/bandwidth/cell.go b/pkg/datapath/linux/bandwidth/cell.go
+index b439205e45..1262df1c8f 100644
+--- a/pkg/datapath/linux/bandwidth/cell.go
++++ b/pkg/datapath/linux/bandwidth/cell.go
+@@ -20,6 +20,7 @@ import (
+ 	"github.com/cilium/cilium/pkg/datapath/tables"
+ 	"github.com/cilium/cilium/pkg/datapath/types"
+ 	"github.com/cilium/cilium/pkg/maps/bwmap"
++	"github.com/cilium/cilium/pkg/maps/ibwmap"
+ 	"github.com/cilium/cilium/pkg/option"
+ )
+ 
+@@ -98,12 +99,13 @@ func (*manager) Stop(cell.HookContext) error {
+ type bandwidthManagerParams struct {
+ 	cell.In
+ 
+-	Log          *slog.Logger
+-	Config       types.BandwidthConfig
+-	DaemonConfig *option.DaemonConfig
+-	Sysctl       sysctl.Sysctl
+-	DB           *statedb.DB
+-	EdtTable     statedb.RWTable[bwmap.Edt]
++	Log                  *slog.Logger
++	Config               types.BandwidthConfig
++	DaemonConfig         *option.DaemonConfig
++	Sysctl               sysctl.Sysctl
++	DB                   *statedb.DB
++	EdtTable             statedb.RWTable[bwmap.Edt]
++	IngressThrottleTable statedb.RWTable[ibwmap.Throttle]
+ }
+ 
+ func deviceToBandwidthQDisc(device *tables.Device, deleted bool) (*tables.BandwidthQDisc, statedb.DeriveResult) {
+diff --git a/pkg/datapath/maps/map.go b/pkg/datapath/maps/map.go
+index ddde740b64..2fe66cb347 100644
+--- a/pkg/datapath/maps/map.go
++++ b/pkg/datapath/maps/map.go
+@@ -189,7 +189,7 @@ func (ms *MapSweeper) RemoveDisabledMaps() {
+ 	}
+ 
+ 	if !ms.bwManager.Enabled() {
+-		maps = append(maps, "cilium_throttle")
++		maps = append(maps, "cilium_throttle","cilium_ingress_throttle")
+ 	}
+ 
+ 	if !option.Config.EnableHealthDatapath {
+diff --git a/pkg/datapath/types/bandwidth.go b/pkg/datapath/types/bandwidth.go
+index 4f1de35dcd..4d36f82a26 100644
+--- a/pkg/datapath/types/bandwidth.go
++++ b/pkg/datapath/types/bandwidth.go
+@@ -34,4 +34,7 @@ type BandwidthManager interface {
+ 
+ 	UpdateBandwidthLimit(endpointID uint16, bytesPerSecond uint64)
+ 	DeleteBandwidthLimit(endpointID uint16)
++
++	UpdateIngressBandwidthLimit(endpointID uint16, bytesPerSecond uint64)
++	DeleteIngressBandwidthLimit(endpointID uint16)
+ }
+diff --git a/pkg/endpoint/bpf.go b/pkg/endpoint/bpf.go
+index 594dad4677..013092819b 100644
+--- a/pkg/endpoint/bpf.go
++++ b/pkg/endpoint/bpf.go
+@@ -1037,6 +1037,9 @@ func (e *Endpoint) deleteMaps() []error {
+ 	if e.bps != 0 {
+ 		e.owner.Datapath().BandwidthManager().DeleteBandwidthLimit(e.ID)
+ 	}
++	if e.ingressBps != 0 {
++		e.owner.Datapath().BandwidthManager().DeleteIngressBandwidthLimit(e.ID)
++	}
+ 
+ 	if e.ConntrackLocalLocked() {
+ 		// Remove endpoint-specific CT map pins.
+diff --git a/pkg/endpoint/endpoint.go b/pkg/endpoint/endpoint.go
+index ae7e11b752..20005f82db 100644
+--- a/pkg/endpoint/endpoint.go
++++ b/pkg/endpoint/endpoint.go
+@@ -217,6 +217,9 @@ type Endpoint struct {
+ 	// bps is the egress rate of the endpoint
+ 	bps uint64
+ 
++	// ingressBps is the ingress rate of the endpoint
++	ingressBps uint64
++
+ 	// mac is the MAC address of the endpoint
+ 	// Constant after endpoint creation / restoration.
+ 	mac mac.MAC // Container MAC address.
+@@ -1835,7 +1838,7 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
+ 		if err != nil {
+ 			return "", filterResolveMetadataError(err)
+ 		}
+-		return k8sMetadata.Annotations[bandwidth.EgressBandwidth], nil
++		return strings.Join([]string{k8sMetadata.Annotations[bandwidth.EgressBandwidth], k8sMetadata.Annotations[bandwidth.IngressBandwidth]}, ","), nil
+ 	})
+ 
+ 	// If 'baseLabels' are not set then 'controllerBaseLabels' only contains
+diff --git a/pkg/endpoint/events.go b/pkg/endpoint/events.go
+index 43b53951b3..0c18b0e598 100644
+--- a/pkg/endpoint/events.go
++++ b/pkg/endpoint/events.go
+@@ -8,8 +8,10 @@ import (
+ 	"errors"
+ 	"fmt"
+ 	"strconv"
++	"strings"
+ 
+ 	"github.com/sirupsen/logrus"
++	k8serr "k8s.io/apimachinery/pkg/util/errors"
+ 
+ 	"github.com/cilium/cilium/pkg/datapath/linux/bandwidth"
+ 	datapath "github.com/cilium/cilium/pkg/datapath/types"
+@@ -267,7 +269,7 @@ type EndpointPolicyBandwidthEvent struct {
+ 
+ // Handle handles the policy bandwidth update.
+ func (ev *EndpointPolicyBandwidthEvent) Handle(res chan interface{}) {
+-	var bps uint64
++	var egressBps, ingressBps uint64
+ 
+ 	if !ev.bwm.Enabled() {
+ 		res <- &EndpointRegenerationResult{
+@@ -289,43 +291,82 @@ func (ev *EndpointPolicyBandwidthEvent) Handle(res chan interface{}) {
+ 		e.unlock()
+ 	}()
+ 
+-	bandwidthEgress, err := ev.annoCB(e.K8sNamespace, e.K8sPodName)
++	bandwidthStr, err := ev.annoCB(e.K8sNamespace, e.K8sPodName)
+ 	if err != nil {
+ 		res <- &EndpointRegenerationResult{
+ 			err: err,
+ 		}
+ 		return
+ 	}
+-	if bandwidthEgress != "" {
+-		bps, err = bandwidth.GetBytesPerSec(bandwidthEgress)
+-		if err == nil {
+-			ev.bwm.UpdateBandwidthLimit(e.ID, bps)
+-		} else {
+-			e.getLogger().WithError(err).Debugf("failed to parse bandwidth limit %q", bandwidthEgress)
+-		}
+-	} else {
+-		ev.bwm.DeleteBandwidthLimit(e.ID)
+-	}
+-	if err != nil {
++	bandwidthSlice := strings.Split(bandwidthStr, ",")
++	if len(bandwidthSlice) != 2 {
+ 		res <- &EndpointRegenerationResult{
+-			err: err,
++			err: fmt.Errorf("invalid bandwidth %q", bandwidthStr),
+ 		}
+ 		return
+ 	}
++	bandwidthEgress := bandwidthSlice[0]
++	bandwidthIngress := bandwidthSlice[1]
++
++	var errs []error
++	func() {
++		if bandwidthEgress != "" {
++			egressBps, err = bandwidth.GetBytesPerSec(bandwidthEgress)
++			if err == nil {
++				ev.bwm.UpdateBandwidthLimit(e.ID, egressBps)
++			} else {
++				e.getLogger().WithError(err).Debugf("failed to parse bandwidth limit %q", bandwidthEgress)
++			}
++		} else {
++			ev.bwm.DeleteBandwidthLimit(e.ID)
++		}
++		if err != nil {
++			errs = append(errs, err)
++			return
++		}
++		bpsOld := "inf"
++		bpsNew := "inf"
++		if e.bps != 0 {
++			bpsOld = strconv.FormatUint(e.bps, 10)
++		}
++		if egressBps != 0 {
++			bpsNew = strconv.FormatUint(egressBps, 10)
++		}
++		e.getLogger().Debugf("Updating %s from %s to %s bytes/sec", bandwidth.EgressBandwidth,
++			bpsOld, bpsNew)
++		e.bps = egressBps
++	}()
++
++	func() {
++		if bandwidthIngress != "" {
++			ingressBps, err = bandwidth.GetBytesPerSec(bandwidthIngress)
++			if err == nil {
++				ev.bwm.UpdateIngressBandwidthLimit(e.ID, ingressBps)
++			} else {
++				e.getLogger().WithError(err).Debugf("failed to parse bandwidth limit %q", bandwidthEgress)
++			}
++		} else {
++			ev.bwm.DeleteIngressBandwidthLimit(e.ID)
++		}
++		if err != nil {
++			errs = append(errs, err)
++			return
++		}
++		bpsOld := "inf"
++		bpsNew := "inf"
++		if e.ingressBps != 0 {
++			bpsOld = strconv.FormatUint(e.ingressBps, 10)
++		}
++		if ingressBps != 0 {
++			bpsNew = strconv.FormatUint(ingressBps, 10)
++		}
++		e.getLogger().Debugf("Updating %s from %s to %s bytes/sec", bandwidth.IngressBandwidth,
++			bpsOld, bpsNew)
++		e.ingressBps = ingressBps
++	}()
+ 
+-	bpsOld := "inf"
+-	bpsNew := "inf"
+-	if e.bps != 0 {
+-		bpsOld = strconv.FormatUint(e.bps, 10)
+-	}
+-	if bps != 0 {
+-		bpsNew = strconv.FormatUint(bps, 10)
+-	}
+-	e.getLogger().Debugf("Updating %s from %s to %s bytes/sec", bandwidth.EgressBandwidth,
+-		bpsOld, bpsNew)
+-	e.bps = bps
+ 	res <- &EndpointRegenerationResult{
+-		err: nil,
++		err: k8serr.NewAggregate(errs),
+ 	}
+ }
+ 
+diff --git a/pkg/k8s/watchers/pod.go b/pkg/k8s/watchers/pod.go
+index 70abef8924..5bd97d15f9 100644
+--- a/pkg/k8s/watchers/pod.go
++++ b/pkg/k8s/watchers/pod.go
+@@ -428,7 +428,7 @@ func (k *K8sPodWatcher) updateK8sPodV1(oldK8sPod, newK8sPod *slim_corev1.Pod) er
+ 	oldAnno := oldK8sPod.ObjectMeta.Annotations
+ 	newAnno := newK8sPod.ObjectMeta.Annotations
+ 	annoChangedProxy := !k8s.AnnotationsEqual([]string{annotation.ProxyVisibility, annotation.ProxyVisibilityAlias}, oldAnno, newAnno)
+-	annoChangedBandwidth := !k8s.AnnotationsEqual([]string{bandwidth.EgressBandwidth}, oldAnno, newAnno)
++	annoChangedBandwidth := !k8s.AnnotationsEqual([]string{bandwidth.EgressBandwidth}, oldAnno, newAnno) || !k8s.AnnotationsEqual([]string{bandwidth.IngressBandwidth}, oldAnno, newAnno)
+ 	annoChangedNoTrack := !k8s.AnnotationsEqual([]string{annotation.NoTrack, annotation.NoTrackAlias}, oldAnno, newAnno)
+ 	annotationsChanged := annoChangedProxy || annoChangedBandwidth || annoChangedNoTrack
+ 
+@@ -516,7 +516,7 @@ func (k *K8sPodWatcher) updateK8sPodV1(oldK8sPod, newK8sPod *slim_corev1.Pod) er
+ 					if err != nil {
+ 						return "", nil
+ 					}
+-					return p.ObjectMeta.Annotations[bandwidth.EgressBandwidth], nil
++					return strings.Join([]string{p.ObjectMeta.Annotations[bandwidth.EgressBandwidth], p.ObjectMeta.Annotations[bandwidth.IngressBandwidth]}, ","), nil
+ 				})
+ 			}
+ 			if annoChangedNoTrack {
+diff --git a/pkg/maps/cells.go b/pkg/maps/cells.go
+index 5846802959..05c2594b4f 100644
+--- a/pkg/maps/cells.go
++++ b/pkg/maps/cells.go
+@@ -9,6 +9,7 @@ import (
+ 	"github.com/cilium/cilium/pkg/maps/act"
+ 	"github.com/cilium/cilium/pkg/maps/authmap"
+ 	"github.com/cilium/cilium/pkg/maps/bwmap"
++	ibwmap "github.com/cilium/cilium/pkg/maps/ibwmap"
+ 	"github.com/cilium/cilium/pkg/maps/configmap"
+ 	"github.com/cilium/cilium/pkg/maps/ctmap/gc"
+ 	"github.com/cilium/cilium/pkg/maps/egressmap"
+@@ -57,6 +58,9 @@ var Cell = cell.Module(
+ 	// Provides RWTable[bwmap.Edt] for configuring the limits.
+ 	bwmap.Cell,
+ 
++	// Provides access to ingress throttle maps.
++	ibwmap.Cell,
++
+ 	// Provides access to ActiveConnectionTracking map.
+ 	act.Cell,
+ 
+diff --git a/pkg/maps/ibwmap/bwmap.go b/pkg/maps/ibwmap/bwmap.go
+new file mode 100644
+index 0000000000..501ab5fdfe
+--- /dev/null
++++ b/pkg/maps/ibwmap/bwmap.go
+@@ -0,0 +1,71 @@
++// SPDX-License-Identifier: Apache-2.0
++// Copyright Authors of Cilium
++
++package ibwmap
++
++import (
++	"fmt"
++
++	"github.com/cilium/hive/cell"
++
++	"github.com/cilium/cilium/pkg/bpf"
++	"github.com/cilium/cilium/pkg/datapath/types"
++	"github.com/cilium/cilium/pkg/ebpf"
++	"github.com/cilium/cilium/pkg/maps/lxcmap"
++)
++
++const (
++	MapName = "cilium_ingress_throttle"
++	// Flow aggregate is per Pod, so same size as Endpoint map.
++	MapSize = lxcmap.MaxEntries
++)
++
++type ThrottleID struct {
++	Id uint64 `align:"id"`
++}
++
++func (k *ThrottleID) String() string  { return fmt.Sprintf("%d", int(k.Id)) }
++func (k *ThrottleID) New() bpf.MapKey { return &ThrottleID{} }
++
++type ThrottleInfo struct {
++	Bps      uint64    `align:"bps"`
++	TimeLast uint64    `align:"t_last"`
++	Tokens   uint64    `align:"tokens"`
++	Pad      [4]uint64 `align:"pad"`
++}
++
++func (v *ThrottleInfo) String() string    { return fmt.Sprintf("%d", int(v.Bps)) }
++func (v *ThrottleInfo) New() bpf.MapValue { return &ThrottleInfo{} }
++
++type throttleMap struct {
++	*bpf.Map
++}
++
++// ThrottleMap constructs the cilium_ingress_throttle map. Direct use of this
++// outside of this package is solely for cilium-dbg.
++func ThrottleMap() *bpf.Map {
++	return bpf.NewMap(
++		MapName,
++		ebpf.Hash,
++		&ThrottleID{},
++		&ThrottleInfo{},
++		MapSize,
++		bpf.BPF_F_NO_PREALLOC,
++	)
++}
++
++func newThrottleMap(cfg types.BandwidthConfig, lc cell.Lifecycle) (out bpf.MapOut[throttleMap]) {
++	m := throttleMap{ThrottleMap()}
++	if cfg.EnableBandwidthManager {
++		// Only open the map if bandwidth manager is enabled.
++		lc.Append(cell.Hook{
++			OnStart: func(cell.HookContext) error {
++				return m.OpenOrCreate()
++			},
++			OnStop: func(cell.HookContext) error {
++				return m.Close()
++			},
++		})
++	}
++	return bpf.NewMapOut(m)
++}
+diff --git a/pkg/maps/ibwmap/cell.go b/pkg/maps/ibwmap/cell.go
+new file mode 100644
+index 0000000000..77f0b2d41e
+--- /dev/null
++++ b/pkg/maps/ibwmap/cell.go
+@@ -0,0 +1,57 @@
++// SPDX-License-Identifier: Apache-2.0
++// Copyright Authors of Cilium
++
++package ibwmap
++
++import (
++	"github.com/cilium/hive/cell"
++	"github.com/cilium/statedb"
++	"github.com/cilium/statedb/reconciler"
++
++	"github.com/cilium/cilium/pkg/bpf"
++	"github.com/cilium/cilium/pkg/datapath/types"
++)
++
++// Cell manages the cilium_ingress_throttle BPF map for implementing per-endpoint
++// bandwidth management. The cell provides RWTable[Throttle] to which per
++// endpoint bandwidth limits can be inserted. Use [NewIngressThrottle] to create the
++// object. The table can be inspected with "cilium-dbg statedb bandwidth-ingress".
++// A reconciler is registered that reconciles the table with the cilium_ingress_throttle
++// map.
++var Cell = cell.Module(
++	"ibwmap",
++	"Manages the endpoint bandwidth limit BPF map",
++
++	cell.Provide(
++		NewIngressThrottleTable,
++		statedb.RWTable[Throttle].ToTable,
++		newThrottleMap,
++	),
++	cell.Invoke(
++		statedb.RegisterTable[Throttle],
++		registerReconciler,
++		bpf.RegisterTablePressureMetricsJob[Throttle, throttleMap],
++	),
++)
++
++func registerReconciler(cfg types.BandwidthConfig, m throttleMap, edts statedb.RWTable[Throttle], params reconciler.Params) error {
++	if cfg.EnableBandwidthManager {
++		ops := bpf.NewMapOps[Throttle](m.Map)
++		_, err := reconciler.Register(
++			params,
++			edts,
++			func(e Throttle) Throttle { return e },
++			func(e Throttle, s reconciler.Status) Throttle {
++				e.Status = s
++				return e
++			},
++			func(e Throttle) reconciler.Status {
++				return e.Status
++			},
++			ops,
++			nil,
++		)
++		return err
++	}
++	return nil
++}
+diff --git a/pkg/maps/ibwmap/doc.go b/pkg/maps/ibwmap/doc.go
+new file mode 100644
+index 0000000000..7d56b1c889
+--- /dev/null
++++ b/pkg/maps/ibwmap/doc.go
+@@ -0,0 +1,7 @@
++// SPDX-License-Identifier: Apache-2.0
++// Copyright Authors of Cilium
++
++// Package bwmap represents the BPF map used to enforce Pod bandwidth
++// limitations via EDT (Earliest Departure Time) + BPF.
++// +groupName=maps
++package ibwmap
+diff --git a/pkg/maps/ibwmap/table.go b/pkg/maps/ibwmap/table.go
+new file mode 100644
+index 0000000000..739c859fe4
+--- /dev/null
++++ b/pkg/maps/ibwmap/table.go
+@@ -0,0 +1,98 @@
++// SPDX-License-Identifier: Apache-2.0
++// Copyright Authors of Cilium
++
++package ibwmap
++
++import (
++	"encoding"
++	"strconv"
++
++	"github.com/cilium/statedb"
++	"github.com/cilium/statedb/index"
++	"github.com/cilium/statedb/reconciler"
++	"k8s.io/apimachinery/pkg/api/resource"
++
++	"github.com/cilium/cilium/pkg/bpf"
++)
++
++const IngressTableName = "bandwidth-ingress"
++
++// Throttle is defines the token bucket for a specific
++// Cilium endpoint. This structure is stored in Table[Throttle] and reconciled
++// to the cilium_ingress_throttle BPF map.
++//
++// Throttle is stored by value as it's relatively tiny.
++type Throttle struct {
++	// EndpointID is the identity of the endpoint being throttled.
++	EndpointID uint16
++
++	// BytesPerSecond is the bandwidth limit for the endpoint.
++	BytesPerSecond uint64
++
++	// Tokens is the maximum allowed departure time nanoseconds
++	// delta in future.
++	Tokens uint64
++
++	// Status is the BPF map reconciliation status of this throttle entry.
++	Status reconciler.Status
++}
++
++var ThrottleIDIndex = statedb.Index[Throttle, uint16]{
++	Name: "endpoint-id",
++	FromObject: func(t Throttle) index.KeySet {
++		return index.NewKeySet(index.Uint16(t.EndpointID))
++	},
++	FromKey: index.Uint16,
++	Unique:  true,
++}
++
++func NewIngressThrottle(endpointID uint16, bytesPerSecond uint64) Throttle {
++	return Throttle{
++		EndpointID:      endpointID,
++		BytesPerSecond:  bytesPerSecond,
++		Tokens: uint64(bytesPerSecond * 8),
++		Status:          reconciler.StatusPending(),
++	}
++}
++
++func NewIngressThrottleTable() (statedb.RWTable[Throttle], error) {
++	return statedb.NewTable(
++		IngressTableName,
++		ThrottleIDIndex,
++	)
++}
++
++func (e Throttle) BinaryKey() encoding.BinaryMarshaler {
++	k := ThrottleID{Id: uint64(e.EndpointID)}
++	return bpf.StructBinaryMarshaler{Target: &k}
++}
++
++func (e Throttle) BinaryValue() encoding.BinaryMarshaler {
++	v := ThrottleInfo{
++		Bps:      e.BytesPerSecond,
++		TimeLast: 0, // Used on the BPF-side
++		Tokens:   e.Tokens,
++	}
++	return bpf.StructBinaryMarshaler{Target: &v}
++}
++
++func (e Throttle) TableHeader() []string {
++	return []string{
++		"EndpointID",
++		"BitsPerSecond",
++		"Tokens",
++		"Status",
++	}
++}
++
++func (e Throttle) TableRow() []string {
++	// Show the limit as bits per second as that's how it is configured via
++	// the annotation.
++	quantity := resource.NewQuantity(int64(e.BytesPerSecond*8), resource.DecimalSI)
++	return []string{
++		strconv.FormatUint(uint64(e.EndpointID), 10),
++		quantity.String(),
++		strconv.FormatUint(e.Tokens, 10),
++		e.Status.String(),
++	}
++}
+-- 
+2.39.5 (Apple Git-154)
+

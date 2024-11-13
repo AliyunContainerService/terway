@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Tue, 26 Nov 2024 10:51:43 +0800
+Subject: ctmap: log ct gc status
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ pkg/maps/ctmap/ctmap.go | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/pkg/maps/ctmap/ctmap.go b/pkg/maps/ctmap/ctmap.go
+index c4ebecc404..81555cfc8a 100644
+--- a/pkg/maps/ctmap/ctmap.go
++++ b/pkg/maps/ctmap/ctmap.go
+@@ -443,6 +443,12 @@ func doGC6(m *Map, filter *GCFilter) gcStats {
+ 	globalDeleteLock[m.mapType].Lock()
+ 	stats.dumpError = m.DumpReliablyWithCallback(filterCallback, stats.DumpStats)
+ 	globalDeleteLock[m.mapType].Unlock()
++
++	log.Infof("gc map %s max %d deleted %d alived %d", m.Name(), m.MaxEntries(), stats.deleted, stats.aliveEntries)
++	cur := stats.aliveEntries + stats.deleted
++	if float64(cur)/float64(m.MaxEntries()) >= 0.9 {
++		log.Infof("ConntrackFull table %s current %d maxEntries %d", m.Name(), cur, m.MaxEntries())
++	}
+ 	return stats
+ }
+ 
+@@ -556,6 +562,12 @@ func doGC4(m *Map, filter *GCFilter) gcStats {
+ 	globalDeleteLock[m.mapType].Lock()
+ 	stats.dumpError = m.DumpReliablyWithCallback(filterCallback, stats.DumpStats)
+ 	globalDeleteLock[m.mapType].Unlock()
++
++	log.Infof("gc map %s max %d deleted %d alived %d", m.Name(), m.MaxEntries(), stats.deleted, stats.aliveEntries)
++	cur := stats.aliveEntries + stats.deleted
++	if float64(cur)/float64(m.MaxEntries()) >= 0.9 {
++		log.Infof("ConntrackFull table %s current %d maxEntries %d", m.Name(), cur, m.MaxEntries())
++	}
+ 	return stats
+ }
+ 
+-- 
+2.39.5 (Apple Git-154)
+
