@@ -937,7 +937,7 @@ func (l *Local) errorHandleLocked(err error) {
 		}
 	}
 
-	if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough) {
+	if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
 		next := time.Now().Add(10 * time.Minute)
 		if next.After(l.ipAllocInhibitExpireAt) {
 			l.ipAllocInhibitExpireAt = next

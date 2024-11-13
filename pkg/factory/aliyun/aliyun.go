@@ -120,7 +120,7 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 
 		eni, innerErr = a.openAPI.CreateNetworkInterface(ctx, option)
 		if innerErr != nil {
-			if apiErr.ErrorCodeIs(innerErr, apiErr.InvalidVSwitchIDIPNotEnough) {
+			if apiErr.ErrorCodeIs(innerErr, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
 				a.vsw.Block(vswID)
 				return false, nil
 			}

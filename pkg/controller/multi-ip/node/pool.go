@@ -1166,7 +1166,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 
 	result, err := n.aliyun.CreateNetworkInterface(ctx, typeOption, createOpts)
 	if err != nil {
-		if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough) {
+		if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
 			// block
 			n.vswpool.Block(createOpts.NetworkInterfaceOptions.VSwitchID)
 		}
@@ -1233,7 +1233,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 			Backoff: &bo,
 		})
 		if err != nil {
-			if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough) {
+			if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
 				// block
 				n.vswpool.Block(opt.eniRef.VSwitchID)
 			}
@@ -1262,7 +1262,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 			Backoff: &bo,
 		})
 		if err != nil {
-			if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough) {
+			if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
 				// block
 				n.vswpool.Block(opt.eniRef.VSwitchID)
 			}
@@ -1416,7 +1416,7 @@ func addIPToMap(in map[string]*networkv1beta1.IP, ip *networkv1beta1.IP) {
 }
 
 func isIPNotEnough(err error) bool {
-	if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough) {
+	if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
 		return true
 	}
 	// can not find vsw
