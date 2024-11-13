@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.11.1
 FROM --platform=$TARGETPLATFORM calico/go-build:v0.90 AS felix-builder
 ARG GOPROXY
 ARG GIT_VERSION
@@ -8,7 +9,7 @@ ENV GIT_COMMIT=f1a1611acb98d9187f48bbbe2227301aa69f0499
 RUN mkdir -p /go/src/github.com/projectcalico/ && cd /go/src/github.com/projectcalico/ && \
     git clone -b ${GIT_BRANCH} --depth 1 https://github.com/projectcalico/calico.git && \
     cd calico && [ "`git rev-parse HEAD`" = "${GIT_COMMIT}" ]
-COPY policy/felix /terway_patch
+COPY ../../../policy/felix /terway_patch
 RUN cd /go/src/github.com/projectcalico/calico && git apply /terway_patch/*.patch
 RUN cd /go/src/github.com/projectcalico/calico && \
     CGO_ENABLED=0 go build -o bin/calico-felix -ldflags \
@@ -33,7 +34,7 @@ ENV GIT_COMMIT=67190636f1d5a7a443ea0bda585b215e7650dd25
 RUN git clone -b $GIT_TAG --depth 1 https://github.com/cilium/cilium.git && \
     cd cilium && git config --global user.email terway && git config --global user.name terway && \
     [ "`git rev-parse HEAD`" = "${GIT_COMMIT}" ]
-COPY policy/cilium /cilium_patch
+COPY ../../../policy/cilium /cilium_patch
 RUN cd cilium && git am /cilium_patch/*.patch
 ARG NOSTRIP
 ARG LOCKDEBUG
