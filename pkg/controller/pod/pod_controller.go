@@ -608,7 +608,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 			eni, err := m.aliyun.CreateNetworkInterface(ctx, option)
 			if err != nil {
 
-				if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough) {
+				if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
 					m.swPool.Block(alloc.ENI.VSwitchID)
 				}
 
