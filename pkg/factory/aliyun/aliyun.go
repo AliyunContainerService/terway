@@ -73,6 +73,7 @@ func NewAliyun(ctx context.Context, openAPI *client.OpenAPI, getter eni.ENIInfoG
 		eniTags:          cfg.ENITags,
 		eniTypeAttr:      cfg.EniTypeAttr,
 		selectionPolicy:  cfg.VSwitchSelectionPolicy,
+		eniTagFilter:     cfg.TagFilter,
 	}
 }
 
