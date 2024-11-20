@@ -12,6 +12,7 @@ Traffic control mainly have two aspect
 | shared eni (eniip)+ IPvlan eBPF | ☑️             | -               | ☑️              |
 | exclusive eni                   | -              | -               | -               |
 | trunking                        | -              | -               | -               |
+| shared eni (eniip)+ datapath v2 | ☑️             | ☑️              | -               |
 
 ## shaping
 

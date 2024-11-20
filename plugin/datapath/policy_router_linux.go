@@ -311,6 +311,12 @@ func (d *PolicyRoute) Setup(ctx context.Context, cfg *types.SetupConfig, netNS n
 		return err
 	}
 
+	if cfg.BandwidthMode != "edt" && cfg.Egress > 0 {
+		err = ensureMQ(ctx, eni)
+		if err != nil {
+			return err
+		}
+	}
 	vethCfg := &veth.Veth{
 		IfName:   cfg.ContainerIfName,
 		PeerName: cfg.HostVETHName,
@@ -342,7 +348,7 @@ func (d *PolicyRoute) Setup(ctx context.Context, cfg *types.SetupConfig, netNS n
 		if err != nil {
 			return err
 		}
-		if cfg.Egress > 0 {
+		if cfg.BandwidthMode != "edt" && cfg.Egress > 0 {
 			return utils.SetupTC(contLink, cfg.Egress)
 		}
 		return nil
@@ -390,7 +396,7 @@ func (d *PolicyRoute) Setup(ctx context.Context, cfg *types.SetupConfig, netNS n
 		return fmt.Errorf("setup host veth config, %w", err)
 	}
 
-	if cfg.Ingress > 0 {
+	if cfg.BandwidthMode != "edt" && cfg.Ingress > 0 {
 		return utils.SetupTC(hostVETH, cfg.Ingress)
 	}
 	return nil
@@ -488,4 +494,36 @@ func (d *PolicyRoute) Teardown(ctx context.Context, cfg *types.TeardownCfg, netN
 	}
 
 	return utils.DelEgressPriority(ctx, link, cfg.ContainerIPNet)
+}
+
+func ensureMQ(ctx context.Context, link netlink.Link) error {
+	mq := &netlink.GenericQdisc{
+		QdiscAttrs: netlink.QdiscAttrs{
+			LinkIndex: link.Attrs().Index,
+			Parent:    netlink.HANDLE_ROOT,
+		},
+		QdiscType: "mq",
+	}
+	qds, err := netlink.QdiscList(link)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, qd := range qds {
+		if qd.Attrs().LinkIndex != link.Attrs().Index {
+			continue
+		}
+		if qd.Type() != mq.Type() {
+			continue
+		}
+		if qd.Attrs().Parent != mq.Parent {
+			continue
+		}
+
+		found = true
+	}
+	if found {
+		return nil
+	}
+	return utils.QdiscReplace(ctx, mq)
 }
