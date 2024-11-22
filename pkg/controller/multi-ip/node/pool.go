@@ -370,8 +370,26 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 		if _, ok := eniIDMap[id]; !ok {
 			// as the eni is not attached, so just delete it
 			if node.Status.NetworkInterfaces[id].NetworkInterfaceType == networkv1beta1.ENITypeSecondary {
-				l.Info("delete eni not found in remote, but in cr", "eni", id)
-				err = n.aliyun.DeleteNetworkInterface(ctx, id)
+				var remote []*aliyunClient.NetworkInterface
+				remote, err = n.aliyun.DescribeNetworkInterface(ctx, "", []string{id}, "", "", "", node.Spec.ENISpec.TagFilter)
+				if err != nil {
+					l.Error(err, "error get eni", "eni", id)
+					continue
+				}
+
+				// ignore eni , either be attached to other instance or be deleted or ignored by tag filter
+				if len(remote) > 0 {
+					switch remote[0].Status {
+					case aliyunClient.ENIStatusAvailable:
+						l.Info("delete eni not found in remote, but in cr", "eni", id)
+						err = n.aliyun.DeleteNetworkInterface(ctx, id)
+					case aliyunClient.ENIStatusInUse:
+						// ignore eni used by other instance
+					default:
+						// some middle status, wait next time
+						continue
+					}
+				}
 			}
 			if err != nil {
 				l.Error(err, "eni not found on remote, delete eni error", "eni", id)
