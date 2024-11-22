@@ -188,7 +188,6 @@ func runCilium(cfg *PolicyConfig) error {
 		"--enable-ipv4-masquerade=false",
 		"--enable-ipv6-masquerade=false",
 		"--disable-envoy-version-check=true",
-		"--enable-endpoint-routes=true",
 		"--ipv4-range=169.254.10.0/30",
 		"--ipv6-range=fe80:2400:3200:baba::/30",
 		"--enable-local-node-route=false",
@@ -202,6 +201,7 @@ func runCilium(cfg *PolicyConfig) error {
 		"--enable-l7-proxy=false",
 		"--ipam=cluster-pool",
 		"--enable-runtime-device-detection=true",
+		"--enable-bandwidth-manager=true",
 		"--agent-health-port=" + cfg.HealthCheckPort,
 	}
 	if cfg.EnableNetworkPolicy {
