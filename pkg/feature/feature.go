@@ -17,5 +17,5 @@ const (
 )
 
 var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
-	AutoDataPathV2: {Default: false, PreRelease: featuregate.Alpha},
+	AutoDataPathV2: {Default: true, PreRelease: featuregate.Alpha},
 }
