@@ -311,7 +311,7 @@ func (d *PolicyRoute) Setup(ctx context.Context, cfg *types.SetupConfig, netNS n
 		return err
 	}
 
-	if cfg.BandwidthMode != "edt" && cfg.Egress > 0 {
+	if cfg.BandwidthMode != types.BandwidthModeEDT && cfg.Egress > 0 {
 		err = ensureMQ(ctx, eni)
 		if err != nil {
 			return err
@@ -348,7 +348,7 @@ func (d *PolicyRoute) Setup(ctx context.Context, cfg *types.SetupConfig, netNS n
 		if err != nil {
 			return err
 		}
-		if cfg.BandwidthMode != "edt" && cfg.Egress > 0 {
+		if cfg.BandwidthMode != types.BandwidthModeEDT && cfg.Egress > 0 {
 			return utils.SetupTC(contLink, cfg.Egress)
 		}
 		return nil
@@ -396,7 +396,7 @@ func (d *PolicyRoute) Setup(ctx context.Context, cfg *types.SetupConfig, netNS n
 		return fmt.Errorf("setup host veth config, %w", err)
 	}
 
-	if cfg.BandwidthMode != "edt" && cfg.Ingress > 0 {
+	if cfg.BandwidthMode != types.BandwidthModeEDT && cfg.Ingress > 0 {
 		return utils.SetupTC(hostVETH, cfg.Ingress)
 	}
 	return nil
