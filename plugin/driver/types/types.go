@@ -136,3 +136,8 @@ type TeardownCfg struct {
 
 	EnableNetworkPriority bool
 }
+
+const (
+	BandwidthModeEDT = "edt"
+	BandwidthModeTC  = "tc"
+)

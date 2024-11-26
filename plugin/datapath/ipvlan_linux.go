@@ -301,7 +301,7 @@ func (d *IPvlanDriver) Setup(ctx context.Context, cfg *types.SetupConfig, netNS 
 		if cfg.Egress == 0 && cfg.Ingress == 0 {
 			return nil
 		}
-		if cfg.BandwidthMode == "edt" {
+		if cfg.BandwidthMode == types.BandwidthModeEDT {
 			return ensureFQ(ctx, contLink)
 		}
 		return utils.SetupTC(contLink, cfg.Egress)
