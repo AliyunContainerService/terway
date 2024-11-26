@@ -311,7 +311,7 @@ func (d *PolicyRoute) Setup(ctx context.Context, cfg *types.SetupConfig, netNS n
 		return err
 	}
 
-	if cfg.BandwidthMode != types.BandwidthModeEDT && cfg.Egress > 0 {
+	if cfg.BandwidthMode == types.BandwidthModeEDT && cfg.Egress > 0 {
 		err = ensureMQ(ctx, eni)
 		if err != nil {
 			return err
