@@ -312,7 +312,7 @@ func (d *PolicyRoute) Setup(ctx context.Context, cfg *types.SetupConfig, netNS n
 	}
 
 	if cfg.BandwidthMode == types.BandwidthModeEDT && cfg.Egress > 0 {
-		err = ensureMQ(ctx, eni)
+		err = ensureMQFQ(ctx, eni)
 		if err != nil {
 			return err
 		}
@@ -496,34 +496,40 @@ func (d *PolicyRoute) Teardown(ctx context.Context, cfg *types.TeardownCfg, netN
 	return utils.DelEgressPriority(ctx, link, cfg.ContainerIPNet)
 }
 
-func ensureMQ(ctx context.Context, link netlink.Link) error {
-	mq := &netlink.GenericQdisc{
-		QdiscAttrs: netlink.QdiscAttrs{
-			LinkIndex: link.Attrs().Index,
-			Parent:    netlink.HANDLE_ROOT,
-		},
-		QdiscType: "mq",
+func ensureMQFQ(ctx context.Context, link netlink.Link) error {
+	// create mq at 1: root
+	err := utils.EnsureMQQdisc(ctx, link)
+	if err != nil {
+		return err
 	}
+
 	qds, err := netlink.QdiscList(link)
 	if err != nil {
 		return err
 	}
-	found := false
 	for _, qd := range qds {
 		if qd.Attrs().LinkIndex != link.Attrs().Index {
 			continue
 		}
-		if qd.Type() != mq.Type() {
-			continue
-		}
-		if qd.Attrs().Parent != mq.Parent {
+		// find parent is mq
+		major, minor := netlink.MajorMinor(qd.Attrs().Parent)
+		if major != 1 || minor == 0 {
 			continue
 		}
 
-		found = true
+		if qd.Type() == "fq" {
+			continue
+		}
+		err = utils.QdiscReplace(ctx, &netlink.GenericQdisc{
+			QdiscAttrs: netlink.QdiscAttrs{
+				LinkIndex: link.Attrs().Index,
+				Parent:    qd.Attrs().Parent,
+			},
+			QdiscType: "fq",
+		})
+		if err != nil {
+			return err
+		}
 	}
-	if found {
-		return nil
-	}
-	return utils.QdiscReplace(ctx, mq)
+	return nil
 }
