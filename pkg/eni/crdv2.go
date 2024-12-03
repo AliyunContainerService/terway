@@ -13,7 +13,6 @@ import (
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -75,18 +74,22 @@ func NewCRDV2(nodeName string) *CRDV2 {
 			DefaultFieldSelector: nil,
 			DefaultTransform:     nil,
 			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Node{}: {
+					Field: fields.SelectorFromSet(map[string]string{
+						"metadata.name": nodeName,
+					}),
+					Transform: nil,
+				},
 				&networkv1beta1.Node{}: {
-					Label: labels.Set(map[string]string{
-						"name": nodeName,
-					}).AsSelector(),
-					Field:     nil,
+					Field: fields.SelectorFromSet(map[string]string{
+						"metadata.name": nodeName,
+					}),
 					Transform: nil,
 				},
 				&networkv1beta1.NodeRuntime{}: {
-					Label: labels.Set(map[string]string{
-						"name": nodeName,
-					}).AsSelector(),
-					Field:     nil,
+					Field: fields.SelectorFromSet(map[string]string{
+						"metadata.name": nodeName,
+					}),
 					Transform: nil,
 				},
 				&corev1.Pod{}: {
