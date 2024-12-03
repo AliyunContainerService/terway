@@ -213,54 +213,60 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 			if !ebpfSupport {
 				_ = plugin.Delete("eniip_virtual_type")
 			} else {
-				requireIPvlan := false
-
 				switch strings.ToLower(virtualType) {
 				case dataPathVeth, dataPathDefault:
 					datapath = dataPathVeth
 
-					// only for terway-eniip
 					if ebpfSupport && networkPolicyProvider == NetworkPolicyProviderEBPF {
 						allow, err := allowEBPFNetworkPolicy(f.EnableNetworkPolicy)
 						if err != nil {
 							return "", err
 						}
 						if allow {
-							requireEBPFChainer = true
+							datapath = dataPathV2
 						}
 					}
 				case dataPathIPvlan:
-					requireIPvlan = true
 					datapath = dataPathIPvlan
 
-					fallthrough
-				case dataPathV2:
-					requireEBPFChainer = true
-
-					if requireIPvlan && !_switchDataPathV2() {
-						fmt.Printf("keep ipvlan mode %v %v\n", requireIPvlan, !_switchDataPathV2())
-						_, err = plugin.Set(dataPathIPvlan, "eniip_virtual_type")
-						if err != nil {
-							return "", err
-						}
-					} else {
-						fmt.Printf("datapathv2 enabled\n")
-						_, err = plugin.Set(dataPathV2, "eniip_virtual_type")
-						if err != nil {
-							return "", err
-						}
-
+					if _switchDataPathV2() {
 						datapath = dataPathV2
 					}
+				case dataPathV2:
+					datapath = dataPathV2
+				}
 
-					if edtSupport {
-						_, err = plugin.Set("edt", "bandwidth_mode")
-					} else {
-						_, err = plugin.Set("tc", "bandwidth_mode")
-					}
+				switch datapath {
+				case dataPathVeth:
+					requireEBPFChainer = false
+					edtSupport = false
+					_, err = plugin.Set(dataPathVeth, "eniip_virtual_type")
 					if err != nil {
 						return "", err
 					}
+				case dataPathIPvlan:
+					requireEBPFChainer = true
+					_, err = plugin.Set(dataPathIPvlan, "eniip_virtual_type")
+					if err != nil {
+						return "", err
+					}
+				case dataPathV2:
+					requireEBPFChainer = true
+					_, err = plugin.Set(dataPathV2, "eniip_virtual_type")
+					if err != nil {
+						return "", err
+					}
+				default:
+					return "", fmt.Errorf("invalid datapath %s", datapath)
+				}
+
+				if edtSupport {
+					_, err = plugin.Set("edt", "bandwidth_mode")
+				} else {
+					_, err = plugin.Set("tc", "bandwidth_mode")
+				}
+				if err != nil {
+					return "", err
 				}
 			}
 		}
