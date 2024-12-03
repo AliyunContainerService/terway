@@ -171,6 +171,7 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 		broadcaster:     broadcaster,
 		recorder:        recorder,
 		Locker:          &sync.RWMutex{},
+		enableErdma:     globalConfig.EnableERDMA,
 	}
 
 	svcCIDR := &types.IPNetSet{}
@@ -209,6 +210,7 @@ type k8s struct {
 	node                    *corev1.Node
 	svcCIDR                 *types.IPNetSet
 	statefulWorkloadKindSet sets.Set[string]
+	enableErdma             bool
 
 	sync.Locker
 }
@@ -374,7 +376,7 @@ func (k *k8s) GetPod(ctx context.Context, namespace, name string, cache bool) (*
 		}
 		return nil, err
 	}
-	podInfo := convertPod(k.mode, k.statefulWorkloadKindSet, pod)
+	podInfo := convertPod(k.mode, k.enableErdma, k.statefulWorkloadKindSet, pod)
 	item := &storageItem{
 		Pod: podInfo,
 	}
@@ -421,7 +423,7 @@ func (k *k8s) GetLocalPods() ([]*daemon.PodInfo, error) {
 			continue
 		}
 
-		podInfo := convertPod(k.mode, k.statefulWorkloadKindSet, &pod)
+		podInfo := convertPod(k.mode, k.enableErdma, k.statefulWorkloadKindSet, &pod)
 		ret = append(ret, podInfo)
 	}
 
@@ -572,7 +574,7 @@ func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 	panic(fmt.Errorf("unknown daemon mode %s", daemonMode))
 }
 
-func convertPod(daemonMode string, statefulWorkloadKindSet sets.Set[string], pod *corev1.Pod) *daemon.PodInfo {
+func convertPod(daemonMode string, enableErdma bool, statefulWorkloadKindSet sets.Set[string], pod *corev1.Pod) *daemon.PodInfo {
 	pi := &daemon.PodInfo{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
@@ -626,7 +628,9 @@ func convertPod(daemonMode string, statefulWorkloadKindSet sets.Set[string], pod
 		}
 	}
 
-	pi.ERdma = isERDMA(pod)
+	if enableErdma {
+		pi.ERdma = isERDMA(pod)
+	}
 
 	// determine whether pod's IP will stick 5 minutes for a reuse, priorities as below,
 	// 1. pod has a positive pod-ip-reservation annotation
