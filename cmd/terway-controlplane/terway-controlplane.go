@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
 	"time"
 
@@ -46,6 +47,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	wh "sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	aliyun "github.com/AliyunContainerService/terway/pkg/aliyun/client"
@@ -251,7 +253,17 @@ func newOption(cfg *controlplane.Config) ctrl.Options {
 		LeaderElectionID:           cfg.ControllerName,
 		LeaderElectionNamespace:    cfg.ControllerNamespace,
 		LeaderElectionResourceLock: "leases",
-		MetricsBindAddress:         cfg.MetricsBindAddress,
+		Metrics: metricsserver.Options{
+			SecureServing:  false,
+			BindAddress:    cfg.MetricsBindAddress,
+			ExtraHandlers:  nil,
+			FilterProvider: nil,
+			CertDir:        "",
+			CertName:       "",
+			KeyName:        "",
+			TLSOpts:        nil,
+			ListenConfig:   net.ListenConfig{},
+		},
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
 				&corev1.Node{}: {
