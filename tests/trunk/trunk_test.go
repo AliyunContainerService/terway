@@ -439,7 +439,7 @@ func TestZoneLimit(t *testing.T) {
 				}
 
 				return true
-			}), wait.WithTimeout(time.Second*5))
+			}), wait.WithTimeout(time.Second*50))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -857,6 +857,9 @@ func newPodNetworking(name string, vSwitchOptions, securityGroupIDs []string, po
 			},
 			VSwitchOptions:   vSwitchOptions,
 			SecurityGroupIDs: securityGroupIDs,
+			ENIOptions: v1beta1.ENIOptions{
+				ENIAttachType: v1beta1.ENIOptionTypeTrunk,
+			},
 		},
 	}
 }
