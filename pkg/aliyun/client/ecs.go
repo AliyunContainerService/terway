@@ -152,7 +152,7 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 			result = append(result, FromDescribeResp(&r))
 		}
 
-		l.V(4).Info("describe enis")
+		l.WithValues(LogFieldRequestID, resp.RequestId).Info("describe enis")
 
 		if len(resp.NetworkInterfaceSets.NetworkInterfaceSet) < maxSinglePageSize {
 			break
