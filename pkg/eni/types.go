@@ -4,6 +4,8 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/samber/lo"
+
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
@@ -257,3 +259,21 @@ const (
 	NetworkInterfaceMismatch
 	InsufficientVSwitchIP
 )
+
+type AllocatingRequests []*LocalIPRequest
+
+// Len return the valid slice size
+func (a *AllocatingRequests) Len() int {
+	// true to keep
+	filtered := lo.Filter(*a, func(item *LocalIPRequest, index int) bool {
+		select {
+		case <-item.workerCtx.Done():
+			return false
+		default:
+			return true
+		}
+	})
+
+	*a = filtered
+	return len(*a)
+}
