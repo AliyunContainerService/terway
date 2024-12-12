@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 )
 
 func Test_syncIPLocked(t *testing.T) {
@@ -99,6 +100,52 @@ func TestSet_Allocatable(t *testing.T) {
 			})
 			if !reflect.DeepEqual(result, tt.expected) {
 				t.Errorf("Allocatable() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestAllocatingRequests_Len(t *testing.T) {
+	tests := []struct {
+		name     string
+		requests AllocatingRequests
+		expected int
+	}{
+		{
+			name: "No expired requests",
+			requests: AllocatingRequests{
+				{deadline: time.Now().Add(1 * time.Hour)},
+				{deadline: time.Now().Add(2 * time.Hour)},
+			},
+			expected: 2,
+		},
+		{
+			name: "Some expired requests",
+			requests: AllocatingRequests{
+				{deadline: time.Now().Add(-1 * time.Hour)},
+				{deadline: time.Now().Add(1 * time.Hour)},
+			},
+			expected: 1,
+		},
+		{
+			name: "All expired requests",
+			requests: AllocatingRequests{
+				{deadline: time.Now().Add(-1 * time.Hour)},
+				{deadline: time.Now().Add(-2 * time.Hour)},
+			},
+			expected: 0,
+		},
+		{
+			name:     "Empty requests",
+			requests: AllocatingRequests{},
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.requests.Len(); got != tt.expected {
+				t.Errorf("Len() = %v, want %v", got, tt.expected)
 			}
 		})
 	}

@@ -4,6 +4,8 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/samber/lo"
+
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
@@ -257,3 +259,20 @@ const (
 	NetworkInterfaceMismatch
 	InsufficientVSwitchIP
 )
+
+type AllocatingRequests []AllocatingRequest
+
+type AllocatingRequest struct {
+	deadline time.Time
+}
+
+// Len return the valid slice size
+func (a *AllocatingRequests) Len() int {
+	// true to keep
+	filtered := lo.Filter(*a, func(item AllocatingRequest, index int) bool {
+		return time.Now().Before(item.deadline)
+	})
+
+	*a = filtered
+	return len(*a)
+}
