@@ -161,6 +161,7 @@ func runCalico(cfg *PolicyConfig) error {
 		"FELIX_XDPENABLED=false",
 		"FELIX_BPFCONNECTTIMELOADBALANCINGENABLED=false",
 		"FELIX_BPFKUBEPROXYIPTABLESCLEANUPENABLED=false",
+		"FELIX_USAGEREPORTINGENABLED=false",
 	)
 
 	binary, err := exec.LookPath("calico-felix")
