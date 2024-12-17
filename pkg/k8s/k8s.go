@@ -104,7 +104,7 @@ type Kubernetes interface {
 }
 
 // NewK8S return Kubernetes service by pod spec and daemon mode
-func NewK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) {
+func NewK8S(daemonMode string, globalConfig *daemon.Config, namespace string) (Kubernetes, error) {
 	restConfig := ctrl.GetConfigOrDie()
 	restConfig.QPS = globalConfig.KubeClientQPS
 	restConfig.Burst = globalConfig.KubeClientBurst
@@ -122,12 +122,6 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
 		return nil, fmt.Errorf("failed to get NODE_NAME")
-	}
-
-	daemonNamespace := os.Getenv("POD_NAMESPACE")
-	if len(daemonNamespace) == 0 {
-		daemonNamespace = "kube-system"
-		klog.Info("POD_NAMESPACE is not set in environment variables, use kube-system as default namespace")
 	}
 
 	node, err := getNode(context.Background(), c, nodeName)
@@ -162,7 +156,7 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config) (Kubernetes, error) 
 		mode:            daemonMode,
 		node:            node,
 		nodeName:        nodeName,
-		daemonNamespace: daemonNamespace,
+		daemonNamespace: namespace,
 		storage:         storage,
 		broadcaster:     broadcaster,
 		recorder:        recorder,

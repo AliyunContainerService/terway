@@ -56,7 +56,7 @@ type CRDV2 struct {
 	cacheSyncedCh chan struct{}
 }
 
-func NewCRDV2(nodeName string) *CRDV2 {
+func NewCRDV2(nodeName, namespace string) *CRDV2 {
 	restConfig := ctrl.GetConfigOrDie()
 
 	options := ctrl.Options{
@@ -112,6 +112,11 @@ func NewCRDV2(nodeName string) *CRDV2 {
 						}
 						return nil, fmt.Errorf("unexpected type %T", i)
 					},
+				},
+				&corev1.ConfigMap{}: {
+					Field: fields.SelectorFromSet(map[string]string{
+						"metadata.namespace": namespace,
+					}),
 				},
 			},
 			UnsafeDisableDeepCopy: nil,
