@@ -32,6 +32,7 @@ type NetworkServiceBuilder struct {
 	ctx            context.Context
 	configFilePath string
 	config         *daemon.Config
+	namespace      string
 	daemonMode     string
 	service        *networkService
 	aliyunClient   *client.OpenAPI
@@ -92,6 +93,10 @@ func (b *NetworkServiceBuilder) LoadGlobalConfig() *NetworkServiceBuilder {
 		b.service.enableIPv6 = true
 	}
 	b.config = globalConfig
+	b.namespace = os.Getenv("POD_NAMESPACE")
+	if b.namespace == "" {
+		b.namespace = "kube-system"
+	}
 
 	b.service.ipamType = globalConfig.IPAMType
 
@@ -103,7 +108,7 @@ func (b *NetworkServiceBuilder) InitK8S() *NetworkServiceBuilder {
 		return b
 	}
 	var err error
-	b.service.k8s, err = k8s.NewK8S(b.daemonMode, b.config)
+	b.service.k8s, err = k8s.NewK8S(b.daemonMode, b.config, b.namespace)
 	if err != nil {
 		b.err = fmt.Errorf("error init k8s: %w", err)
 		return b
@@ -397,7 +402,7 @@ func (b *NetworkServiceBuilder) PostInitForCRDV2() *NetworkServiceBuilder {
 	if b.err != nil {
 		return b
 	}
-	crdv2 := eni.NewCRDV2(b.service.k8s.NodeName())
+	crdv2 := eni.NewCRDV2(b.service.k8s.NodeName(), b.namespace)
 	mgr := eni.NewManager(0, 0, 0, 0, []eni.NetworkInterface{crdv2}, types.EniSelectionPolicy(b.config.EniSelectionPolicy), nil)
 
 	svc := b.RunENIMgr(b.ctx, mgr)
