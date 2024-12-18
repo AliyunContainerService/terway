@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: terway-controlplane
+  labels:
+  {{- include "terway-controlplane.labels" . | nindent 4 }}
+data:
+  cilium-config.yaml: |
+    k8s-namespace: kube-system
+    identity-gc-interval: 10m
+    identity-heartbeat-timeout: 20m
+  ctrl-config.yaml: |
+    leaseLockName: "terway-controller-lock"
+    leaseLockNamespace: "kube-system"
+    controllerNamespace: "kube-system"
+    controllerName: "terway-controlplane"
+    healthzBindAddress: "{{.Values.terwayControlplane.healthzBindAddress}}"
+    clusterDomain: "{{.Values.terwayControlplane.clusterDomain}}"
+    leaderElection: true
+    webhookPort: {{.Values.terwayControlplane.webhookPort}}
+    certDir: "/var/run/webhook-cert"
+    regionID: "{{ .Values.terwayControlplane.regionID }}"
+    clusterID: "{{ .Values.terwayControlplane.clusterID }}"
+    vpcID: "{{ .Values.terwayControlplane.vpcID }}"
+    ipStack: "{{ .Values.terwayControlplane.ipStack }}"
+    enableTrunk: {{.Values.terwayControlplane.enableTrunk}}
+    enableTrace: {{.Values.terwayControlplane.enableTrace}}
+    {{- with .Values.terwayControlplane.controllers }}
+    controllers:
+    {{- toYaml . | nindent 4 }}
+    {{- end }}

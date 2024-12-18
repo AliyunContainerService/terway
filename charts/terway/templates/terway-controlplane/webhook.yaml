@@ -1,7 +1,7 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: {{ .Release.Name }}
+  name: terway-controlplane
   labels:
     {{- include "terway-controlplane.labels" . | nindent 4 }}
 webhooks:
@@ -25,17 +25,17 @@ webhooks:
     clientConfig:
       service:
         namespace: {{ .Release.Namespace }}
-        name: {{ .Release.Name }}
+        name: terway-controlplane
         path: /mutating
     admissionReviewVersions: ["v1", "v1beta1"]
     sideEffects: None
-    timeoutSeconds: {{ .Values.webhookTimeoutSeconds }}
-    failurePolicy: {{ .Values.webhookFailurePolicy }}
+    timeoutSeconds: {{ .Values.terwayControlplane.webhookTimeoutSeconds }}
+    failurePolicy: {{ .Values.terwayControlplane.webhookFailurePolicy }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: {{ .Release.Name }}
+  name: terway-controlplane
   labels:
   {{- include "terway-controlplane.labels" . | nindent 4 }}
 webhooks:
@@ -49,9 +49,9 @@ webhooks:
     clientConfig:
       service:
         namespace: {{ .Release.Namespace }}
-        name: {{ .Release.Name }}
+        name: terway-controlplane
         path: /validate
     admissionReviewVersions: ["v1", "v1beta1"]
     sideEffects: None
-    timeoutSeconds: {{ .Values.webhookTimeoutSeconds }}
+    timeoutSeconds: {{ .Values.terwayControlplane.webhookTimeoutSeconds }}
     failurePolicy: Fail

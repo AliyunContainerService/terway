@@ -44,7 +44,7 @@ spec:
       hostNetwork: true
       initContainers:
         - name: terway-init
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.terway.image.repository }}:{{ .Values.terway.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
@@ -68,7 +68,7 @@ spec:
               name: var-run-eni
             - name: cni-bin
               mountPath: /opt/cni/bin/
-            - name: cni-config-project
+            - name: cni
               mountPath: /etc/cni/net.d/
             - mountPath: /lib/modules
               name: lib-modules
@@ -78,14 +78,14 @@ spec:
               name: eni-run
       containers:
         - name: terway
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.terway.image.repository }}:{{ .Values.terway.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           command:
             - "/usr/bin/terwayd"
             - "-log-level"
             - "info"
             - "-daemon-mode"
-            - "{{.Values.daemonMode}}"
+            - "{{.Values.terway.daemonMode}}"
             - "-config"
             - "/etc/eni/eni_conf"
           securityContext:
@@ -112,7 +112,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
           volumeMounts:
-            - name: configvolume
+            - name: eni-config
               mountPath: /etc/eni
               readOnly: true
             - mountPath: /var/run/
@@ -122,17 +122,14 @@ spec:
             - mountPath: /var/lib/cni/terway
               name: cni-terway
             - mountPath: /etc/cni/net.d
-              name: cni-config-project
+              name: cni
               readOnly: true
             - mountPath: /host-etc-net.d
-              name: cni-config
+              name: host-cni
             - mountPath: /var/lib/kubelet/device-plugins
               name: device-plugin-path
-            - name: addon-token
-              mountPath: "/var/addon"
-              readOnly: true
         - name: policy
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.terway.image.repository }}:{{ .Values.terway.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           command: [ "/bin/policyinit.sh" ]
           env:
@@ -173,7 +170,7 @@ spec:
                 - SYS_ADMIN
                 - NET_RAW
                 - SYS_MODULE
-{{- if .Values.enableIPvlan }}
+{{- if or .Values.terway.enableDatapathV2 (eq .Values.terway.networkPolicyProvider "ebpf") }}
                 - CHOWN
                 - KILL
                 - IPC_LOCK
@@ -189,7 +186,6 @@ spec:
             limits:
               cpu: "1"
           livenessProbe:
-            httpGet: null
             tcpSocket:
               port: 9099
               host: 127.0.0.1
@@ -197,21 +193,21 @@ spec:
             initialDelaySeconds: 10
             failureThreshold: 6
           readinessProbe:
-            httpGet: null
             tcpSocket:
               port: 9099
               host: 127.0.0.1
             periodSeconds: 10
           volumeMounts:
-            - mountPath: /etc/eni
-              name: configvolume
+            - name: eni-config
+              mountPath: /etc/eni
               readOnly: true
             - mountPath: /var-run-eni
               name: var-run-eni
+              readOnly: true
             - mountPath: /lib/modules
               name: lib-modules
             - mountPath: /etc/cni/net.d
-              name: cni-config-project
+              name: cni
               readOnly: true
             # volumes use by cilium
             - mountPath: /sys/fs
@@ -224,18 +220,17 @@ spec:
       volumes:
         - name: var-run-eni
           emptyDir: { }
-        - name: configvolume
+        - name: eni-config
           configMap:
             name: eni-config
-            items: null
         - name: cni-bin
           hostPath:
             path: /opt/cni/bin
             type: "Directory"
-        - name: cni-config
+        - name: host-cni
           hostPath:
             path: /etc/cni/net.d
-        - name: cni-config-project
+        - name: cni
           emptyDir: { }
         - name: eni-run
           hostPath:
@@ -255,13 +250,6 @@ spec:
           hostPath:
             path: /
             type: "Directory"
-        - name: addon-token
-          secret:
-            secretName: addon.network.token
-            items:
-              - key: addon.token.config
-                path: token-config
-            optional: true
         # used by cilium
         # To keep state between restarts / upgrades
         - hostPath:
