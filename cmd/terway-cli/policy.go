@@ -16,6 +16,8 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 )
 
+var readFunc func(name string) ([]byte, error)
+
 type PolicyConfig struct {
 	Datapath             string
 	EnableNetworkPolicy  bool
@@ -39,6 +41,8 @@ var policyCmd = &cobra.Command{
 	Use:          "policy",
 	SilenceUsage: true,
 	Run: func(cmd *cobra.Command, args []string) {
+		readFunc = os.ReadFile
+
 		err := initPolicy(cmd, args)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "failed to init policy: %v\n", err)
@@ -285,19 +289,19 @@ func policyConfig(container *gabs.Container) ([]string, error) {
 		ciliumArgs = append(ciliumArgs, extractArgs(h.CiliumExtraArgs)...)
 	}
 
-	old, err := isOldNode()
-	if err != nil {
-		return nil, err
-	}
-
-	// check the extra args
-	lo.Filter(ciliumArgs, func(item string, index int) bool {
+	var err error
+	ciliumArgs = lo.Filter(ciliumArgs, func(item string, index int) bool {
 		if strings.Contains(item, "disable-per-package-lb") {
-			return old
+			should, innerErr := shouldAppend()
+			if innerErr != nil {
+				err = innerErr
+			}
+			return should
 		}
-		return true
+		return false
 	})
-	return ciliumArgs, nil
+
+	return ciliumArgs, err
 }
 
 func extractArgs(in string) []string {
@@ -352,4 +356,16 @@ func runSocat(cfg *PolicyConfig) error {
 		return fmt.Errorf("socat is not installed %w", err)
 	}
 	return syscall.Exec(binary, args, env)
+}
+
+// shouldAppend check whether disable-per-package-lb should be appended
+func shouldAppend() (bool, error) {
+	out, err := readFunc("/var/run/cilium/state/globals/node_config.h")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return strings.Contains(string(out), "DISABLE_PER_PACKET_LB"), nil
 }
