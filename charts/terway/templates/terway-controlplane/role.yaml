@@ -1,7 +1,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ .Release.Name }}
+  name: terway-controlplane
 rules:
   - apiGroups: [ "" ]
     resources:
@@ -17,7 +17,7 @@ rules:
       - patch
       - watch
     resourceNames:
-      - {{ .Release.Name }}-webhook-cert
+      - terway-controlplane-webhook-cert
   - apiGroups:
       - coordination.k8s.io
     resources:
@@ -28,13 +28,3 @@ rules:
       - watch
       - create
       - update
-{{- if .Values.secretName }}
-  - apiGroups: [ "" ]
-    resources:
-      - secrets
-    verbs:
-      - get
-      - watch
-    resourceNames:
-      - {{ .Values.secretName }}
-{{- end }}

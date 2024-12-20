@@ -50,7 +50,7 @@ vet: ## Run go vet against code.
 	GOOS=linux go vet --tags "$(GO_BUILD_TAGS)" ./...
 
 .PHONY: test
-test: manifests generate fmt vet envtest ## Run tests.
+test: manifests generate fmt vet envtest datapath-test## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -race --tags "$(GO_BUILD_TAGS)" $$(go list ./... | grep -Ev '/e2e|/mocks|/generated|/apis|/examples|/tests|/rpc') -coverprofile coverage.txt
 
 .PHONY: lint
@@ -61,6 +61,9 @@ lint: golangci-lint ## Run golangci-lint linter & yamllint
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 	$(GOLANGCI_LINT) run
 
+.PHONY: datapath-test
+datapath-test: ## Run datapath tests using the Makefile in tests/kind directory.
+	make -C tests/kind datapath-test
 ##@ Build
 
 .PHONY: build
