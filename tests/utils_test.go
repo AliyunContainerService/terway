@@ -3,6 +3,7 @@
 package tests
 
 import (
+	"context"
 	"net/netip"
 
 	corev1 "k8s.io/api/core/v1"
@@ -10,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type Pod struct {
@@ -249,4 +251,20 @@ func getIP(pod *corev1.Pod) (v4 netip.Addr, v6 netip.Addr) {
 		}
 	}
 	return
+}
+
+type resourceKey struct{}
+
+func ResourcesFromCtx(ctx context.Context) []client.Object {
+	v, ok := ctx.Value(resourceKey{}).([]client.Object)
+	if !ok {
+		return nil
+	}
+	return v
+}
+
+func SaveResources(ctx context.Context, resources ...client.Object) context.Context {
+	prev := ResourcesFromCtx(ctx)
+	prev = append(prev, resources...)
+	return context.WithValue(ctx, resourceKey{}, prev)
 }
