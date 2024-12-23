@@ -24,6 +24,7 @@ import (
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
@@ -46,12 +47,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const controllerName = "pod"
@@ -63,28 +61,15 @@ func init() {
 
 		crdMode := controlplane.GetConfig().IPAMType == types.IPAMTypeCRD
 
-		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
-			Reconciler:              NewReconcilePod(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool, crdMode),
-			MaxConcurrentReconciles: controlplane.GetConfig().PodMaxConcurrent,
-		})
-		if err != nil {
-			return err
-		}
+		err := builder.ControllerManagedBy(mgr).
+			Named(controllerName).
+			WithOptions(controller.Options{
+				MaxConcurrentReconciles: controlplane.GetConfig().PodMaxConcurrent,
+			}).
+			For(&corev1.Pod{}, builder.WithPredicates(&predicateForPodEvent{})).
+			Complete(NewReconcilePod(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool, crdMode))
 
-		w := &Wrapper{
-			ctrl: c,
-		}
-		err = mgr.Add(w)
-		if err != nil {
-			return err
-		}
-
-		return c.Watch(
-			source.Kind(mgr.GetCache(), &corev1.Pod{}),
-			&handler.EnqueueRequestForObject{},
-			&predicate.ResourceVersionChangedPredicate{},
-			&predicateForPodEvent{},
-		)
+		return err
 	}, true)
 }
 
@@ -105,26 +90,6 @@ type ReconcilePod struct {
 	trunkMode bool // use trunk mode or secondary eni mode
 	// deprecated
 	crdMode bool
-}
-
-type Wrapper struct {
-	ctrl controller.Controller
-}
-
-// Start the controller
-func (w *Wrapper) Start(ctx context.Context) error {
-	err := w.ctrl.Start(ctx)
-	if err != nil {
-		return err
-	}
-
-	<-ctx.Done()
-	return nil
-}
-
-// NeedLeaderElection need election
-func (w *Wrapper) NeedLeaderElection() bool {
-	return true
 }
 
 // NewReconcilePod watch pod lifecycle events and sync to podENI resource

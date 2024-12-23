@@ -52,6 +52,7 @@ func init() {
 		}
 
 		return ctrl.NewControllerManagedBy(mgr).
+			Named(ControllerName).
 			WithOptions(controller.Options{
 				MaxConcurrentReconciles: controlplane.GetConfig().NodeMaxConcurrent,
 				LogConstructor: func(request *reconcile.Request) logr.Logger {

@@ -24,6 +24,7 @@ func init() {
 	register.Add(ControllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &corev1.Pod{})
 		return ctrl.NewControllerManagedBy(mgr).
+			Named(ControllerName).
 			WithOptions(controller.Options{
 				MaxConcurrentReconciles: ctrlCtx.Config.MultiIPPodMaxConcurrent,
 			}).

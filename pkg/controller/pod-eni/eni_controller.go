@@ -80,12 +80,13 @@ func init() {
 			return err
 		}
 
-		return c.Watch(
-			source.Kind(mgr.GetCache(), &v1beta1.PodENI{}),
-			&handler.EnqueueRequestForObject{},
-			&predicate.ResourceVersionChangedPredicate{},
-			&predicateForPodENIEvent{},
-		)
+		return c.Watch(source.Kind(mgr.GetCache(), &v1beta1.PodENI{}, &handler.TypedEnqueueRequestForObject[*v1beta1.PodENI]{},
+			&predicate.TypedResourceVersionChangedPredicate[*v1beta1.PodENI]{},
+			predicate.TypedFuncs[*v1beta1.PodENI]{
+				UpdateFunc: updateFunc,
+			},
+		))
+
 	}, true)
 }
 

@@ -4,11 +4,9 @@ import (
 	"context"
 	"reflect"
 
-	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -48,23 +46,7 @@ func (r *DummyReconcile) SetupWithManager(mgr manager.Manager) error {
 			continue
 		}
 		used[t.Name()] = struct{}{}
-		builder = builder.Watches(v, &NoOp{})
+		builder = builder.Watches(v, &handler.TypedFuncs[client.Object, reconcile.Request]{})
 	}
 	return builder.Complete(&DummyReconcile{})
-}
-
-var _ handler.EventHandler = &NoOp{}
-
-type NoOp struct{}
-
-func (n *NoOp) Create(ctx context.Context, event event.CreateEvent, limitingInterface workqueue.RateLimitingInterface) {
-}
-
-func (n *NoOp) Update(ctx context.Context, event event.UpdateEvent, limitingInterface workqueue.RateLimitingInterface) {
-}
-
-func (n *NoOp) Delete(ctx context.Context, event event.DeleteEvent, limitingInterface workqueue.RateLimitingInterface) {
-}
-
-func (n *NoOp) Generic(ctx context.Context, event event.GenericEvent, limitingInterface workqueue.RateLimitingInterface) {
 }
