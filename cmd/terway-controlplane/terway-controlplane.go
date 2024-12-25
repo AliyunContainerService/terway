@@ -141,7 +141,7 @@ func main() {
 	options := newOption(cfg)
 
 	if !cfg.DisableWebhook {
-		err = cert.SyncCert(ctx, directClient, cfg.ControllerNamespace, cfg.ControllerName, cfg.ClusterDomain, cfg.CertDir)
+		err = cert.SyncCert(ctx, directClient, cfg.ControllerNamespace, cfg.ControllerName, cfg.ClusterDomain, cfg.CertDir, cfg.ClusterID, cfg.WebhookURLMode)
 		if err != nil {
 			panic(err)
 		}

@@ -41,6 +41,7 @@ type Config struct {
 	DisableWebhook     bool   `json:"disableWebhook"`
 	WebhookPort        int    `json:"webhookPort" validate:"gt=0,lte=65535" mod:"default=4443"`
 	CertDir            string `json:"certDir" validate:"required" mod:"default=/var/run/webhook-cert"`
+	WebhookURLMode     bool   `json:"webhookURLMode"`
 	LeaderElection     bool   `json:"leaderElection"`
 	RegisterEndpoint   bool   `json:"registerEndpoint"` // deprecated
 	EnableTrace        bool   `json:"enableTrace"`
