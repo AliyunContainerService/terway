@@ -20,6 +20,8 @@ import (
 	"context"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
@@ -37,7 +39,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const controllerName = "pod-networking"
@@ -46,20 +47,15 @@ func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &v1beta1.PodNetworking{})
 
-		c, err := controller.New(controllerName, mgr, controller.Options{
-			Reconciler:              NewReconcilePodNetworking(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool),
-			MaxConcurrentReconciles: 1,
-		})
-		if err != nil {
-			return err
-		}
+		err := builder.ControllerManagedBy(mgr).
+			Named(controllerName).
+			WithOptions(controller.Options{
+				MaxConcurrentReconciles: 1,
+			}).
+			Watches(&v1beta1.PodNetworking{}, &handler.EnqueueRequestForObject{}, builder.WithPredicates(&predicate.ResourceVersionChangedPredicate{}, &predicateForPodnetwokringEvent{})).
+			Complete(NewReconcilePodNetworking(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool))
 
-		return c.Watch(
-			source.Kind(mgr.GetCache(), &v1beta1.PodNetworking{}),
-			&handler.EnqueueRequestForObject{},
-			&predicate.ResourceVersionChangedPredicate{},
-			&predicateForPodnetwokringEvent{},
-		)
+		return err
 	}, true)
 }
 

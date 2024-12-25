@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"go.uber.org/atomic"
 	appsv1 "k8s.io/api/apps/v1"
@@ -61,6 +63,8 @@ var (
 	isFailed atomic.Bool
 
 	nginxImage string
+
+	defaultPodNetworkingName string
 )
 
 func init() {
@@ -68,6 +72,8 @@ func init() {
 	flag.StringVar(&timeout, "timeout", "2m", "2m")
 	flag.StringVar(&vSwitchIDs, "vswitch-ids", "", "extra vSwitchIDs")
 	flag.StringVar(&securityGroupIDs, "security-group-ids", "", "extra securityGroupIDs")
+
+	defaultPodNetworkingName = "default-pn"
 }
 
 func TestMain(m *testing.M) {
@@ -99,21 +105,15 @@ func TestMain(m *testing.M) {
 		setPodNetworking,
 	)
 	testenv.AfterEachFeature(func(ctx context.Context, config *envconf.Config, t *testing.T, feature features.Feature) (context.Context, error) {
-		objs, ok := ctx.Value(resourceKey).([]k8s.Object)
-		if !ok {
-			return ctx, nil
-		}
-		for _, obj := range objs {
-			_ = config.Client().Resources().Delete(ctx, obj)
+		lo.ForEach(ResourcesFromCtx(ctx), func(item client.Object, index int) {
+			_ = config.Client().Resources().Delete(ctx, item)
 
-			err = wait.For(conditions.New(config.Client().Resources()).ResourceDeleted(obj), wait.WithContext(ctx),
-				wait.WithTimeout(parsedTimeout),
-				wait.WithInterval(1*time.Second))
+			err := wait.For(conditions.New(config.Client().Resources()).ResourceDeleted(item),
+				wait.WithInterval(1*time.Second), wait.WithImmediate(), wait.WithTimeout(1*time.Minute))
 			if err != nil {
-				t.Error(err)
-				t.FailNow()
+				t.Fatal("failed waiting for pods to be deleted", err)
 			}
-		}
+		})
 		return ctx, nil
 	})
 
@@ -124,6 +124,7 @@ func TestMain(m *testing.M) {
 
 		pn := &networkv1beta1.PodNetworking{}
 		pn.Name = "trunk"
+		pn.Spec.ENIOptions = networkv1beta1.ENIOptions{ENIAttachType: networkv1beta1.ENIOptionTypeTrunk}
 
 		_ = config.Client().Resources().Delete(ctx, pn)
 		return ctx, nil
@@ -223,9 +224,10 @@ func setPodNetworking(ctx context.Context, config *envconf.Config) (context.Cont
 	}
 
 	pn := &networkv1beta1.PodNetworking{}
-	pn.Name = "trunk"
+	pn.Name = defaultPodNetworkingName
+	pn.Spec.ENIOptions = networkv1beta1.ENIOptions{ENIAttachType: networkv1beta1.ENIOptionTypeTrunk}
 	pn.Spec.Selector = networkv1beta1.Selector{PodSelector: &metav1.LabelSelector{
-		MatchLabels: map[string]string{"trunk": "enable"},
+		MatchLabels: map[string]string{"netplan": "default"},
 	}}
 	if securityGroupIDs != "" {
 		pn.Spec.SecurityGroupIDs = strings.Split(securityGroupIDs, ",")
@@ -241,19 +243,7 @@ func setPodNetworking(ctx context.Context, config *envconf.Config) (context.Cont
 		}
 	}
 
-	err = wait.For(func(ctx context.Context) (bool, error) {
-		pn := &networkv1beta1.PodNetworking{}
-		err := config.Client().Resources().Get(ctx, "trunk", "", pn)
-		if err != nil {
-			return false, err
-		}
-		if pn.Status.Status != networkv1beta1.NetworkingStatusReady {
-			return false, nil
-		}
-		return true, nil
-	},
-		wait.WithTimeout(10*time.Second),
-		wait.WithInterval(1*time.Second))
+	err = WaitPodNetworkingReady(pn.Name, config.Client())
 
 	return ctx, err
 }
@@ -269,6 +259,7 @@ func patchNamespace(ctx context.Context, config *envconf.Config) (context.Contex
 			"labels": map[string]interface{}{
 				"ns":                       config.Namespace(),
 				"node-local-dns-injection": "enabled",
+				"ns-trunking":              "true",
 			},
 		},
 	})

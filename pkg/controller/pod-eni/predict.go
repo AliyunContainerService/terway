@@ -21,27 +21,13 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
 
-type predicateForPodENIEvent struct {
-	predicate.Funcs
-}
-
-func (p *predicateForPodENIEvent) Update(e event.UpdateEvent) bool {
-	oldPodENI, ok := e.ObjectOld.(*v1beta1.PodENI)
-	if !ok {
-		return false
-	}
-	newPodENI, ok := e.ObjectNew.(*v1beta1.PodENI)
-	if !ok {
-		return false
-	}
-
-	oldPodENICopy := oldPodENI.DeepCopy()
-	newPodENICopy := newPodENI.DeepCopy()
+func updateFunc(e event.TypedUpdateEvent[*v1beta1.PodENI]) bool {
+	oldPodENICopy := e.ObjectOld.DeepCopy()
+	newPodENICopy := e.ObjectNew.DeepCopy()
 
 	oldPodENICopy.ResourceVersion = ""
 	newPodENICopy.ResourceVersion = ""

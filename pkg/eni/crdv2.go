@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
@@ -62,14 +63,15 @@ func NewCRDV2(nodeName, namespace string) *CRDV2 {
 	options := ctrl.Options{
 		Scheme:                 types.Scheme,
 		HealthProbeBindAddress: "0",
-		MetricsBindAddress:     "0",
-		WebhookServer:          nil,
+		Metrics: metricsserver.Options{
+			BindAddress: "0",
+		},
+		WebhookServer: nil,
 		Cache: cache.Options{
 			HTTPClient:           nil,
 			Scheme:               nil,
 			Mapper:               types.NewRESTMapper(),
 			SyncPeriod:           nil,
-			Namespaces:           nil,
 			DefaultLabelSelector: nil,
 			DefaultFieldSelector: nil,
 			DefaultTransform:     nil,
@@ -119,7 +121,6 @@ func NewCRDV2(nodeName, namespace string) *CRDV2 {
 					}),
 				},
 			},
-			UnsafeDisableDeepCopy: nil,
 		},
 	}
 

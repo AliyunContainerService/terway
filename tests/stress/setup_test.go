@@ -8,12 +8,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/AliyunContainerService/terway/tests/utils"
 	"k8s.io/client-go/kubernetes/scheme"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/e2e-framework/pkg/env"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/envfuncs"
+
+	"github.com/AliyunContainerService/terway/tests/utils"
 )
 
 var (

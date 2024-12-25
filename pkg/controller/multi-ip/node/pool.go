@@ -106,9 +106,9 @@ func init() {
 				gcPeriod:           gcPeriod,
 				tracer:             tracer,
 			},
-			RateLimiter: workqueue.NewMaxOfRateLimiter(
-				workqueue.NewItemExponentialFailureRateLimiter(minSyncPeriod, maxSyncPeriod),
-				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(500), 1000)}),
+			RateLimiter: workqueue.NewTypedMaxOfRateLimiter(
+				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](minSyncPeriod, maxSyncPeriod),
+				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(500), 1000)}),
 			LogConstructor: func(request *reconcile.Request) logr.Logger {
 				log := mgr.GetLogger()
 				if request != nil {
@@ -121,10 +121,7 @@ func init() {
 			return err
 		}
 
-		return ctrl.Watch(
-			&source.Channel{Source: EventCh},
-			&handler.EnqueueRequestForObject{},
-		)
+		return ctrl.Watch(source.Channel(EventCh, &handler.EnqueueRequestForObject{}))
 	}, false)
 }
 

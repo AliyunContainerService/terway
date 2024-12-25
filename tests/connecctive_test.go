@@ -14,15 +14,13 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/e2e-framework/klient"
-	"sigs.k8s.io/e2e-framework/klient/k8s"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
 )
-
-var resourceKey struct{}
 
 func getStack() []string {
 	var r []string
@@ -63,19 +61,19 @@ func TestConnective(t *testing.T) {
 		{
 			name: "trunk pod",
 			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"trunk": "enable"})
+				return pod.WithLabels(map[string]string{"netplan": "default"})
 			},
 		},
 		{
 			name: "trunk pod alinux2",
 			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"trunk": "enable"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux2"})
+				return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux2"})
 			},
 		},
 		{
 			name: "trunk pod alinux3",
 			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"trunk": "enable"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux3"})
+				return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux3"})
 			},
 		},
 	}
@@ -86,7 +84,7 @@ func TestConnective(t *testing.T) {
 
 		hairpin := features.New(fmt.Sprintf("PodConnective/hairpin-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
+				var objs []client.Object
 
 				server := fn(NewPod("server", config.Namespace()).
 					WithLabels(map[string]string{"app": "server"}).
@@ -110,7 +108,7 @@ func TestConnective(t *testing.T) {
 					}
 					objs = append(objs, svc.Service)
 				}
-				ctx = context.WithValue(ctx, resourceKey, objs)
+				ctx = SaveResources(ctx, objs...)
 				return ctx
 			}).
 			Assess("Pod can access own service", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -145,7 +143,7 @@ func TestConnective(t *testing.T) {
 
 		podSameNode := features.New(fmt.Sprintf("PodConnective/podSameNode-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
+				var objs []client.Object
 
 				server := fn(NewPod("server", config.Namespace()).
 					WithLabels(map[string]string{"app": "server"}).
@@ -182,8 +180,7 @@ func TestConnective(t *testing.T) {
 					}
 					objs = append(objs, svc.Service)
 				}
-				ctx = context.WithValue(ctx, resourceKey, objs)
-
+				ctx = SaveResources(ctx, objs...)
 				return ctx
 			}).
 			Assess("Pod can access server", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -225,7 +222,7 @@ func TestConnective(t *testing.T) {
 
 		podDifferentNode := features.New(fmt.Sprintf("PodConnective/podDifferentNode-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
+				var objs []client.Object
 
 				server := fn(NewPod("server", config.Namespace()).
 					WithLabels(map[string]string{"app": "server"}).
@@ -262,7 +259,7 @@ func TestConnective(t *testing.T) {
 					}
 					objs = append(objs, svc.Service)
 				}
-				ctx = context.WithValue(ctx, resourceKey, objs)
+				ctx = SaveResources(ctx, objs...)
 
 				return ctx
 			}).
@@ -305,7 +302,7 @@ func TestConnective(t *testing.T) {
 
 		hostToPodSameNode := features.New(fmt.Sprintf("PodConnective/hostToSameNode-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
+				var objs []client.Object
 
 				server := fn(NewPod("server", config.Namespace()).
 					WithLabels(map[string]string{"app": "server"}).
@@ -344,7 +341,7 @@ func TestConnective(t *testing.T) {
 					}
 					objs = append(objs, svc.Service)
 				}
-				ctx = context.WithValue(ctx, resourceKey, objs)
+				ctx = SaveResources(ctx, objs...)
 
 				return ctx
 			}).
@@ -427,19 +424,19 @@ func TestNetworkPolicy(t *testing.T) {
 		{
 			name: "trunk pod",
 			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"trunk": "enable"})
+				return pod.WithLabels(map[string]string{"netplan": "default"})
 			},
 		},
 		{
 			name: "trunk pod alinux2",
 			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"trunk": "enable"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux2"})
+				return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux2"})
 			},
 		},
 		{
 			name: "trunk pod alinux3",
 			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"trunk": "enable"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux3"})
+				return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux3"})
 			},
 		},
 	}
@@ -449,7 +446,7 @@ func TestNetworkPolicy(t *testing.T) {
 
 		healthCheck := features.New(fmt.Sprintf("NetworkPolicy/PodHealthCheck-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
+				var objs []client.Object
 
 				policy := NewNetworkPolicy("default-deny-ingress", config.Namespace()).
 					WithPolicyType(networkingv1.PolicyTypeIngress)
@@ -469,7 +466,7 @@ func TestNetworkPolicy(t *testing.T) {
 					}
 				}
 
-				ctx = context.WithValue(ctx, resourceKey, objs)
+				ctx = SaveResources(ctx, objs...)
 
 				return ctx
 			}).
@@ -486,7 +483,7 @@ func TestNetworkPolicy(t *testing.T) {
 
 		denyIngressSameNode := features.New(fmt.Sprintf("NetworkPolicy/DenyIngressSameNode-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
+				var objs []client.Object
 
 				policy := NewNetworkPolicy("deny-ingress", config.Namespace()).
 					WithPolicyType(networkingv1.PolicyTypeIngress).
@@ -525,7 +522,7 @@ func TestNetworkPolicy(t *testing.T) {
 					}
 				}
 
-				ctx = context.WithValue(ctx, resourceKey, objs)
+				ctx = SaveResources(ctx, objs...)
 
 				return ctx
 			}).
@@ -557,7 +554,7 @@ func TestNetworkPolicy(t *testing.T) {
 
 		denyIngressotherNode := features.New(fmt.Sprintf("NetworkPolicy/denyIngressotherNode-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
+				var objs []client.Object
 
 				policy := NewNetworkPolicy("deny-ingress", config.Namespace()).
 					WithPolicyType(networkingv1.PolicyTypeIngress).
@@ -596,7 +593,7 @@ func TestNetworkPolicy(t *testing.T) {
 					}
 				}
 
-				ctx = context.WithValue(ctx, resourceKey, objs)
+				ctx = SaveResources(ctx, objs...)
 
 				return ctx
 			}).
@@ -628,7 +625,7 @@ func TestNetworkPolicy(t *testing.T) {
 
 		denyEgressSameNode := features.New(fmt.Sprintf("NetworkPolicy/denyEgressSameNode-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
+				var objs []client.Object
 
 				policy := NewNetworkPolicy("deny-ingress", config.Namespace()).
 					WithPolicyType(networkingv1.PolicyTypeEgress).
@@ -660,8 +657,7 @@ func TestNetworkPolicy(t *testing.T) {
 					}
 				}
 
-				ctx = context.WithValue(ctx, resourceKey, objs)
-
+				ctx = SaveResources(ctx, objs...)
 				return ctx
 			}).
 			Assess("Check ingress policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -685,7 +681,7 @@ func TestNetworkPolicy(t *testing.T) {
 
 		denyEgressOtherNode := features.New(fmt.Sprintf("NetworkPolicy/denyEgressOtherNode-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
+				var objs []client.Object
 
 				policy := NewNetworkPolicy("deny-ingress", config.Namespace()).
 					WithPolicyType(networkingv1.PolicyTypeEgress).
@@ -717,8 +713,7 @@ func TestNetworkPolicy(t *testing.T) {
 					}
 				}
 
-				ctx = context.WithValue(ctx, resourceKey, objs)
-
+				ctx = SaveResources(ctx, objs...)
 				return ctx
 			}).
 			Assess("Check ingress policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {

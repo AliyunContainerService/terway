@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	_ "go.uber.org/automaxprocs"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -46,6 +48,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	wh "sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	aliyun "github.com/AliyunContainerService/terway/pkg/aliyun/client"
@@ -188,7 +191,9 @@ func main() {
 		panic(err)
 	}
 
-	tp := oteltrace.NewNoopTracerProvider()
+	var tp oteltrace.TracerProvider
+
+	tp = noop.NewTracerProvider()
 	if cfg.EnableTrace {
 		grpcTP, err := initOpenTelemetry(ctx, "terway-controlplane", version.Version, cfg)
 		if err != nil {
@@ -216,7 +221,8 @@ func main() {
 		if controlplane.IsControllerEnabled(name, register.Controllers[name].Enable, cfg.Controllers) {
 			err = register.Controllers[name].Creator(mgr, ctrlCtx)
 			if err != nil {
-				panic(err)
+				log.Error(err, "unable create controller", "name", name)
+				os.Exit(1)
 			}
 			log.Info("register controller", "controller", name)
 		}
@@ -251,7 +257,17 @@ func newOption(cfg *controlplane.Config) ctrl.Options {
 		LeaderElectionID:           cfg.ControllerName,
 		LeaderElectionNamespace:    cfg.ControllerNamespace,
 		LeaderElectionResourceLock: "leases",
-		MetricsBindAddress:         cfg.MetricsBindAddress,
+		Metrics: metricsserver.Options{
+			SecureServing:  false,
+			BindAddress:    cfg.MetricsBindAddress,
+			ExtraHandlers:  nil,
+			FilterProvider: nil,
+			CertDir:        "",
+			CertName:       "",
+			KeyName:        "",
+			TLSOpts:        nil,
+			ListenConfig:   net.ListenConfig{},
+		},
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
 				&corev1.Node{}: {
