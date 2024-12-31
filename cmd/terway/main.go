@@ -57,6 +57,7 @@ func main() {
 	log.Info(version.Version)
 
 	ctx := ctrl.SetupSignalHandler()
+	ctx = ctrl.LoggerInto(ctx, ctrl.Log)
 	err = daemon.Run(ctx, utils.NormalizePath(defaultSocketPath), readonlyListen, utils.NormalizePath(configFilePath), daemonMode)
 
 	if err != nil {

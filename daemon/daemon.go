@@ -563,6 +563,10 @@ func (n *networkService) gcPods(ctx context.Context) error {
 
 		podID := utils.PodInfoKey(podRes.PodInfo.Namespace, podRes.PodInfo.Name)
 		if _, ok := exist[podID]; ok {
+			err = ruleSync(ctx, podRes)
+			if err != nil {
+				serviceLog.Error(err, "error sync pod rule")
+			}
 			continue
 		}
 
