@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/AliyunContainerService/terway/pkg/factory"
+	factorymocks "github.com/AliyunContainerService/terway/pkg/factory/mocks"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
@@ -119,7 +120,7 @@ func TestLocal_AllocWorker_EnableIPv4(t *testing.T) {
 	cni := &daemon.CNI{PodID: "pod-1"}
 
 	respCh := make(chan *AllocResp)
-	go local.allocWorker(context.Background(), cni, nil, respCh, func() {})
+	go local.allocWorker(context.Background(), cni, nil, respCh)
 
 	go func() {
 		local.cond.L.Lock()
@@ -144,7 +145,7 @@ func TestLocal_AllocWorker_EnableIPv6(t *testing.T) {
 	cni := &daemon.CNI{PodID: "pod-1"}
 
 	respCh := make(chan *AllocResp)
-	go local.allocWorker(context.Background(), cni, nil, respCh, func() {})
+	go local.allocWorker(context.Background(), cni, nil, respCh)
 
 	go func() {
 		local.cond.L.Lock()
@@ -170,7 +171,7 @@ func TestLocal_AllocWorker_ParentCancelContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	respCh := make(chan *AllocResp)
-	go local.allocWorker(ctx, cni, nil, respCh, func() {})
+	go local.allocWorker(ctx, cni, nil, respCh)
 
 	cancel()
 
@@ -209,7 +210,8 @@ func TestLocal_DisposeWholeENI(t *testing.T) {
 func TestLocal_Allocate_NoCache(t *testing.T) {
 	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "")
 
-	request := &LocalIPRequest{NoCache: true}
+	request := NewLocalIPRequest()
+	request.NoCache = true
 	cni := &daemon.CNI{PodID: "pod-1"}
 
 	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
@@ -218,6 +220,22 @@ func TestLocal_Allocate_NoCache(t *testing.T) {
 	_, resp := local.Allocate(context.Background(), cni, request)
 
 	assert.Equal(t, 1, len(resp))
+}
+
+func TestLocal_Allocate_NoCache_AllocSuccess(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{
+		MaxIPPerENI: 10, EnableIPv4: true, EnableIPv6: true}, "")
+
+	request := NewLocalIPRequest()
+	request.NoCache = true
+	cni := &daemon.CNI{PodID: "pod-1"}
+
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.2"), false))
+
+	ch, resp := local.Allocate(context.Background(), cni, request)
+	assert.NotNil(t, ch)
+	assert.Equal(t, 0, len(resp))
 }
 
 func TestLocal_DisposeWholeERDMA(t *testing.T) {
@@ -234,7 +252,8 @@ func TestLocal_DisposeWholeERDMA(t *testing.T) {
 func TestLocal_Allocate_ERDMA(t *testing.T) {
 	localErdma := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "erdma")
 
-	request := &LocalIPRequest{NoCache: true}
+	request := NewLocalIPRequest()
+	request.NoCache = true
 	cni := &daemon.CNI{PodID: "pod-1"}
 
 	localErdma.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
@@ -245,7 +264,9 @@ func TestLocal_Allocate_ERDMA(t *testing.T) {
 	assert.Equal(t, 1, len(resp))
 	assert.Equal(t, ResourceTypeMismatch, resp[0].Condition)
 
-	request = &LocalIPRequest{NoCache: true, LocalIPType: LocalIPTypeERDMA}
+	request = NewLocalIPRequest()
+	request.NoCache = true
+	request.LocalIPType = LocalIPTypeERDMA
 
 	_, resp = localErdma.Allocate(context.Background(), cni, request)
 	assert.Equal(t, 1, len(resp))
@@ -255,13 +276,16 @@ func TestLocal_Allocate_ERDMA(t *testing.T) {
 	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
 	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.2"), false))
 
-	request = &LocalIPRequest{NoCache: true}
+	request = NewLocalIPRequest()
+	request.NoCache = true
 	_, resp = local.Allocate(context.Background(), cni, request)
 
 	assert.Equal(t, 1, len(resp))
 	assert.NotEqual(t, ResourceTypeMismatch, resp[0].Condition)
 
-	request = &LocalIPRequest{NoCache: true, LocalIPType: LocalIPTypeERDMA}
+	request = NewLocalIPRequest()
+	request.NoCache = true
+	request.LocalIPType = LocalIPTypeERDMA
 	_, resp = local.Allocate(context.Background(), cni, request)
 
 	assert.Equal(t, 1, len(resp))
@@ -271,7 +295,7 @@ func TestLocal_Allocate_ERDMA(t *testing.T) {
 func TestLocal_Allocate_Inhibit(t *testing.T) {
 	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "")
 
-	request := &LocalIPRequest{}
+	request := NewLocalIPRequest()
 	cni := &daemon.CNI{PodID: "pod-1"}
 
 	local.ipAllocInhibitExpireAt = time.Now().Add(time.Minute)
@@ -337,4 +361,208 @@ func Test_orphanIP(t *testing.T) {
 	orphanIP(lo1, remote1)
 	v, _ = invalidIPCache.Get(netip.MustParseAddr("127.0.0.2"))
 	assert.Equal(t, 2, v)
+}
+
+func Test_switchIPv4(t *testing.T) {
+	l := &Local{}
+
+	req := NewLocalIPRequest()
+	l.allocatingV4 = append(l.allocatingV4,
+		req,
+		NewLocalIPRequest(),
+	)
+
+	l.dangingV4 = append(l.dangingV4, NewLocalIPRequest())
+
+	l.switchIPv4(req)
+	assert.Equal(t, 2, l.allocatingV4.Len())
+	assert.Equal(t, 0, l.dangingV4.Len())
+}
+
+func Test_switchIPv6(t *testing.T) {
+	l := &Local{}
+
+	req := NewLocalIPRequest()
+	l.allocatingV6 = append(l.allocatingV6,
+		req,
+		NewLocalIPRequest(),
+	)
+
+	l.switchIPv6(req)
+	assert.Equal(t, 1, l.allocatingV6.Len())
+	assert.Equal(t, 0, l.dangingV6.Len())
+}
+
+func TestPopNIPv4JobsMovesCorrectNumberOfJobs(t *testing.T) {
+	l := &Local{
+		allocatingV4: AllocatingRequests{NewLocalIPRequest(), NewLocalIPRequest(), NewLocalIPRequest()},
+		dangingV4:    AllocatingRequests{},
+	}
+
+	l.popNIPv4Jobs(2)
+
+	assert.Len(t, l.allocatingV4, 1)
+	assert.Len(t, l.dangingV4, 2)
+}
+
+func TestPopNIPv6JobsMovesCorrectNumberOfJobs(t *testing.T) {
+	l := &Local{
+		allocatingV6: AllocatingRequests{NewLocalIPRequest(), NewLocalIPRequest(), NewLocalIPRequest()},
+		dangingV6:    AllocatingRequests{},
+	}
+
+	l.popNIPv6Jobs(2)
+
+	assert.Len(t, l.allocatingV6, 1)
+	assert.Len(t, l.dangingV6, 2)
+}
+
+func TestPopNIPv6JobsMovesAllJobsWhenCountExceeds(t *testing.T) {
+	l := &Local{
+		allocatingV6: AllocatingRequests{NewLocalIPRequest(), NewLocalIPRequest()},
+		dangingV6:    AllocatingRequests{},
+	}
+
+	l.popNIPv6Jobs(5)
+
+	assert.Len(t, l.allocatingV6, 0)
+	assert.Len(t, l.dangingV6, 2)
+}
+
+func TestPopNIPv6JobsMovesNoJobsWhenCountIsZero(t *testing.T) {
+	l := &Local{
+		allocatingV6: AllocatingRequests{NewLocalIPRequest(), NewLocalIPRequest()},
+		dangingV6:    AllocatingRequests{},
+	}
+
+	l.popNIPv6Jobs(0)
+
+	assert.Len(t, l.allocatingV6, 2)
+	assert.Len(t, l.dangingV6, 0)
+}
+
+func TestPriorityReturnsNegativeWhenStatusIsDeleting(t *testing.T) {
+	l := &Local{
+		cond:   sync.NewCond(&sync.Mutex{}),
+		status: statusDeleting,
+	}
+
+	prio := l.Priority()
+
+	assert.Equal(t, -100, prio)
+}
+
+func TestPriorityReturnsZeroWhenStatusIsInit(t *testing.T) {
+	l := &Local{
+		cond:   sync.NewCond(&sync.Mutex{}),
+		status: statusInit,
+	}
+
+	prio := l.Priority()
+
+	assert.Equal(t, 0, prio)
+}
+
+func TestPriorityReturnsTenWhenStatusIsCreating(t *testing.T) {
+	l := &Local{
+		cond:   sync.NewCond(&sync.Mutex{}),
+		status: statusCreating,
+	}
+
+	prio := l.Priority()
+
+	assert.Equal(t, 10, prio)
+}
+
+func TestPriorityReturnsFiftyPlusIPv4CountWhenStatusIsInUseAndIPv4Enabled(t *testing.T) {
+	l := &Local{
+		cond:       sync.NewCond(&sync.Mutex{}),
+		status:     statusInUse,
+		enableIPv4: true,
+		ipv4:       Set{netip.MustParseAddr("192.0.2.1"): &IP{}},
+	}
+
+	prio := l.Priority()
+
+	assert.Equal(t, 51, prio)
+}
+
+func TestPriorityReturnsFiftyPlusIPv6CountWhenStatusIsInUseAndIPv6Enabled(t *testing.T) {
+	l := &Local{
+		cond:       sync.NewCond(&sync.Mutex{}),
+		status:     statusInUse,
+		enableIPv6: true,
+		ipv6:       Set{netip.MustParseAddr("fd00:46dd:e::1"): &IP{}},
+	}
+
+	prio := l.Priority()
+
+	assert.Equal(t, 51, prio)
+}
+
+func TestPriorityReturnsFiftyPlusIPv4AndIPv6CountWhenStatusIsInUseAndBothEnabled(t *testing.T) {
+	l := &Local{
+		cond:       sync.NewCond(&sync.Mutex{}),
+		status:     statusInUse,
+		enableIPv4: true,
+		enableIPv6: true,
+		ipv4:       Set{netip.MustParseAddr("192.0.2.1"): &IP{}},
+		ipv6:       Set{netip.MustParseAddr("fd00:46dd:e::1"): &IP{}},
+	}
+
+	prio := l.Priority()
+
+	assert.Equal(t, 52, prio)
+}
+
+func TestAllocFromFactory(t *testing.T) {
+	// 1. test factory worker finish req1, and alloc worker consumed req2
+
+	f := factorymocks.NewFactory(t)
+	// even we have two jobs ,we only get one ip
+	f.On("AssignNIPv4", "eni-1", 2, "").Return([]netip.Addr{netip.MustParseAddr("192.0.2.1")}, nil).Once()
+	f.On("AssignNIPv6", "eni-1", 2, "").Return([]netip.Addr{netip.MustParseAddr("fd00::1")}, nil).Once()
+	f.On("AssignNIPv4", "eni-1", 1, "").Return(nil, nil).Maybe()
+	f.On("AssignNIPv6", "eni-1", 1, "").Return(nil, nil).Maybe()
+
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &types.PoolConfig{
+		EnableIPv4: true,
+		EnableIPv6: true,
+		BatchSize:  10,
+	}, "")
+	local.status = statusInUse
+
+	req1 := NewLocalIPRequest()
+	req2 := NewLocalIPRequest()
+
+	local.allocatingV4 = append(local.allocatingV4, req1, req2)
+	local.allocatingV6 = append(local.allocatingV6, req1, req2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// expect req1 is moved to danging
+	go local.factoryAllocWorker(ctx)
+
+	local.cond.Broadcast()
+	req2Ch := make(chan *AllocResp)
+	go local.allocWorker(ctx, &daemon.CNI{}, req2, req2Ch)
+
+	<-req2Ch
+	cancel()
+
+	local.cond.Broadcast()
+	// worker may not exist
+	time.Sleep(time.Second)
+
+	local.cond.L.Lock()
+	defer local.cond.L.Unlock()
+
+	assert.Equal(t, 1, len(local.allocatingV4))
+	assert.Equal(t, 0, len(local.dangingV4))
+	assert.Equal(t, 1, len(local.allocatingV6))
+	assert.Equal(t, 0, len(local.dangingV6))
+
+	// check the job is switched
+	assert.Equal(t, req1, local.allocatingV4[0])
+	assert.Equal(t, req1, local.allocatingV6[0])
 }

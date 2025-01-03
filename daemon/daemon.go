@@ -195,7 +195,7 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 		if pod.PodENI {
 			resourceRequests = append(resourceRequests, &eni.RemoteIPRequest{})
 		} else {
-			req := &eni.LocalIPRequest{}
+			req := eni.NewLocalIPRequest()
 			if pod.ERdma {
 				req.LocalIPType = eni.LocalIPTypeERDMA
 			}
@@ -213,7 +213,7 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 		if pod.PodENI || n.ipamType == types.IPAMTypeCRD {
 			resourceRequests = append(resourceRequests, &eni.RemoteIPRequest{})
 		} else {
-			req := &eni.LocalIPRequest{}
+			req := eni.NewLocalIPRequest()
 
 			if len(oldRes.GetResourceItemByType(daemon.ResourceTypeENI)) == 1 {
 				old := oldRes.GetResourceItemByType(daemon.ResourceTypeENI)[0]
