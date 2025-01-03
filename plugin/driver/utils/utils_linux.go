@@ -174,6 +174,9 @@ func NewIPNet1(ipNet *terwayTypes.IPNetSet) []*netlink.Addr {
 }
 
 func NewIPNetToMaxMask(ipNet *terwayTypes.IPNetSet) []*netlink.Addr {
+	if ipNet == nil {
+		return nil
+	}
 	var addrs []*netlink.Addr
 	if ipNet.IPv4 != nil {
 		addrs = append(addrs, &netlink.Addr{IPNet: NewIPNetWithMaxMask(ipNet.IPv4)})

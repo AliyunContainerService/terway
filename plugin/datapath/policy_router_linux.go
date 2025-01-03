@@ -172,7 +172,7 @@ func generateContCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, mac net
 	return contCfg
 }
 
-func generateHostPeerCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, table int) *nic.Conf {
+func GenerateHostPeerCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, table int) *nic.Conf {
 	var addrs []*netlink.Addr
 	var routes []*netlink.Route
 	var rules []*netlink.Rule
@@ -247,7 +247,7 @@ func generateHostPeerCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, tab
 	}
 }
 
-func generateENICfgForPolicy(cfg *types.SetupConfig, link netlink.Link, table int) *nic.Conf {
+func GenerateENICfgForPolicy(cfg *types.SetupConfig, link netlink.Link, table int) *nic.Conf {
 	var routes []*netlink.Route
 	var rules []*netlink.Rule
 	var neighs []*netlink.Neigh
@@ -377,7 +377,7 @@ func (d *PolicyRoute) Setup(ctx context.Context, cfg *types.SetupConfig, netNS n
 
 	table := utils.GetRouteTableID(eni.Attrs().Index)
 
-	eniCfg := generateENICfgForPolicy(cfg, eni, table)
+	eniCfg := GenerateENICfgForPolicy(cfg, eni, table)
 	err = nic.Setup(ctx, eni, eniCfg)
 	if err != nil {
 		return fmt.Errorf("setup eni config, %w", err)
@@ -390,7 +390,7 @@ func (d *PolicyRoute) Setup(ctx context.Context, cfg *types.SetupConfig, netNS n
 		}
 	}
 
-	hostVETHCfg := generateHostPeerCfgForPolicy(cfg, hostVETH, table)
+	hostVETHCfg := GenerateHostPeerCfgForPolicy(cfg, hostVETH, table)
 	err = nic.Setup(ctx, hostVETH, hostVETHCfg)
 	if err != nil {
 		return fmt.Errorf("setup host veth config, %w", err)
