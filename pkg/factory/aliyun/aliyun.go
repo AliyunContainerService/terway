@@ -2,6 +2,7 @@ package aliyun
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"strings"
 	"time"
@@ -180,6 +181,8 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		return r, nil, nil, err
 	}
 
+	timeout := time.After(2 * time.Second)
+
 	// 3. wait metadata ready & update cidr
 	err = validateIPInMetadata(ctx, v4Set, func() []netip.Addr {
 		exists, err := metadata.GetIPv4ByMac(r.MAC)
@@ -240,6 +243,34 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 			return r, nil, nil, err
 		}
 		r.GatewayIP.SetIP(gw.String())
+	}
+
+	// safe to use in go 1.23
+	<-timeout
+
+	var innerErr error
+	// we check openAPI at last to ensure the eni is at InUse status
+	err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIOps), func(ctx context.Context) (done bool, err error) {
+		var eniSet []*client.NetworkInterface
+		eniSet, innerErr = a.openAPI.DescribeNetworkInterface(ctx, "", []string{r.ID}, "", "", "", nil)
+		if innerErr != nil {
+			return false, nil
+		}
+		if len(eniSet) != 1 {
+			innerErr = fmt.Errorf("can not found eni %s, resp %#v", r.ID, eniSet)
+			return false, nil
+		}
+		if eniSet[0].Status != client.ENIStatusInUse {
+			innerErr = fmt.Errorf("eni %s at %s", r.ID, eniSet[0].Status)
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		if innerErr != nil {
+			err = innerErr
+		}
+		return r, v4Set, v6Set, err
 	}
 
 	return r, v4Set, v6Set, nil

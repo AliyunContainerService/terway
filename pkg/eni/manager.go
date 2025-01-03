@@ -328,9 +328,12 @@ func (m *Manager) syncPool(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 
+			req := NewLocalIPRequest()
+			req.NoCache = true
+
 			_, err := m.Allocate(ctx, &daemon.CNI{}, &AllocRequest{
 				ResourceRequests: []ResourceRequest{
-					&LocalIPRequest{NoCache: true},
+					req,
 				},
 			})
 			if err != nil {

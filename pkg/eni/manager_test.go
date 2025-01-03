@@ -86,8 +86,9 @@ func TestManagerAllocateReturnsResourcesWhenSuccessful(t *testing.T) {
 	mockNI := &success{}
 	manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI}, types.EniSelectionPolicyMostIPs, &FakeK8s{})
 
+	request := NewLocalIPRequest()
 	resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
-		ResourceRequests: []ResourceRequest{&LocalIPRequest{}},
+		ResourceRequests: []ResourceRequest{request},
 	})
 
 	assert.Nil(t, err)
@@ -109,8 +110,9 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 	{
 		manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI, mockNI2}, types.EniSelectionPolicyMostIPs, &FakeK8s{})
 
+		request := NewLocalIPRequest()
 		resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
-			ResourceRequests: []ResourceRequest{&LocalIPRequest{}},
+			ResourceRequests: []ResourceRequest{request},
 		})
 
 		assert.Nil(t, err)
@@ -121,8 +123,9 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 	{
 		manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI, mockNI2}, types.EniSelectionPolicyLeastIPs, &FakeK8s{})
 
+		request := NewLocalIPRequest()
 		resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
-			ResourceRequests: []ResourceRequest{&LocalIPRequest{}},
+			ResourceRequests: []ResourceRequest{request},
 		})
 
 		assert.Nil(t, err)
@@ -134,8 +137,9 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 func TestManagerAllocateReturnsErrorWhenNoBackendCanHandleAllocation(t *testing.T) {
 	manager := NewManager(0, 0, 0, 0, []NetworkInterface{}, types.EniSelectionPolicyMostIPs, &FakeK8s{})
 
+	request := NewLocalIPRequest()
 	_, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
-		ResourceRequests: []ResourceRequest{&LocalIPRequest{}},
+		ResourceRequests: []ResourceRequest{request},
 	})
 
 	assert.NotNil(t, err)
@@ -147,8 +151,10 @@ func TestManagerAllocateWithTimeoutWhenAllocationFails(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+
+	request := NewLocalIPRequest()
 	_, err := manager.Allocate(ctx, &daemon.CNI{}, &AllocRequest{
-		ResourceRequests: []ResourceRequest{&LocalIPRequest{}},
+		ResourceRequests: []ResourceRequest{request},
 	})
 	assert.NotNil(t, err)
 }
