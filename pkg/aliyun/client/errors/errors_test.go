@@ -118,3 +118,10 @@ func TestErrorIs(t *testing.T) {
 	// Test case 3: Check if no check functions are provided
 	assert.False(t, ErrorIs(err))
 }
+
+func TestErrorIsReturnsFalseWhenNoCheckErrMatches(t *testing.T) {
+	err := apiErr.NewServerError(403, "{\"Code\": \"err\"}", "")
+	checkFunc1 := WarpFn("anotherErr")
+	checkFunc2 := WarpFn("yetAnotherErr")
+	assert.False(t, ErrorIs(err, checkFunc1, checkFunc2))
+}

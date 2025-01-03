@@ -17,9 +17,11 @@ limitations under the License.
 package controlplane
 
 import (
+	"os"
 	"testing"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParseAndValidateCredential(t *testing.T) {
@@ -145,4 +147,40 @@ func TestIsControllerEnabled(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseAndValidate(t *testing.T) {
+	configFile, err := os.CreateTemp("", "")
+	assert.NoError(t, err)
+	defer os.Remove(configFile.Name())
+
+	err = os.WriteFile(configFile.Name(), []byte(`disableWebhook: true
+regionID: "cn-hangzhou"
+leaseLockName: "terway-controller-lock"
+leaseLockNamespace: "kube-system"
+controllerNamespace: "kube-system"
+controllerName: "terway-controlplane"
+metricsBindAddress: "127.0.0.1:9999"
+healthzBindAddress: "0.0.0.0:8080"
+clusterDomain: "cluster.local"
+clusterID: foo
+vpcID: bar
+disableWebhook: true
+webhookURLMode: true
+leaderElection: true
+webhookPort: 4443`), os.ModeType)
+	assert.NoError(t, err)
+
+	credentialFilePath, err := os.CreateTemp("", "")
+	assert.NoError(t, err)
+	defer os.Remove(credentialFilePath.Name())
+
+	err = os.WriteFile(credentialFilePath.Name(), []byte(`accessKey: foo
+accessSecret: bar`), os.ModeType)
+	assert.NoError(t, err)
+
+	cfg, err := ParseAndValidate(configFile.Name(), credentialFilePath.Name())
+	assert.NoError(t, err)
+
+	assert.Equal(t, "cn-hangzhou", cfg.RegionID)
 }

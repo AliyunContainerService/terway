@@ -1,5 +1,3 @@
-//go:build test_env
-
 package pod
 
 import (

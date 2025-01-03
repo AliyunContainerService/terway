@@ -2,10 +2,12 @@ package types_test
 
 import (
 	"fmt"
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
 )
 
@@ -58,4 +60,147 @@ func TestErrorUnwrapReturnsNilWhenNoUnderlyingError(t *testing.T) {
 	}
 
 	assert.Nil(t, err.Unwrap())
+}
+
+func TestIPSet2_String(t *testing.T) {
+	tests := []struct {
+		name     string
+		ipset2   types.IPSet2
+		expected string
+	}{
+		{
+			name:     "IPv4 and IPv6 valid",
+			ipset2:   types.IPSet2{IPv4: netip.MustParseAddr("192.0.2.1"), IPv6: netip.MustParseAddr("2001:db8::1")},
+			expected: "192.0.2.1-2001:db8::1",
+		},
+		{
+			name:     "Only IPv4 valid",
+			ipset2:   types.IPSet2{IPv4: netip.MustParseAddr("192.0.2.1")},
+			expected: "192.0.2.1",
+		},
+		{
+			name:     "Only IPv6 valid",
+			ipset2:   types.IPSet2{IPv6: netip.MustParseAddr("2001:db8::1")},
+			expected: "2001:db8::1",
+		},
+		{
+			name:     "Both invalid",
+			ipset2:   types.IPSet2{},
+			expected: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.ipset2.String()
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestIPSet2_ToRPC(t *testing.T) {
+	tests := []struct {
+		name     string
+		ipset2   types.IPSet2
+		expected *rpc.IPSet
+	}{
+		{
+			name: "IPv4 and IPv6 valid",
+			ipset2: types.IPSet2{
+				IPv4: netip.MustParseAddr("192.0.2.1"),
+				IPv6: netip.MustParseAddr("2001:db8::1"),
+			},
+			expected: &rpc.IPSet{
+				IPv4: "192.0.2.1",
+				IPv6: "2001:db8::1",
+			},
+		},
+		{
+			name: "Only IPv4 valid",
+			ipset2: types.IPSet2{
+				IPv4: netip.MustParseAddr("192.0.2.1"),
+			},
+			expected: &rpc.IPSet{
+				IPv4: "192.0.2.1",
+				IPv6: "",
+			},
+		},
+		{
+			name: "Only IPv6 valid",
+			ipset2: types.IPSet2{
+				IPv6: netip.MustParseAddr("2001:db8::1"),
+			},
+			expected: &rpc.IPSet{
+				IPv4: "",
+				IPv6: "2001:db8::1",
+			},
+		},
+		{
+			name:   "Both invalid",
+			ipset2: types.IPSet2{},
+			expected: &rpc.IPSet{
+				IPv4: "",
+				IPv6: "",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.ipset2.ToRPC()
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestIPSet2_GetIPv4(t *testing.T) {
+	tests := []struct {
+		name     string
+		ipset2   types.IPSet2
+		expected string
+	}{
+		{
+			name:     "IPv4 valid",
+			ipset2:   types.IPSet2{IPv4: netip.MustParseAddr("192.0.2.1")},
+			expected: "192.0.2.1",
+		},
+		{
+			name:     "IPv4 invalid",
+			ipset2:   types.IPSet2{},
+			expected: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.ipset2.GetIPv4()
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestIPSet2_GetIPv6(t *testing.T) {
+	tests := []struct {
+		name     string
+		ipset2   types.IPSet2
+		expected string
+	}{
+		{
+			name:     "IPv6 valid",
+			ipset2:   types.IPSet2{IPv6: netip.MustParseAddr("2001:db8::1")},
+			expected: "2001:db8::1",
+		},
+		{
+			name:     "IPv6 invalid",
+			ipset2:   types.IPSet2{},
+			expected: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.ipset2.GetIPv6()
+			assert.Equal(t, test.expected, result)
+		})
+	}
 }

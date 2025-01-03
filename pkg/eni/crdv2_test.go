@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	pkgclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
@@ -469,4 +470,65 @@ func Test_removeDeleted(t *testing.T) {
 			assert.Equal(t, tt.expect, tt.args.nodeRuntime)
 		})
 	}
+}
+
+func TestSyncNodeRuntimeReturnsNilWhenNoDeletedPods(t *testing.T) {
+	r := &CRDV2{
+		deletedPods: make(map[string]*networkv1beta1.RuntimePodStatus),
+	}
+	err := r.syncNodeRuntime(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestSyncNodeRuntimeReturnsErrorWhenGetRuntimeNodeFails(t *testing.T) {
+	client := fake.NewClientBuilder().WithScheme(types.Scheme).Build()
+	r := &CRDV2{
+		client:      client,
+		deletedPods: map[string]*networkv1beta1.RuntimePodStatus{"pod-1": {PodID: "pod-1"}},
+	}
+	err := r.syncNodeRuntime(context.Background())
+	assert.Error(t, err)
+}
+
+func TestSyncNodeRuntimeUpdatesDeletedPods(t *testing.T) {
+	n := &networkv1beta1.NodeRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+		Spec:       networkv1beta1.NodeRuntimeSpec{},
+		Status:     networkv1beta1.NodeRuntimeStatus{Pods: map[string]*networkv1beta1.RuntimePodStatus{}},
+	}
+	client := fake.NewClientBuilder().WithScheme(types.Scheme).
+		WithStatusSubresource(n).
+		WithObjects(n).Build()
+	r := &CRDV2{
+		client:      client,
+		nodeName:    "node1",
+		deletedPods: map[string]*networkv1beta1.RuntimePodStatus{"pod-1": {PodID: "pod-1"}},
+	}
+
+	err := r.syncNodeRuntime(context.Background())
+	assert.NoError(t, err)
+
+	nodeRuntime := &networkv1beta1.NodeRuntime{}
+	err = client.Get(context.Background(), pkgclient.ObjectKey{Name: "node1"}, nodeRuntime)
+	assert.NoError(t, err)
+	assert.Contains(t, nodeRuntime.Status.Pods, "pod-1")
+	assert.Contains(t, nodeRuntime.Status.Pods["pod-1"].Status, networkv1beta1.CNIStatusDeleted)
+}
+
+func TestSyncNodeRuntimeClearsDeletedPods(t *testing.T) {
+	n := &networkv1beta1.NodeRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+		Spec:       networkv1beta1.NodeRuntimeSpec{},
+		Status:     networkv1beta1.NodeRuntimeStatus{Pods: map[string]*networkv1beta1.RuntimePodStatus{}},
+	}
+
+	client := fake.NewClientBuilder().WithScheme(types.Scheme).WithStatusSubresource(n).WithObjects(n).Build()
+	r := &CRDV2{
+		client:      client,
+		nodeName:    "node1",
+		deletedPods: map[string]*networkv1beta1.RuntimePodStatus{"pod-1": {PodID: "pod-1"}},
+	}
+	err := r.syncNodeRuntime(context.Background())
+	assert.NoError(t, err)
+	assert.Empty(t, r.deletedPods)
 }
