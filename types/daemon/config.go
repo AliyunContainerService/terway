@@ -58,6 +58,7 @@ type Config struct {
 	KubeClientQPS               float32                 `json:"kube_client_qps"`
 	KubeClientBurst             int                     `json:"kube_client_burst"`
 	ResourceGroupID             string                  `json:"resource_group_id"`
+	EnablePatchPodIPs           *bool                   `json:"enable_patch_pod_ips,omitempty"  mod:"default=true"`
 }
 
 func (c *Config) GetSecurityGroups() []string {
@@ -96,6 +97,11 @@ func (c *Config) Populate() {
 
 	if c.IPStack == "" {
 		c.IPStack = string(types.IPStackIPv4)
+	}
+
+	if c.EnablePatchPodIPs == nil {
+		enable := true
+		c.EnablePatchPodIPs = &enable
 	}
 }
 
