@@ -152,6 +152,7 @@ func TestPopulateSetsDefaultValues(t *testing.T) {
 	assert.Equal(t, 1.0, cfg.EniCapRatio)
 	assert.Equal(t, VSwitchSelectionPolicyRandom, cfg.VSwitchSelectionPolicy)
 	assert.Equal(t, string(types.IPStackIPv4), cfg.IPStack)
+	assert.True(t, *cfg.EnablePatchPodIPs)
 }
 
 func TestPopulateDoesNotOverrideExistingValues(t *testing.T) {
