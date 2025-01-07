@@ -23,6 +23,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
@@ -99,6 +100,27 @@ func (b *NetworkServiceBuilder) LoadGlobalConfig() *NetworkServiceBuilder {
 	}
 
 	b.service.ipamType = globalConfig.IPAMType
+
+	if nodecap.GetNodeCapabilities(nodecap.NodeCapabilityNetworkPolicyProvider) != "ebpf" &&
+		(nodecap.GetNodeCapabilities(nodecap.NodeCapabilityDataPath) == "veth" || nodecap.GetNodeCapabilities(nodecap.NodeCapabilityDataPath) == "") {
+		var np bool
+		out, err := os.ReadFile("/etc/eni/disable_network_policy")
+		if err != nil {
+			if !os.IsNotExist(err) {
+				b.err = err
+				return b
+			}
+		}
+		switch string(out) {
+		case "false", "0", "":
+			np = false
+		default:
+			np = true
+		}
+		if np {
+			b.service.enablePatchPodIPs = true
+		}
+	}
 
 	return b
 }
