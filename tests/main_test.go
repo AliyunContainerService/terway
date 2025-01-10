@@ -65,6 +65,7 @@ var (
 	nginxImage string
 
 	defaultPodNetworkingName string
+	affinityLabel            string
 )
 
 func init() {
@@ -72,7 +73,7 @@ func init() {
 	flag.StringVar(&timeout, "timeout", "2m", "2m")
 	flag.StringVar(&vSwitchIDs, "vswitch-ids", "", "extra vSwitchIDs")
 	flag.StringVar(&securityGroupIDs, "security-group-ids", "", "extra securityGroupIDs")
-
+	flag.StringVar(&affinityLabel, "label", "", "node affinity, format as key:value")
 	defaultPodNetworkingName = "default-pn"
 }
 
@@ -101,7 +102,7 @@ func TestMain(m *testing.M) {
 		envfuncs.CreateNamespace(envCfg.Namespace()),
 		patchNamespace,
 		checkENIConfig,
-		setNodeLabel,
+		//setNodeLabel,
 		setPodNetworking,
 	)
 	testenv.AfterEachFeature(func(ctx context.Context, config *envconf.Config, t *testing.T, feature features.Feature) (context.Context, error) {
