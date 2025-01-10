@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/AliyunContainerService/terway/types"
 )
 
 func Test_MergeConfigAndUnmarshal(t *testing.T) {
@@ -104,4 +106,64 @@ func TestGetAddonSecret(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "key", ak)
 	assert.Equal(t, "secret", sk)
+}
+
+func TestGetVSwitchIDsReturnsAllVSwitchIDs(t *testing.T) {
+	cfg := &Config{
+		VSwitches: map[string][]string{
+			"zone-a": {"vsw-1", "vsw-2"},
+			"zone-b": {"vsw-3"},
+		},
+	}
+	vsws := cfg.GetVSwitchIDs()
+	assert.ElementsMatch(t, []string{"vsw-1", "vsw-2", "vsw-3"}, vsws)
+}
+
+func TestGetVSwitchIDsReturnsEmptyWhenNoVSwitches(t *testing.T) {
+	cfg := &Config{
+		VSwitches: map[string][]string{},
+	}
+	vsws := cfg.GetVSwitchIDs()
+	assert.Empty(t, vsws)
+}
+
+func TestGetExtraRoutesReturnsAllRoutes(t *testing.T) {
+	cfg := &Config{
+		VSwitches: map[string][]string{
+			"zone-a": {"vsw-1", "vsw-2"},
+			"zone-b": {"vsw-3"},
+		},
+	}
+	routes := cfg.GetExtraRoutes()
+	assert.ElementsMatch(t, []string{"vsw-1", "vsw-2", "vsw-3"}, routes)
+}
+
+func TestGetExtraRoutesReturnsEmptyWhenNoRoutes(t *testing.T) {
+	cfg := &Config{
+		VSwitches: map[string][]string{},
+	}
+	routes := cfg.GetExtraRoutes()
+	assert.Empty(t, routes)
+}
+
+func TestPopulateSetsDefaultValues(t *testing.T) {
+	cfg := &Config{}
+	cfg.Populate()
+	assert.Equal(t, 1.0, cfg.EniCapRatio)
+	assert.Equal(t, VSwitchSelectionPolicyRandom, cfg.VSwitchSelectionPolicy)
+	assert.Equal(t, string(types.IPStackIPv4), cfg.IPStack)
+}
+
+func TestPopulateDoesNotOverrideExistingValues(t *testing.T) {
+	cfg := &Config{
+		EniCapRatio:            0.5,
+		VSwitchSelectionPolicy: "custom",
+		IPStack:                string(types.IPStackDual),
+	}
+	cfg.Populate()
+	err := cfg.Validate()
+	assert.NoError(t, err)
+	assert.Equal(t, 0.5, cfg.EniCapRatio)
+	assert.Equal(t, "custom", cfg.VSwitchSelectionPolicy)
+	assert.Equal(t, string(types.IPStackDual), cfg.IPStack)
 }
