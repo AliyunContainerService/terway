@@ -125,7 +125,7 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 
 	if eniConfig.EnableENITrunking {
 		node.Spec.ENISpec.EnableTrunk = true
-		if node.Spec.NodeCap.TotalAdapters-node.Spec.NodeCap.Adapters <= 0 {
+		if node.Spec.NodeCap.MemberAdapterLimit <= 0 {
 			node.Spec.ENISpec.EnableTrunk = false
 			l.Info("instance is not support trunk")
 		}
