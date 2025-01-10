@@ -10,9 +10,11 @@ import (
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sClient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	terwayfeature "github.com/AliyunContainerService/terway/pkg/feature"
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/AliyunContainerService/terway/pkg/version"
 	"github.com/AliyunContainerService/terway/types"
@@ -37,6 +39,7 @@ const eniOnlyCNI = `{
 
 const cniFilePath = "/etc/cni/net.d/10-terway.conflist"
 const nodeCapabilitiesFile = "/var/run/eni/node_capabilities"
+const kubeProxyCapabilitiesFile = "/var/run/kube-proxy/node_capabilities"
 
 type Task struct {
 	Name string
@@ -55,6 +58,10 @@ var tasks = []Task{
 	{
 		Name: "dual stack",
 		Func: dualStack,
+	},
+	{
+		Name: "kpr",
+		Func: enableKPR,
 	},
 }
 
@@ -177,5 +184,38 @@ func dualStack(cmd *cobra.Command, args []string) error {
 	}
 
 	store.Set(nodecap.NodeCapabilityIPv6, val)
+	return store.Save()
+}
+
+func enableKPR(cmd *cobra.Command, args []string) error {
+	if !utilfeature.DefaultFeatureGate.Enabled(terwayfeature.KubeProxyReplacement) {
+		return nil
+	}
+
+	store := nodecap.NewFileNodeCapabilities(nodeCapabilitiesFile)
+
+	err := store.Load()
+	if err != nil {
+		return err
+	}
+
+	prev := store.Get(nodecap.NodeCapabilityKubeProxyReplacement)
+	if prev != "" {
+		return nil
+	}
+
+	kubeProxy := nodecap.NewFileNodeCapabilities(kubeProxyCapabilitiesFile)
+	err = kubeProxy.Load()
+	if err != nil {
+		return err
+	}
+
+	// depends on kube-proxy
+	if kubeProxy.Get(nodecap.NodeCapabilityKubeProxyReplacement) == True {
+		store.Set(nodecap.NodeCapabilityKubeProxyReplacement, True)
+	} else {
+		store.Set(nodecap.NodeCapabilityKubeProxyReplacement, False)
+	}
+
 	return store.Save()
 }
