@@ -36,48 +36,46 @@ func getStack() []string {
 func TestConnective(t *testing.T) {
 	var feats []features.Feature
 
-	mutateConfig := []struct {
+	type PodConfig struct {
 		name    string
 		podFunc func(pod *Pod) *Pod
-	}{
-		{
-			name: "normal config",
-			podFunc: func(pod *Pod) *Pod {
-				return pod
-			},
-		},
-		{
-			name: "alinux2 node",
-			podFunc: func(pod *Pod) *Pod {
-				return pod.WithNodeAffinity(map[string]string{"e2e-os": "alinux2"})
-			},
-		},
-		{
-			name: "alinux3 node",
-			podFunc: func(pod *Pod) *Pod {
-				return pod.WithNodeAffinity(map[string]string{"e2e-os": "alinux3"})
-			},
-		},
-		{
-			name: "trunk pod",
-			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"netplan": "default"})
-			},
-		},
-		{
-			name: "trunk pod alinux2",
-			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux2"})
-			},
-		},
-		{
-			name: "trunk pod alinux3",
-			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux3"})
-			},
-		},
 	}
-
+	mutateConfig := []PodConfig{}
+	if affinityLabel == "" {
+		mutateConfig = []PodConfig{
+			{
+				name: "normal config",
+				podFunc: func(pod *Pod) *Pod {
+					return pod
+				},
+			},
+			{
+				name: "trunk pod",
+				podFunc: func(pod *Pod) *Pod {
+					return pod.WithLabels(map[string]string{"netplan": "default"})
+				},
+			},
+		}
+	} else {
+		labelArr := strings.Split(affinityLabel, ":")
+		if len(labelArr) != 2 {
+			t.Fatal("affinityLabel is not valid")
+		}
+		mutateConfig = []PodConfig{
+			{
+				name: fmt.Sprintf("normal_%s", labelArr[0]),
+				podFunc: func(pod *Pod) *Pod {
+					return pod.WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]})
+				},
+			},
+			{
+				name: fmt.Sprintf("trunk_%s", labelArr[0]),
+				podFunc: func(pod *Pod) *Pod {
+					return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]})
+				},
+			},
+		}
+	}
 	for i := range mutateConfig {
 		name := mutateConfig[i].name
 		fn := mutateConfig[i].podFunc
@@ -399,46 +397,45 @@ func TestNetworkPolicy(t *testing.T) {
 	}
 	var feats []features.Feature
 
-	mutateConfig := []struct {
+	type PodConfig struct {
 		name    string
 		podFunc func(pod *Pod) *Pod
-	}{
-		{
-			name: "normal config",
-			podFunc: func(pod *Pod) *Pod {
-				return pod
+	}
+	mutateConfig := []PodConfig{}
+	if affinityLabel == "" {
+		mutateConfig = []PodConfig{
+			{
+				name: "normal config",
+				podFunc: func(pod *Pod) *Pod {
+					return pod
+				},
 			},
-		},
-		{
-			name: "alinux2 node",
-			podFunc: func(pod *Pod) *Pod {
-				return pod.WithNodeAffinity(map[string]string{"e2e-os": "alinux2"})
+			{
+				name: "trunk pod",
+				podFunc: func(pod *Pod) *Pod {
+					return pod.WithLabels(map[string]string{"netplan": "default"})
+				},
 			},
-		},
-		{
-			name: "alinux3 node",
-			podFunc: func(pod *Pod) *Pod {
-				return pod.WithNodeAffinity(map[string]string{"e2e-os": "alinux3"})
+		}
+	} else {
+		labelArr := strings.Split(affinityLabel, ":")
+		if len(labelArr) != 2 {
+			t.Fatal("affinityLabel is not valid")
+		}
+		mutateConfig = []PodConfig{
+			{
+				name: fmt.Sprintf("normal_%s", labelArr[0]),
+				podFunc: func(pod *Pod) *Pod {
+					return pod.WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]})
+				},
 			},
-		},
-		{
-			name: "trunk pod",
-			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"netplan": "default"})
+			{
+				name: fmt.Sprintf("trunk_%s", labelArr[0]),
+				podFunc: func(pod *Pod) *Pod {
+					return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]})
+				},
 			},
-		},
-		{
-			name: "trunk pod alinux2",
-			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux2"})
-			},
-		},
-		{
-			name: "trunk pod alinux3",
-			podFunc: func(pod *Pod) *Pod {
-				return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{"e2e-os": "alinux3"})
-			},
-		},
+		}
 	}
 	for i := range mutateConfig {
 		name := mutateConfig[i].name
