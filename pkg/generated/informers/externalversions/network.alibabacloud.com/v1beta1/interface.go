@@ -23,6 +23,10 @@ import (
 
 // Interface provides access to all the informers in this group version.
 type Interface interface {
+	// Nodes returns a NodeInformer.
+	Nodes() NodeInformer
+	// NodeRuntimes returns a NodeRuntimeInformer.
+	NodeRuntimes() NodeRuntimeInformer
 	// PodENIs returns a PodENIInformer.
 	PodENIs() PodENIInformer
 	// PodNetworkings returns a PodNetworkingInformer.
@@ -38,6 +42,16 @@ type version struct {
 // New returns a new Interface.
 func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc) Interface {
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
+}
+
+// Nodes returns a NodeInformer.
+func (v *version) Nodes() NodeInformer {
+	return &nodeInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// NodeRuntimes returns a NodeRuntimeInformer.
+func (v *version) NodeRuntimes() NodeRuntimeInformer {
+	return &nodeRuntimeInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // PodENIs returns a PodENIInformer.

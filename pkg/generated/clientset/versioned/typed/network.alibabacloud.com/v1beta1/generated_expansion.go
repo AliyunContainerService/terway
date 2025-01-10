@@ -17,6 +17,10 @@ limitations under the License.
 
 package v1beta1
 
+type NodeExpansion interface{}
+
+type NodeRuntimeExpansion interface{}
+
 type PodENIExpansion interface{}
 
 type PodNetworkingExpansion interface{}

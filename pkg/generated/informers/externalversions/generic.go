@@ -52,6 +52,10 @@ func (f *genericInformer) Lister() cache.GenericLister {
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
 	// Group=network.alibabacloud.com, Version=v1beta1
+	case v1beta1.SchemeGroupVersion.WithResource("nodes"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Network().V1beta1().Nodes().Informer()}, nil
+	case v1beta1.SchemeGroupVersion.WithResource("noderuntimes"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Network().V1beta1().NodeRuntimes().Informer()}, nil
 	case v1beta1.SchemeGroupVersion.WithResource("podenis"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Network().V1beta1().PodENIs().Informer()}, nil
 	case v1beta1.SchemeGroupVersion.WithResource("podnetworkings"):

@@ -168,6 +168,7 @@ type NodeStatus struct {
 	NetworkInterfaces   map[string]*NetworkInterface `json:"networkInterfaces,omitempty"`
 }
 
+// +genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:scope=Cluster
