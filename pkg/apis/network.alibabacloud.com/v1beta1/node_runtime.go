@@ -38,6 +38,7 @@ type NodeRuntimeStatus struct {
 	Pods map[string]*RuntimePodStatus `json:"pods,omitempty"`
 }
 
+// +genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:scope=Cluster
