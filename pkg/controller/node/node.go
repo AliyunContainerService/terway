@@ -303,7 +303,7 @@ func (r *ReconcileNode) patchNodeRes(ctx context.Context, k8sNode *corev1.Node, 
 			})
 
 			if found {
-				members := node.Spec.NodeCap.TotalAdapters - node.Spec.NodeCap.Adapters
+				members := node.Spec.NodeCap.MemberAdapterLimit
 
 				// report rse only trunk eni is ready
 				num = resource.NewQuantity(int64(members), resource.DecimalSI)
