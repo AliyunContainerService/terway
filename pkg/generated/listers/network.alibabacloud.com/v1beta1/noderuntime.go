@@ -30,8 +30,9 @@ type NodeRuntimeLister interface {
 	// List lists all NodeRuntimes in the indexer.
 	// Objects returned here must be treated as read-only.
 	List(selector labels.Selector) (ret []*v1beta1.NodeRuntime, err error)
-	// NodeRuntimes returns an object that can list and get NodeRuntimes.
-	NodeRuntimes(namespace string) NodeRuntimeNamespaceLister
+	// Get retrieves the NodeRuntime from the index for a given name.
+	// Objects returned here must be treated as read-only.
+	Get(name string) (*v1beta1.NodeRuntime, error)
 	NodeRuntimeListerExpansion
 }
 
@@ -53,41 +54,9 @@ func (s *nodeRuntimeLister) List(selector labels.Selector) (ret []*v1beta1.NodeR
 	return ret, err
 }
 
-// NodeRuntimes returns an object that can list and get NodeRuntimes.
-func (s *nodeRuntimeLister) NodeRuntimes(namespace string) NodeRuntimeNamespaceLister {
-	return nodeRuntimeNamespaceLister{indexer: s.indexer, namespace: namespace}
-}
-
-// NodeRuntimeNamespaceLister helps list and get NodeRuntimes.
-// All objects returned here must be treated as read-only.
-type NodeRuntimeNamespaceLister interface {
-	// List lists all NodeRuntimes in the indexer for a given namespace.
-	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.NodeRuntime, err error)
-	// Get retrieves the NodeRuntime from the indexer for a given namespace and name.
-	// Objects returned here must be treated as read-only.
-	Get(name string) (*v1beta1.NodeRuntime, error)
-	NodeRuntimeNamespaceListerExpansion
-}
-
-// nodeRuntimeNamespaceLister implements the NodeRuntimeNamespaceLister
-// interface.
-type nodeRuntimeNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all NodeRuntimes in the indexer for a given namespace.
-func (s nodeRuntimeNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.NodeRuntime, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.NodeRuntime))
-	})
-	return ret, err
-}
-
-// Get retrieves the NodeRuntime from the indexer for a given namespace and name.
-func (s nodeRuntimeNamespaceLister) Get(name string) (*v1beta1.NodeRuntime, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+// Get retrieves the NodeRuntime from the index for a given name.
+func (s *nodeRuntimeLister) Get(name string) (*v1beta1.NodeRuntime, error) {
+	obj, exists, err := s.indexer.GetByKey(name)
 	if err != nil {
 		return nil, err
 	}

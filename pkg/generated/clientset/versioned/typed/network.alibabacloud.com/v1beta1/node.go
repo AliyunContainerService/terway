@@ -32,7 +32,7 @@ import (
 // NodesGetter has a method to return a NodeInterface.
 // A group's client should implement this interface.
 type NodesGetter interface {
-	Nodes(namespace string) NodeInterface
+	Nodes() NodeInterface
 }
 
 // NodeInterface has methods to work with Node resources.
@@ -52,14 +52,12 @@ type NodeInterface interface {
 // nodes implements NodeInterface
 type nodes struct {
 	client rest.Interface
-	ns     string
 }
 
 // newNodes returns a Nodes
-func newNodes(c *NetworkV1beta1Client, namespace string) *nodes {
+func newNodes(c *NetworkV1beta1Client) *nodes {
 	return &nodes{
 		client: c.RESTClient(),
-		ns:     namespace,
 	}
 }
 
@@ -67,7 +65,6 @@ func newNodes(c *NetworkV1beta1Client, namespace string) *nodes {
 func (c *nodes) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta1.Node, err error) {
 	result = &v1beta1.Node{}
 	err = c.client.Get().
-		Namespace(c.ns).
 		Resource("nodes").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
@@ -84,7 +81,6 @@ func (c *nodes) List(ctx context.Context, opts v1.ListOptions) (result *v1beta1.
 	}
 	result = &v1beta1.NodeList{}
 	err = c.client.Get().
-		Namespace(c.ns).
 		Resource("nodes").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Timeout(timeout).
@@ -101,7 +97,6 @@ func (c *nodes) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface
 	}
 	opts.Watch = true
 	return c.client.Get().
-		Namespace(c.ns).
 		Resource("nodes").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Timeout(timeout).
@@ -112,7 +107,6 @@ func (c *nodes) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface
 func (c *nodes) Create(ctx context.Context, node *v1beta1.Node, opts v1.CreateOptions) (result *v1beta1.Node, err error) {
 	result = &v1beta1.Node{}
 	err = c.client.Post().
-		Namespace(c.ns).
 		Resource("nodes").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Body(node).
@@ -125,7 +119,6 @@ func (c *nodes) Create(ctx context.Context, node *v1beta1.Node, opts v1.CreateOp
 func (c *nodes) Update(ctx context.Context, node *v1beta1.Node, opts v1.UpdateOptions) (result *v1beta1.Node, err error) {
 	result = &v1beta1.Node{}
 	err = c.client.Put().
-		Namespace(c.ns).
 		Resource("nodes").
 		Name(node.Name).
 		VersionedParams(&opts, scheme.ParameterCodec).
@@ -140,7 +133,6 @@ func (c *nodes) Update(ctx context.Context, node *v1beta1.Node, opts v1.UpdateOp
 func (c *nodes) UpdateStatus(ctx context.Context, node *v1beta1.Node, opts v1.UpdateOptions) (result *v1beta1.Node, err error) {
 	result = &v1beta1.Node{}
 	err = c.client.Put().
-		Namespace(c.ns).
 		Resource("nodes").
 		Name(node.Name).
 		SubResource("status").
@@ -154,7 +146,6 @@ func (c *nodes) UpdateStatus(ctx context.Context, node *v1beta1.Node, opts v1.Up
 // Delete takes name of the node and deletes it. Returns an error if one occurs.
 func (c *nodes) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	return c.client.Delete().
-		Namespace(c.ns).
 		Resource("nodes").
 		Name(name).
 		Body(&opts).
@@ -169,7 +160,6 @@ func (c *nodes) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, lis
 		timeout = time.Duration(*listOpts.TimeoutSeconds) * time.Second
 	}
 	return c.client.Delete().
-		Namespace(c.ns).
 		Resource("nodes").
 		VersionedParams(&listOpts, scheme.ParameterCodec).
 		Timeout(timeout).
@@ -182,7 +172,6 @@ func (c *nodes) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, lis
 func (c *nodes) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.Node, err error) {
 	result = &v1beta1.Node{}
 	err = c.client.Patch(pt).
-		Namespace(c.ns).
 		Resource("nodes").
 		Name(name).
 		SubResource(subresources...).
