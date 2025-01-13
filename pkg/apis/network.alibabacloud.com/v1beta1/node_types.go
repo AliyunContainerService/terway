@@ -169,6 +169,7 @@ type NodeStatus struct {
 }
 
 // +genclient
+// +genclient:nonNamespaced
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:scope=Cluster

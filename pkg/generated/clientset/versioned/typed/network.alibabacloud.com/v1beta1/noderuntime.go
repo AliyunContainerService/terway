@@ -32,7 +32,7 @@ import (
 // NodeRuntimesGetter has a method to return a NodeRuntimeInterface.
 // A group's client should implement this interface.
 type NodeRuntimesGetter interface {
-	NodeRuntimes(namespace string) NodeRuntimeInterface
+	NodeRuntimes() NodeRuntimeInterface
 }
 
 // NodeRuntimeInterface has methods to work with NodeRuntime resources.
@@ -52,14 +52,12 @@ type NodeRuntimeInterface interface {
 // nodeRuntimes implements NodeRuntimeInterface
 type nodeRuntimes struct {
 	client rest.Interface
-	ns     string
 }
 
 // newNodeRuntimes returns a NodeRuntimes
-func newNodeRuntimes(c *NetworkV1beta1Client, namespace string) *nodeRuntimes {
+func newNodeRuntimes(c *NetworkV1beta1Client) *nodeRuntimes {
 	return &nodeRuntimes{
 		client: c.RESTClient(),
-		ns:     namespace,
 	}
 }
 
@@ -67,7 +65,6 @@ func newNodeRuntimes(c *NetworkV1beta1Client, namespace string) *nodeRuntimes {
 func (c *nodeRuntimes) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta1.NodeRuntime, err error) {
 	result = &v1beta1.NodeRuntime{}
 	err = c.client.Get().
-		Namespace(c.ns).
 		Resource("noderuntimes").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
@@ -84,7 +81,6 @@ func (c *nodeRuntimes) List(ctx context.Context, opts v1.ListOptions) (result *v
 	}
 	result = &v1beta1.NodeRuntimeList{}
 	err = c.client.Get().
-		Namespace(c.ns).
 		Resource("noderuntimes").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Timeout(timeout).
@@ -101,7 +97,6 @@ func (c *nodeRuntimes) Watch(ctx context.Context, opts v1.ListOptions) (watch.In
 	}
 	opts.Watch = true
 	return c.client.Get().
-		Namespace(c.ns).
 		Resource("noderuntimes").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Timeout(timeout).
@@ -112,7 +107,6 @@ func (c *nodeRuntimes) Watch(ctx context.Context, opts v1.ListOptions) (watch.In
 func (c *nodeRuntimes) Create(ctx context.Context, nodeRuntime *v1beta1.NodeRuntime, opts v1.CreateOptions) (result *v1beta1.NodeRuntime, err error) {
 	result = &v1beta1.NodeRuntime{}
 	err = c.client.Post().
-		Namespace(c.ns).
 		Resource("noderuntimes").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Body(nodeRuntime).
@@ -125,7 +119,6 @@ func (c *nodeRuntimes) Create(ctx context.Context, nodeRuntime *v1beta1.NodeRunt
 func (c *nodeRuntimes) Update(ctx context.Context, nodeRuntime *v1beta1.NodeRuntime, opts v1.UpdateOptions) (result *v1beta1.NodeRuntime, err error) {
 	result = &v1beta1.NodeRuntime{}
 	err = c.client.Put().
-		Namespace(c.ns).
 		Resource("noderuntimes").
 		Name(nodeRuntime.Name).
 		VersionedParams(&opts, scheme.ParameterCodec).
@@ -140,7 +133,6 @@ func (c *nodeRuntimes) Update(ctx context.Context, nodeRuntime *v1beta1.NodeRunt
 func (c *nodeRuntimes) UpdateStatus(ctx context.Context, nodeRuntime *v1beta1.NodeRuntime, opts v1.UpdateOptions) (result *v1beta1.NodeRuntime, err error) {
 	result = &v1beta1.NodeRuntime{}
 	err = c.client.Put().
-		Namespace(c.ns).
 		Resource("noderuntimes").
 		Name(nodeRuntime.Name).
 		SubResource("status").
@@ -154,7 +146,6 @@ func (c *nodeRuntimes) UpdateStatus(ctx context.Context, nodeRuntime *v1beta1.No
 // Delete takes name of the nodeRuntime and deletes it. Returns an error if one occurs.
 func (c *nodeRuntimes) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	return c.client.Delete().
-		Namespace(c.ns).
 		Resource("noderuntimes").
 		Name(name).
 		Body(&opts).
@@ -169,7 +160,6 @@ func (c *nodeRuntimes) DeleteCollection(ctx context.Context, opts v1.DeleteOptio
 		timeout = time.Duration(*listOpts.TimeoutSeconds) * time.Second
 	}
 	return c.client.Delete().
-		Namespace(c.ns).
 		Resource("noderuntimes").
 		VersionedParams(&listOpts, scheme.ParameterCodec).
 		Timeout(timeout).
@@ -182,7 +172,6 @@ func (c *nodeRuntimes) DeleteCollection(ctx context.Context, opts v1.DeleteOptio
 func (c *nodeRuntimes) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.NodeRuntime, err error) {
 	result = &v1beta1.NodeRuntime{}
 	err = c.client.Patch(pt).
-		Namespace(c.ns).
 		Resource("noderuntimes").
 		Name(name).
 		SubResource(subresources...).

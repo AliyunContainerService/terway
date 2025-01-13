@@ -30,8 +30,9 @@ type NodeLister interface {
 	// List lists all Nodes in the indexer.
 	// Objects returned here must be treated as read-only.
 	List(selector labels.Selector) (ret []*v1beta1.Node, err error)
-	// Nodes returns an object that can list and get Nodes.
-	Nodes(namespace string) NodeNamespaceLister
+	// Get retrieves the Node from the index for a given name.
+	// Objects returned here must be treated as read-only.
+	Get(name string) (*v1beta1.Node, error)
 	NodeListerExpansion
 }
 
@@ -53,41 +54,9 @@ func (s *nodeLister) List(selector labels.Selector) (ret []*v1beta1.Node, err er
 	return ret, err
 }
 
-// Nodes returns an object that can list and get Nodes.
-func (s *nodeLister) Nodes(namespace string) NodeNamespaceLister {
-	return nodeNamespaceLister{indexer: s.indexer, namespace: namespace}
-}
-
-// NodeNamespaceLister helps list and get Nodes.
-// All objects returned here must be treated as read-only.
-type NodeNamespaceLister interface {
-	// List lists all Nodes in the indexer for a given namespace.
-	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.Node, err error)
-	// Get retrieves the Node from the indexer for a given namespace and name.
-	// Objects returned here must be treated as read-only.
-	Get(name string) (*v1beta1.Node, error)
-	NodeNamespaceListerExpansion
-}
-
-// nodeNamespaceLister implements the NodeNamespaceLister
-// interface.
-type nodeNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all Nodes in the indexer for a given namespace.
-func (s nodeNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.Node, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.Node))
-	})
-	return ret, err
-}
-
-// Get retrieves the Node from the indexer for a given namespace and name.
-func (s nodeNamespaceLister) Get(name string) (*v1beta1.Node, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+// Get retrieves the Node from the index for a given name.
+func (s *nodeLister) Get(name string) (*v1beta1.Node, error) {
+	obj, exists, err := s.indexer.GetByKey(name)
 	if err != nil {
 		return nil, err
 	}

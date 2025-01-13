@@ -38,12 +38,12 @@ type NetworkV1beta1Client struct {
 	restClient rest.Interface
 }
 
-func (c *NetworkV1beta1Client) Nodes(namespace string) NodeInterface {
-	return newNodes(c, namespace)
+func (c *NetworkV1beta1Client) Nodes() NodeInterface {
+	return newNodes(c)
 }
 
-func (c *NetworkV1beta1Client) NodeRuntimes(namespace string) NodeRuntimeInterface {
-	return newNodeRuntimes(c, namespace)
+func (c *NetworkV1beta1Client) NodeRuntimes() NodeRuntimeInterface {
+	return newNodeRuntimes(c)
 }
 
 func (c *NetworkV1beta1Client) PodENIs(namespace string) PodENIInterface {

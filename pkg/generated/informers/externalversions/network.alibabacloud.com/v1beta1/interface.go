@@ -46,12 +46,12 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 
 // Nodes returns a NodeInformer.
 func (v *version) Nodes() NodeInformer {
-	return &nodeInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+	return &nodeInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
 // NodeRuntimes returns a NodeRuntimeInformer.
 func (v *version) NodeRuntimes() NodeRuntimeInformer {
-	return &nodeRuntimeInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+	return &nodeRuntimeInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
 // PodENIs returns a PodENIInformer.

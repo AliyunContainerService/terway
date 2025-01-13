@@ -27,12 +27,12 @@ type FakeNetworkV1beta1 struct {
 	*testing.Fake
 }
 
-func (c *FakeNetworkV1beta1) Nodes(namespace string) v1beta1.NodeInterface {
-	return &FakeNodes{c, namespace}
+func (c *FakeNetworkV1beta1) Nodes() v1beta1.NodeInterface {
+	return &FakeNodes{c}
 }
 
-func (c *FakeNetworkV1beta1) NodeRuntimes(namespace string) v1beta1.NodeRuntimeInterface {
-	return &FakeNodeRuntimes{c, namespace}
+func (c *FakeNetworkV1beta1) NodeRuntimes() v1beta1.NodeRuntimeInterface {
+	return &FakeNodeRuntimes{c}
 }
 
 func (c *FakeNetworkV1beta1) PodENIs(namespace string) v1beta1.PodENIInterface {

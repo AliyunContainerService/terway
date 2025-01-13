@@ -21,17 +21,9 @@ package v1beta1
 // NodeLister.
 type NodeListerExpansion interface{}
 
-// NodeNamespaceListerExpansion allows custom methods to be added to
-// NodeNamespaceLister.
-type NodeNamespaceListerExpansion interface{}
-
 // NodeRuntimeListerExpansion allows custom methods to be added to
 // NodeRuntimeLister.
 type NodeRuntimeListerExpansion interface{}
-
-// NodeRuntimeNamespaceListerExpansion allows custom methods to be added to
-// NodeRuntimeNamespaceLister.
-type NodeRuntimeNamespaceListerExpansion interface{}
 
 // PodENIListerExpansion allows custom methods to be added to
 // PodENILister.
