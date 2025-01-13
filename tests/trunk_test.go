@@ -283,7 +283,7 @@ func TestSelector(t *testing.T) {
 
 func TestZoneLimit(t *testing.T) {
 	pnName := "pn"
-	podName := "test-pod"
+	podName := "test-zone"
 	zoneLimit := features.New("PodNetworking/ZoneLimit").WithLabel("env", "trunking").
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			podENI := &v1beta1.PodENI{
