@@ -553,31 +553,31 @@ func TestNetworkPolicy(t *testing.T) {
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 				var objs []client.Object
 
-				policy := NewNetworkPolicy("deny-ingress", config.Namespace()).
+				policy := NewNetworkPolicy("deny-ingress-other", config.Namespace()).
 					WithPolicyType(networkingv1.PolicyTypeIngress).
-					WithPodSelector(map[string]string{"app": "deny-ingress"})
+					WithPodSelector(map[string]string{"app": "deny-ingress-other"})
 
-				client := fn(NewPod("client", config.Namespace()).
-					WithLabels(map[string]string{"app": "client"}).
+				client := fn(NewPod("client-other", config.Namespace()).
+					WithLabels(map[string]string{"app": "client-other"}).
 					WithContainer("client", nginxImage, nil)).
-					WithPodAntiAffinity(map[string]string{"app": "server"})
+					WithPodAntiAffinity(map[string]string{"app": "server-other", "applabel": "deny-ingress-other"})
 
-				serverDenyIngress := fn(NewPod("server-deny-ingress", config.Namespace()).
-					WithLabels(map[string]string{"app": "deny-ingress"}).
+				serverDenyIngress := fn(NewPod("server-deny-ingress-other", config.Namespace()).
+					WithLabels(map[string]string{"applabel": "deny-ingress-other"}).
 					WithContainer("server", nginxImage, nil))
 
-				server := fn(NewPod("server", config.Namespace()).
-					WithLabels(map[string]string{"app": "server"}).
+				server := fn(NewPod("server-other", config.Namespace()).
+					WithLabels(map[string]string{"app": "server-other"}).
 					WithContainer("server", nginxImage, nil).
-					WithPodAffinity(map[string]string{"app": "deny-ingress"}))
+					WithPodAffinity(map[string]string{"applabel": "deny-ingress-other"}))
 
 				objs = append(objs, policy.NetworkPolicy, client.Pod, serverDenyIngress.Pod, server.Pod)
 
 				for _, stack := range getStack() {
 
-					denySvc := NewService("server-deny-ingress-"+stack, config.Namespace(), map[string]string{"app": "deny-ingress"}).WithIPFamily(stack).ExposePort(80, "http")
+					denySvc := NewService("server-deny-ingress-"+stack, config.Namespace(), map[string]string{"app": "deny-ingress-other"}).WithIPFamily(stack).ExposePort(80, "http")
 
-					normalSvc := NewService("server-"+stack, config.Namespace(), map[string]string{"app": "server"}).WithIPFamily(stack).ExposePort(80, "http")
+					normalSvc := NewService("server-"+stack, config.Namespace(), map[string]string{"app": "server-other"}).WithIPFamily(stack).ExposePort(80, "http")
 
 					objs = append(objs, denySvc.Service, normalSvc.Service)
 				}
@@ -595,9 +595,9 @@ func TestNetworkPolicy(t *testing.T) {
 				return ctx
 			}).
 			Assess("Check ingress policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: config.Namespace()}}
-				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server", Namespace: config.Namespace()}}
-				serverDenyIngress := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-deny-ingress", Namespace: config.Namespace()}}
+				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client-other", Namespace: config.Namespace()}}
+				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-other", Namespace: config.Namespace()}}
+				serverDenyIngress := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-deny-ingress-other", Namespace: config.Namespace()}}
 				err := waitPodsReady(config.Client(), client, server, serverDenyIngress)
 				if err != nil {
 					t.Error(err)
