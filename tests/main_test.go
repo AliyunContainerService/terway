@@ -93,7 +93,6 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic("error get home path")
 	}
-
 	envCfg := envconf.NewWithKubeConfig(filepath.Join(home, ".kube", "config")).
 		WithRandomNamespace()
 
