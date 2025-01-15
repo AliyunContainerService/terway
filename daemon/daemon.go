@@ -1097,6 +1097,7 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 			serviceLog.V(5).Info("found attached eni", "eni", ni)
 			if config.EnableENITrunking && ni.Trunk && trunkENIID == ni.ID {
 				lo := eni.NewLocal(ni, "trunk", factory, poolConfig)
+				normalENICount++
 				eniList = append(eniList, eni.NewTrunk(netSrv.k8s.GetClient(), lo))
 			} else if config.EnableERDMA && ni.ERdma {
 				erdmaENICount++
