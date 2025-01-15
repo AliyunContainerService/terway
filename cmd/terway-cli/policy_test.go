@@ -126,7 +126,7 @@ func Test_policyConfig(t *testing.T) {
       "capabilities": {
         "bandwidth": true
       },
-      "cilium_args": "disable-per-package-lb=true",
+      "cilium_args": "disable-per-package-lb=true --other=false",
       "eniip_virtual_type": "datapathv2",
       "network_policy_provider": "ebpf",
       "type": "terway"
@@ -147,6 +147,7 @@ func Test_policyConfig(t *testing.T) {
 			checkFunc: func(t *testing.T, strings []string, err error) {
 				assert.NoError(t, err)
 				assert.NotContains(t, strings, "--disable-per-package-lb=true")
+				assert.Contains(t, strings, "--other=false")
 			},
 		},
 	}
@@ -155,6 +156,62 @@ func Test_policyConfig(t *testing.T) {
 			readFunc = tt.readFunc
 			got, err := policyConfig(tt.args.container)
 			tt.checkFunc(t, got, err)
+		})
+	}
+}
+
+func Test_mutateCiliumArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		want     []string
+		readFunc func(name string) ([]byte, error)
+		wantErr  assert.ErrorAssertionFunc
+	}{
+		{
+			name: "not found",
+			args: []string{
+				"cilium-agent",
+				"--cni-chaining-mode=terway-chainer",
+				"--datapath-mode=veth",
+			},
+			want: []string{
+				"cilium-agent",
+				"--cni-chaining-mode=terway-chainer",
+				"--datapath-mode=veth",
+			},
+			readFunc: func(name string) ([]byte, error) {
+				return nil, os.ErrNotExist
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "exists should not enable veth datapath",
+			args: []string{
+				"cilium-agent",
+				"--cni-chaining-mode=terway-chainer",
+				"--datapath-mode=veth",
+				"--disable-per-package-lb",
+			},
+			want: []string{
+				"cilium-agent",
+				"--cni-chaining-mode=terway-chainer",
+				"--disable-per-package-lb",
+			},
+			readFunc: func(name string) ([]byte, error) {
+				return []byte("#define DIRECT_ROUTING_DEV_IFINDEX 0\n#define DISABLE_PER_PACKET_LB 1\n#define EGRESS_POLICY_MAP cilium_egress_gw_policy_v4\n#define EGRESS_POLICY_MAP_SIZE 16384\n#define ENABLE_BANDWIDTH_MANAGER 1"), nil
+			},
+			wantErr: assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			readFunc = tt.readFunc
+			got, err := mutateCiliumArgs(tt.args)
+			if !tt.wantErr(t, err, fmt.Sprintf("shouldAppend()")) {
+				return
+			}
+			assert.Equalf(t, tt.want, got, "shouldAppend()")
 		})
 	}
 }
