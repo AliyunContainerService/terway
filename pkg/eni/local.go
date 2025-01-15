@@ -420,7 +420,6 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 	}
 
 	log := logr.FromContextOrDiscard(ctx)
-	log.Info(fmt.Sprintf("local request %v", localIPRequest))
 
 	expectV4 := 0
 	expectV6 := 0
@@ -475,6 +474,11 @@ func (l *Local) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 
 	go l.allocWorker(ctx, cni, localIPRequest, respCh)
 
+	if l.eni == nil {
+		log.Info("local request", "eni", "", "req", localIPRequest)
+	} else {
+		log.Info("local request", "eni", l.eni.ID, "req", localIPRequest)
+	}
 	return respCh, nil
 }
 
@@ -548,6 +552,8 @@ func (l *Local) allocWorker(ctx context.Context, cni *daemon.CNI, request *Local
 	l.cond.L.Lock()
 	defer l.cond.L.Unlock()
 
+	defer l.cond.Broadcast()
+
 	defer func() {
 		if request == nil {
 			return
@@ -570,6 +576,32 @@ func (l *Local) allocWorker(ctx context.Context, cni *daemon.CNI, request *Local
 	}()
 
 	log := logr.FromContextOrDiscard(ctx)
+	if request != nil && request.NoCache {
+		// as we want to do preheat, so this ip will not be consumed
+		// so just hang there , let this ctx done
+
+		for {
+			select {
+			case <-request.workerCtx.Done():
+				// work ctx finished (factory cancel it)
+
+				select {
+				case <-ctx.Done():
+					close(respCh)
+				case respCh <- &AllocResp{}:
+				}
+
+				return
+			case <-ctx.Done():
+				// parent cancel the context, so close the ch
+				close(respCh)
+				return
+			default:
+			}
+			l.cond.Wait()
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -586,6 +618,7 @@ func (l *Local) allocWorker(ctx context.Context, cni *daemon.CNI, request *Local
 		if l.enableIPv4 {
 			ipv4 = l.ipv4.PeekAvailable(cni.PodID)
 			if ipv4 == nil {
+				log.Info("waiting ipv4")
 				l.cond.Wait()
 				continue
 			}
@@ -1148,12 +1181,24 @@ func (l *Local) popNIPv4Jobs(count int) {
 	firstPart, secondPart := Split(l.allocatingV4, count)
 	l.dangingV4 = append(l.dangingV4, firstPart...)
 	l.allocatingV4 = secondPart
+
+	lo.ForEach(l.dangingV4, func(item *LocalIPRequest, index int) {
+		if item.NoCache {
+			item.cancel()
+		}
+	})
 }
 
 func (l *Local) popNIPv6Jobs(count int) {
 	firstPart, secondPart := Split(l.allocatingV6, count)
 	l.dangingV6 = append(l.dangingV6, firstPart...)
 	l.allocatingV6 = secondPart
+
+	lo.ForEach(l.dangingV6, func(item *LocalIPRequest, index int) {
+		if item.NoCache {
+			item.cancel()
+		}
+	})
 }
 
 func Split[T any](arr []T, index int) ([]T, []T) {
