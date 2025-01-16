@@ -83,6 +83,8 @@ func (b *NetworkServiceBuilder) LoadGlobalConfig() *NetworkServiceBuilder {
 		b.err = err
 		return b
 	}
+	globalConfig.Populate()
+
 	switch globalConfig.IPStack {
 	case "ipv4":
 		b.service.enableIPv4 = true
@@ -99,7 +101,7 @@ func (b *NetworkServiceBuilder) LoadGlobalConfig() *NetworkServiceBuilder {
 	}
 
 	b.service.ipamType = globalConfig.IPAMType
-
+	b.service.enablePatchPodIPs = *globalConfig.EnablePatchPodIPs
 	return b
 }
 
@@ -146,7 +148,6 @@ func (b *NetworkServiceBuilder) LoadDynamicConfig() *NetworkServiceBuilder {
 	serviceLog.Info("got config", "config", fmt.Sprintf("%+v", config))
 
 	b.config = config
-
 	return b
 }
 
