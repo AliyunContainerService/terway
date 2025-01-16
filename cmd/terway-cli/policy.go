@@ -230,6 +230,12 @@ func runCilium(cfg *PolicyConfig) error {
 	}
 
 	args = append(args, extraArgs...)
+
+	args, err = mutateCiliumArgs(args)
+	if err != nil {
+		return err
+	}
+
 	env := os.Environ()
 	binary, err := exec.LookPath("cilium-agent")
 	if err != nil {
@@ -298,7 +304,7 @@ func policyConfig(container *gabs.Container) ([]string, error) {
 			}
 			return should
 		}
-		return false
+		return true
 	})
 
 	return ciliumArgs, err
@@ -356,6 +362,34 @@ func runSocat(cfg *PolicyConfig) error {
 		return fmt.Errorf("socat is not installed %w", err)
 	}
 	return syscall.Exec(binary, args, env)
+}
+
+func mutateCiliumArgs(in []string) ([]string, error) {
+	var err error
+	hasLegacy := false
+
+	args := lo.Filter(in, func(item string, index int) bool {
+		if strings.Contains(item, "disable-per-package-lb") {
+			var innerErr error
+			hasLegacy, innerErr = shouldAppend()
+			if innerErr != nil {
+				err = innerErr
+			}
+
+			return hasLegacy
+		}
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+	if hasLegacy {
+		args = lo.Filter(args, func(item string, index int) bool {
+			return !strings.Contains(item, "datapath-mode=veth")
+		})
+	}
+
+	return args, nil
 }
 
 // shouldAppend check whether disable-per-package-lb should be appended
