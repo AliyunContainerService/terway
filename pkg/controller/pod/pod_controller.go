@@ -512,6 +512,9 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 	var err error
 	defer func() {
 		if err != nil {
+			if k8sErr.IsConflict(err) {
+				return
+			}
 			l.WithValues("eni", "").Error(err, "create fail")
 			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventCreateENIFailed, err.Error())
 		} else {
