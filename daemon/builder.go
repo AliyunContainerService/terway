@@ -338,6 +338,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 		serviceLog.V(5).Info("found attached eni", "eni", ni)
 		if b.config.EnableENITrunking && ni.Trunk && trunkENIID == ni.ID {
 			lo := eni.NewLocal(ni, "trunk", factory, poolConfig)
+			normalENICount++
 			eniList = append(eniList, eni.NewTrunk(b.service.k8s.GetClient(), lo))
 		} else if b.config.EnableERDMA && ni.ERdma {
 			erdmaENICount++
