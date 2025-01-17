@@ -186,6 +186,25 @@ func TestLocal_AllocWorker_ParentCancelContext(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestLocal_AllocWorker_UpdateCache(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{
+		EnableIPv4: true,
+	}, "")
+	cni := &daemon.CNI{PodID: "pod-1"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	respCh := make(chan *AllocResp)
+
+	req := NewLocalIPRequest()
+	req.NoCache = true
+	go local.allocWorker(ctx, cni, req, respCh)
+	req.cancel()
+	result, ok := <-respCh
+	assert.True(t, ok)
+	assert.NotNil(t, result)
+}
+
 func TestLocal_Dispose(t *testing.T) {
 	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{}, "")
 	local.status = statusInUse
@@ -227,6 +246,19 @@ func TestLocal_Allocate_NoCache(t *testing.T) {
 	_, resp := local.Allocate(context.Background(), cni, request)
 
 	assert.Equal(t, 1, len(resp))
+}
+
+func TestLocal_DisposeFailWhenAllocatingIsNotEmpty(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{}, "")
+	local.status = statusInUse
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), true))
+	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00:46dd:e::1"), false))
+
+	local.allocatingV4 = append(local.allocatingV4, NewLocalIPRequest())
+	n := local.Dispose(1)
+
+	assert.Equal(t, 1, n)
+	assert.Equal(t, statusInUse, local.status)
 }
 
 func TestLocal_Allocate_NoCache_AllocSuccess(t *testing.T) {
