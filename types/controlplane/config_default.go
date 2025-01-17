@@ -70,6 +70,7 @@ type Config struct {
 
 	BackoffOverride map[string]wait.Backoff `json:"backoffOverride,omitempty"`
 	IPAMType        string                  `json:"ipamType"`
+	CentralizedIPAM bool                    `json:"centralizedIPAM,omitempty"`
 
 	RateLimit map[string]int `json:"rateLimit"`
 
