@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/util/cache"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/AliyunContainerService/terway/pkg/factory"
 	factorymocks "github.com/AliyunContainerService/terway/pkg/factory/mocks"
@@ -570,4 +572,162 @@ func TestAllocFromFactory(t *testing.T) {
 	// check the job is switched
 	assert.Equal(t, req1, local.allocatingV4[0])
 	assert.Equal(t, req1, local.allocatingV6[0])
+}
+
+func Test_factoryDisposeWorker_unAssignIP(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	// even we have two jobs ,we only get one ip
+	f.On("UnAssignNIPv4", "eni-1", []netip.Addr{netip.MustParseAddr("192.0.2.1")}, mock.Anything).Return(nil).Once()
+	f.On("UnAssignNIPv6", "eni-1", []netip.Addr{netip.MustParseAddr("fd00::1")}, mock.Anything).Return(nil).Once()
+
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &types.PoolConfig{
+		EnableIPv4: true,
+		EnableIPv6: true,
+		BatchSize:  10,
+	}, "")
+	local.status = statusInUse
+
+	local.ipv4.Add(&IP{
+		ip:      netip.MustParseAddr("192.0.2.1"),
+		primary: false,
+		podID:   "",
+		status:  ipStatusDeleting,
+	})
+
+	local.ipv4.Add(&IP{
+		ip:      netip.MustParseAddr("192.0.2.2"),
+		primary: false,
+		podID:   "",
+		status:  ipStatusValid,
+	})
+
+	local.ipv6.Add(&IP{
+		ip:      netip.MustParseAddr("fd00::1"),
+		primary: false,
+		podID:   "",
+		status:  ipStatusDeleting,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go local.factoryDisposeWorker(ctx)
+
+	err := wait.ExponentialBackoff(wait.Backoff{
+		Duration: 100 * time.Millisecond,
+		Steps:    10,
+	}, func() (done bool, err error) {
+		local.cond.L.Lock()
+		defer local.cond.L.Unlock()
+
+		if len(local.ipv6) == 0 && len(local.ipv4) == 1 {
+			return true, nil
+		}
+		return false, nil
+	})
+	assert.NoError(t, err)
+}
+
+func Test_factoryDisposeWorker_releaseIP(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	// even we have two jobs ,we only get one ip
+	f.On("DeleteNetworkInterface", "eni-1").Return(nil).Once()
+
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &types.PoolConfig{
+		EnableIPv4: true,
+		EnableIPv6: true,
+		BatchSize:  10,
+	}, "")
+	local.status = statusDeleting
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go local.factoryDisposeWorker(ctx)
+
+	err := wait.ExponentialBackoff(wait.Backoff{
+		Duration: 100 * time.Millisecond,
+		Steps:    10,
+	}, func() (done bool, err error) {
+		local.cond.L.Lock()
+		defer local.cond.L.Unlock()
+		if local.eni == nil {
+			return true, nil
+		}
+		return false, nil
+	})
+
+	assert.NoError(t, err)
+}
+
+func Test_commit_responsed(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &types.PoolConfig{
+		EnableIPv4: true,
+		EnableIPv6: true,
+		BatchSize:  10,
+	}, "")
+	local.status = statusInUse
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	respCh := make(chan *AllocResp)
+	ipv4 := &IP{
+		ip:      netip.MustParseAddr("127.0.0.1"),
+		primary: false,
+		podID:   "",
+		status:  ipStatusValid,
+	}
+	ipv6 := &IP{
+		ip:      netip.MustParseAddr("fd00::1"),
+		primary: false,
+		podID:   "",
+		status:  ipStatusValid,
+	}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		<-respCh
+	}()
+
+	local.commit(ctx, respCh, ipv4, ipv6, "foo")
+
+	wg.Wait()
+
+	assert.Equal(t, "foo", ipv4.podID)
+	assert.Equal(t, "foo", ipv6.podID)
+}
+
+func Test_commit_canceled(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &types.PoolConfig{
+		EnableIPv4: true,
+		EnableIPv6: true,
+		BatchSize:  10,
+	}, "")
+	local.status = statusInUse
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	respCh := make(chan *AllocResp)
+	ipv4 := &IP{
+		ip:      netip.MustParseAddr("127.0.0.1"),
+		primary: false,
+		podID:   "foo",
+		status:  ipStatusValid,
+	}
+	ipv6 := &IP{
+		ip:      netip.MustParseAddr("fd00::1"),
+		primary: false,
+		podID:   "foo",
+		status:  ipStatusValid,
+	}
+
+	local.commit(ctx, respCh, ipv4, ipv6, "foo")
+
+	assert.Equal(t, "", ipv4.podID)
+	assert.Equal(t, "", ipv6.podID)
 }

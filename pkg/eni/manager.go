@@ -342,6 +342,8 @@ func (m *Manager) syncPool(ctx context.Context) {
 			})
 			if err != nil {
 				mgrLog.Error(err, "sync pool error")
+			} else {
+				mgrLog.Info("add ip done")
 			}
 		}()
 	}
