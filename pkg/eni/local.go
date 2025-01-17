@@ -844,8 +844,7 @@ func (l *Local) Dispose(n int) int {
 
 	// 1. check if can dispose the eni
 	if n >= max(len(l.ipv4), len(l.ipv6)) {
-		eniType := strings.ToLower(l.eniType)
-		if eniType != "trunk" && eniType != "erdma" && !l.eni.Trunk && len(l.ipv4.InUse()) == 0 && len(l.ipv6.InUse()) == 0 {
+		if l.canDispose() {
 			log.Info("dispose eni")
 			l.status = statusDeleting
 			return max(len(l.ipv4), len(l.ipv6))
@@ -922,7 +921,11 @@ func (l *Local) factoryDisposeWorker(ctx context.Context) {
 
 		if l.status == statusDeleting {
 			// remove the eni
-
+			if !l.canDispose() {
+				l.cond.Wait()
+				// this can't happen
+				continue
+			}
 			l.cond.L.Unlock()
 
 			err := l.rateLimitEni.Wait(ctx)
@@ -1100,6 +1103,25 @@ func (l *Local) commit(ctx context.Context, respCh chan *AllocResp, ipv4, ipv6 *
 	case respCh <- resp:
 		logr.FromContextOrDiscard(ctx).Info("allocWorker got ip", "eni", l.eni.ID, "ipv4", ip.IPv4.String(), "ipv6", ip.IPv6.String())
 	}
+}
+
+// canDispose will check current eni status , and make sure no pending jobs ,and no pod is using this eni
+func (l *Local) canDispose() bool {
+	if l.eni == nil {
+		return true
+	}
+	eniType := strings.ToLower(l.eniType)
+	switch eniType {
+	case "trunk", "erdma":
+		return false
+	}
+	if l.eni.Trunk {
+		return false
+	}
+	return len(l.ipv4.InUse()) == 0 &&
+		len(l.ipv6.InUse()) == 0 &&
+		l.allocatingV4.Len() == 0 &&
+		l.allocatingV6.Len() == 0
 }
 
 // syncIPLocked will mark ip as invalid , if not found in remote
