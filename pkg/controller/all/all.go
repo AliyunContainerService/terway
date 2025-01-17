@@ -19,7 +19,6 @@ package all
 
 import (
 	// register all controllers
-	_ "github.com/AliyunContainerService/terway/pkg/controller/endpoint"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/multi-ip/node"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/multi-ip/pod"
 	_ "github.com/AliyunContainerService/terway/pkg/controller/node"
