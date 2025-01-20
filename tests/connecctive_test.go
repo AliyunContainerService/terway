@@ -42,19 +42,19 @@ func TestConnective(t *testing.T) {
 	}
 	mutateConfig := []PodConfig{}
 	if affinityLabel == "" {
-		mutateConfig = []PodConfig{
-			{
-				name: "normal config",
-				podFunc: func(pod *Pod) *Pod {
-					return pod
-				},
+		mutateConfig = []PodConfig{{
+			name: "normal config",
+			podFunc: func(pod *Pod) *Pod {
+				return pod
 			},
-			{
+		}}
+		if testTrunk {
+			mutateConfig = append(mutateConfig, PodConfig{
 				name: "trunk pod",
 				podFunc: func(pod *Pod) *Pod {
 					return pod.WithLabels(map[string]string{"netplan": "default"})
 				},
-			},
+			})
 		}
 	} else {
 		labelArr := strings.Split(affinityLabel, ":")
@@ -68,12 +68,14 @@ func TestConnective(t *testing.T) {
 					return pod.WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]})
 				},
 			},
-			{
-				name: fmt.Sprintf("trunk_%s", labelArr[0]),
+		}
+		if testTrunk {
+			mutateConfig = append(mutateConfig, PodConfig{
+				name: "trunk_trunk",
 				podFunc: func(pod *Pod) *Pod {
 					return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]})
 				},
-			},
+			})
 		}
 	}
 	for i := range mutateConfig {
@@ -410,12 +412,14 @@ func TestNetworkPolicy(t *testing.T) {
 					return pod
 				},
 			},
-			{
+		}
+		if testTrunk {
+			mutateConfig = append(mutateConfig, PodConfig{
 				name: "trunk pod",
 				podFunc: func(pod *Pod) *Pod {
 					return pod.WithLabels(map[string]string{"netplan": "default"})
 				},
-			},
+			})
 		}
 	} else {
 		labelArr := strings.Split(affinityLabel, ":")
@@ -429,12 +433,14 @@ func TestNetworkPolicy(t *testing.T) {
 					return pod.WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]})
 				},
 			},
-			{
+		}
+		if testTrunk {
+			mutateConfig = append(mutateConfig, PodConfig{
 				name: fmt.Sprintf("trunk_%s", labelArr[0]),
 				podFunc: func(pod *Pod) *Pod {
 					return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]})
 				},
-			},
+			})
 		}
 	}
 	for i := range mutateConfig {
