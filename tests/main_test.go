@@ -105,9 +105,28 @@ func TestMain(m *testing.M) {
 		setPodNetworking,
 	)
 	testenv.AfterEachFeature(func(ctx context.Context, config *envconf.Config, t *testing.T, feature features.Feature) (context.Context, error) {
+		pod := &corev1.PodList{}
+		err = config.Client().Resources(envCfg.Namespace()).List(ctx, pod)
+		t.Log("---------list pods---------")
+		// 遍历 Pod 列表，筛选出非 Running 状态的 Pod
+		isTestFailed := false
+		for _, printPod := range pod.Items {
+			if printPod.Status.Phase != corev1.PodRunning {
+				isTestFailed = true
+			}
+			t.Logf("Pod: %s/%s, Node: %s, Status: %s\n", printPod.Namespace, printPod.Name, printPod.Spec.NodeName, printPod.Status.Phase)
+		}
+		if isTestFailed {
+			t.Log("---------list events---------")
+			// 遍历 Event 列表
+			event := &corev1.EventList{}
+			err = config.Client().Resources(envCfg.Namespace()).List(ctx, event)
+			for _, printEvent := range event.Items {
+				t.Logf("%s/%s, Event: %s %s, Time:%s\n", printEvent.InvolvedObject.Kind, printEvent.InvolvedObject.Name, printEvent.Reason, printEvent.Message, printEvent.LastTimestamp)
+			}
+		}
 		lo.ForEach(ResourcesFromCtx(ctx), func(item client.Object, index int) {
 			_ = config.Client().Resources().Delete(ctx, item)
-
 			err := wait.For(conditions.New(config.Client().Resources()).ResourceDeleted(item),
 				wait.WithInterval(1*time.Second), wait.WithImmediate(), wait.WithTimeout(1*time.Minute))
 			if err != nil {
