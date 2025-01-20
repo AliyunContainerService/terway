@@ -74,6 +74,7 @@ func init() {
 	flag.StringVar(&vSwitchIDs, "vswitch-ids", "", "extra vSwitchIDs")
 	flag.StringVar(&securityGroupIDs, "security-group-ids", "", "extra securityGroupIDs")
 	flag.StringVar(&affinityLabel, "label", "", "node affinity, format as key:value")
+	flag.BoolVar(&testTrunk, "enable-trunk", true, "enable trunk test")
 	defaultPodNetworkingName = "default-pn"
 }
 
@@ -191,8 +192,8 @@ func checkENIConfig(ctx context.Context, config *envconf.Config) (context.Contex
 	if err != nil {
 		return nil, err
 	}
-	if cfg.EnableENITrunking {
-		testTrunk = true
+	if !cfg.EnableENITrunking {
+		testTrunk = false
 		testPodLevelConfig = true
 	}
 	if cfg.IPAMType == "crd" {
