@@ -201,4 +201,15 @@ func TestDataPathPolicyRoute(t *testing.T) {
 	for _, r := range rules {
 		t.Logf("%s %#v ", r, r)
 	}
+
+	err = d.Teardown(&types.TeardownCfg{
+		HostVETHName:    cfg.HostVETHName,
+		ContainerIfName: cfg.ContainerIfName,
+		ContainerIPNet: &terwayTypes.IPNetSet{
+			IPv4: containerIPNet,
+			IPv6: containerIPNetIPv6,
+		},
+		ENIIndex: 0,
+	}, containerNS)
+	assert.NoError(t, err)
 }
