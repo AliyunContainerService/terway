@@ -418,7 +418,12 @@ func parseTearDownConf(alloc *rpc.NetConf, conf *types.CNIConf, ipType rpc.IPTyp
 	if alloc.GetENIInfo() != nil {
 		mac := alloc.GetENIInfo().GetMAC()
 		if mac != "" {
-			eniIndex, _ = link.GetDeviceNumber(mac)
+			eniIndex, err = link.GetDeviceNumber(mac)
+			if err != nil {
+				if !errors.Is(err, link.ErrNotFound) {
+					return nil, err
+				}
+			}
 		}
 	}
 

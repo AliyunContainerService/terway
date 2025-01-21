@@ -323,7 +323,7 @@ func (d *IPvlanDriver) Teardown(ctx context.Context, cfg *types.TeardownCfg, net
 		return err
 	}
 
-	if cfg.EnableNetworkPriority {
+	if cfg.EnableNetworkPriority && cfg.ENIIndex > 0 {
 		link, err := netlink.LinkByIndex(cfg.ENIIndex)
 		if err != nil {
 			if _, ok := err.(netlink.LinkNotFoundError); !ok {
@@ -338,6 +338,9 @@ func (d *IPvlanDriver) Teardown(ctx context.Context, cfg *types.TeardownCfg, net
 	}
 
 	err = func() error {
+		if cfg.ENIIndex <= 0 {
+			return nil
+		}
 		link, err := netlink.LinkByIndex(cfg.ENIIndex)
 		if err != nil {
 			if _, ok := err.(netlink.LinkNotFoundError); !ok {
