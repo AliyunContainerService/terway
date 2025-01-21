@@ -88,6 +88,8 @@ type networkService struct {
 	gcRulesOnce sync.Once
 
 	rpc.UnimplementedTerwayBackendServer
+
+	EnablePatchPodIPs bool
 }
 
 var serviceLog = logf.Log.WithName("server")
@@ -277,9 +279,11 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 		}
 	}
 
-	ips := getPodIPs(netConf)
-	if len(ips) > 0 {
-		_ = n.k8s.PatchPodIPInfo(pod, strings.Join(ips, ","))
+	if n.EnablePatchPodIPs {
+		ips := getPodIPs(netConf)
+		if len(ips) > 0 {
+			_ = n.k8s.PatchPodIPInfo(pod, strings.Join(ips, ","))
+		}
 	}
 
 	// 4. Record resource info
@@ -858,6 +862,8 @@ func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (
 	if err != nil {
 		return nil, err
 	}
+
+	netSrv.EnablePatchPodIPs = *config.EnablePatchPodIPs
 
 	serviceLog.Info("got config", "config", fmt.Sprintf("%+v", config))
 
