@@ -304,4 +304,15 @@ func TestDataPathIPvlanL2(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, 0, len(routes))
+
+	err = d.Teardown(context.Background(), &types2.TeardownCfg{
+		HostVETHName:    cfg.HostVETHName,
+		ContainerIfName: cfg.ContainerIfName,
+		ContainerIPNet: &types.IPNetSet{
+			IPv4: containerIPNet,
+			IPv6: containerIPNetIPv6,
+		},
+		ENIIndex: 0,
+	}, containerNS)
+	assert.NoError(t, err)
 }
