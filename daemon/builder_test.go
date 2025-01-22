@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -81,4 +82,104 @@ func TestInitService(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNetworkServiceBuilder_LoadGlobalConfig(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer tmpFile.Close()
+	configContent := `
+{
+      "version": "1",
+      "max_pool_size": 5,
+      "min_pool_size": 0,
+      "credential_path": "/var/addon/token-config",
+      "ipam_type": "crd"
+    }`
+	err = os.WriteFile(tmpFile.Name(), []byte(configContent), os.ModeDir)
+	assert.NoError(t, err)
+	builder := &NetworkServiceBuilder{
+		configFilePath: tmpFile.Name(),
+		service:        &networkService{},
+	}
+	builder.LoadGlobalConfig()
+	assert.True(t, *builder.config.EnablePatchPodIPs)
+}
+
+func TestNetworkServiceBuilder_LoadGlobalConfig2(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer tmpFile.Close()
+	configContent := `
+{
+      "version": "1",
+      "max_pool_size": 5,
+      "min_pool_size": 0,
+      "credential_path": "/var/addon/token-config",
+      "enable_patch_pod_ips": false,
+      "ipam_type": "crd"
+    }`
+	err = os.WriteFile(tmpFile.Name(), []byte(configContent), os.ModeDir)
+	assert.NoError(t, err)
+	builder := &NetworkServiceBuilder{
+		configFilePath: tmpFile.Name(),
+		service:        &networkService{},
+	}
+	builder.LoadGlobalConfig()
+	assert.False(t, *builder.config.EnablePatchPodIPs)
+}
+
+func TestNetworkServiceBuilder_GetConfigFromFileWithMerge_1(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer tmpFile.Close()
+	configContent := `
+{
+      "version": "1",
+      "max_pool_size": 5,
+      "min_pool_size": 0,
+      "credential_path": "/var/addon/token-config",
+      "ipam_type": "crd"
+    }`
+
+	dynamicCfg := ""
+	err = os.WriteFile(tmpFile.Name(), []byte(configContent), os.ModeDir)
+	assert.NoError(t, err)
+	config, err := daemon.GetConfigFromFileWithMerge(tmpFile.Name(), []byte(dynamicCfg))
+	assert.NoError(t, err)
+	config.Populate()
+
+	assert.True(t, *config.EnablePatchPodIPs)
+}
+
+func TestNetworkServiceBuilder_GetConfigFromFileWithMerge_2(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer tmpFile.Close()
+	configContent := `
+{
+      "version": "1",
+      "max_pool_size": 5,
+      "min_pool_size": 0,
+      "credential_path": "/var/addon/token-config",
+      "enable_patch_pod_ips": false,
+      "ipam_type": "crd"
+    }`
+
+	dynamicCfg := ""
+	err = os.WriteFile(tmpFile.Name(), []byte(configContent), os.ModeDir)
+	assert.NoError(t, err)
+	config, err := daemon.GetConfigFromFileWithMerge(tmpFile.Name(), []byte(dynamicCfg))
+	assert.NoError(t, err)
+	config.Populate()
+
+	assert.False(t, *config.EnablePatchPodIPs)
 }

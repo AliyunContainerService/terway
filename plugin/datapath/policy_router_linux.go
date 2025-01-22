@@ -462,6 +462,9 @@ func (d *PolicyRoute) Teardown(cfg *types.TeardownCfg, netNS ns.NetNS) error {
 		}
 	}
 
+	if cfg.ENIIndex <= 0 {
+		return nil
+	}
 	link, err := netlink.LinkByIndex(cfg.ENIIndex)
 	if err != nil {
 		if _, ok := err.(netlink.LinkNotFoundError); !ok {
