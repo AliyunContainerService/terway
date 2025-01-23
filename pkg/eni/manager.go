@@ -211,7 +211,11 @@ func (m *Manager) Allocate(ctx context.Context, cni *daemon.CNI, req *AllocReque
 					cancel()
 					break
 				}
-				resultCh <- resp.NetworkConfigs
+
+				select {
+				case <-ctx.Done():
+				case resultCh <- resp.NetworkConfigs:
+				}
 			}
 		}()
 	}
