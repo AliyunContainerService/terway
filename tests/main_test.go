@@ -183,9 +183,16 @@ func checkENIConfig(ctx context.Context, config *envconf.Config) (context.Contex
 	if strings.Contains(cm.Data["10-terway.conf"], "datapathv2") {
 		ipvlan = true
 	}
+	ebpf := false
+	if strings.Contains(cm.Data["10-terway.conf"], "ebpf") {
+		ebpf = true
+	}
 	switch cm.Data["disable_network_policy"] {
 	case "", "false":
 		testNetworkPolicy = true
+		if ebpf {
+			ipvlan = true
+		}
 	}
 	cfg := &Config{}
 	err = json.Unmarshal([]byte(cm.Data["eni_conf"]), cfg)
