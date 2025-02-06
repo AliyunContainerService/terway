@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Mon, 30 Dec 2024 10:20:33 +0800
+Subject: fix egress filter check
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ pkg/datapath/loader/netlink.go | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/pkg/datapath/loader/netlink.go b/pkg/datapath/loader/netlink.go
+index 92af541580..bc0ae8539c 100644
+--- a/pkg/datapath/loader/netlink.go
++++ b/pkg/datapath/loader/netlink.go
+@@ -138,7 +138,27 @@ func replaceDatapath(ctx context.Context, ifName, objPath, progSec, progDirectio
+ 							if err != nil {
+ 								l.WithError(err).Error("Remove filter")
+ 							} else {
+-								l.Infof("Remove filter")
++								l.Infof("Remove ingress filter")
++							}
++						}
++					}
++				}
++
++				egressFilters, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
++				if err != nil {
++					l.WithError(err).Error("Could get filter")
++				} else {
++					for _, filter := range egressFilters {
++						bpf, ok := filter.(*netlink.BpfFilter)
++						if ok {
++							if bpf.Priority != 1 || !bpf.DirectAction {
++								continue
++							}
++							err = netlink.FilterDel(filter)
++							if err != nil {
++								l.WithError(err).Error("Remove filter")
++							} else {
++								l.Infof("Remove egress filter")
+ 							}
+ 						}
+ 					}
+-- 
+2.39.5 (Apple Git-154)
+
