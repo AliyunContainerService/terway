@@ -364,7 +364,7 @@ func initOpenTelemetry(ctx context.Context, serviceName, serviceVersion string, 
 }
 
 func detectMultiIP(ctx context.Context, directClient client.Client, cfg *controlplane.Config) error {
-	if !lo.Contains(cfg.Controllers, multiipnode.ControllerName) {
+	if !lo.Contains(cfg.Controllers, multiipnode.ControllerName) || cfg.CentralizedIPAM {
 		return nil
 	}
 
