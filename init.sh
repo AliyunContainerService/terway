@@ -29,8 +29,6 @@ cp -f /usr/bin/cilium-cni /opt/cni/bin/
 chmod +x /opt/cni/bin/terway
 chmod +x /opt/cni/bin/cilium-cni
 
-# init cni config
-cp /tmp/eni/eni_conf /etc/eni/eni.json
 
 terway-cli cni /tmp/eni/10-terway.conflist /tmp/eni/10-terway.conf --output /etc/cni/net.d/10-terway.conflist
 # remove legacy cni config
