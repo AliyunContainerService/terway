@@ -31,13 +31,13 @@ index e496664e45..a43a8847d3 100644
  #include "lib/overloadable.h"
  #include "lib/encrypt.h"
 +#include "lib/tb.h"
-
+ 
  static __always_inline bool allow_vlan(__u32 __maybe_unused ifindex, __u32 __maybe_unused vlan_id) {
  	VLAN_FILTER(ifindex, vlan_id);
 @@ -271,6 +272,9 @@ skip_host_firewall:
  		if (ep->flags & ENDPOINT_F_HOST)
  			return CTX_ACT_OK;
-
+ 
 +		ret = accept(ctx,ep->lxc_id);
 +		if (IS_ERR(ret))
 +			return ret;
@@ -47,7 +47,7 @@ index e496664e45..a43a8847d3 100644
 @@ -563,6 +567,9 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 secctx,
  		if (ep->flags & ENDPOINT_F_HOST)
  			return CTX_ACT_OK;
-
+ 
 +		ret = accept(ctx,ep->lxc_id);
 +		if (IS_ERR(ret))
 +			return ret;
@@ -61,7 +61,7 @@ index 850fd57092..eaf1003419 100644
 @@ -253,6 +253,17 @@ struct edt_info {
  	__u64		pad[4];
  };
-
+ 
 +struct throttle_id {
 +	__u64		id;
 +};
@@ -94,7 +94,7 @@ index e3a3e57389..10b6e71196 100644
 +	__uint(map_flags, BPF_F_NO_PREALLOC);
 +} INGRESS_THROTTLE_MAP __section_maps_btf;
  #endif /* ENABLE_BANDWIDTH_MANAGER */
-
+ 
  /* Map to link endpoint id to per endpoint cilium_policy map */
 diff --git a/bpf/lib/tb.h b/bpf/lib/tb.h
 new file mode 100644
@@ -175,12 +175,12 @@ index 96a4bc1cb2..251eaa5448 100644
  	"github.com/cilium/cilium/pkg/maps/bwmap"
 +	"github.com/cilium/cilium/pkg/maps/ingress"
  )
-
+ 
  var bpfBandwidthListCmd = &cobra.Command{
 @@ -39,11 +40,27 @@ var bpfBandwidthListCmd = &cobra.Command{
  			return
  		}
-
+ 
 -		listBandwidth(bpfBandwidthList)
 +		listBandwidth(bpfBandwidthList, "EGRESS")
 +
@@ -201,24 +201,24 @@ index 96a4bc1cb2..251eaa5448 100644
 +		listBandwidth(bpfBandwidthList, "INGRESS")
  	},
  }
-
+ 
 -func listBandwidth(bpfBandwidthList map[string][]string) {
 +func listBandwidth(bpfBandwidthList map[string][]string, direction string) {
  	if len(bpfBandwidthList) == 0 {
  		fmt.Fprintf(os.Stderr, "No entries found.\n")
  		return
 @@ -51,11 +68,11 @@ func listBandwidth(bpfBandwidthList map[string][]string) {
-
+ 
  	const (
  		labelsIDTitle   = "IDENTITY"
 -		labelsBandwidth = "EGRESS BANDWIDTH (BitsPerSec)"
 +		labelsBandwidth = "BANDWIDTH (BitsPerSec)"
  	)
-
+ 
  	w := tabwriter.NewWriter(os.Stdout, 5, 0, 3, ' ', 0)
 -	fmt.Fprintf(w, "%s\t%s\n", labelsIDTitle, labelsBandwidth)
 +	fmt.Fprintf(w, "%s\t%s\n", labelsIDTitle, direction+" "+labelsBandwidth)
-
+ 
  	const numColumns = 2
  	rows := [][numColumns]string{}
 diff --git a/daemon/cmd/endpoint.go b/daemon/cmd/endpoint.go
@@ -232,7 +232,7 @@ index c7c4ad1637..58f4abbb2f 100644
 +	"strings"
  	"sync"
  	"time"
-
+ 
 @@ -465,9 +466,10 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
  		ep.UpdateBandwidthPolicy(func(ns, podName string) (bandwidthEgress string, err error) {
  			p, err := d.k8sWatcher.GetCachedPod(ns, podName)
@@ -261,7 +261,7 @@ index 06974a2868..b97a740748 100644
 @@ -182,6 +183,10 @@ func InitBandwidthManager() {
  		log.WithError(err).Fatal("Failed to access ThrottleMap")
  	}
-
+ 
 +	if _, err := ingress.ThrottleMap.OpenOrCreate(); err != nil {
 +		log.WithError(err).Fatal("Failed to access ThrottleMap")
 +	}
@@ -287,7 +287,7 @@ index 4201e878fb..06b6719843 100644
  		cDefinesMap["THROTTLE_MAP_SIZE"] = fmt.Sprintf("%d", bwmap.MapSize)
 +		cDefinesMap["INGRESS_THROTTLE_MAP"] = ingress.MapName
  	}
-
+ 
  	if option.Config.EnableHostFirewall {
 @@ -910,6 +912,7 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, e datapath.Endp
  		fmt.Fprint(fw, "#define ENABLE_BANDWIDTH_MANAGER 1\n")
@@ -295,7 +295,7 @@ index 4201e878fb..06b6719843 100644
  		fmt.Fprintf(fw, "#define THROTTLE_MAP_SIZE %d\n", bwmap.MapSize)
 +		fmt.Fprintf(fw, "#define INGRESS_THROTTLE_MAP %s\n", ingress.MapName)
  	}
-
+ 
  	if e.ConntrackLocalLocked() {
 diff --git a/pkg/endpoint/bpf.go b/pkg/endpoint/bpf.go
 index 5b14a7921a..1af4a60b23 100644
@@ -322,7 +322,7 @@ index 5b14a7921a..1af4a60b23 100644
 +	}
  	return errors
  }
-
+ 
 diff --git a/pkg/endpoint/endpoint.go b/pkg/endpoint/endpoint.go
 index c3d5ce7a81..5da227c4d1 100644
 --- a/pkg/endpoint/endpoint.go
@@ -330,7 +330,7 @@ index c3d5ce7a81..5da227c4d1 100644
 @@ -167,6 +167,8 @@ type Endpoint struct {
  	// bps is the egress rate of the endpoint
  	bps uint64
-
+ 
 +	ingressBps uint64
 +
  	// mac is the MAC address of the endpoint
@@ -357,10 +357,10 @@ index 3d709d3eb7..55cc92a110 100644
  	"fmt"
  	"strconv"
 +	"strings"
-
+ 
  	"github.com/sirupsen/logrus"
 +	"k8s.io/apimachinery/pkg/util/errors"
-
+ 
  	"github.com/cilium/cilium/pkg/bandwidth"
  	"github.com/cilium/cilium/pkg/eventqueue"
  	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -370,18 +370,18 @@ index 3d709d3eb7..55cc92a110 100644
  	"github.com/cilium/cilium/pkg/policy"
  )
 @@ -260,7 +263,7 @@ type EndpointPolicyBandwidthEvent struct {
-
+ 
  // Handle handles the policy bandwidth update.
  func (ev *EndpointPolicyBandwidthEvent) Handle(res chan interface{}) {
 -	var bps uint64
 +	var egressBps, ingressBps uint64
-
+ 
  	e := ev.ep
  	if err := e.lockAlive(); err != nil {
 @@ -275,41 +278,78 @@ func (ev *EndpointPolicyBandwidthEvent) Handle(res chan interface{}) {
  		e.unlock()
  	}()
-
+ 
 -	bandwidthEgress, err := ev.annoCB(e.K8sNamespace, e.K8sPodName)
 +	bandwidthStr, err := ev.annoCB(e.K8sNamespace, e.K8sPodName)
  	if err != nil || !option.Config.EnableBandwidthManager {
@@ -464,7 +464,7 @@ index 3d709d3eb7..55cc92a110 100644
 +			bpsOld, bpsNew)
 +		e.ingressBps = ingressBps
 +	}()
-
+ 
 -	bpsOld := "inf"
 -	bpsNew := "inf"
 -	if e.bps != 0 {
@@ -481,7 +481,7 @@ index 3d709d3eb7..55cc92a110 100644
 +		err: errors.NewAggregate(errs),
  	}
  }
-
+ 
 diff --git a/pkg/k8s/watchers/pod.go b/pkg/k8s/watchers/pod.go
 index 9c7502aa6f..f0690504a6 100644
 --- a/pkg/k8s/watchers/pod.go
@@ -495,7 +495,7 @@ index 9c7502aa6f..f0690504a6 100644
 +		!k8s.AnnotationsEqual([]string{bandwidth.IngressBandwidth}, oldAnno, newAnno)
  	annoChangedNoTrack := !k8s.AnnotationsEqual([]string{annotation.NoTrack}, oldAnno, newAnno)
  	annotationsChanged := annoChangedProxy || annoChangedBandwidth || annoChangedNoTrack
-
+ 
 @@ -349,9 +350,9 @@ func (k *K8sWatcher) updateK8sPodV1(oldK8sPod, newK8sPod *slim_corev1.Pod) error
  			podEP.UpdateBandwidthPolicy(func(ns, podName string) (bandwidthEgress string, err error) {
  				p, err := k.GetCachedPod(ns, podName)
@@ -576,5 +576,5 @@ index 0000000000..e726462716
 +		&ThrottleID{Id: uint64(Id)})
 +}
 -- 
-2.47.0
+2.39.5 (Apple Git-154)
 

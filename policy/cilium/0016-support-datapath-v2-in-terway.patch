@@ -205,7 +205,7 @@ index 215b374154..5c4babe14f 100644
  
  	ret = ipv4_l3(ctx, l3_off, NULL, NULL, ip4);
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 375a11d5cf..ab35062146 100644
+index ac3c6834a3..37516e7fa4 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
 @@ -1374,6 +1374,8 @@ func initEnv(cmd *cobra.Command) {
@@ -470,7 +470,7 @@ index a1aca7641a..145af07060 100644
  	DatapathModeLBOnly = "lb-only"
  )
 diff --git a/pkg/defaults/defaults.go b/pkg/defaults/defaults.go
-index 398e50474d..49508c6008 100644
+index df797c44e9..1eaa7e3096 100644
 --- a/pkg/defaults/defaults.go
 +++ b/pkg/defaults/defaults.go
 @@ -232,7 +232,7 @@ const (
@@ -820,5 +820,5 @@ index e84e949968..2327cf5816 100644
  
  // IPAM is the Cilium specific CNI IPAM configuration
 -- 
-2.44.0
+2.39.5 (Apple Git-154)
 

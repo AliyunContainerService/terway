@@ -21,13 +21,13 @@ index e29bbc5c97..e496664e45 100644
  	__u32 __maybe_unused vlan_id;
 -	int ret = CTX_ACT_OK;
 +	int ret = CTX_ACT_PIPE;
-
+ 
  	/* Filter allowed vlan id's and pass them back to kernel.
  	 */
 @@ -1103,6 +1103,10 @@ out:
  	send_trace_notify(ctx, TRACE_TO_NETWORK, 0, 0, 0,
  			  0, trace.reason, trace.monitor);
-
+ 
 +    if ( ret == CTX_ACT_OK ) {
 +        return CTX_ACT_PIPE;
 +    }
@@ -108,5 +108,5 @@ index dfc5096aac..060328adf9 100644
  		// ENABLE_HOST_ROUTING has higher priority than ENABLE_REDIRECT
  		// CONTAINER_DIRECT_ROUTING_DEV_IFINDEX is used for both, but not for ipvl
 -- 
-2.44.0
+2.39.5 (Apple Git-154)
 

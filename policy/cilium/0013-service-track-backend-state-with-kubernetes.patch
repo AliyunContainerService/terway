@@ -9,10 +9,10 @@ Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
  1 file changed, 4 insertions(+), 17 deletions(-)
 
 diff --git a/pkg/service/service.go b/pkg/service/service.go
-index 428317168f..d29d6dc75f 100644
+index b9acad2f6e..62450b1155 100644
 --- a/pkg/service/service.go
 +++ b/pkg/service/service.go
-@@ -1610,23 +1610,10 @@ func (s *Service) updateBackendsCacheLocked(svc *svcInfo, backends []lb.Backend)
+@@ -1619,23 +1619,10 @@ func (s *Service) updateBackendsCacheLocked(svc *svcInfo, backends []*lb.Backend
  				// Toggle the flag as the backend is now restored.
  				b.RestoredFromDatapath = false
  			} else {
@@ -41,5 +41,5 @@ index 428317168f..d29d6dc75f 100644
  			}
  		}
 -- 
-2.42.0
+2.39.5 (Apple Git-154)
 

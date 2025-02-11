@@ -5,10 +5,10 @@ Subject: optimize cep watch when no policy enabled
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
- pkg/k8s/watchers/cilium_endpoint.go      | 15 ++++++++--
- pkg/k8s/watchers/endpointsynchronizer.go | 35 ++++++++++++++++++++++--
- pkg/k8s/watchers/pod.go                  |  3 --
- 3 files changed, 44 insertions(+), 9 deletions(-)
+ pkg/k8s/watchers/cilium_endpoint.go      | 15 ++++++++---
+ pkg/k8s/watchers/endpointsynchronizer.go | 34 +++++++++++++++++++++---
+ pkg/k8s/watchers/pod.go                  |  3 ---
+ 3 files changed, 43 insertions(+), 9 deletions(-)
 
 diff --git a/pkg/k8s/watchers/cilium_endpoint.go b/pkg/k8s/watchers/cilium_endpoint.go
 index ab612862df..c8ec544c3b 100644
@@ -45,16 +45,15 @@ index ab612862df..c8ec544c3b 100644
  			0,
  			cache.ResourceEventHandlerFuncs{
 diff --git a/pkg/k8s/watchers/endpointsynchronizer.go b/pkg/k8s/watchers/endpointsynchronizer.go
-index b0ba43adce..e91c3e94e4 100644
+index b0ba43adce..9f6d738541 100644
 --- a/pkg/k8s/watchers/endpointsynchronizer.go
 +++ b/pkg/k8s/watchers/endpointsynchronizer.go
-@@ -151,6 +151,34 @@ func (epSync *EndpointSynchronizer) RunK8sCiliumEndpointSync(e *endpoint.Endpoin
+@@ -151,6 +151,33 @@ func (epSync *EndpointSynchronizer) RunK8sCiliumEndpointSync(e *endpoint.Endpoin
  							scopedLog.WithError(err).Warn("could not take ownership of existing ciliumendpoint")
  							return err
  						}
 +						// update cep label if not present
 +						// updateCEPUID already checked the ownership
-+						// lb["k8s-node-ip"] = node.GetCiliumEndpointNodeIP()
 +						if localCEP.Labels["k8s-node-ip"] != node.GetCiliumEndpointNodeIP() {
 +							replaceLabels := []k8s.JSONPatch{
 +								{
@@ -83,7 +82,7 @@ index b0ba43adce..e91c3e94e4 100644
  					case k8serrors.IsNotFound(err):
  						pod := e.GetPod()
  						if pod == nil {
-@@ -171,9 +199,10 @@ func (epSync *EndpointSynchronizer) RunK8sCiliumEndpointSync(e *endpoint.Endpoin
+@@ -171,9 +198,10 @@ func (epSync *EndpointSynchronizer) RunK8sCiliumEndpointSync(e *endpoint.Endpoin
  										UID:        pod.ObjectMeta.UID,
  									},
  								},
@@ -112,5 +111,5 @@ index d61a324f61..9c7502aa6f 100644
  
  	if annotationsChanged {
 -- 
-2.45.2
+2.39.5 (Apple Git-154)
 

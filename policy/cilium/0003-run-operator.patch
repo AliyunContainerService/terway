@@ -1,72 +1,14 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Wed, 9 Jun 2021 16:32:33 +0800
-Subject: [PATCH] run operator
+Subject: run operator
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
- daemon/cmd/daemon_main.go |  25 +++--
- operator/Makefile         |   2 +-
- operator/main.go          | 225 --------------------------------------
- 3 files changed, 19 insertions(+), 233 deletions(-)
+ operator/Makefile |   2 +-
+ operator/main.go  | 243 ++--------------------------------------------
+ 2 files changed, 11 insertions(+), 234 deletions(-)
 
-diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 28bf66a7a9..1f2796810b 100644
---- a/daemon/cmd/daemon_main.go
-+++ b/daemon/cmd/daemon_main.go
-@@ -14,13 +14,6 @@ import (
- 	"strings"
- 	"time"
- 
--	"github.com/go-openapi/loads"
--	gops "github.com/google/gops/agent"
--	"github.com/sirupsen/logrus"
--	"github.com/spf13/cobra"
--	"github.com/spf13/viper"
--	"google.golang.org/grpc"
--
- 	"github.com/cilium/cilium/api/v1/server"
- 	"github.com/cilium/cilium/api/v1/server/restapi"
- 	"github.com/cilium/cilium/pkg/aws/eni"
-@@ -28,6 +21,7 @@ import (
- 	"github.com/cilium/cilium/pkg/bgpv1/gobgp"
- 	"github.com/cilium/cilium/pkg/bpf"
- 	"github.com/cilium/cilium/pkg/cgroups"
-+	"github.com/cilium/cilium/pkg/command/exec"
- 	"github.com/cilium/cilium/pkg/common"
- 	"github.com/cilium/cilium/pkg/components"
- 	"github.com/cilium/cilium/pkg/controller"
-@@ -75,6 +69,12 @@ import (
- 	"github.com/cilium/cilium/pkg/version"
- 	wireguard "github.com/cilium/cilium/pkg/wireguard/agent"
- 	wireguardTypes "github.com/cilium/cilium/pkg/wireguard/types"
-+	"github.com/go-openapi/loads"
-+	gops "github.com/google/gops/agent"
-+	"github.com/sirupsen/logrus"
-+	"github.com/spf13/cobra"
-+	"github.com/spf13/viper"
-+	"google.golang.org/grpc"
- )
- 
- const (
-@@ -1624,6 +1624,17 @@ func (d *Daemon) initKVStore() {
- }
- 
- func runDaemon() {
-+	go func() {
-+		if os.Getenv("DISABLE_CILIUM_OPERATOR") == "true" {
-+			return
-+		}
-+		cmd := exec.CommandContext(server.ServerCtx, "cilium-operator-generic", "--skip-crd-creation", "--k8s-namespace", os.Getenv("CILIUM_K8S_NAMESPACE"), "--identity-gc-interval", "10m", "--identity-heartbeat-timeout", "20m")
-+		cmd.Stdout = os.Stdout
-+		cmd.Stderr = os.Stderr
-+		err := cmd.Run()
-+		log.Fatal(fmt.Errorf("cilium-operator exited, %w", err))
-+	}()
-+
- 	datapathConfig := linuxdatapath.DatapathConfiguration{
- 		HostDevice: defaults.HostDevice,
- 		ProcFs:     option.Config.ProcFs,
 diff --git a/operator/Makefile b/operator/Makefile
 index ebd1285e3d..1710880c84 100644
 --- a/operator/Makefile
@@ -81,7 +23,7 @@ index ebd1285e3d..1710880c84 100644
  cilium-operator-aws: GO_TAGS_FLAGS+=ipam_provider_aws
  cilium-operator-azure: GO_TAGS_FLAGS+=ipam_provider_azure
 diff --git a/operator/main.go b/operator/main.go
-index 756b218121..ec71d565dc 100644
+index 756b218121..ec0a329109 100644
 --- a/operator/main.go
 +++ b/operator/main.go
 @@ -15,30 +15,22 @@ import (
@@ -123,7 +65,33 @@ index 756b218121..ec71d565dc 100644
  	"github.com/cilium/cilium/pkg/rand"
  	"github.com/cilium/cilium/pkg/rate"
  	"github.com/cilium/cilium/pkg/version"
-@@ -250,14 +241,6 @@ func runOperator() {
+@@ -72,15 +63,17 @@ var (
+ 			}
+ 
+ 			// Open socket for using gops to get stacktraces of the agent.
+-			addr := fmt.Sprintf("127.0.0.1:%d", viper.GetInt(option.GopsPort))
+-			addrField := logrus.Fields{"address": addr}
+-			if err := gops.Listen(gops.Options{
+-				Addr:                   addr,
+-				ReuseSocketAddrAndPort: true,
+-			}); err != nil {
+-				log.WithError(err).WithFields(addrField).Fatal("Cannot start gops server")
++			if viper.GetInt(option.GopsPort) > 0 {
++				addr := fmt.Sprintf("127.0.0.1:%d", viper.GetInt(option.GopsPort))
++				addrField := logrus.Fields{"address": addr}
++				if err := gops.Listen(gops.Options{
++					Addr:                   addr,
++					ReuseSocketAddrAndPort: true,
++				}); err != nil {
++					log.WithError(err).WithFields(addrField).Fatal("Cannot start gops server")
++				}
++				log.WithFields(addrField).Info("Started gops server")
+ 			}
+-			log.WithFields(addrField).Info("Started gops server")
+ 
+ 			initEnv()
+ 			runOperator()
+@@ -250,14 +243,6 @@ func runOperator() {
  		}
  	}()
  
@@ -138,7 +106,7 @@ index 756b218121..ec71d565dc 100644
  	initK8s(k8sInitDone)
  
  	capabilities := k8sversion.Capabilities()
-@@ -367,189 +350,6 @@ func onOperatorStartLeading(ctx context.Context) {
+@@ -367,189 +352,6 @@ func onOperatorStartLeading(ctx context.Context) {
  		go cesController.Run(operatorWatchers.CiliumEndpointStore, stopCh)
  	}
  
@@ -328,7 +296,7 @@ index 756b218121..ec71d565dc 100644
  	if operatorOption.Config.IdentityGCInterval != 0 {
  		identityRateLimiter = rate.NewLimiter(
  			operatorOption.Config.IdentityGCRateInterval,
-@@ -583,31 +383,6 @@ func onOperatorStartLeading(ctx context.Context) {
+@@ -583,31 +385,6 @@ func onOperatorStartLeading(ctx context.Context) {
  		enableCiliumEndpointSyncGC(true)
  	}
  
@@ -361,5 +329,5 @@ index 756b218121..ec71d565dc 100644
  
  	<-shutdownSignal
 -- 
-2.39.1
+2.39.5 (Apple Git-154)
 

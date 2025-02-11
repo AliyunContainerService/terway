@@ -14,7 +14,7 @@ index 21124db6fb..b02803db11 100644
 +++ b/pkg/endpoint/restore.go
 @@ -113,8 +113,24 @@ func ReadEPsFromDirNames(ctx context.Context, owner regeneration.Owner, policyGe
  		}
-
+ 
  		if err := headerFileExists(); err != nil {
 -			scopedLog.WithError(err).Warn("C header file not found. Ignoring endpoint")
 -			continue
@@ -55,5 +55,5 @@ index 21124db6fb..b02803db11 100644
  	// ID of the endpoint, unique in the scope of the node
  	ID uint16
 -- 
-2.42.1
+2.39.5 (Apple Git-154)
 

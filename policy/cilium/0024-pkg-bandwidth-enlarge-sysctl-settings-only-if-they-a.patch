@@ -204,5 +204,5 @@ index 77d072b145..ea5bee3b03 100644
  func ApplySettings(sysSettings []Setting) error {
  	for _, s := range sysSettings {
 -- 
-2.44.0
+2.39.5 (Apple Git-154)
 

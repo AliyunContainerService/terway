@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Wed, 9 Jun 2021 16:55:20 +0800
-Subject: [PATCH] cilium terway datapath
+Subject: cilium terway datapath
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
@@ -735,5 +735,5 @@ index 5eca17daeb..1ee2227373 100644
  )
  
 -- 
-2.39.1
+2.39.5 (Apple Git-154)
 
