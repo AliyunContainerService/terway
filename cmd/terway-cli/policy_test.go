@@ -150,6 +150,46 @@ func Test_policyConfig(t *testing.T) {
 				assert.Contains(t, strings, "--other=false")
 			},
 		},
+		{
+			name: "test hubble",
+			args: args{container: func() *gabs.Container {
+				cniJSON, _ := gabs.ParseJSON([]byte(`{
+  "cniVersion": "0.4.0",
+  "name": "terway-chainer",
+  "plugins": [
+    {
+      "bandwidth_mode": "edt",
+      "capabilities": {
+        "bandwidth": true
+      },
+      "cilium_args": "disable-per-package-lb=true",
+      "eniip_virtual_type": "datapathv2",
+      "network_policy_provider": "ebpf",
+      "cilium_enable_hubble": "true",
+      "cilium_hubble_listen_address": ":4244",
+      "cilium_hubble_metrics_server": ":9091",
+      "cilium_hubble_metrics": "drop,tcp,flow,port-distribution,icmp",
+      "type": "terway"
+    },
+    {
+      "data-path": "datapathv2",
+      "enable-debug": false,
+      "log-file": "/var/run/cilium/cilium-cni.log",
+      "type": "cilium-cni"
+    }
+  ]
+}`))
+				return cniJSON
+			}()},
+			readFunc: func(name string) ([]byte, error) {
+				return []byte("#define DIRECT_ROUTING_DEV_IFINDEX 0\n#define DISABLE_PER_PACKET_LB 1\n"), nil
+			},
+			checkFunc: func(t *testing.T, strings []string, err error) {
+				assert.NoError(t, err)
+				assert.Contains(t, strings, "--disable-per-package-lb=true")
+				assert.Contains(t, strings, "--enable-hubble=true")
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
