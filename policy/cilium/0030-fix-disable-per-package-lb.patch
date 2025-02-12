@@ -5,14 +5,14 @@ Subject: fix disable per-package lb
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
- bpf/bpf_lxc.c                       | 5 ++---
+ bpf/bpf_lxc.c                       | 4 ++--
  daemon/cmd/daemon_main.go           | 3 +++
  pkg/datapath/linux/config/config.go | 5 +++++
  pkg/option/config.go                | 6 ++++++
- 4 files changed, 16 insertions(+), 3 deletions(-)
+ 4 files changed, 16 insertions(+), 2 deletions(-)
 
 diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
-index 2773e2c276..7e424204e2 100644
+index 2773e2c276..0a18c35c9a 100644
 --- a/bpf/bpf_lxc.c
 +++ b/bpf/bpf_lxc.c
 @@ -58,9 +58,9 @@
@@ -27,16 +27,8 @@ index 2773e2c276..7e424204e2 100644
  # define ENABLE_PER_PACKET_LB 1
  #endif
  
-@@ -1247,7 +1247,6 @@ static __always_inline int __tail_handle_ipv4(struct __ctx_buff *ctx)
- 
- 	if (unlikely(!is_valid_lxc_src_ipv4(ip4)))
- 		return DROP_INVALID_SIP;
--
- #ifdef ENABLE_PER_PACKET_LB
- 	{
- 		struct ipv4_ct_tuple tuple = {};
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index de2ad4900b..8b495d972f 100644
+index 3fd6c40564..4812da39c7 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
 @@ -1147,6 +1147,9 @@ func initializeFlags() {
@@ -97,5 +89,5 @@ index d4d9643f4e..80b5eb2c7c 100644
  	c.DisableEnvoyVersionCheck = viper.GetBool(DisableEnvoyVersionCheck)
  	if !c.EnableL7Proxy {
 -- 
-2.46.0
+2.39.5 (Apple Git-154)
 

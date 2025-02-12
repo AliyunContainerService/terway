@@ -154,5 +154,5 @@ index 060cc3a593..22b15db6c3 100644
  			// For a clusterwide policy the namespace is empty but when a to/fromEndpoint
  			// rule is added that represents a wildcard we add a match expression
 -- 
-2.45.2
+2.39.5 (Apple Git-154)
 

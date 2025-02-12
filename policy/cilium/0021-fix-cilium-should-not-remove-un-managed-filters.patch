@@ -32,12 +32,12 @@ index 1e6a750883..92af541580 100644
  	"net"
  	"strconv"
 +	"strings"
-
+ 
  	"github.com/vishvananda/netlink"
-
+ 
 @@ -163,8 +164,18 @@ func RemoveTCFilters(ifName string, tcDir uint32) error {
  	}
-
+ 
  	for _, f := range filters {
 -		if err := netlink.FilterDel(f); err != nil {
 -			return err
@@ -49,7 +49,7 @@ index 1e6a750883..92af541580 100644
 +			strings.Contains(bpfFilter.Name, "bpf_network") ||
 +			strings.Contains(bpfFilter.Name, "bpf_host") ||
 +			strings.Contains(bpfFilter.Name, "bpf_lxc") {
-+			log.Infof("remove tc filter %#v", bpfFilter)
++			log.Infof("remote tc filter %#v", bpfFilter)
 +			if err := netlink.FilterDel(f); err != nil {
 +				return err
 +			}
@@ -57,5 +57,5 @@ index 1e6a750883..92af541580 100644
  	}
  
 -- 
-2.44.0
+2.39.5 (Apple Git-154)
 

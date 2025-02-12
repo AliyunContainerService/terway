@@ -13,9 +13,9 @@ index 9a879f8ab7..7698a568e2 100644
 --- a/bpf/bpf_lxc.c
 +++ b/bpf/bpf_lxc.c
 @@ -15,6 +15,8 @@
-
+ 
  #define EVENT_SOURCE LXC_ID
-
+ 
 +#define LOCAL_DNS_IP 0x0A14FEA9
 +
  #include "lib/tailcall.h"
@@ -29,7 +29,7 @@ index 9a879f8ab7..7698a568e2 100644
  	if (is_defined(ENABLE_HOST_ROUTING)) {
  	    // for 5.10 use bpf redirect neigh
  		int oif;
-
+ 
 +        if (ip4->daddr == LOCAL_DNS_IP )
 +            goto pass_to_stack;
 +
@@ -46,5 +46,5 @@ index 9a879f8ab7..7698a568e2 100644
  	}
  
 -- 
-2.44.0
+2.39.5 (Apple Git-154)
 

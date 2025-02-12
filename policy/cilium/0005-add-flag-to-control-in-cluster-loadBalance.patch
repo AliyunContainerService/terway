@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Thu, 9 Dec 2021 10:39:49 +0800
-Subject: [PATCH] add flag to control in cluster loadBalance
+Subject: add flag to control in cluster loadBalance
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
@@ -11,7 +11,7 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  3 files changed, 11 insertions(+), 1 deletion(-)
 
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 1f2796810b..375a11d5cf 100644
+index 28bf66a7a9..ac3c6834a3 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
 @@ -390,6 +390,9 @@ func initializeFlags() {
@@ -70,5 +70,5 @@ index f713067030..df026092f8 100644
  	c.EnableHostPort = viper.GetBool(EnableHostPort)
  	c.EnableHostLegacyRouting = viper.GetBool(EnableHostLegacyRouting)
 -- 
-2.39.1
+2.39.5 (Apple Git-154)
 

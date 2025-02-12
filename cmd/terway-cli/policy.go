@@ -30,7 +30,7 @@ type PolicyConfig struct {
 }
 
 type CNIConfig struct {
-	HubbleEnabled       bool   `json:"cilium_enable_hubble,omitempty"`
+	HubbleEnabled       string `json:"cilium_enable_hubble,omitempty"`
 	HubbleMetrics       string `json:"cilium_hubble_metrics,omitempty"`
 	HubbleListenAddress string `json:"cilium_hubble_listen_address,omitempty"`
 	HubbleMetricServer  string `json:"cilium_hubble_metrics_server,omitempty"`
@@ -272,7 +272,7 @@ func policyConfig(container *gabs.Container) ([]string, error) {
 			return nil, fmt.Errorf("failed to unmarshal args: %w", err)
 		}
 
-		if h.HubbleEnabled {
+		if h.HubbleEnabled == "true" {
 			if h.HubbleMetrics == "" {
 				h.HubbleMetrics = "drop"
 			}

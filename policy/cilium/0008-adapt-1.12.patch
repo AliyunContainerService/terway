@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Wed, 28 Sep 2022 10:11:36 +0800
-Subject: [PATCH] adapt 1.12
+Subject: adapt 1.12
 
 - disable source ip check
 - disable host bpf
@@ -61,5 +61,5 @@ index d85bba9285..802384084e 100644
  	}
  
 -- 
-2.39.1
+2.39.5 (Apple Git-154)
 

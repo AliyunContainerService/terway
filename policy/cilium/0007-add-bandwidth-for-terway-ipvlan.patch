@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.dev@gmail.com>
 Date: Mon, 20 Jun 2022 10:57:16 +0800
-Subject: [PATCH] add bandwidth for terway ipvlan
+Subject: add bandwidth for terway ipvlan
 
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
@@ -93,5 +93,5 @@ index ea542dd527..0f078ad502 100644
  		ctmap.WriteBPFMacros(fw, e)
  	} else {
 -- 
-2.39.1
+2.39.5 (Apple Git-154)
 

@@ -1,8 +1,7 @@
-From 73a16a5192c1061f8eaeac8f6316770b2c8fb064 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alan Kutniewski <kutniewski@google.com>
 Date: Wed, 6 Jul 2022 13:39:14 +0200
-Subject: [PATCH] service: Improve memory usage when handling update of a big
- service.
+Subject: service: Improve memory usage when handling update of a big service.
 
 Change slices of Backends into slices of pointers to Backends.
 That way the slice can be garbage collected even if some parts of
@@ -31,7 +30,7 @@ Signed-off-by: Alan Kutniewski <kutniewski@google.com>
  pkg/redirectpolicy/manager.go             |   4 +-
  pkg/service/service.go                    |  46 ++++-----
  pkg/testutils/mockmaps/lbmap.go           |   8 +-
- 12 files changed, 155 insertions(+), 151 deletions(-)
+ 11 files changed, 120 insertions(+), 116 deletions(-)
 
 diff --git a/daemon/cmd/loadbalancer.go b/daemon/cmd/loadbalancer.go
 index 9545624e0b..59b057d1e1 100644
@@ -83,10 +82,10 @@ index ed6b4b67ec..f56edaab68 100644
  	lbEndpoints := []*envoy_config_endpoint.LbEndpoint{}
  	for port, bes := range backendMap {
 diff --git a/pkg/k8s/watchers/pod.go b/pkg/k8s/watchers/pod.go
-index 0cecea0ba4..ceeadcb426 100644
+index 2370d694dc..d61a324f61 100644
 --- a/pkg/k8s/watchers/pod.go
 +++ b/pkg/k8s/watchers/pod.go
-@@ -493,8 +493,8 @@ func (k *K8sWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string, l
+@@ -504,8 +504,8 @@ func (k *K8sWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string, l
  				continue
  			}
  
@@ -97,7 +96,7 @@ index 0cecea0ba4..ceeadcb426 100644
  
  			for _, podIP := range podIPs {
  				be := loadbalancer.Backend{
-@@ -507,9 +507,9 @@ func (k *K8sWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string, l
+@@ -518,9 +518,9 @@ func (k *K8sWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string, l
  					},
  				}
  				if be.L3n4Addr.IP.To4() != nil {
@@ -109,7 +108,7 @@ index 0cecea0ba4..ceeadcb426 100644
  				}
  			}
  
-@@ -854,8 +854,8 @@ func (k *K8sWatcher) deletePodHostData(pod *slim_corev1.Pod) (bool, error) {
+@@ -865,8 +865,8 @@ func (k *K8sWatcher) deletePodHostData(pod *slim_corev1.Pod) (bool, error) {
  // agent flag `option.Config.K8sEventHandover` this function might only return
  // local pods.
  // If `option.Config.K8sEventHandover` is:
@@ -121,10 +120,10 @@ index 0cecea0ba4..ceeadcb426 100644
  	<-k.controllersStarted
  	k.WaitForCacheSync(resources.K8sAPIGroupPodV1Core)
 diff --git a/pkg/k8s/watchers/watcher.go b/pkg/k8s/watchers/watcher.go
-index 5c815dfcc3..c0bd27a2e7 100644
+index e8e3ced771..767cf08257 100644
 --- a/pkg/k8s/watchers/watcher.go
 +++ b/pkg/k8s/watchers/watcher.go
-@@ -715,7 +715,7 @@ func genCartesianProduct(
+@@ -729,7 +729,7 @@ func genCartesianProduct(
  	feFamilyIPv6 := ip.IsIPv6(fe)
  
  	for fePortName, fePort := range ports {
@@ -133,7 +132,7 @@ index 5c815dfcc3..c0bd27a2e7 100644
  		for netIP, backend := range bes.Backends {
  			parsedIP := net.ParseIP(netIP)
  
-@@ -724,7 +724,7 @@ func genCartesianProduct(
+@@ -738,7 +738,7 @@ func genCartesianProduct(
  				if backend.Terminating {
  					backendState = loadbalancer.BackendStateTerminating
  				}
@@ -797,7 +796,7 @@ index 25a5527bdb..31b615ea1a 100644
  			L3n4Addr: be.L3n4Addr,
  		})
 diff --git a/pkg/service/service.go b/pkg/service/service.go
-index a85264813c..1fb72dc890 100644
+index 428317168f..51fe90f5dc 100644
 --- a/pkg/service/service.go
 +++ b/pkg/service/service.go
 @@ -43,8 +43,8 @@ type LBMap interface {
@@ -839,7 +838,7 @@ index a85264813c..1fb72dc890 100644
  	}
  	return &lb.SVC{
  		Frontend:            *svc.frontend.DeepCopy(),
-@@ -610,7 +610,7 @@ func (s *Service) upsertService(params *lb.SVC) (bool, lb.ID, error) {
+@@ -720,7 +720,7 @@ func (s *Service) upsertService(params *lb.SVC) (bool, lb.ID, error) {
  	onlyLocalBackends, filterBackends := svc.requireNodeLocalBackends(params.Frontend)
  	prevBackendCount := len(svc.backends)
  
@@ -848,7 +847,7 @@ index a85264813c..1fb72dc890 100644
  	for _, b := range params.Backends {
  		// Local redirect services or services with trafficPolicy=Local may
  		// only use node-local backends for external scope. We implement this by
-@@ -618,7 +618,7 @@ func (s *Service) upsertService(params *lb.SVC) (bool, lb.ID, error) {
+@@ -728,7 +728,7 @@ func (s *Service) upsertService(params *lb.SVC) (bool, lb.ID, error) {
  		if filterBackends && len(b.NodeName) > 0 && b.NodeName != nodeTypes.GetName() {
  			continue
  		}
@@ -857,7 +856,7 @@ index a85264813c..1fb72dc890 100644
  	}
  
  	// TODO (Aditi) When we filter backends for LocalRedirect service, there
-@@ -678,18 +678,18 @@ func (s *Service) upsertService(params *lb.SVC) (bool, lb.ID, error) {
+@@ -789,18 +789,18 @@ func (s *Service) upsertService(params *lb.SVC) (bool, lb.ID, error) {
  
  // filterServiceBackends returns the list of backends based on given front end ports.
  // The returned map will have key as port name/number, and value as list of respective backends.
@@ -880,7 +879,7 @@ index a85264813c..1fb72dc890 100644
  				port: svc.backends,
  			}
  		}
-@@ -710,7 +710,7 @@ func filterServiceBackends(svc *svcInfo, onlyPorts []string) map[string][]lb.Bac
+@@ -821,7 +821,7 @@ func filterServiceBackends(svc *svcInfo, onlyPorts []string) map[string][]lb.Bac
  //
  // In case of duplicated backends in the list, the state will be updated to the
  // last duplicate entry.
@@ -889,7 +888,7 @@ index a85264813c..1fb72dc890 100644
  	if len(backends) == 0 {
  		return nil
  	}
-@@ -804,7 +804,7 @@ func (s *Service) UpdateBackendsState(backends []lb.Backend) error {
+@@ -915,7 +915,7 @@ func (s *Service) UpdateBackendsState(backends []lb.Backend) error {
  			logfields.BackendState:     b.State,
  			logfields.BackendPreferred: b.Preferred,
  		}).Info("Persisting updated backend state for backend")
@@ -898,7 +897,7 @@ index a85264813c..1fb72dc890 100644
  			e := fmt.Errorf("failed to update backend %+v %w", b, err)
  			errs = multierr.Append(errs, e)
  		}
-@@ -1143,7 +1143,7 @@ func (s *Service) addBackendsToAffinityMatchMap(svcID lb.ID, backendIDs []lb.Bac
+@@ -1254,7 +1254,7 @@ func (s *Service) addBackendsToAffinityMatchMap(svcID lb.ID, backendIDs []lb.Bac
  }
  
  func (s *Service) upsertServiceIntoLBMaps(svc *svcInfo, onlyLocalBackends bool,
@@ -907,7 +906,7 @@ index a85264813c..1fb72dc890 100644
  	prevSessionAffinity bool, prevLoadBalancerSourceRanges []*cidr.CIDR,
  	obsoleteSVCBackendIDs []lb.BackendID, scopedLog *logrus.Entry) error {
  
-@@ -1373,7 +1373,7 @@ func (s *Service) restoreServicesLocked() error {
+@@ -1484,7 +1484,7 @@ func (s *Service) restoreServicesLocked() error {
  		for j, backend := range svc.Backends {
  			hash := backend.L3n4Addr.Hash()
  			s.backendRefCount.Add(hash)
@@ -916,7 +915,7 @@ index a85264813c..1fb72dc890 100644
  		}
  
  		// Recalculate Maglev lookup tables if the maps were removed due to
-@@ -1461,12 +1461,12 @@ func (s *Service) deleteServiceLocked(svc *svcInfo) error {
+@@ -1572,12 +1572,12 @@ func (s *Service) deleteServiceLocked(svc *svcInfo) error {
  	return nil
  }
  
@@ -932,7 +931,7 @@ index a85264813c..1fb72dc890 100644
  	backendSet := map[string]struct{}{}
  
  	for i, backend := range backends {
-@@ -1485,12 +1485,12 @@ func (s *Service) updateBackendsCacheLocked(svc *svcInfo, backends []lb.Backend)
+@@ -1596,12 +1596,12 @@ func (s *Service) updateBackendsCacheLocked(svc *svcInfo, backends []lb.Backend)
  				backends[i].State = lb.BackendStateActive
  				newBackends = append(newBackends, backends[i])
  				// TODO make backendByHash by value not by ref
@@ -947,7 +946,7 @@ index a85264813c..1fb72dc890 100644
  		} else {
  			backends[i].ID = b.ID
  			// Update backend state.
-@@ -1550,7 +1550,7 @@ func (s *Service) deleteBackendsFromCacheLocked(svc *svcInfo) []lb.BackendID {
+@@ -1661,7 +1661,7 @@ func (s *Service) deleteBackendsFromCacheLocked(svc *svcInfo) []lb.BackendID {
  	return obsoleteBackendIDs
  }
  
@@ -956,7 +955,7 @@ index a85264813c..1fb72dc890 100644
  	svcType lb.SVCType, svcTrafficPolicy lb.SVCTrafficPolicy, svcName, svcNamespace string) {
  	if s.monitorNotify == nil {
  		return
-@@ -1604,7 +1604,7 @@ func isWildcardAddr(frontend lb.L3n4AddrID) bool {
+@@ -1715,7 +1715,7 @@ func isWildcardAddr(frontend lb.L3n4AddrID) bool {
  	return net.IPv4zero.Equal(frontend.IP)
  }
  
@@ -1004,5 +1003,5 @@ index c6e095ef6e..3337b6ddee 100644
  
  	be, found := m.BackendByID[id]
 -- 
-2.37.1 (Apple Git-137.1)
+2.39.5 (Apple Git-154)
 

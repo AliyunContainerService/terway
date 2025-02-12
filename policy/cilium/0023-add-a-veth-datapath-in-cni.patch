@@ -31,5 +31,5 @@ index 0dfbf74c68..e60b52ec47 100644
  	}
  	return fmt.Errorf("unknown datapath %s", pluginCtx.NetConf.DataPath)
 -- 
-2.44.0
+2.39.5 (Apple Git-154)
 

@@ -47,5 +47,5 @@ index 868871811b..052cab28e9 100644
  // In the case of 1-3, we always create a CT_EGRESS CT entry. This allows the
  // CT GC to remove corresponding SNAT entries. In the case of 4, will create
 -- 
-2.47.0
+2.39.5 (Apple Git-154)
 

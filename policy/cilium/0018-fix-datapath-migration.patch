@@ -10,7 +10,7 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  2 files changed, 30 insertions(+)
 
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index ab35062146..de2ad4900b 100644
+index 37516e7fa4..3fd6c40564 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
 @@ -1380,6 +1380,9 @@ func initEnv(cmd *cobra.Command) {
@@ -62,5 +62,5 @@ index 31a55027a4..1e6a750883 100644
  
  	return finalize, nil
 -- 
-2.44.0
+2.39.5 (Apple Git-154)
 

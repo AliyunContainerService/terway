@@ -1,8 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?=E6=B8=85=E5=BC=A6?= <libokang.lbk@alibaba-inc.com>
 Date: Fri, 26 May 2023 15:14:29 +0800
-Subject: [PATCH] bpf: cilium-map-migrate might unpin in-use tailcall map
- #16561
+Subject: bpf: cilium-map-migrate might unpin in-use tailcall map #16561
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -93,5 +92,5 @@ index 629ef1bece..ab692881f7 100644
 +	return finalize, nil
  }
 -- 
-2.40.1
+2.39.5 (Apple Git-154)
 
