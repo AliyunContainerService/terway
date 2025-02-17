@@ -50,8 +50,8 @@ func SetBackendAPI(ctx context.Context, b BackendAPI) context.Context {
 type ENI interface {
 	CreateNetworkInterfaceV2(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error)
 	DescribeNetworkInterfaceV2(ctx context.Context, opts ...DescribeNetworkInterfaceOption) ([]*NetworkInterface, error)
-	AttachNetworkInterfaceV2(ctx context.Context, opts ...AttachNetworkInterfaceOption) error
-	DetachNetworkInterfaceV2(ctx context.Context, opts ...DetachNetworkInterfaceOption) error
+	AttachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
+	DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
 	DeleteNetworkInterfaceV2(ctx context.Context, eniID string) error
 	AssignPrivateIPAddressV2(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]IPSet, error)
 	UnAssignPrivateIPAddressesV2(ctx context.Context, eniID string, ips []IPSet) error

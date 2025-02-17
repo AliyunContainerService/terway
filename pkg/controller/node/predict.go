@@ -68,7 +68,7 @@ func predicateNode(o client.Object) bool {
 }
 
 func isECSNode(node *corev1.Node) bool {
-	if utils.ISLinJunNode(node) {
+	if utils.ISLinJunNode(node.Labels) {
 		return false
 	}
 	if utils.ISVKNode(node) {

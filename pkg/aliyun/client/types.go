@@ -42,7 +42,8 @@ const (
 )
 
 const (
-	LENIStatusAvailable string = "Available"
+	LENIStatusAvailable  string = "Available"
+	LENIStatusUnattached string = "Unattached"
 )
 
 const (

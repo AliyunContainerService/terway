@@ -22,6 +22,8 @@ type NetworkInterfaceOptions struct {
 	Status                string
 	NetworkInterfaceID    string
 	DeleteENIOnECSRelease *bool
+
+	ZoneID string
 }
 
 type CreateNetworkInterfaceOption interface {
@@ -84,6 +86,10 @@ func (c *CreateNetworkInterfaceOptions) ApplyCreateNetworkInterface(options *Cre
 		if c.NetworkInterfaceOptions.DeleteENIOnECSRelease != nil {
 			options.NetworkInterfaceOptions.DeleteENIOnECSRelease = c.NetworkInterfaceOptions.DeleteENIOnECSRelease
 		}
+
+		if c.NetworkInterfaceOptions.ZoneID != "" {
+			options.NetworkInterfaceOptions.ZoneID = c.NetworkInterfaceOptions.ZoneID
+		}
 	}
 }
 
@@ -140,6 +146,53 @@ func (c *CreateNetworkInterfaceOptions) Finish(idempotentKeyGen IdempotentKeyGen
 	}, nil
 }
 
+func (c *CreateNetworkInterfaceOptions) EFLO(idempotentKeyGen IdempotentKeyGen) (*eflo.CreateElasticNetworkInterfaceRequest, func(), error) {
+	if c.NetworkInterfaceOptions == nil {
+		return nil, nil, ErrInvalidArgs
+	}
+
+	if c.NetworkInterfaceOptions.IPCount > 1 {
+		// eflo does not support multi ip in create
+		return nil, nil, ErrInvalidArgs
+	}
+
+	if c.NetworkInterfaceOptions.VSwitchID == "" {
+		return nil, nil, ErrInvalidArgs
+	}
+
+	req := eflo.CreateCreateElasticNetworkInterfaceRequest()
+	if c.NetworkInterfaceOptions.VSwitchID != "" {
+		req.VSwitchId = c.NetworkInterfaceOptions.VSwitchID
+	}
+	if len(c.NetworkInterfaceOptions.SecurityGroupIDs) > 0 {
+		req.SecurityGroupId = c.NetworkInterfaceOptions.SecurityGroupIDs[0]
+	}
+	req.Description = eniDescription
+	if c.NetworkInterfaceOptions.InstanceID != "" {
+		req.NodeId = c.NetworkInterfaceOptions.InstanceID
+	}
+	if c.NetworkInterfaceOptions.ZoneID != "" {
+		req.ZoneId = c.NetworkInterfaceOptions.ZoneID
+	}
+
+	if req.SecurityGroupId == "" {
+		return nil, nil, ErrInvalidArgs
+	}
+
+	argsHash := md5Hash(req)
+	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
+
+	if c.Backoff == nil {
+		c.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	return req, func() {
+		idempotentKeyGen.PutBack(argsHash, req.ClientToken)
+	}, nil
+}
+
 type AssignPrivateIPAddressOption interface {
 	ApplyAssignPrivateIPAddress(*AssignPrivateIPAddressOptions)
 }
@@ -166,6 +219,29 @@ func (c *AssignPrivateIPAddressOptions) Finish(idempotentKeyGen IdempotentKeyGen
 	req := ecs.CreateAssignPrivateIpAddressesRequest()
 	req.NetworkInterfaceId = c.NetworkInterfaceOptions.NetworkInterfaceID
 	req.SecondaryPrivateIpAddressCount = requests.NewInteger(c.NetworkInterfaceOptions.IPCount)
+
+	argsHash := md5Hash(req)
+	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
+
+	if c.Backoff == nil {
+		c.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	return req, func() {
+		idempotentKeyGen.PutBack(argsHash, req.ClientToken)
+	}, nil
+}
+
+func (c *AssignPrivateIPAddressOptions) EFLO(idempotentKeyGen IdempotentKeyGen) (*eflo.AssignLeniPrivateIpAddressRequest, func(), error) {
+	if c.NetworkInterfaceOptions == nil ||
+		c.NetworkInterfaceOptions.NetworkInterfaceID == "" ||
+		c.NetworkInterfaceOptions.IPCount != 1 {
+		return nil, nil, ErrInvalidArgs
+	}
+	req := eflo.CreateAssignLeniPrivateIpAddressRequest()
+	req.ElasticNetworkInterfaceId = c.NetworkInterfaceOptions.NetworkInterfaceID
 
 	argsHash := md5Hash(req)
 	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
@@ -324,74 +400,4 @@ func (o *DescribeNetworkInterfaceOptions) EFLO() *eflo.ListElasticNetworkInterfa
 	}
 
 	return req
-}
-
-type AttachNetworkInterfaceOption interface {
-	ApplyTo(*AttachNetworkInterfaceOptions)
-}
-
-type AttachNetworkInterfaceOptions struct {
-	NetworkInterfaceID, InstanceID, TrunkNetworkInstanceId *string
-}
-
-func (o *AttachNetworkInterfaceOptions) ApplyTo(in *AttachNetworkInterfaceOptions) {
-	if o.NetworkInterfaceID != nil {
-		in.NetworkInterfaceID = o.NetworkInterfaceID
-	}
-	if o.InstanceID != nil {
-		in.InstanceID = o.InstanceID
-	}
-	if o.TrunkNetworkInstanceId != nil {
-		in.TrunkNetworkInstanceId = o.TrunkNetworkInstanceId
-	}
-}
-
-func (o *AttachNetworkInterfaceOptions) ECS() (*ecs.AttachNetworkInterfaceRequest, error) {
-	if o.NetworkInterfaceID == nil || o.InstanceID == nil {
-		return nil, ErrInvalidArgs
-	}
-	req := ecs.CreateAttachNetworkInterfaceRequest()
-	req.NetworkInterfaceId = *o.NetworkInterfaceID
-	req.InstanceId = *o.InstanceID
-
-	if o.TrunkNetworkInstanceId != nil {
-		req.TrunkNetworkInstanceId = *o.TrunkNetworkInstanceId
-	}
-
-	return req, nil
-}
-
-type DetachNetworkInterfaceOption interface {
-	ApplyTo(*DetachNetworkInterfaceOptions)
-}
-
-type DetachNetworkInterfaceOptions struct {
-	NetworkInterfaceID, InstanceID, TrunkENIID *string
-}
-
-func (o *DetachNetworkInterfaceOptions) ApplyTo(in *DetachNetworkInterfaceOptions) {
-	if o.NetworkInterfaceID != nil {
-		in.NetworkInterfaceID = o.NetworkInterfaceID
-	}
-	if o.InstanceID != nil {
-		in.InstanceID = o.InstanceID
-	}
-	if o.TrunkENIID != nil {
-		in.TrunkENIID = o.TrunkENIID
-	}
-}
-
-func (o *DetachNetworkInterfaceOptions) ECS() (*ecs.DetachNetworkInterfaceRequest, error) {
-	if o.NetworkInterfaceID == nil || o.InstanceID == nil {
-		return nil, ErrInvalidArgs
-	}
-	req := ecs.CreateDetachNetworkInterfaceRequest()
-	req.NetworkInterfaceId = *o.NetworkInterfaceID
-	req.InstanceId = *o.InstanceID
-
-	if o.TrunkENIID != nil {
-		req.TrunkNetworkInstanceId = *o.TrunkENIID
-	}
-
-	return req, nil
 }
