@@ -9,7 +9,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.0
 	github.com/Microsoft/hcsshim v0.9.9
 	github.com/alexflint/go-filemutex v1.2.0
-	github.com/aliyun/alibaba-cloud-sdk-go v1.62.663
+	github.com/aliyun/alibaba-cloud-sdk-go v1.63.88
 	github.com/boltdb/bolt v1.3.1
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.3.0
