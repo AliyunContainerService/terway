@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/netip"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -53,7 +52,8 @@ const (
 
 	finalizer = "network.alibabacloud.com/node-controller"
 
-	batchSize = 10
+	ecsBatchSize  = 10
+	efloBatchSize = 1
 )
 
 var EventCh = make(chan event.GenericEvent, 1000)
@@ -211,9 +211,20 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 	}
 
 	// check if daemon has ready
-	if node.Spec.ENISpec == nil ||
-		node.Spec.Pool == nil {
-		return reconcile.Result{}, nil
+
+	if utils.ISLinJunNode(node.Labels) {
+		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
+		if node.Spec.ENISpec == nil ||
+			node.Spec.Pool == nil ||
+			node.Spec.NodeCap.Adapters == 0 {
+			return reconcile.Result{}, nil
+		}
+	} else {
+		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIECS)
+		if node.Spec.ENISpec == nil ||
+			node.Spec.Pool == nil {
+			return reconcile.Result{}, nil
+		}
 	}
 
 	if types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
@@ -313,8 +324,16 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	l := logf.FromContext(ctx).WithName("syncWithAPI")
 	SyncOpenAPITotal.WithLabelValues(node.Name).Inc()
 
+	var err error
+	var enis []*aliyunClient.NetworkInterface
 	// all eni attached to this instance is take into count. (exclude member eni)
-	enis, err := n.aliyun.DescribeNetworkInterface(ctx, "", nil, node.Spec.NodeMetadata.InstanceID, "", "", node.Spec.ENISpec.TagFilter)
+	opts := &aliyunClient.DescribeNetworkInterfaceOptions{
+		InstanceID: &node.Spec.NodeMetadata.InstanceID,
+	}
+	if node.Spec.ENISpec.TagFilter != nil {
+		opts.Tags = &node.Spec.ENISpec.TagFilter
+	}
+	enis, err = n.aliyun.DescribeNetworkInterfaceV2(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -368,18 +387,26 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 			// as the eni is not attached, so just delete it
 			if node.Status.NetworkInterfaces[id].NetworkInterfaceType == networkv1beta1.ENITypeSecondary {
 				var remote []*aliyunClient.NetworkInterface
-				remote, err = n.aliyun.DescribeNetworkInterface(ctx, "", []string{id}, "", "", "", node.Spec.ENISpec.TagFilter)
+
+				opts = &aliyunClient.DescribeNetworkInterfaceOptions{
+					InstanceID:          &node.Spec.NodeMetadata.InstanceID,
+					NetworkInterfaceIDs: &[]string{id},
+				}
+				if node.Spec.ENISpec.TagFilter != nil {
+					opts.Tags = &node.Spec.ENISpec.TagFilter
+				}
+				remote, err = n.aliyun.DescribeNetworkInterfaceV2(ctx, opts)
+
 				if err != nil {
 					l.Error(err, "error get eni", "eni", id)
 					continue
 				}
-
 				// ignore eni , either be attached to other instance or be deleted or ignored by tag filter
 				if len(remote) > 0 {
 					switch remote[0].Status {
 					case aliyunClient.ENIStatusAvailable:
 						l.Info("delete eni not found in remote, but in cr", "eni", id)
-						err = n.aliyun.DeleteNetworkInterface(ctx, id)
+						err = n.aliyun.DeleteNetworkInterfaceV2(ctx, id)
 					case aliyunClient.ENIStatusInUse:
 						// ignore eni used by other instance
 					default:
@@ -685,10 +712,10 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	options := getEniOptions(node)
 
 	// handle trunk/secondary eni
-	assignEniWithOptions(node, len(normalPods)+node.Spec.Pool.MinPoolSize, options, func(option *eniOptions) bool {
+	assignEniWithOptions(ctx, node, len(normalPods)+node.Spec.Pool.MinPoolSize, options, func(option *eniOptions) bool {
 		return n.validateENI(ctx, option, []eniTypeKey{secondaryKey, trunkKey})
 	})
-	assignEniWithOptions(node, len(rdmaPods), options, func(option *eniOptions) bool {
+	assignEniWithOptions(ctx, node, len(rdmaPods), options, func(option *eniOptions) bool {
 		return n.validateENI(ctx, option, []eniTypeKey{rdmaKey})
 	})
 
@@ -871,7 +898,7 @@ func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eni
 
 // assignEniWithOptions determine how many ip should be added to this eni.
 // In dual stack, ip on eni is automatically balanced.
-func assignEniWithOptions(node *networkv1beta1.Node, toAdd int, options []*eniOptions, filterFunc func(option *eniOptions) bool) {
+func assignEniWithOptions(ctx context.Context, node *networkv1beta1.Node, toAdd int, options []*eniOptions, filterFunc func(option *eniOptions) bool) {
 	eniSpec := node.Spec.ENISpec
 
 	toAddIPv4, toAddIPv6 := 0, 0
@@ -896,7 +923,7 @@ func assignEniWithOptions(node *networkv1beta1.Node, toAdd int, options []*eniOp
 				if toAddIPv4 > 0 {
 					leftQuota := node.Spec.NodeCap.IPv4PerAdapter - len(option.eniRef.IPv4)
 					if leftQuota > 0 {
-						option.addIPv4N = min(leftQuota, toAddIPv4, batchSize)
+						option.addIPv4N = min(leftQuota, toAddIPv4, batchSize(ctx))
 						toAddIPv4 -= option.addIPv4N
 					} else {
 						option.isFull = true
@@ -911,7 +938,7 @@ func assignEniWithOptions(node *networkv1beta1.Node, toAdd int, options []*eniOp
 				if toAddIPv6 > 0 {
 					leftQuota := node.Spec.NodeCap.IPv6PerAdapter - len(option.eniRef.IPv6)
 					if leftQuota > 0 {
-						option.addIPv6N = min(leftQuota, toAddIPv6, batchSize)
+						option.addIPv6N = min(leftQuota, toAddIPv6, batchSize(ctx))
 						toAddIPv6 -= option.addIPv6N
 					} else {
 						option.isFull = true
@@ -932,11 +959,11 @@ func assignEniWithOptions(node *networkv1beta1.Node, toAdd int, options []*eniOp
 			}
 
 			if toAddIPv4 > 0 {
-				option.addIPv4N = min(node.Spec.NodeCap.IPv4PerAdapter, toAddIPv4, batchSize)
+				option.addIPv4N = min(node.Spec.NodeCap.IPv4PerAdapter, toAddIPv4, batchSize(ctx))
 				toAddIPv4 -= option.addIPv4N
 			}
 			if toAddIPv6 > 0 {
-				option.addIPv6N = min(node.Spec.NodeCap.IPv6PerAdapter, toAddIPv6, batchSize)
+				option.addIPv6N = min(node.Spec.NodeCap.IPv6PerAdapter, toAddIPv6, batchSize(ctx))
 				toAddIPv6 -= option.addIPv6N
 			}
 		}
@@ -1016,21 +1043,23 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 
 		switch eni.Status {
 		case aliyunClient.ENIStatusDeleting, aliyunClient.ENIStatusDetaching:
-			err := n.aliyun.DetachNetworkInterface(ctx, eni.ID, node.Spec.NodeMetadata.InstanceID, "")
-			if err != nil {
-				log.Error(err, "run gc failed")
-				continue
-			}
-			_, err = n.aliyun.WaitForNetworkInterface(ctx, eni.ID, aliyunClient.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
-			if err != nil {
-				if !errors.Is(err, apiErr.ErrNotFound) {
+			if !isEFLO(ctx) {
+				err := n.aliyun.DetachNetworkInterface(ctx, eni.ID, node.Spec.NodeMetadata.InstanceID, "")
+				if err != nil {
 					log.Error(err, "run gc failed")
 					continue
+				}
+				_, err = n.aliyun.WaitForNetworkInterface(ctx, eni.ID, aliyunClient.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
+				if err != nil {
+					if !errors.Is(err, apiErr.ErrNotFound) {
+						log.Error(err, "run gc failed")
+						continue
+					}
 				}
 			}
 
 			// wait eni detached
-			err = n.aliyun.DeleteNetworkInterface(ctx, eni.ID)
+			err := n.aliyun.DeleteNetworkInterfaceV2(ctx, eni.ID)
 			if err != nil {
 				log.Error(err, "run gc failed")
 				continue
@@ -1042,26 +1071,27 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 			delete(node.Status.NetworkInterfaces, eni.ID)
 		case aliyunClient.ENIStatusInUse:
 			var waitTime time.Duration
-			ips := make([]netip.Addr, 0)
+			ips := make([]aliyunClient.IPSet, 0)
 			for _, ip := range eni.IPv4 {
 				if ip.Status == networkv1beta1.IPStatusDeleting {
-					addr, err := netip.ParseAddr(ip.IP)
-					if err == nil {
-						ips = append(ips, addr)
-					}
+					ips = append(ips, aliyunClient.IPSet{
+						Primary:   false,
+						IPAddress: ip.IP,
+						IPName:    ip.IPName,
+					})
 				}
 			}
-			ips = lo.Subset(ips, 0, batchSize)
+			ips = lo.Subset(ips, 0, uint(batchSize(ctx)))
 			if len(ips) > 0 {
-				err := n.aliyun.UnAssignPrivateIPAddresses(ctx, eni.ID, ips)
+				err := n.aliyun.UnAssignPrivateIPAddressesV2(ctx, eni.ID, ips)
 				if err != nil {
 					continue
 				}
 
 				MetaCtx(ctx).StatusChanged.Store(true)
 
-				lo.ForEach(ips, func(ip netip.Addr, _ int) {
-					delete(eni.IPv4, ip.String())
+				lo.ForEach(ips, func(ip aliyunClient.IPSet, _ int) {
+					delete(eni.IPv4, ip.IPAddress)
 				})
 
 				waitTime = 1 * time.Second
@@ -1070,26 +1100,27 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 			ips = ips[:0]
 			for _, ip := range eni.IPv6 {
 				if ip.Status == networkv1beta1.IPStatusDeleting {
-					addr, err := netip.ParseAddr(ip.IP)
-					if err == nil {
-						ips = append(ips, addr)
-					}
+					ips = append(ips, aliyunClient.IPSet{
+						Primary:   false,
+						IPAddress: ip.IP,
+						IPName:    ip.IPName,
+					})
 				}
 			}
-			ips = lo.Subset(ips, 0, batchSize)
+			ips = lo.Subset(ips, 0, uint(batchSize(ctx)))
 			if len(ips) > 0 {
 				if waitTime > 0 {
 					time.Sleep(waitTime)
 				}
 
-				err := n.aliyun.UnAssignIpv6Addresses(ctx, eni.ID, ips)
+				err := n.aliyun.UnAssignIpv6AddressesV2(ctx, eni.ID, ips)
 				if err != nil {
 					continue
 				}
 				MetaCtx(ctx).StatusChanged.Store(true)
 
-				lo.ForEach(ips, func(ip netip.Addr, _ int) {
-					delete(eni.IPv6, ip.String())
+				lo.ForEach(ips, func(ip aliyunClient.IPSet, _ int) {
+					delete(eni.IPv6, ip.IPAddress)
 				})
 			}
 		default:
@@ -1167,10 +1198,11 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 	}
 	bo := backoff.Backoff(backoff.ENICreate)
 
-	tags := node.Spec.ENISpec.Tag
-	if tags == nil {
-		tags = map[string]string{}
+	tags := make(map[string]string, len(node.Spec.ENISpec.Tag))
+	for k, v := range node.Spec.ENISpec.Tag {
+		tags[k] = v
 	}
+
 	// keep the ds behave
 	tags[types.NetworkInterfaceTagCreatorKey] = types.NetworkInterfaceTagCreatorValue
 	createOpts := &aliyunClient.CreateNetworkInterfaceOptions{
@@ -1181,11 +1213,15 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			Tags:             node.Spec.ENISpec.Tag,
 			IPCount:          opt.addIPv4N,
 			IPv6Count:        opt.addIPv6N,
+
+			ZoneID:     node.Spec.NodeMetadata.ZoneID, // eflo
+			InstanceID: node.Spec.NodeMetadata.InstanceID,
 		},
+
 		Backoff: &bo,
 	}
 
-	result, err := n.aliyun.CreateNetworkInterface(ctx, typeOption, createOpts)
+	result, err := n.aliyun.CreateNetworkInterfaceV2(ctx, typeOption, createOpts)
 	if err != nil {
 		if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
 			// block
@@ -1203,7 +1239,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer rollbackCancel()
 
-			innerErr := n.aliyun.DeleteNetworkInterface(rollbackCtx, result.NetworkInterfaceID)
+			innerErr := n.aliyun.DeleteNetworkInterfaceV2(rollbackCtx, result.NetworkInterfaceID)
 			if innerErr == nil {
 				return
 			}
@@ -1216,13 +1252,26 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			MetaCtx(ctx).StatusChanged.Store(true)
 		}
 	}()
-	err = n.aliyun.AttachNetworkInterface(ctx, result.NetworkInterfaceID, node.Spec.NodeMetadata.InstanceID, "")
-	if err != nil {
-		return err
+
+	var status string
+	if !isEFLO(ctx) {
+		err = n.aliyun.AttachNetworkInterface(ctx, result.NetworkInterfaceID, node.Spec.NodeMetadata.InstanceID, "")
+		if err != nil {
+			return err
+		}
+		if err != nil {
+			return err
+		}
+
+		time.Sleep(3 * time.Second)
+
+		status = aliyunClient.ENIStatusInUse
+
+	} else {
+		status = aliyunClient.LENIStatusAvailable
 	}
 
-	time.Sleep(3 * time.Second)
-	eni, err := n.aliyun.WaitForNetworkInterface(ctx, result.NetworkInterfaceID, aliyunClient.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
+	eni, err := n.aliyun.WaitForNetworkInterfaceV2(ctx, result.NetworkInterfaceID, status, backoff.Backoff(backoff.WaitENIStatus), false)
 	if err != nil {
 		return err
 	}
@@ -1246,13 +1295,14 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 	// nb(l1b0k): ENi does not support assigning both IPv4 and IPv6 simultaneously.
 	if opt.addIPv4N > 0 {
 		bo := backoff.Backoff(backoff.ENIIPOps)
-		result, err := n.aliyun.AssignPrivateIPAddress(ctx, &aliyunClient.AssignPrivateIPAddressOptions{
+		result, err := n.aliyun.AssignPrivateIPAddressV2(ctx, &aliyunClient.AssignPrivateIPAddressOptions{
 			NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
 				NetworkInterfaceID: opt.eniRef.ID,
 				IPCount:            opt.addIPv4N,
 			},
 			Backoff: &bo,
 		})
+
 		if err != nil {
 			if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
 				// block
@@ -1267,7 +1317,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 			}
 			for _, ip := range result {
 				addIPToMap(opt.eniRef.IPv4, &networkv1beta1.IP{
-					IP:     ip.String(),
+					IP:     ip.IPAddress,
 					Status: networkv1beta1.IPStatusValid,
 				})
 			}
@@ -1275,7 +1325,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 	}
 	if opt.addIPv6N > 0 {
 		bo := backoff.Backoff(backoff.ENIIPOps)
-		result, err := n.aliyun.AssignIpv6Addresses(ctx, &aliyunClient.AssignIPv6AddressesOptions{
+		result, err := n.aliyun.AssignIpv6AddressesV2(ctx, &aliyunClient.AssignIPv6AddressesOptions{
 			NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
 				NetworkInterfaceID: opt.eniRef.ID,
 				IPv6Count:          opt.addIPv6N,
@@ -1296,7 +1346,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 			}
 			for _, ip := range result {
 				addIPToMap(opt.eniRef.IPv6, &networkv1beta1.IP{
-					IP:     ip.String(),
+					IP:     ip.IPAddress,
 					Status: networkv1beta1.IPStatusValid,
 				})
 			}
@@ -1445,4 +1495,15 @@ func isIPNotEnough(err error) bool {
 		return true
 	}
 	return false
+}
+
+func isEFLO(ctx context.Context) bool {
+	return aliyunClient.GetBackendAPI(ctx) == aliyunClient.BackendAPIEFLO
+}
+
+func batchSize(ctx context.Context) int {
+	if isEFLO(ctx) {
+		return efloBatchSize
+	}
+	return ecsBatchSize
 }

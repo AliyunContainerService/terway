@@ -36,6 +36,7 @@ import (
 type Interface interface {
 	aliyunClient.VPC
 	aliyunClient.ECS
+	aliyunClient.ENI
 }
 
 type ControllerCtx struct {
