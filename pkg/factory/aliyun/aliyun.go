@@ -148,7 +148,7 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 	v4Set, err := func() ([]netip.Addr, error) {
 		var ips []netip.Addr
 		for _, v := range eni.PrivateIPSets {
-			addr, err := netip.ParseAddr(v.PrivateIpAddress)
+			addr, err := netip.ParseAddr(v.IPAddress)
 			if err != nil {
 				return nil, err
 			}
@@ -163,7 +163,7 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 	v6Set, err := func() ([]netip.Addr, error) {
 		var ips []netip.Addr
 		for _, v := range eni.IPv6Set {
-			addr, err := netip.ParseAddr(v.Ipv6Address)
+			addr, err := netip.ParseAddr(v.IPAddress)
 			if err != nil {
 				return nil, err
 			}

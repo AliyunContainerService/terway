@@ -3,6 +3,7 @@ package client
 import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -219,4 +220,178 @@ func (c *AssignIPv6AddressesOptions) Finish(idempotentKeyGen IdempotentKeyGen) (
 	return req, func() {
 		idempotentKeyGen.PutBack(argsHash, req.ClientToken)
 	}, nil
+}
+
+type DescribeNetworkInterfaceOption interface {
+	ApplyTo(*DescribeNetworkInterfaceOptions)
+}
+
+type DescribeNetworkInterfaceOptions struct {
+	VPCID               *string
+	NetworkInterfaceIDs *[]string
+	InstanceID          *string
+	InstanceType        *string
+	Status              *string
+	Tags                *map[string]string
+
+	Backoff *wait.Backoff
+}
+
+func (o *DescribeNetworkInterfaceOptions) ApplyTo(in *DescribeNetworkInterfaceOptions) {
+	if o.VPCID != nil {
+		in.VPCID = o.VPCID
+	}
+	if o.NetworkInterfaceIDs != nil {
+		in.NetworkInterfaceIDs = o.NetworkInterfaceIDs
+	}
+	if o.InstanceID != nil {
+		in.InstanceID = o.InstanceID
+	}
+	if o.InstanceType != nil {
+		in.InstanceType = o.InstanceType
+	}
+	if o.Status != nil {
+		in.Status = o.Status
+	}
+	if o.Tags != nil {
+		in.Tags = o.Tags
+	}
+	if o.Backoff != nil {
+		in.Backoff = o.Backoff
+	}
+}
+
+func (o *DescribeNetworkInterfaceOptions) ECS() *ecs.DescribeNetworkInterfacesRequest {
+	req := ecs.CreateDescribeNetworkInterfacesRequest()
+	if o.VPCID != nil {
+		req.VpcId = *o.VPCID
+	}
+	if o.NetworkInterfaceIDs != nil {
+		req.NetworkInterfaceId = o.NetworkInterfaceIDs
+	}
+	if o.InstanceID != nil {
+		req.InstanceId = *o.InstanceID
+	}
+	if o.InstanceType != nil {
+		req.Type = *o.InstanceType
+	}
+	if o.Status != nil {
+		req.Status = *o.Status
+	}
+	if o.Tags != nil {
+		tags := make([]ecs.DescribeNetworkInterfacesTag, 0)
+		for k, v := range *o.Tags {
+			tags = append(tags, ecs.DescribeNetworkInterfacesTag{
+				Key:   k,
+				Value: v,
+			})
+		}
+		req.Tag = &tags
+	}
+
+	if o.Backoff == nil {
+		o.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	return req
+}
+
+func (o *DescribeNetworkInterfaceOptions) EFLO() *eflo.ListElasticNetworkInterfacesRequest {
+	req := eflo.CreateListElasticNetworkInterfacesRequest()
+	if o.VPCID != nil {
+		req.VpcId = *o.VPCID
+	}
+
+	if o.NetworkInterfaceIDs != nil && len(*o.NetworkInterfaceIDs) > 0 {
+		req.ElasticNetworkInterfaceId = (*o.NetworkInterfaceIDs)[0]
+	}
+	if o.InstanceID != nil {
+		req.NodeId = *o.InstanceID
+	}
+	if o.InstanceType != nil {
+		req.Type = *o.InstanceType
+	}
+	if o.Status != nil {
+		req.Status = *o.Status
+	}
+
+	if o.Backoff == nil {
+		o.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	return req
+}
+
+type AttachNetworkInterfaceOption interface {
+	ApplyTo(*AttachNetworkInterfaceOptions)
+}
+
+type AttachNetworkInterfaceOptions struct {
+	NetworkInterfaceID, InstanceID, TrunkNetworkInstanceId *string
+}
+
+func (o *AttachNetworkInterfaceOptions) ApplyTo(in *AttachNetworkInterfaceOptions) {
+	if o.NetworkInterfaceID != nil {
+		in.NetworkInterfaceID = o.NetworkInterfaceID
+	}
+	if o.InstanceID != nil {
+		in.InstanceID = o.InstanceID
+	}
+	if o.TrunkNetworkInstanceId != nil {
+		in.TrunkNetworkInstanceId = o.TrunkNetworkInstanceId
+	}
+}
+
+func (o *AttachNetworkInterfaceOptions) ECS() (*ecs.AttachNetworkInterfaceRequest, error) {
+	if o.NetworkInterfaceID == nil || o.InstanceID == nil {
+		return nil, ErrInvalidArgs
+	}
+	req := ecs.CreateAttachNetworkInterfaceRequest()
+	req.NetworkInterfaceId = *o.NetworkInterfaceID
+	req.InstanceId = *o.InstanceID
+
+	if o.TrunkNetworkInstanceId != nil {
+		req.TrunkNetworkInstanceId = *o.TrunkNetworkInstanceId
+	}
+
+	return req, nil
+}
+
+type DetachNetworkInterfaceOption interface {
+	ApplyTo(*DetachNetworkInterfaceOptions)
+}
+
+type DetachNetworkInterfaceOptions struct {
+	NetworkInterfaceID, InstanceID, TrunkENIID *string
+}
+
+func (o *DetachNetworkInterfaceOptions) ApplyTo(in *DetachNetworkInterfaceOptions) {
+	if o.NetworkInterfaceID != nil {
+		in.NetworkInterfaceID = o.NetworkInterfaceID
+	}
+	if o.InstanceID != nil {
+		in.InstanceID = o.InstanceID
+	}
+	if o.TrunkENIID != nil {
+		in.TrunkENIID = o.TrunkENIID
+	}
+}
+
+func (o *DetachNetworkInterfaceOptions) ECS() (*ecs.DetachNetworkInterfaceRequest, error) {
+	if o.NetworkInterfaceID == nil || o.InstanceID == nil {
+		return nil, ErrInvalidArgs
+	}
+	req := ecs.CreateDetachNetworkInterfaceRequest()
+	req.NetworkInterfaceId = *o.NetworkInterfaceID
+	req.InstanceId = *o.InstanceID
+
+	if o.TrunkENIID != nil {
+		req.TrunkNetworkInstanceId = *o.TrunkENIID
+	}
+
+	return req, nil
 }

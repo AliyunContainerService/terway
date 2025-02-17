@@ -3,7 +3,6 @@ package node
 import (
 	"sort"
 
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/go-logr/logr"
 	"github.com/samber/lo"
 
@@ -130,20 +129,21 @@ func newENIFromAPI(eni *aliyunClient.NetworkInterface) *networkv1beta1.NetworkIn
 		PrimaryIPAddress:            eni.PrivateIPAddress,
 		NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficMode(eni.NetworkInterfaceTrafficMode),
 		NetworkInterfaceType:        networkv1beta1.ENIType(eni.Type),
-		IPv4: lo.SliceToMap(eni.PrivateIPSets, func(item ecs.PrivateIpSet) (string, *networkv1beta1.IP) {
-			return item.PrivateIpAddress, &networkv1beta1.IP{
-				IP:      item.PrivateIpAddress,
-				Status:  networkv1beta1.IPStatusValid,
-				Primary: item.Primary,
-			}
-		}),
-		IPv6: lo.SliceToMap(eni.IPv6Set, func(item ecs.Ipv6Set) (string, *networkv1beta1.IP) {
-			return item.Ipv6Address, &networkv1beta1.IP{
-				IP:     item.Ipv6Address,
-				Status: networkv1beta1.IPStatusValid,
-			}
-		}),
+		IPv4:                        convertIPSet(eni.PrivateIPSets),
+		IPv6:                        convertIPSet(eni.IPv6Set),
 	}
+}
+
+// convertIPSet convert aliyunClient.IPSet to networkv1beta1.IP
+// for eflo case need to handle the ip status here
+func convertIPSet(in []aliyunClient.IPSet) map[string]*networkv1beta1.IP {
+	return lo.SliceToMap(in, func(item aliyunClient.IPSet) (string, *networkv1beta1.IP) {
+		return item.IPAddress, &networkv1beta1.IP{
+			IP:      item.IPAddress,
+			Status:  networkv1beta1.IPStatusValid,
+			Primary: item.Primary,
+		}
+	})
 }
 
 func mergeIPMap(log logr.Logger, remote, current map[string]*networkv1beta1.IP) {

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -440,14 +439,14 @@ func TestReconcileNodeSyncWithAPI(t *testing.T) {
 			NetworkInterfaceID: "eni-3",
 			VSwitchID:          "vsw-1",
 			PrivateIPAddress:   "",
-			PrivateIPSets: []ecs.PrivateIpSet{
+			PrivateIPSets: []aliyunClient.IPSet{
 				{
-					PrivateIpAddress: "192.168.0.1",
-					Primary:          true,
+					IPAddress: "192.168.0.1",
+					Primary:   true,
 				},
 				{
-					PrivateIpAddress: "192.168.0.2",
-					Primary:          false,
+					IPAddress: "192.168.0.2",
+					Primary:   false,
 				},
 			},
 			ZoneID:                      "zone-1",
@@ -1014,25 +1013,25 @@ func TestReconcileNode_createENI(t *testing.T) {
 						NetworkInterfaceID: "eni-1",
 						VSwitchID:          "vsw-1",
 						PrivateIPAddress:   "127.0.0.1",
-						PrivateIPSets: []ecs.PrivateIpSet{
+						PrivateIPSets: []aliyunClient.IPSet{
 							{
-								PrivateIpAddress: "127.0.0.1",
-								Primary:          true,
+								IPAddress: "127.0.0.1",
+								Primary:   true,
 							},
 							{
-								PrivateIpAddress: "127.0.0.2",
-								Primary:          false,
+								IPAddress: "127.0.0.2",
+								Primary:   false,
 							},
 						},
 						ZoneID:           "zone-1",
 						SecurityGroupIDs: nil,
 						ResourceGroupID:  "",
-						IPv6Set: []ecs.Ipv6Set{
+						IPv6Set: []aliyunClient.IPSet{
 							{
-								Ipv6Address: "fd00::1",
+								IPAddress: "fd00::1",
 							},
 							{
-								Ipv6Address: "fd00::2",
+								IPAddress: "fd00::2",
 							},
 						},
 						Tags:                        nil,
@@ -1047,25 +1046,25 @@ func TestReconcileNode_createENI(t *testing.T) {
 						NetworkInterfaceID: "eni-1",
 						VSwitchID:          "vsw-1",
 						PrivateIPAddress:   "127.0.0.1",
-						PrivateIPSets: []ecs.PrivateIpSet{
+						PrivateIPSets: []aliyunClient.IPSet{
 							{
-								PrivateIpAddress: "127.0.0.1",
-								Primary:          true,
+								IPAddress: "127.0.0.1",
+								Primary:   true,
 							},
 							{
-								PrivateIpAddress: "127.0.0.2",
-								Primary:          false,
+								IPAddress: "127.0.0.2",
+								Primary:   false,
 							},
 						},
 						ZoneID:           "zone-1",
 						SecurityGroupIDs: nil,
 						ResourceGroupID:  "",
-						IPv6Set: []ecs.Ipv6Set{
+						IPv6Set: []aliyunClient.IPSet{
 							{
-								Ipv6Address: "fd00::1",
+								IPAddress: "fd00::1",
 							},
 							{
-								Ipv6Address: "fd00::2",
+								IPAddress: "fd00::2",
 							},
 						},
 						Tags:                        nil,
@@ -1140,25 +1139,25 @@ func TestReconcileNode_createENI(t *testing.T) {
 						NetworkInterfaceID: "eni-1",
 						VSwitchID:          "vsw-1",
 						PrivateIPAddress:   "127.0.0.1",
-						PrivateIPSets: []ecs.PrivateIpSet{
+						PrivateIPSets: []aliyunClient.IPSet{
 							{
-								PrivateIpAddress: "127.0.0.1",
-								Primary:          true,
+								IPAddress: "127.0.0.1",
+								Primary:   true,
 							},
 							{
-								PrivateIpAddress: "127.0.0.2",
-								Primary:          false,
+								IPAddress: "127.0.0.2",
+								Primary:   false,
 							},
 						},
 						ZoneID:           "zone-1",
 						SecurityGroupIDs: nil,
 						ResourceGroupID:  "",
-						IPv6Set: []ecs.Ipv6Set{
+						IPv6Set: []aliyunClient.IPSet{
 							{
-								Ipv6Address: "fd00::1",
+								IPAddress: "fd00::1",
 							},
 							{
-								Ipv6Address: "fd00::2",
+								IPAddress: "fd00::2",
 							},
 						},
 						Tags:                        nil,
@@ -1666,25 +1665,25 @@ func TestReconcileNode_handleStatus(t *testing.T) {
 						NetworkInterfaceID: "eni-1",
 						VSwitchID:          "vsw-1",
 						PrivateIPAddress:   "127.0.0.1",
-						PrivateIPSets: []ecs.PrivateIpSet{
+						PrivateIPSets: []aliyunClient.IPSet{
 							{
-								PrivateIpAddress: "127.0.0.1",
-								Primary:          true,
+								IPAddress: "127.0.0.1",
+								Primary:   true,
 							},
 							{
-								PrivateIpAddress: "127.0.0.2",
-								Primary:          false,
+								IPAddress: "127.0.0.2",
+								Primary:   false,
 							},
 						},
 						ZoneID:           "zone-1",
 						SecurityGroupIDs: nil,
 						ResourceGroupID:  "",
-						IPv6Set: []ecs.Ipv6Set{
+						IPv6Set: []aliyunClient.IPSet{
 							{
-								Ipv6Address: "fd00::1",
+								IPAddress: "fd00::1",
 							},
 							{
-								Ipv6Address: "fd00::2",
+								IPAddress: "fd00::2",
 							},
 						},
 						Tags:                        nil,
