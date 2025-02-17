@@ -85,6 +85,8 @@ type ClientMgr struct {
 	ecsDomainOverride  string
 	vpcDomainOverride  string
 	efloDomainOverride string
+
+	endpointType string
 }
 
 // NewClientMgr return new aliyun client manager
@@ -106,6 +108,12 @@ func NewClientMgr(regionID string, providers ...Interface) (*ClientMgr, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	mgr.endpointType = "vpc"
+	if os.Getenv("ALICLOUD_ENDPOINT_TYPE") != "" {
+		mgr.endpointType = os.Getenv("ALICLOUD_ENDPOINT_TYPE")
+	}
+
 	for _, p := range providers {
 		c, err := p.Resolve()
 		if err != nil {
@@ -181,7 +189,7 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		c.ecs.SetEndpointRules(c.ecs.EndpointMap, "regional", "vpc")
+		c.ecs.SetEndpointRules(c.ecs.EndpointMap, "regional", c.endpointType)
 
 		if c.ecsDomainOverride != "" {
 			c.ecs.Domain = c.ecsDomainOverride
@@ -191,7 +199,7 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		c.vpc.SetEndpointRules(c.vpc.EndpointMap, "regional", "vpc")
+		c.vpc.SetEndpointRules(c.vpc.EndpointMap, "regional", c.endpointType)
 
 		if c.vpcDomainOverride != "" {
 			c.vpc.Domain = c.vpcDomainOverride
@@ -201,7 +209,7 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		c.eflo.SetEndpointRules(c.eflo.EndpointMap, "regional", "vpc")
+		c.eflo.SetEndpointRules(c.eflo.EndpointMap, "regional", c.endpointType)
 
 		if c.efloDomainOverride != "" {
 			c.eflo.Domain = c.efloDomainOverride
