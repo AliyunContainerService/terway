@@ -103,7 +103,10 @@ func (e *ENIMetadata) GetENIPrivateIPv6AddressesByMACv2(mac string) ([]netip.Add
 func (e *ENIMetadata) GetENIs(containsMainENI bool) ([]*daemon.ENI, error) {
 	var enis []*daemon.ENI
 
-	mainENIMac := instance.GetInstanceMeta().PrimaryMAC
+	mainENIMac, err := instance.GetInstanceMeta().GetPrimaryMAC()
+	if err != nil {
+		return nil, err
+	}
 
 	macs, err := metadata.GetENIsMAC()
 	if err != nil {

@@ -108,7 +108,7 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 	if len(vswitchOptions) == 0 {
 		// if user forget to set vsw , we still rely on metadata to get the actual one
 
-		switchID, err := instance.VSwitchID()
+		switchID, err := instance.GetInstanceMeta().GetVSwitchID()
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("failed to get vsw from metadata, %w", err)
 		}
@@ -227,27 +227,27 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	if node.Labels == nil {
 		node.Labels = map[string]string{}
 	}
-	node.Labels[types.LinJunNodeLabel] = "true"
+	node.Labels[types.LinJunNodeLabelKey] = "true"
 
-	regionID, err := instance.EFLORegionID()
+	regionID, err := instance.GetInstanceMeta().GetRegionID()
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	instanceType, err := instance.EFLOInstanceType()
+	instanceType, err := instance.GetInstanceMeta().GetInstanceType()
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	nodeID, err := instance.EFLONodeID()
+	instanceID, err := instance.GetInstanceMeta().GetInstanceID()
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	zoneID, err := instance.EFLOZoneID()
+	zoneID, err := instance.GetInstanceMeta().GetZoneID()
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 	node.Spec.NodeMetadata.RegionID = regionID
 	node.Spec.NodeMetadata.InstanceType = instanceType
-	node.Spec.NodeMetadata.InstanceID = nodeID
+	node.Spec.NodeMetadata.InstanceID = instanceID
 	node.Spec.NodeMetadata.ZoneID = zoneID
 
 	vswitchOptions := []string{}
@@ -257,7 +257,7 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		}
 	}
 	if len(vswitchOptions) == 0 {
-		return reconcile.Result{}, fmt.Errorf("failed to get vsw for zone %s, %w", zoneID, err)
+		return reconcile.Result{}, fmt.Errorf("failed to get vsw for zone %s", zoneID)
 	}
 
 	policy := networkv1beta1.VSwitchSelectionPolicyRandom

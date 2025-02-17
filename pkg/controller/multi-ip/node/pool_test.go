@@ -394,7 +394,7 @@ func TestReconcileNodeSyncWithAPI(t *testing.T) {
 		CidrBlock:               "192.168.0.0/16",
 		Ipv6CidrBlock:           "fd00::/64",
 	}, nil).Maybe()
-	openAPI.On("DescribeNetworkInterface", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+	openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
 		{
 			Status:                      "InUse",
 			MacAddress:                  "",
@@ -876,13 +876,21 @@ func TestReconcileNode_assignIP(t *testing.T) {
 			fields: fields{
 				aliyun: func() register.Interface {
 					openAPI := mocks.NewInterface(t)
-					openAPI.On("AssignPrivateIPAddress", mock.Anything, mock.Anything).Return([]netip.Addr{
-						netip.MustParseAddr("192.168.0.1"),
-						netip.MustParseAddr("192.168.0.2"),
+					openAPI.On("AssignPrivateIPAddressV2", mock.Anything, mock.Anything).Return([]aliyunClient.IPSet{
+						{
+							IPAddress: netip.MustParseAddr("192.168.0.1").String(),
+						},
+						{
+							IPAddress: netip.MustParseAddr("192.168.0.2").String(),
+						},
 					}, nil)
-					openAPI.On("AssignIpv6Addresses", mock.Anything, mock.Anything).Return([]netip.Addr{
-						netip.MustParseAddr("fd00::1"),
-						netip.MustParseAddr("fd00::2"),
+					openAPI.On("AssignIpv6AddressesV2", mock.Anything, mock.Anything).Return([]aliyunClient.IPSet{
+						{
+							IPAddress: netip.MustParseAddr("fd00::1").String(),
+						},
+						{
+							IPAddress: netip.MustParseAddr("fd00::2").String(),
+						},
 					}, nil)
 					return openAPI
 				}(),
@@ -1007,7 +1015,7 @@ func TestReconcileNode_createENI(t *testing.T) {
 			fields: fields{
 				aliyun: func() register.Interface {
 					openAPI := mocks.NewInterface(t)
-					openAPI.On("CreateNetworkInterface", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
+					openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
 						Status:             "Available",
 						MacAddress:         "",
 						NetworkInterfaceID: "eni-1",
@@ -1040,7 +1048,7 @@ func TestReconcileNode_createENI(t *testing.T) {
 						NetworkInterfaceTrafficMode: "",
 					}, nil)
 					openAPI.On("AttachNetworkInterface", mock.Anything, "eni-1", mock.Anything, "").Return(nil)
-					openAPI.On("WaitForNetworkInterface", mock.Anything, "eni-1", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
+					openAPI.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-1", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
 						Status:             "InUse",
 						MacAddress:         "",
 						NetworkInterfaceID: "eni-1",
@@ -1133,7 +1141,7 @@ func TestReconcileNode_createENI(t *testing.T) {
 			fields: fields{
 				aliyun: func() register.Interface {
 					openAPI := mocks.NewInterface(t)
-					openAPI.On("CreateNetworkInterface", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
+					openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
 						Status:             "Available",
 						MacAddress:         "",
 						NetworkInterfaceID: "eni-1",
@@ -1166,8 +1174,8 @@ func TestReconcileNode_createENI(t *testing.T) {
 						NetworkInterfaceTrafficMode: "",
 					}, nil)
 					openAPI.On("AttachNetworkInterface", mock.Anything, "eni-1", mock.Anything, "").Return(nil)
-					openAPI.On("WaitForNetworkInterface", mock.Anything, "eni-1", mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("time out"))
-					openAPI.On("DeleteNetworkInterface", mock.Anything, "eni-1").Return(fmt.Errorf("eni already attached"))
+					openAPI.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-1", mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("time out"))
+					openAPI.On("DeleteNetworkInterfaceV2", mock.Anything, "eni-1").Return(fmt.Errorf("eni already attached"))
 					return openAPI
 				}(),
 				vswpool: func() *vswpool.SwitchPool {
@@ -1577,7 +1585,7 @@ func Test_assignEniWithOptions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assignEniWithOptions(tt.args.node, tt.args.toAdd, tt.args.options, tt.args.filterFunc)
+			assignEniWithOptions(context.Background(), tt.args.node, tt.args.toAdd, tt.args.options, tt.args.filterFunc)
 
 			tt.checkResult(t, tt.args.options)
 		})
@@ -1604,8 +1612,8 @@ func TestReconcileNode_handleStatus(t *testing.T) {
 			fields: fields{
 				aliyun: func() register.Interface {
 					openAPI := mocks.NewInterface(t)
-					openAPI.On("UnAssignPrivateIPAddresses", mock.Anything, "eni-1", mock.Anything).Return(nil)
-					openAPI.On("UnAssignIpv6Addresses", mock.Anything, "eni-1", mock.Anything).Return(nil)
+					openAPI.On("UnAssignPrivateIPAddressesV2", mock.Anything, "eni-1", mock.Anything).Return(nil)
+					openAPI.On("UnAssignIpv6AddressesV2", mock.Anything, "eni-1", mock.Anything).Return(nil)
 					return openAPI
 				}(),
 			},
@@ -1659,7 +1667,7 @@ func TestReconcileNode_handleStatus(t *testing.T) {
 				aliyun: func() register.Interface {
 					openAPI := mocks.NewInterface(t)
 					openAPI.On("DetachNetworkInterface", mock.Anything, "eni-1", mock.Anything, mock.Anything).Return(nil)
-					openAPI.On("WaitForNetworkInterface", mock.Anything, "eni-1", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
+					openAPI.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-1", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
 						Status:             "Available",
 						MacAddress:         "",
 						NetworkInterfaceID: "eni-1",
@@ -1694,7 +1702,7 @@ func TestReconcileNode_handleStatus(t *testing.T) {
 						DeviceIndex:                 0,
 						CreationTime:                "",
 					}, nil)
-					openAPI.On("DeleteNetworkInterface", mock.Anything, "eni-1").Return(nil)
+					openAPI.On("DeleteNetworkInterfaceV2", mock.Anything, "eni-1").Return(nil)
 					return openAPI
 				}(),
 			},

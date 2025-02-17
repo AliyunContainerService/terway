@@ -21,7 +21,7 @@ import (
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
-func NewLocalTest(eni *daemon.ENI, factory factory.Factory, poolConfig *types.PoolConfig, eniType string) *Local {
+func NewLocalTest(eni *daemon.ENI, factory factory.Factory, poolConfig *daemon.PoolConfig, eniType string) *Local {
 	l := &Local{
 		eni:        eni,
 		batchSize:  poolConfig.BatchSize,
@@ -43,7 +43,7 @@ func NewLocalTest(eni *daemon.ENI, factory factory.Factory, poolConfig *types.Po
 }
 
 func TestLocal_Release_ValidIPv4(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{}, "")
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
 	request := &LocalIPResource{
 		ENI: daemon.ENI{ID: "eni-1"},
 		IP:  types.IPSet2{IPv4: netip.MustParseAddr("192.0.2.1")},
@@ -58,7 +58,7 @@ func TestLocal_Release_ValidIPv4(t *testing.T) {
 }
 
 func TestLocal_Release_ValidIPv6(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{}, "")
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
 	request := &LocalIPResource{
 		ENI: daemon.ENI{ID: "eni-1"},
 		IP:  types.IPSet2{IPv6: netip.MustParseAddr("fd00:46dd:e::1")},
@@ -73,7 +73,7 @@ func TestLocal_Release_ValidIPv6(t *testing.T) {
 }
 
 func TestLocal_Release_NilENI(t *testing.T) {
-	local := NewLocalTest(nil, nil, &types.PoolConfig{}, "")
+	local := NewLocalTest(nil, nil, &daemon.PoolConfig{}, "")
 	request := &LocalIPResource{
 		ENI: daemon.ENI{ID: "eni-1"},
 		IP:  types.IPSet2{IPv4: netip.MustParseAddr("192.0.2.1")},
@@ -85,7 +85,7 @@ func TestLocal_Release_NilENI(t *testing.T) {
 }
 
 func TestLocal_Release_DifferentENIID(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{}, "")
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
 	request := &LocalIPResource{
 		ENI: daemon.ENI{ID: "eni-2"},
 		IP:  types.IPSet2{IPv4: netip.MustParseAddr("192.0.2.1")},
@@ -97,7 +97,7 @@ func TestLocal_Release_DifferentENIID(t *testing.T) {
 }
 
 func TestLocal_Release_ValidIPv4_ReleaseIPv6(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{}, "")
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
 	request := &LocalIPResource{
 		ENI: daemon.ENI{ID: "eni-1"},
 		IP:  types.IPSet2{IPv4: netip.MustParseAddr("192.0.2.1"), IPv6: netip.MustParseAddr("fd00:46dd:e::1")},
@@ -121,7 +121,7 @@ func TestLocal_Release_ValidIPv4_ReleaseIPv6(t *testing.T) {
 }
 
 func TestLocal_AllocWorker_EnableIPv4(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{
 		EnableIPv4: true,
 	}, "")
 	cni := &daemon.CNI{PodID: "pod-1"}
@@ -146,7 +146,7 @@ func TestLocal_AllocWorker_EnableIPv4(t *testing.T) {
 }
 
 func TestLocal_AllocWorker_EnableIPv6(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{
 		EnableIPv6: true,
 	}, "")
 	cni := &daemon.CNI{PodID: "pod-1"}
@@ -171,7 +171,7 @@ func TestLocal_AllocWorker_EnableIPv6(t *testing.T) {
 }
 
 func TestLocal_AllocWorker_ParentCancelContext(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{
 		EnableIPv4: true,
 	}, "")
 	cni := &daemon.CNI{PodID: "pod-1"}
@@ -187,7 +187,7 @@ func TestLocal_AllocWorker_ParentCancelContext(t *testing.T) {
 }
 
 func TestLocal_AllocWorker_UpdateCache(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{
 		EnableIPv4: true,
 	}, "")
 	cni := &daemon.CNI{PodID: "pod-1"}
@@ -206,7 +206,7 @@ func TestLocal_AllocWorker_UpdateCache(t *testing.T) {
 }
 
 func TestLocal_Dispose(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{}, "")
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
 	local.status = statusInUse
 	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
 	local.ipv4[netip.MustParseAddr("192.0.2.1")].Allocate("pod-1")
@@ -222,7 +222,7 @@ func TestLocal_Dispose(t *testing.T) {
 }
 
 func TestLocal_DisposeWholeENI(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{}, "")
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
 	local.status = statusInUse
 	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), true))
 	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00:46dd:e::1"), false))
@@ -234,7 +234,7 @@ func TestLocal_DisposeWholeENI(t *testing.T) {
 }
 
 func TestLocal_Allocate_NoCache(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "")
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "")
 
 	request := NewLocalIPRequest()
 	request.NoCache = true
@@ -249,7 +249,7 @@ func TestLocal_Allocate_NoCache(t *testing.T) {
 }
 
 func TestLocal_DisposeFailWhenAllocatingIsNotEmpty(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{}, "")
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
 	local.status = statusInUse
 	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), true))
 	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00:46dd:e::1"), false))
@@ -262,7 +262,7 @@ func TestLocal_DisposeFailWhenAllocatingIsNotEmpty(t *testing.T) {
 }
 
 func TestLocal_Allocate_NoCache_AllocSuccess(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{
 		MaxIPPerENI: 10, EnableIPv4: true, EnableIPv6: true}, "")
 
 	request := NewLocalIPRequest()
@@ -278,7 +278,7 @@ func TestLocal_Allocate_NoCache_AllocSuccess(t *testing.T) {
 }
 
 func TestLocal_DisposeWholeERDMA(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{}, "erdma")
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "erdma")
 	local.status = statusInUse
 	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
 
@@ -289,7 +289,7 @@ func TestLocal_DisposeWholeERDMA(t *testing.T) {
 }
 
 func TestLocal_Allocate_ERDMA(t *testing.T) {
-	localErdma := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "erdma")
+	localErdma := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "erdma")
 
 	request := NewLocalIPRequest()
 	request.NoCache = true
@@ -311,7 +311,7 @@ func TestLocal_Allocate_ERDMA(t *testing.T) {
 	assert.Equal(t, 1, len(resp))
 	assert.NotEqual(t, ResourceTypeMismatch, resp[0].Condition)
 
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "")
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "")
 	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
 	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.2"), false))
 
@@ -332,7 +332,7 @@ func TestLocal_Allocate_ERDMA(t *testing.T) {
 }
 
 func TestLocal_Allocate_Inhibit(t *testing.T) {
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &types.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "")
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{MaxIPPerENI: 2, EnableIPv4: true}, "")
 
 	request := NewLocalIPRequest()
 	cni := &daemon.CNI{PodID: "pod-1"}
@@ -564,7 +564,7 @@ func TestAllocFromFactory(t *testing.T) {
 	f.On("AssignNIPv4", "eni-1", 1, "").Return(nil, nil).Maybe()
 	f.On("AssignNIPv6", "eni-1", 1, "").Return(nil, nil).Maybe()
 
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &types.PoolConfig{
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &daemon.PoolConfig{
 		EnableIPv4: true,
 		EnableIPv6: true,
 		BatchSize:  10,
@@ -612,7 +612,7 @@ func Test_factoryDisposeWorker_unAssignIP(t *testing.T) {
 	f.On("UnAssignNIPv4", "eni-1", []netip.Addr{netip.MustParseAddr("192.0.2.1")}, mock.Anything).Return(nil).Once()
 	f.On("UnAssignNIPv6", "eni-1", []netip.Addr{netip.MustParseAddr("fd00::1")}, mock.Anything).Return(nil).Once()
 
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &types.PoolConfig{
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &daemon.PoolConfig{
 		EnableIPv4: true,
 		EnableIPv6: true,
 		BatchSize:  10,
@@ -664,7 +664,7 @@ func Test_factoryDisposeWorker_releaseIP(t *testing.T) {
 	// even we have two jobs ,we only get one ip
 	f.On("DeleteNetworkInterface", "eni-1").Return(nil).Once()
 
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &types.PoolConfig{
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &daemon.PoolConfig{
 		EnableIPv4: true,
 		EnableIPv6: true,
 		BatchSize:  10,
@@ -693,7 +693,7 @@ func Test_factoryDisposeWorker_releaseIP(t *testing.T) {
 
 func Test_commit_responsed(t *testing.T) {
 	f := factorymocks.NewFactory(t)
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &types.PoolConfig{
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &daemon.PoolConfig{
 		EnableIPv4: true,
 		EnableIPv6: true,
 		BatchSize:  10,
@@ -734,7 +734,7 @@ func Test_commit_responsed(t *testing.T) {
 
 func Test_commit_canceled(t *testing.T) {
 	f := factorymocks.NewFactory(t)
-	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &types.PoolConfig{
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, f, &daemon.PoolConfig{
 		EnableIPv4: true,
 		EnableIPv6: true,
 		BatchSize:  10,

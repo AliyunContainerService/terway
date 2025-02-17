@@ -1049,7 +1049,7 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 					log.Error(err, "run gc failed")
 					continue
 				}
-				_, err = n.aliyun.WaitForNetworkInterface(ctx, eni.ID, aliyunClient.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
+				_, err = n.aliyun.WaitForNetworkInterfaceV2(ctx, eni.ID, aliyunClient.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
 				if err != nil {
 					if !errors.Is(err, apiErr.ErrNotFound) {
 						log.Error(err, "run gc failed")
@@ -1210,7 +1210,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			VSwitchID:        vsw.ID,
 			SecurityGroupIDs: node.Spec.ENISpec.SecurityGroupIDs,
 			ResourceGroupID:  node.Spec.ENISpec.ResourceGroupID,
-			Tags:             node.Spec.ENISpec.Tag,
+			Tags:             tags,
 			IPCount:          opt.addIPv4N,
 			IPv6Count:        opt.addIPv6N,
 

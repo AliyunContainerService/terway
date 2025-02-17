@@ -26,7 +26,3 @@ linters:
 linters-settings:
   errcheck:
     check-blank: false
-  govet:
-    check-shadowing: false
-  maligned:
-    suggest-new: true

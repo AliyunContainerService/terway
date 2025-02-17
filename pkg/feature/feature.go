@@ -14,8 +14,11 @@ func init() {
 const (
 	// AutoDataPathV2 enable the new datapath feature.
 	AutoDataPathV2 featuregate.Feature = "AutoDataPathV2"
+
+	EFLO featuregate.Feature = "EFLO"
 )
 
 var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
 	AutoDataPathV2: {Default: true, PreRelease: featuregate.Alpha},
+	EFLO:           {Default: false, PreRelease: featuregate.Alpha},
 }

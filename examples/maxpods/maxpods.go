@@ -32,15 +32,21 @@ func init() {
 func main() {
 	flag.Parse()
 	log.SetOutput(io.Discard)
-	ins := instance.GetInstanceMeta()
-
+	regionID, err := instance.GetInstanceMeta().GetRegionID()
+	if err != nil {
+		panic(err)
+	}
+	instanceType, err := instance.GetInstanceMeta().GetInstanceType()
+	if err != nil {
+		panic(err)
+	}
 	providers := []credential.Interface{
 		credential.NewAKPairProvider(accessKeyID, accessKeySecret),
 		credential.NewEncryptedCredentialProvider(credentialPath),
 		credential.NewMetadataProvider(),
 	}
 
-	c, err := credential.NewClientMgr(ins.RegionID, providers...)
+	c, err := credential.NewClientMgr(regionID, providers...)
 	if err != nil {
 		panic(err)
 	}
@@ -51,13 +57,13 @@ func main() {
 	}
 
 	if mode == "terway-eniip" {
-		limit, err := client.LimitProviders["ecs"].GetLimit(api, instance.GetInstanceMeta().InstanceType)
+		limit, err := client.LimitProviders["ecs"].GetLimit(api, instanceType)
 		if err != nil {
 			panic(err)
 		}
 		fmt.Println(limit.IPv4PerAdapter * (limit.Adapters - 1))
 	} else if mode == "terway-eni" {
-		limit, err := client.LimitProviders["ecs"].GetLimit(api, instance.GetInstanceMeta().InstanceType)
+		limit, err := client.LimitProviders["ecs"].GetLimit(api, instanceType)
 		if err != nil {
 			panic(err)
 		}

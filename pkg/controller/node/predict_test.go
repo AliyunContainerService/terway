@@ -3,121 +3,96 @@ package node
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func Test_isECSNode(t *testing.T) {
-	type args struct {
-		node *corev1.Node
-	}
+func TestPredicateNode(t *testing.T) {
 	tests := []struct {
-		name string
-		args args
-		want bool
+		name        string
+		node        *corev1.Node
+		supportEFLO bool
+		expected    bool
 	}{
 		{
-			name: "normal node",
-			args: args{
-				node: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "vk node",
-			args: args{
-				node: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							"type": "virtual-kubelet",
-						},
+			name: "SupportEFLOFalseAndNoRegionLabel",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"other-label": "value",
 					},
 				},
 			},
-			want: false,
+			supportEFLO: false,
+			expected:    false,
 		},
 		{
-			name: "linjun node",
-			args: args{
-				node: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							"alibabacloud.com/lingjun-worker": "true",
-						},
+			name: "IgnoredByTerway",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"topology.kubernetes.io/region":   "region",
+						"k8s.aliyun.com/ignore-by-terway": "true",
 					},
 				},
 			},
-			want: false,
+			expected: false,
+		},
+		{
+			name: "Ignore Lunjun worker",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"topology.kubernetes.io/region":   "region",
+						"alibabacloud.com/lingjun-worker": "true",
+					},
+				},
+			},
+			supportEFLO: false,
+			expected:    false,
+		},
+		{
+			name: "Lunjun worker",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"alibabacloud.com/lingjun-worker": "true",
+					},
+				},
+			},
+			supportEFLO: true,
+			expected:    true,
+		},
+		{
+			name: "VKNode",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"topology.kubernetes.io/region": "region",
+						"type":                          "virtual-kubelet",
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "AllConditionsSatisfied",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"topology.kubernetes.io/region": "region",
+					},
+				},
+			},
+			expected: true,
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isECSNode(tt.args.node); got != tt.want {
-				t.Errorf("isECSNode() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
-func Test_predicateNode(t *testing.T) {
-	type args struct {
-		o client.Object
-	}
-	tests := []struct {
-		name string
-		args args
-		want bool
-	}{
-		{
-			name: "non node",
-			args: args{
-				o: &corev1.Pod{},
-			},
-			want: false,
-		},
-		{
-			name: "empty node",
-			args: args{
-				o: &corev1.Node{},
-			},
-			want: false,
-		},
-		{
-			name: "normal node",
-			args: args{
-				o: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							"topology.kubernetes.io/region": "cn-hangzhou",
-						},
-					},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "normal node but has exclude rule",
-			args: args{
-				o: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							"topology.kubernetes.io/region":   "cn-hangzhou",
-							"k8s.aliyun.com/ignore-by-terway": "true",
-						},
-					},
-				},
-			},
-			want: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := predicateNode(tt.args.o); got != tt.want {
-				t.Errorf("predicateNode() = %v, want %v", got, tt.want)
-			}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := predicateNode(test.node, test.supportEFLO)
+			assert.Equal(t, test.expected, result)
 		})
 	}
 }

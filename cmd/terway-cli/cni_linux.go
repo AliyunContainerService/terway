@@ -3,8 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+	"syscall"
 
-	"github.com/docker/docker/pkg/parsers/kernel"
 	"github.com/vishvananda/netlink"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 
@@ -60,6 +62,54 @@ func allowEBPFNetworkPolicy(require bool) (bool, error) {
 	return require, nil
 }
 
-func checkKernelVersion(k, major, minor int) bool {
-	return kernel.CheckKernelVersion(k, major, minor)
+func checkKernelVersion(iMajor, iMinor, iPatch int) bool {
+	var un syscall.Utsname
+	_ = syscall.Uname(&un)
+	var sb strings.Builder
+	for _, b := range un.Release[:] {
+		if b == 0 {
+			break
+		}
+		sb.WriteByte(byte(b))
+	}
+	major, minor, patch, ok := parseRelease(sb.String())
+	return ok && (major > iMajor ||
+		major == iMajor && minor > iMinor ||
+		major == iMajor && minor == iMinor && iPatch >= patch)
+}
+
+// parseRelease parses a dot-separated version number. It follows the semver
+// syntax, but allows the minor and patch versions to be elided.
+//
+// This is a copy of the Go runtime's parseRelease from
+// https://golang.org/cl/209597.
+func parseRelease(rel string) (major, minor, patch int, ok bool) {
+	// Strip anything after a dash or plus.
+	for i := 0; i < len(rel); i++ {
+		if rel[i] == '-' || rel[i] == '+' {
+			rel = rel[:i]
+			break
+		}
+	}
+
+	next := func() (int, bool) {
+		for i := 0; i < len(rel); i++ {
+			if rel[i] == '.' {
+				ver, err := strconv.Atoi(rel[:i])
+				rel = rel[i+1:]
+				return ver, err == nil
+			}
+		}
+		ver, err := strconv.Atoi(rel)
+		rel = ""
+		return ver, err == nil
+	}
+	if major, ok = next(); !ok || rel == "" {
+		return
+	}
+	if minor, ok = next(); !ok || rel == "" {
+		return
+	}
+	patch, ok = next()
+	return
 }

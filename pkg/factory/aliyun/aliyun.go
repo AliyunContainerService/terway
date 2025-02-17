@@ -18,7 +18,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/factory"
 	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
-	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
@@ -53,11 +52,11 @@ type Aliyun struct {
 
 	eniTags map[string]string
 
-	eniTypeAttr  types.Feat
+	eniTypeAttr  daemon.Feat
 	eniTagFilter map[string]string
 }
 
-func NewAliyun(ctx context.Context, openAPI *client.OpenAPI, getter eni.ENIInfoGetter, vsw *vswpool.SwitchPool, cfg *types.ENIConfig) *Aliyun {
+func NewAliyun(ctx context.Context, openAPI *client.OpenAPI, getter eni.ENIInfoGetter, vsw *vswpool.SwitchPool, cfg *daemon.ENIConfig) *Aliyun {
 
 	return &Aliyun{
 		ctx:              ctx,
@@ -456,7 +455,7 @@ func (a *Aliyun) GetAttachedNetworkInterface(trunkENIID string) ([]*daemon.ENI, 
 		if trunkENIID == eni.ID {
 			eni.Trunk = true
 
-			types.DisableFeature(&feat, types.FeatTrunk)
+			daemon.DisableFeature(&feat, daemon.FeatTrunk)
 		}
 	}
 

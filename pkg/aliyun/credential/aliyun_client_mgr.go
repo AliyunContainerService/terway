@@ -86,6 +86,8 @@ type ClientMgr struct {
 	vpcDomainOverride  string
 	efloDomainOverride string
 
+	efloRegionOverride string
+
 	endpointType string
 }
 
@@ -107,6 +109,11 @@ func NewClientMgr(regionID string, providers ...Interface) (*ClientMgr, error) {
 	mgr.efloDomainOverride, err = parseURL(os.Getenv("EFLO_ENDPOINT"))
 	if err != nil {
 		return nil, err
+	}
+
+	mgr.efloRegionOverride = os.Getenv("EFLO_REGION_ID")
+	if mgr.efloRegionOverride == "" {
+		mgr.efloRegionOverride = regionID
 	}
 
 	mgr.endpointType = "vpc"
@@ -205,7 +212,7 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 			c.vpc.Domain = c.vpcDomainOverride
 		}
 
-		c.eflo, err = eflo.NewClientWithOptions(c.regionID, clientCfg(), cc.Credential)
+		c.eflo, err = eflo.NewClientWithOptions(c.efloRegionOverride, clientCfg(), cc.Credential)
 		if err != nil {
 			return false, err
 		}

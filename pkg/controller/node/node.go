@@ -12,6 +12,7 @@ import (
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -29,6 +30,8 @@ import (
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/controller/multi-ip/node"
+	"github.com/AliyunContainerService/terway/pkg/feature"
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 )
@@ -63,14 +66,17 @@ func init() {
 					return log
 				},
 			}).
-			For(&corev1.Node{}, builder.WithPredicates(&predicateForNodeEvent{})).
+			For(&corev1.Node{}, builder.WithPredicates(&predicateForNodeEvent{
+				supportEFLO: utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
+			})).
 			Watches(&networkv1beta1.Node{}, &handler.EnqueueRequestForObject{}).
 			Watches(&networkv1beta1.NodeRuntime{}, &handler.EnqueueRequestForObject{}).
 			Complete(&ReconcileNode{
-				client: mgr.GetClient(),
-				scheme: mgr.GetScheme(),
-				record: mgr.GetEventRecorderFor(ControllerName),
-				aliyun: ctrlCtx.AliyunClient,
+				client:      mgr.GetClient(),
+				scheme:      mgr.GetScheme(),
+				record:      mgr.GetEventRecorderFor(ControllerName),
+				aliyun:      ctrlCtx.AliyunClient,
+				supportEFLO: utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
 			})
 	}, false)
 }
@@ -83,6 +89,8 @@ type ReconcileNode struct {
 
 	aliyun register.Interface
 	record record.EventRecorder
+
+	supportEFLO bool
 }
 
 func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
@@ -96,7 +104,7 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		}
 		return reconcile.Result{}, err
 	}
-	if !predicateNode(k8sNode) {
+	if !predicateNode(k8sNode, r.supportEFLO) {
 		return reconcile.Result{}, nil
 	}
 	if !k8sNode.DeletionTimestamp.IsZero() {
@@ -120,6 +128,9 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{}, nil
 	}
 
+	if utils.ISLinJunNode(k8sNode.Labels) {
+		return r.handleEFLO(ctx, k8sNode, node)
+	}
 	// create or update the crdNode
 	err = r.createOrUpdate(ctx, k8sNode, node)
 	if err != nil {
@@ -338,4 +349,29 @@ func (r *ReconcileNode) patchNodeRes(ctx context.Context, k8sNode *corev1.Node, 
 	}
 
 	return nil
+}
+
+func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, node *networkv1beta1.Node) (reconcile.Result, error) {
+	if node.Labels == nil {
+		node.Labels = make(map[string]string)
+	}
+
+	if node.Spec.NodeMetadata.InstanceID != "" && node.Spec.NodeCap.Adapters == 0 {
+		resp, err := r.aliyun.GetNodeInfoForPod(ctx, node.Spec.NodeMetadata.InstanceID)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		node.Spec.NodeCap.Adapters = resp.LeniQuota
+		node.Spec.NodeCap.TotalAdapters = resp.LeniQuota
+		node.Spec.NodeCap.IPv4PerAdapter = resp.LniSipQuota
+	}
+
+	update := node.DeepCopy()
+	_, err := controllerutil.CreateOrPatch(ctx, r.client, update, func() error {
+		update.Status = node.Status
+		update.Spec = node.Spec
+		update.Labels = node.Labels
+		return nil
+	})
+	return reconcile.Result{}, err
 }

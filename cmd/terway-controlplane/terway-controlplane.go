@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -41,7 +42,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	cliflag "k8s.io/component-base/cli/flag"
 	"k8s.io/klog/v2/textlogger"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -92,9 +95,12 @@ func main() {
 	var (
 		configFilePath     string
 		credentialFilePath string
+		featureGates       map[string]bool
 	)
 	flag.StringVar(&configFilePath, "config", "/etc/config/ctrl-config.yaml", "config file for controlplane")
 	flag.StringVar(&credentialFilePath, "credential", "/etc/credential/ctrl-secret.yaml", "secret file for controlplane")
+	flag.Var(cliflag.NewMapStringBool(&featureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features. "+
+		"Options are:\n"+strings.Join(utilfeature.DefaultFeatureGate.KnownFeatures(), "\n"))
 
 	logCfg := textlogger.NewConfig()
 	logCfg.AddFlags(flag.CommandLine)
@@ -103,6 +109,12 @@ func main() {
 
 	ctrl.SetLogger(textlogger.NewLogger(textlogger.NewConfig()))
 	log.Info(version.Version)
+
+	err := utilfeature.DefaultMutableFeatureGate.SetFromMap(featureGates)
+	if err != nil {
+		log.Error(err, "unable to set feature gates")
+		os.Exit(1)
+	}
 
 	ctx := ctrl.SetupSignalHandler()
 

@@ -68,6 +68,8 @@ const (
 	IgnoreByTerway = LabelPrefix + "ignore-by-terway"
 
 	ExclusiveENIModeLabel = LabelPrefix + "exclusive-mode-eni-type"
+
+	LinJunNodeLabelKey = "alibabacloud.com/lingjun-worker"
 )
 
 // FinalizerPodENI finalizer for podENI resource
