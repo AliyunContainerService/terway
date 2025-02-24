@@ -54,6 +54,10 @@ func init() {
 			return err
 		}
 
+		nodePredicate := &predicateForNodeEvent{
+			nodeLabelWhiteList: controlplane.GetConfig().NodeLabelWhiteList,
+			supportEFLO:        utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
+		}
 		return ctrl.NewControllerManagedBy(mgr).
 			Named(ControllerName).
 			WithOptions(controller.Options{
@@ -66,17 +70,16 @@ func init() {
 					return log
 				},
 			}).
-			For(&corev1.Node{}, builder.WithPredicates(&predicateForNodeEvent{
-				supportEFLO: utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
-			})).
+			For(&corev1.Node{}, builder.WithPredicates(nodePredicate)).
 			Watches(&networkv1beta1.Node{}, &handler.EnqueueRequestForObject{}).
 			Watches(&networkv1beta1.NodeRuntime{}, &handler.EnqueueRequestForObject{}).
 			Complete(&ReconcileNode{
-				client:      mgr.GetClient(),
-				scheme:      mgr.GetScheme(),
-				record:      mgr.GetEventRecorderFor(ControllerName),
-				aliyun:      ctrlCtx.AliyunClient,
-				supportEFLO: utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
+				client:        mgr.GetClient(),
+				scheme:        mgr.GetScheme(),
+				record:        mgr.GetEventRecorderFor(ControllerName),
+				aliyun:        ctrlCtx.AliyunClient,
+				supportEFLO:   utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
+				nodePredicate: nodePredicate,
 			})
 	}, false)
 }
@@ -90,7 +93,8 @@ type ReconcileNode struct {
 	aliyun register.Interface
 	record record.EventRecorder
 
-	supportEFLO bool
+	supportEFLO   bool
+	nodePredicate *predicateForNodeEvent
 }
 
 func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
@@ -104,7 +108,7 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		}
 		return reconcile.Result{}, err
 	}
-	if !predicateNode(k8sNode, r.supportEFLO) {
+	if r.nodePredicate != nil && !r.nodePredicate.predicateNode(k8sNode) {
 		return reconcile.Result{}, nil
 	}
 	if !k8sNode.DeletionTimestamp.IsZero() {

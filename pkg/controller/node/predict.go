@@ -29,36 +29,43 @@ import (
 type predicateForNodeEvent struct {
 	predicate.Funcs
 
-	supportEFLO bool
+	supportEFLO        bool
+	nodeLabelWhiteList map[string]string
 }
 
 // Create returns true if the Create event should be processed
 func (p *predicateForNodeEvent) Create(e event.CreateEvent) bool {
-	return predicateNode(e.Object, p.supportEFLO)
+	return p.predicateNode(e.Object)
 }
 
 // Delete returns true if the Delete event should be processed
 func (p *predicateForNodeEvent) Delete(e event.DeleteEvent) bool {
-	return predicateNode(e.Object, p.supportEFLO)
+	return p.predicateNode(e.Object)
 }
 
 // Update returns true if the Update event should be processed
 func (p *predicateForNodeEvent) Update(e event.UpdateEvent) bool {
-	return predicateNode(e.ObjectNew, p.supportEFLO)
+	return p.predicateNode(e.ObjectNew)
 }
 
 // Generic returns true if the Generic event should be processed
 func (p *predicateForNodeEvent) Generic(e event.GenericEvent) bool {
-	return predicateNode(e.Object, p.supportEFLO)
+	return p.predicateNode(e.Object)
 }
 
-func predicateNode(o client.Object, supportEFLO bool) bool {
+func (p *predicateForNodeEvent) predicateNode(o client.Object) bool {
 	node, ok := o.(*corev1.Node)
 	if !ok {
 		return false
 	}
 
-	if !supportEFLO {
+	if p.nodeLabelWhiteList != nil {
+		if !utils.ContainsAll(node.Labels, p.nodeLabelWhiteList) {
+			return false
+		}
+	}
+
+	if !p.supportEFLO {
 		if node.Labels[corev1.LabelTopologyRegion] == "" {
 			return false
 		}
@@ -68,7 +75,7 @@ func predicateNode(o client.Object, supportEFLO bool) bool {
 		return false
 	}
 
-	if !supportEFLO {
+	if !p.supportEFLO {
 		if utils.ISLinJunNode(node.Labels) {
 			return false
 		}

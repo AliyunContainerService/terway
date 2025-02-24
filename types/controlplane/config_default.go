@@ -95,5 +95,6 @@ type MultiIPController struct {
 }
 
 type NodeController struct {
-	NodeMaxConcurrent int `json:"nodeMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
+	NodeMaxConcurrent  int               `json:"nodeMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
+	NodeLabelWhiteList map[string]string `json:"nodeLabelWhiteList"`
 }
