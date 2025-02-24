@@ -25,3 +25,37 @@ type ECS interface {
 	UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []netip.Addr) error
 	DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error)
 }
+
+type BackendAPI int
+
+const (
+	BackendAPIECS BackendAPI = iota
+	BackendAPIEFLO
+)
+
+type backendAPIKey struct{}
+
+func GetBackendAPI(ctx context.Context) BackendAPI {
+	value, ok := ctx.Value(backendAPIKey{}).(BackendAPI)
+	if !ok {
+		return BackendAPIECS
+	}
+	return value
+}
+
+func SetBackendAPI(ctx context.Context, b BackendAPI) context.Context {
+	return context.WithValue(ctx, backendAPIKey{}, b)
+}
+
+type ENI interface {
+	CreateNetworkInterfaceV2(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error)
+	DescribeNetworkInterfaceV2(ctx context.Context, opts ...DescribeNetworkInterfaceOption) ([]*NetworkInterface, error)
+	AttachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
+	DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
+	DeleteNetworkInterfaceV2(ctx context.Context, eniID string) error
+	AssignPrivateIPAddressV2(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]IPSet, error)
+	UnAssignPrivateIPAddressesV2(ctx context.Context, eniID string, ips []IPSet) error
+	AssignIpv6AddressesV2(ctx context.Context, opts ...AssignIPv6AddressesOption) ([]IPSet, error)
+	UnAssignIpv6AddressesV2(ctx context.Context, eniID string, ips []IPSet) error
+	WaitForNetworkInterfaceV2(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error)
+}

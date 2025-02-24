@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	"github.com/AliyunContainerService/terway/pkg/k8s"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
@@ -25,7 +24,7 @@ func getDynamicConfig(ctx context.Context, k8s k8s.Kubernetes) (string, string, 
 	return cfg, label, err
 }
 
-func getENIConfig(cfg *daemon.Config) *types.ENIConfig {
+func getENIConfig(cfg *daemon.Config) *daemon.ENIConfig {
 	vswitchSelectionPolicy := vswitch.VSwitchSelectionPolicyRandom
 	switch cfg.VSwitchSelectionPolicy {
 	case "ordered":
@@ -33,18 +32,16 @@ func getENIConfig(cfg *daemon.Config) *types.ENIConfig {
 		vswitchSelectionPolicy = vswitch.VSwitchSelectionPolicyMost
 	}
 
-	eniSelectionPolicy := types.EniSelectionPolicyMostIPs
+	eniSelectionPolicy := daemon.EniSelectionPolicyMostIPs
 	switch cfg.EniSelectionPolicy {
 	case "least_ips":
-		eniSelectionPolicy = types.EniSelectionPolicyLeastIPs
+		eniSelectionPolicy = daemon.EniSelectionPolicyLeastIPs
 	}
 
-	eniConfig := &types.ENIConfig{
-		ZoneID:                 instance.GetInstanceMeta().ZoneID,
+	eniConfig := &daemon.ENIConfig{
 		VSwitchOptions:         nil,
 		ENITags:                cfg.ENITags,
 		SecurityGroupIDs:       cfg.GetSecurityGroups(),
-		InstanceID:             instance.GetInstanceMeta().InstanceID,
 		VSwitchSelectionPolicy: vswitchSelectionPolicy,
 		EniSelectionPolicy:     eniSelectionPolicy,
 		ResourceGroupID:        cfg.ResourceGroupID,
@@ -59,24 +56,20 @@ func getENIConfig(cfg *daemon.Config) *types.ENIConfig {
 		}
 	}
 
-	if len(eniConfig.VSwitchOptions) == 0 {
-		eniConfig.VSwitchOptions = []string{instance.GetInstanceMeta().VSwitchID}
-	}
-
 	if cfg.EnableENITrunking {
-		types.EnableFeature(&eniConfig.EniTypeAttr, types.FeatTrunk)
+		daemon.EnableFeature(&eniConfig.EniTypeAttr, daemon.FeatTrunk)
 	}
 	if cfg.EnableERDMA {
-		types.EnableFeature(&eniConfig.EniTypeAttr, types.FeatERDMA)
+		daemon.EnableFeature(&eniConfig.EniTypeAttr, daemon.FeatERDMA)
 	}
 
 	return eniConfig
 }
 
 // the actual size for pool is minIdle and maxIdle
-func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *client.Limits) (*types.PoolConfig, error) {
+func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *client.Limits) (*daemon.PoolConfig, error) {
 
-	poolConfig := &types.PoolConfig{
+	poolConfig := &daemon.PoolConfig{
 		BatchSize: 10,
 	}
 

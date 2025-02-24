@@ -39,7 +39,8 @@ type NetworkServiceBuilder struct {
 
 	limit *client.Limits
 
-	err error
+	eflo bool
+	err  error
 }
 
 func NewNetworkServiceBuilder(ctx context.Context) *NetworkServiceBuilder {
@@ -120,6 +121,10 @@ func (b *NetworkServiceBuilder) InitK8S() *NetworkServiceBuilder {
 		b.service.daemonMode = daemon.ModeENIOnly
 	}
 
+	if utils.ISLinJunNode(b.service.k8s.Node().Labels) {
+		b.eflo = true
+		instance.Init(&instance.EFLO{})
+	}
 	return b
 }
 
@@ -152,10 +157,10 @@ func (b *NetworkServiceBuilder) LoadDynamicConfig() *NetworkServiceBuilder {
 }
 
 func (b *NetworkServiceBuilder) setupAliyunClient() error {
-	if os.Getenv("TERWAY_DEPLOY_ENV") == envEFLO {
-		instance.SetPopulateFunc(instance.EfloPopulate)
+	regionID, err := instance.GetInstanceMeta().GetRegionID()
+	if err != nil {
+		return err
 	}
-	meta := instance.GetInstanceMeta()
 
 	var providers []credential.Interface
 	if string(b.config.AccessID) != "" && string(b.config.AccessSecret) != "" {
@@ -164,7 +169,7 @@ func (b *NetworkServiceBuilder) setupAliyunClient() error {
 	providers = append(providers, credential.NewEncryptedCredentialProvider(utils.NormalizePath(b.config.CredentialPath)))
 	providers = append(providers, credential.NewMetadataProvider())
 
-	clientSet, err := credential.NewClientMgr(meta.RegionID, providers...)
+	clientSet, err := credential.NewClientMgr(regionID, providers...)
 	if err != nil {
 		return err
 	}
@@ -184,14 +189,18 @@ func (b *NetworkServiceBuilder) initInstanceLimit() error {
 		return fmt.Errorf("k8s node not found")
 	}
 	provider := client.LimitProviders["ecs"]
-	if os.Getenv("TERWAY_DEPLOY_ENV") == envEFLO {
+	if b.eflo {
 		provider = client.LimitProviders["eflo"]
 		limit, err := provider.GetLimitFromAnno(node.Annotations)
 		if err != nil {
 			return err
 		}
 		if limit == nil {
-			limit, err = provider.GetLimit(b.aliyunClient, instance.GetInstanceMeta().InstanceID)
+			instanceID, err := instance.GetInstanceMeta().GetInstanceID()
+			if err != nil {
+				return err
+			}
+			limit, err = provider.GetLimit(b.aliyunClient, instanceID)
 			if err != nil {
 				return fmt.Errorf("upable get instance limit, %w", err)
 			}
@@ -202,10 +211,28 @@ func (b *NetworkServiceBuilder) initInstanceLimit() error {
 		if err != nil {
 			return err
 		}
-		if limit == nil || instance.GetInstanceMeta().InstanceType != limit.InstanceTypeID {
-			limit, err = provider.GetLimit(b.aliyunClient, instance.GetInstanceMeta().InstanceType)
+
+		if limit != nil {
+			instanceType, err := instance.GetInstanceMeta().GetInstanceType()
 			if err != nil {
-				return fmt.Errorf("upable get instance limit, %w", err)
+				return err
+			}
+			if limit.InstanceTypeID != instanceType {
+				limit = nil
+			}
+		}
+
+		if limit == nil {
+			instanceType, err := instance.GetInstanceMeta().GetInstanceType()
+			if err != nil {
+				return err
+			}
+
+			if instanceType != limit.InstanceTypeID {
+				limit, err = provider.GetLimit(b.aliyunClient, instanceType)
+				if err != nil {
+					return fmt.Errorf("upable get instance limit, %w", err)
+				}
 			}
 		}
 		b.limit = limit
@@ -226,6 +253,29 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 	eniConfig := getENIConfig(b.config)
 	eniConfig.EnableIPv4 = enableIPv4
 	eniConfig.EnableIPv6 = enableIPv6
+
+	zoneID, err := instance.GetInstanceMeta().GetZoneID()
+	if err != nil {
+		return err
+	}
+	instanceID, err := instance.GetInstanceMeta().GetInstanceID()
+	if err != nil {
+		return err
+	}
+	vswitchID, err := instance.GetInstanceMeta().GetVSwitchID()
+	if err != nil {
+		return err
+	}
+
+	if eniConfig.ZoneID == "" {
+		eniConfig.ZoneID = zoneID
+	}
+	if eniConfig.InstanceID == "" {
+		eniConfig.InstanceID = instanceID
+	}
+	if len(eniConfig.VSwitchOptions) == 0 {
+		eniConfig.VSwitchOptions = []string{vswitchID}
+	}
 
 	// fall back to use primary eni's sg
 	if len(eniConfig.SecurityGroupIDs) == 0 {
@@ -361,7 +411,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 		eniList = append(eniList, eni.NewLocal(nil, "secondary", factory, poolConfig))
 	}
 
-	eniManager := eni.NewManager(poolConfig.MinPoolSize, poolConfig.MaxPoolSize, poolConfig.Capacity, 30*time.Second, eniList, types.EniSelectionPolicy(b.config.EniSelectionPolicy), b.service.k8s)
+	eniManager := eni.NewManager(poolConfig.MinPoolSize, poolConfig.MaxPoolSize, poolConfig.Capacity, 30*time.Second, eniList, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), b.service.k8s)
 	b.service.eniMgr = eniManager
 	err = eniManager.Run(b.ctx, &b.service.wg, podResources)
 	if err != nil {
@@ -405,7 +455,7 @@ func (b *NetworkServiceBuilder) PostInitForCRDV2() *NetworkServiceBuilder {
 		return b
 	}
 	crdv2 := eni.NewCRDV2(b.service.k8s.NodeName(), b.namespace)
-	mgr := eni.NewManager(0, 0, 0, 0, []eni.NetworkInterface{crdv2}, types.EniSelectionPolicy(b.config.EniSelectionPolicy), nil)
+	mgr := eni.NewManager(0, 0, 0, 0, []eni.NetworkInterface{crdv2}, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), nil)
 
 	svc := b.RunENIMgr(b.ctx, mgr)
 	go b.service.startGarbageCollectionLoop(b.ctx)

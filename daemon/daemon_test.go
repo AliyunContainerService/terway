@@ -86,7 +86,7 @@ func Test_checkInstance1(t *testing.T) {
 func Test_initTrunk(t *testing.T) {
 	type args struct {
 		config     *daemon.Config
-		poolConfig *types.PoolConfig
+		poolConfig *daemon.PoolConfig
 		k8sClient  *k8smocks.Kubernetes
 		f          *factorymocks.Factory
 	}
@@ -105,7 +105,7 @@ func Test_initTrunk(t *testing.T) {
 					EnableENITrunking: true,
 					EnableERDMA:       true,
 				},
-				poolConfig: &types.PoolConfig{
+				poolConfig: &daemon.PoolConfig{
 					MaxENI: 2,
 				},
 				k8sClient: k8smocks.NewKubernetes(t),
@@ -148,7 +148,7 @@ func Test_initTrunk(t *testing.T) {
 					EnableENITrunking: true,
 					EnableERDMA:       true,
 				},
-				poolConfig: &types.PoolConfig{
+				poolConfig: &daemon.PoolConfig{
 					MaxENI: 2,
 				},
 				k8sClient: k8smocks.NewKubernetes(t),
@@ -180,7 +180,7 @@ func Test_initTrunk(t *testing.T) {
 					EnableENITrunking: true,
 					EnableERDMA:       true,
 				},
-				poolConfig: &types.PoolConfig{
+				poolConfig: &daemon.PoolConfig{
 					MaxENI: 2,
 				},
 				k8sClient: k8smocks.NewKubernetes(t),

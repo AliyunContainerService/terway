@@ -28,6 +28,10 @@ func (a *OpenAPI) CreateElasticNetworkInterface(zoneID, nodeID, vSwitchID, secur
 		return "", "", err
 	}
 
+	if resp.Code != 0 {
+		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		return "", "", err
+	}
 	return resp.Content.NodeId, resp.Content.ElasticNetworkInterfaceId, nil
 }
 
@@ -45,6 +49,12 @@ func (a *OpenAPI) DeleteElasticNetworkInterface(ctx context.Context, eniID strin
 	if err != nil {
 		err = apiErr.WarpError(err)
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
+		return err
+	}
+
+	if resp.Code != 0 {
+		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		l.Error(err, "failed")
 		return err
 	}
 
@@ -72,6 +82,11 @@ func (a *OpenAPI) AssignLeniPrivateIPAddress(ctx context.Context, eniID, prefer 
 		return "", err
 	}
 
+	if resp.Code != 0 {
+		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		l.Error(err, "failed")
+		return "", err
+	}
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("assign", "ipName", resp.Content.IpName, "ip", resp.Content.Ip, "private", resp.Content.PrivateIpAddress)
 
 	return resp.Content.IpName, nil
@@ -97,6 +112,11 @@ func (a *OpenAPI) UnassignLeniPrivateIPAddress(ctx context.Context, eniID, ipNam
 		return err
 	}
 
+	if resp.Code != 0 {
+		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		l.Error(err, "failed")
+		return err
+	}
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
 
 	return nil
@@ -110,6 +130,11 @@ func (a *OpenAPI) GetElasticNetworkInterface(eniID string) (*eflo.Content, error
 	resp, err := a.ClientSet.EFLO().GetElasticNetworkInterface(req)
 	metric.OpenAPILatency.WithLabelValues("GetElasticNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
+		return nil, err
+	}
+
+	if resp.Code != 0 {
+		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
 		return nil, err
 	}
 
@@ -135,6 +160,12 @@ func (a *OpenAPI) ListLeniPrivateIPAddresses(ctx context.Context, eniID, ipName,
 		err = apiErr.WarpError(err)
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
 
+		return nil, err
+	}
+
+	if resp.Code != 0 {
+		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		l.Error(err, "failed")
 		return nil, err
 	}
 
@@ -164,6 +195,12 @@ func (a *OpenAPI) ListElasticNetworkInterfaces(ctx context.Context, zoneID, node
 		return nil, err
 	}
 
+	if resp.Code != 0 {
+		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		l.Error(err, "failed")
+		return nil, err
+	}
+
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
 
 	return &resp.Content, nil
@@ -185,6 +222,12 @@ func (a *OpenAPI) GetNodeInfoForPod(ctx context.Context, nodeID string) (*eflo.C
 		return nil, err
 	}
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
+
+	if resp.Code != 0 {
+		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		l.Error(err, "failed")
+		return nil, err
+	}
 
 	return &resp.Content, nil
 }

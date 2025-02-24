@@ -7,6 +7,7 @@ import (
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/go-logr/logr"
+	"github.com/samber/lo"
 )
 
 var ErrInvalidArgs = errors.New("invalid args")
@@ -41,6 +42,11 @@ const (
 )
 
 const (
+	LENIStatusAvailable  string = "Available"
+	LENIStatusUnattached string = "Unattached"
+)
+
+const (
 	ENITypePrimary   string = "Primary"
 	ENITypeSecondary string = "Secondary"
 	ENITypeTrunk     string = "Trunk"
@@ -56,17 +62,18 @@ const EIPInstanceTypeNetworkInterface = "NetworkInterface"
 
 // NetworkInterface openAPI result for ecs.CreateNetworkInterfaceResponse and ecs.NetworkInterfaceSet
 type NetworkInterface struct {
-	Status             string             `json:"status,omitempty"`
-	MacAddress         string             `json:"mac_address,omitempty"`
-	NetworkInterfaceID string             `json:"network_interface_id,omitempty"`
-	VSwitchID          string             `json:"v_switch_id,omitempty"`
-	PrivateIPAddress   string             `json:"private_ip_address,omitempty"`
-	PrivateIPSets      []ecs.PrivateIpSet `json:"private_ip_sets"`
-	ZoneID             string             `json:"zone_id,omitempty"`
-	SecurityGroupIDs   []string           `json:"security_group_ids,omitempty"`
-	ResourceGroupID    string             `json:"resource_group_id,omitempty"`
-	IPv6Set            []ecs.Ipv6Set      `json:"ipv6_set,omitempty"`
-	Tags               []ecs.Tag          `json:"tags,omitempty"`
+	Status             string    `json:"status,omitempty"`
+	MacAddress         string    `json:"mac_address,omitempty"`
+	NetworkInterfaceID string    `json:"network_interface_id,omitempty"`
+	VPCID              string    `json:"vpc_ic,omitempty"`
+	VSwitchID          string    `json:"v_switch_id,omitempty"`
+	PrivateIPAddress   string    `json:"private_ip_address,omitempty"`
+	PrivateIPSets      []IPSet   `json:"private_ip_sets"`
+	ZoneID             string    `json:"zone_id,omitempty"`
+	SecurityGroupIDs   []string  `json:"security_group_ids,omitempty"`
+	ResourceGroupID    string    `json:"resource_group_id,omitempty"`
+	IPv6Set            []IPSet   `json:"ipv6_set,omitempty"`
+	Tags               []ecs.Tag `json:"tags,omitempty"`
 
 	// fields for DescribeNetworkInterface
 	Type                        string `json:"type,omitempty"`
@@ -77,6 +84,13 @@ type NetworkInterface struct {
 	CreationTime                string `json:"creation_time,omitempty"`
 }
 
+type IPSet struct {
+	Primary   bool
+	IPAddress string
+	IPName    string
+	IPStatus  string
+}
+
 func FromCreateResp(in *ecs.CreateNetworkInterfaceResponse) *NetworkInterface {
 	return &NetworkInterface{
 		Status:             in.Status,
@@ -84,13 +98,22 @@ func FromCreateResp(in *ecs.CreateNetworkInterfaceResponse) *NetworkInterface {
 		NetworkInterfaceID: in.NetworkInterfaceId,
 		VSwitchID:          in.VSwitchId,
 		PrivateIPAddress:   in.PrivateIpAddress,
-		PrivateIPSets:      in.PrivateIpSets.PrivateIpSet,
-		ZoneID:             in.ZoneId,
-		SecurityGroupIDs:   in.SecurityGroupIds.SecurityGroupId,
-		IPv6Set:            in.Ipv6Sets.Ipv6Set,
-		Tags:               in.Tags.Tag,
-		Type:               in.Type,
-		ResourceGroupID:    in.ResourceGroupId,
+		PrivateIPSets: lo.Map(in.PrivateIpSets.PrivateIpSet, func(item ecs.PrivateIpSet, _ int) IPSet {
+			return IPSet{
+				IPAddress: item.PrivateIpAddress,
+				Primary:   item.Primary,
+			}
+		}),
+		ZoneID:           in.ZoneId,
+		SecurityGroupIDs: in.SecurityGroupIds.SecurityGroupId,
+		IPv6Set: lo.Map(in.Ipv6Sets.Ipv6Set, func(item ecs.Ipv6Set, _ int) IPSet {
+			return IPSet{
+				IPAddress: item.Ipv6Address,
+			}
+		}),
+		Tags:            in.Tags.Tag,
+		Type:            in.Type,
+		ResourceGroupID: in.ResourceGroupId,
 	}
 }
 
@@ -101,16 +124,25 @@ func FromDescribeResp(in *ecs.NetworkInterfaceSet) *NetworkInterface {
 	}
 
 	return &NetworkInterface{
-		Status:                      in.Status,
-		MacAddress:                  in.MacAddress,
-		NetworkInterfaceID:          in.NetworkInterfaceId,
-		InstanceID:                  ins,
-		VSwitchID:                   in.VSwitchId,
-		PrivateIPAddress:            in.PrivateIpAddress,
-		ZoneID:                      in.ZoneId,
-		SecurityGroupIDs:            in.SecurityGroupIds.SecurityGroupId,
-		IPv6Set:                     in.Ipv6Sets.Ipv6Set,
-		PrivateIPSets:               in.PrivateIpSets.PrivateIpSet,
+		Status:             in.Status,
+		MacAddress:         in.MacAddress,
+		NetworkInterfaceID: in.NetworkInterfaceId,
+		InstanceID:         ins,
+		VSwitchID:          in.VSwitchId,
+		PrivateIPAddress:   in.PrivateIpAddress,
+		ZoneID:             in.ZoneId,
+		SecurityGroupIDs:   in.SecurityGroupIds.SecurityGroupId,
+		IPv6Set: lo.Map(in.Ipv6Sets.Ipv6Set, func(item ecs.Ipv6Set, _ int) IPSet {
+			return IPSet{
+				IPAddress: item.Ipv6Address,
+			}
+		}),
+		PrivateIPSets: lo.Map(in.PrivateIpSets.PrivateIpSet, func(item ecs.PrivateIpSet, _ int) IPSet {
+			return IPSet{
+				IPAddress: item.PrivateIpAddress,
+				Primary:   item.Primary,
+			}
+		}),
 		Tags:                        in.Tags.Tag,
 		TrunkNetworkInterfaceID:     in.Attachment.TrunkNetworkInterfaceId,
 		NetworkInterfaceTrafficMode: in.NetworkInterfaceTrafficMode,

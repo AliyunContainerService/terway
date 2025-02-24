@@ -13,13 +13,10 @@ import (
 
 // ENIInfoGetter interface to get eni information
 type ENIInfoGetter interface {
-	GetENIByMac(mac string) (*daemon.ENI, error)
-
 	GetENIPrivateAddressesByMACv2(mac string) ([]netip.Addr, error)
 	GetENIPrivateIPv6AddressesByMACv2(mac string) ([]netip.Addr, error)
 
 	GetENIs(containsMainENI bool) ([]*daemon.ENI, error)
-	GetSecondaryENIMACs() ([]string, error)
 }
 
 type ENIMetadata struct {
@@ -106,7 +103,10 @@ func (e *ENIMetadata) GetENIPrivateIPv6AddressesByMACv2(mac string) ([]netip.Add
 func (e *ENIMetadata) GetENIs(containsMainENI bool) ([]*daemon.ENI, error) {
 	var enis []*daemon.ENI
 
-	mainENIMac := instance.GetInstanceMeta().PrimaryMAC
+	mainENIMac, err := instance.GetInstanceMeta().GetPrimaryMAC()
+	if err != nil {
+		return nil, err
+	}
 
 	macs, err := metadata.GetENIsMAC()
 	if err != nil {
@@ -125,23 +125,4 @@ func (e *ENIMetadata) GetENIs(containsMainENI bool) ([]*daemon.ENI, error) {
 		enis = append(enis, eni)
 	}
 	return enis, nil
-}
-
-// GetSecondaryENIMACs return secondary ENI macs
-func (e *ENIMetadata) GetSecondaryENIMACs() ([]string, error) {
-	var result []string
-
-	mainENIMac := instance.GetInstanceMeta().PrimaryMAC
-
-	macs, err := metadata.GetENIsMAC()
-	if err != nil {
-		return nil, err
-	}
-	for _, mac := range macs {
-		if mac == mainENIMac {
-			continue
-		}
-		result = append(result, mac)
-	}
-	return result, nil
 }

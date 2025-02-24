@@ -128,19 +128,24 @@ var _ = Describe("Node Controller", func() {
 					Name: resourceName,
 				},
 				Spec: networkv1beta1.NodeSpec{
-					NodeMetadata: networkv1beta1.NodeMetadata{},
-					NodeCap:      networkv1beta1.NodeCap{},
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "foo",
+						InstanceType: "foo",
+						InstanceID:   "foo",
+						ZoneID:       "foo",
+					},
+					NodeCap: networkv1beta1.NodeCap{},
 					ENISpec: &networkv1beta1.ENISpec{
 						Tag:                 nil,
 						TagFilter:           nil,
-						VSwitchOptions:      nil,
-						SecurityGroupIDs:    nil,
+						VSwitchOptions:      []string{"foo"},
+						SecurityGroupIDs:    []string{"foo"},
 						ResourceGroupID:     "",
 						EnableIPv4:          true,
 						EnableIPv6:          false,
 						EnableERDMA:         false,
 						EnableTrunk:         true,
-						VSwitchSelectPolicy: "",
+						VSwitchSelectPolicy: "ordered",
 					},
 					Pool: nil,
 					Flavor: []networkv1beta1.Flavor{
@@ -169,6 +174,12 @@ var _ = Describe("Node Controller", func() {
 							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
 							SecurityGroupIDs:            []string{"ff"},
 							Status:                      "InUse",
+							IPv4: map[string]*networkv1beta1.IP{
+								"192.168.0.1": {
+									IP:     "192.168.0.1",
+									Status: "Valid",
+								},
+							},
 						},
 					},
 				}
@@ -201,19 +212,24 @@ var _ = Describe("Node Controller", func() {
 					Name: resourceName,
 				},
 				Spec: networkv1beta1.NodeSpec{
-					NodeMetadata: networkv1beta1.NodeMetadata{},
-					NodeCap:      networkv1beta1.NodeCap{},
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "foo",
+						InstanceType: "foo",
+						InstanceID:   "foo",
+						ZoneID:       "foo",
+					},
+					NodeCap: networkv1beta1.NodeCap{},
 					ENISpec: &networkv1beta1.ENISpec{
 						Tag:                 nil,
 						TagFilter:           nil,
-						VSwitchOptions:      nil,
-						SecurityGroupIDs:    nil,
+						VSwitchOptions:      []string{"foo"},
+						SecurityGroupIDs:    []string{"foo"},
 						ResourceGroupID:     "",
 						EnableIPv4:          true,
 						EnableIPv6:          false,
 						EnableERDMA:         false,
 						EnableTrunk:         true,
-						VSwitchSelectPolicy: "",
+						VSwitchSelectPolicy: "ordered",
 					},
 					Pool: nil,
 					Flavor: []networkv1beta1.Flavor{
@@ -247,7 +263,12 @@ var _ = Describe("Node Controller", func() {
 							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
 							SecurityGroupIDs:            []string{"ff"},
 							Status:                      "InUse",
-						},
+							IPv4: map[string]*networkv1beta1.IP{
+								"192.168.0.1": {
+									IP:     "192.168.0.1",
+									Status: "Valid",
+								},
+							}},
 					},
 				}
 				return nil
@@ -369,19 +390,24 @@ var _ = Describe("Node Exclusive eni node", func() {
 					Name: resourceName,
 				},
 				Spec: networkv1beta1.NodeSpec{
-					NodeMetadata: networkv1beta1.NodeMetadata{},
-					NodeCap:      networkv1beta1.NodeCap{},
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "foo",
+						InstanceType: "foo",
+						InstanceID:   "foo",
+						ZoneID:       "foo",
+					},
+					NodeCap: networkv1beta1.NodeCap{},
 					ENISpec: &networkv1beta1.ENISpec{
 						Tag:                 nil,
 						TagFilter:           nil,
-						VSwitchOptions:      nil,
-						SecurityGroupIDs:    nil,
+						VSwitchOptions:      []string{"foo"},
+						SecurityGroupIDs:    []string{"foo"},
 						ResourceGroupID:     "",
 						EnableIPv4:          true,
 						EnableIPv6:          false,
 						EnableERDMA:         false,
 						EnableTrunk:         true,
-						VSwitchSelectPolicy: "",
+						VSwitchSelectPolicy: "ordered",
 					},
 					Pool: nil,
 					Flavor: []networkv1beta1.Flavor{
@@ -410,6 +436,12 @@ var _ = Describe("Node Exclusive eni node", func() {
 							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
 							SecurityGroupIDs:            []string{"ff"},
 							Status:                      "InUse",
+							IPv4: map[string]*networkv1beta1.IP{
+								"192.168.0.1": {
+									IP:     "192.168.0.1",
+									Status: "Valid",
+								},
+							},
 						},
 					},
 				}

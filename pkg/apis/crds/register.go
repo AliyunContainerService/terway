@@ -47,7 +47,7 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 	switch name {
 	case CRDPodENI:
 		crdBytes = crdsPodENI
-		version = "v0.2.0"
+		version = "v0.3.0"
 	case CRDPodNetworking:
 		crdBytes = crdsPodNetworking
 		version = "v0.1.0"

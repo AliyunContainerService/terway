@@ -171,6 +171,8 @@ spec:
                         properties:
                           ip:
                             type: string
+                          ipName:
+                            type: string
                           podID:
                             description: Add the pod ID
                             type: string
@@ -198,6 +200,8 @@ spec:
                       additionalProperties:
                         properties:
                           ip:
+                            type: string
+                          ipName:
                             type: string
                           podID:
                             description: Add the pod ID

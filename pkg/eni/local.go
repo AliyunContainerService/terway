@@ -155,7 +155,7 @@ type Local struct {
 	factory factory.Factory
 }
 
-func NewLocal(eni *daemon.ENI, eniType string, factory factory.Factory, poolConfig *types.PoolConfig) *Local {
+func NewLocal(eni *daemon.ENI, eniType string, factory factory.Factory, poolConfig *daemon.PoolConfig) *Local {
 	l := &Local{
 		eni:        eni,
 		batchSize:  poolConfig.BatchSize,

@@ -84,7 +84,7 @@ func (s *success) Run(ctx context.Context, podResources []daemon.PodResources, w
 
 func TestManagerAllocateReturnsResourcesWhenSuccessful(t *testing.T) {
 	mockNI := &success{}
-	manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI}, types.EniSelectionPolicyMostIPs, &FakeK8s{})
+	manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI}, daemon.EniSelectionPolicyMostIPs, &FakeK8s{})
 
 	request := NewLocalIPRequest()
 	resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -108,7 +108,7 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 	}
 
 	{
-		manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI, mockNI2}, types.EniSelectionPolicyMostIPs, &FakeK8s{})
+		manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI, mockNI2}, daemon.EniSelectionPolicyMostIPs, &FakeK8s{})
 
 		request := NewLocalIPRequest()
 		resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -121,7 +121,7 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 	}
 
 	{
-		manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI, mockNI2}, types.EniSelectionPolicyLeastIPs, &FakeK8s{})
+		manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI, mockNI2}, daemon.EniSelectionPolicyLeastIPs, &FakeK8s{})
 
 		request := NewLocalIPRequest()
 		resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -135,7 +135,7 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 }
 
 func TestManagerAllocateReturnsErrorWhenNoBackendCanHandleAllocation(t *testing.T) {
-	manager := NewManager(0, 0, 0, 0, []NetworkInterface{}, types.EniSelectionPolicyMostIPs, &FakeK8s{})
+	manager := NewManager(0, 0, 0, 0, []NetworkInterface{}, daemon.EniSelectionPolicyMostIPs, &FakeK8s{})
 
 	request := NewLocalIPRequest()
 	_, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -147,7 +147,7 @@ func TestManagerAllocateReturnsErrorWhenNoBackendCanHandleAllocation(t *testing.
 
 func TestManagerAllocateWithTimeoutWhenAllocationFails(t *testing.T) {
 	mockNI := &timeOut{}
-	manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI}, types.EniSelectionPolicyMostIPs, &FakeK8s{})
+	manager := NewManager(0, 0, 0, 0, []NetworkInterface{mockNI}, daemon.EniSelectionPolicyMostIPs, &FakeK8s{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

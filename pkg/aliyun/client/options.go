@@ -3,6 +3,7 @@ package client
 import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -21,6 +22,8 @@ type NetworkInterfaceOptions struct {
 	Status                string
 	NetworkInterfaceID    string
 	DeleteENIOnECSRelease *bool
+
+	ZoneID string
 }
 
 type CreateNetworkInterfaceOption interface {
@@ -83,6 +86,10 @@ func (c *CreateNetworkInterfaceOptions) ApplyCreateNetworkInterface(options *Cre
 		if c.NetworkInterfaceOptions.DeleteENIOnECSRelease != nil {
 			options.NetworkInterfaceOptions.DeleteENIOnECSRelease = c.NetworkInterfaceOptions.DeleteENIOnECSRelease
 		}
+
+		if c.NetworkInterfaceOptions.ZoneID != "" {
+			options.NetworkInterfaceOptions.ZoneID = c.NetworkInterfaceOptions.ZoneID
+		}
 	}
 }
 
@@ -139,6 +146,53 @@ func (c *CreateNetworkInterfaceOptions) Finish(idempotentKeyGen IdempotentKeyGen
 	}, nil
 }
 
+func (c *CreateNetworkInterfaceOptions) EFLO(idempotentKeyGen IdempotentKeyGen) (*eflo.CreateElasticNetworkInterfaceRequest, func(), error) {
+	if c.NetworkInterfaceOptions == nil {
+		return nil, nil, ErrInvalidArgs
+	}
+
+	if c.NetworkInterfaceOptions.IPCount > 1 {
+		// eflo does not support multi ip in create
+		return nil, nil, ErrInvalidArgs
+	}
+
+	if c.NetworkInterfaceOptions.VSwitchID == "" {
+		return nil, nil, ErrInvalidArgs
+	}
+
+	req := eflo.CreateCreateElasticNetworkInterfaceRequest()
+	if c.NetworkInterfaceOptions.VSwitchID != "" {
+		req.VSwitchId = c.NetworkInterfaceOptions.VSwitchID
+	}
+	if len(c.NetworkInterfaceOptions.SecurityGroupIDs) > 0 {
+		req.SecurityGroupId = c.NetworkInterfaceOptions.SecurityGroupIDs[0]
+	}
+	req.Description = eniDescription
+	if c.NetworkInterfaceOptions.InstanceID != "" {
+		req.NodeId = c.NetworkInterfaceOptions.InstanceID
+	}
+	if c.NetworkInterfaceOptions.ZoneID != "" {
+		req.ZoneId = c.NetworkInterfaceOptions.ZoneID
+	}
+
+	if req.SecurityGroupId == "" {
+		return nil, nil, ErrInvalidArgs
+	}
+
+	argsHash := md5Hash(req)
+	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
+
+	if c.Backoff == nil {
+		c.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	return req, func() {
+		idempotentKeyGen.PutBack(argsHash, req.ClientToken)
+	}, nil
+}
+
 type AssignPrivateIPAddressOption interface {
 	ApplyAssignPrivateIPAddress(*AssignPrivateIPAddressOptions)
 }
@@ -165,6 +219,29 @@ func (c *AssignPrivateIPAddressOptions) Finish(idempotentKeyGen IdempotentKeyGen
 	req := ecs.CreateAssignPrivateIpAddressesRequest()
 	req.NetworkInterfaceId = c.NetworkInterfaceOptions.NetworkInterfaceID
 	req.SecondaryPrivateIpAddressCount = requests.NewInteger(c.NetworkInterfaceOptions.IPCount)
+
+	argsHash := md5Hash(req)
+	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
+
+	if c.Backoff == nil {
+		c.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	return req, func() {
+		idempotentKeyGen.PutBack(argsHash, req.ClientToken)
+	}, nil
+}
+
+func (c *AssignPrivateIPAddressOptions) EFLO(idempotentKeyGen IdempotentKeyGen) (*eflo.AssignLeniPrivateIpAddressRequest, func(), error) {
+	if c.NetworkInterfaceOptions == nil ||
+		c.NetworkInterfaceOptions.NetworkInterfaceID == "" ||
+		c.NetworkInterfaceOptions.IPCount != 1 {
+		return nil, nil, ErrInvalidArgs
+	}
+	req := eflo.CreateAssignLeniPrivateIpAddressRequest()
+	req.ElasticNetworkInterfaceId = c.NetworkInterfaceOptions.NetworkInterfaceID
 
 	argsHash := md5Hash(req)
 	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
@@ -219,4 +296,108 @@ func (c *AssignIPv6AddressesOptions) Finish(idempotentKeyGen IdempotentKeyGen) (
 	return req, func() {
 		idempotentKeyGen.PutBack(argsHash, req.ClientToken)
 	}, nil
+}
+
+type DescribeNetworkInterfaceOption interface {
+	ApplyTo(*DescribeNetworkInterfaceOptions)
+}
+
+type DescribeNetworkInterfaceOptions struct {
+	VPCID               *string
+	NetworkInterfaceIDs *[]string
+	InstanceID          *string
+	InstanceType        *string
+	Status              *string
+	Tags                *map[string]string
+
+	Backoff *wait.Backoff
+}
+
+func (o *DescribeNetworkInterfaceOptions) ApplyTo(in *DescribeNetworkInterfaceOptions) {
+	if o.VPCID != nil {
+		in.VPCID = o.VPCID
+	}
+	if o.NetworkInterfaceIDs != nil {
+		in.NetworkInterfaceIDs = o.NetworkInterfaceIDs
+	}
+	if o.InstanceID != nil {
+		in.InstanceID = o.InstanceID
+	}
+	if o.InstanceType != nil {
+		in.InstanceType = o.InstanceType
+	}
+	if o.Status != nil {
+		in.Status = o.Status
+	}
+	if o.Tags != nil {
+		in.Tags = o.Tags
+	}
+	if o.Backoff != nil {
+		in.Backoff = o.Backoff
+	}
+}
+
+func (o *DescribeNetworkInterfaceOptions) ECS() *ecs.DescribeNetworkInterfacesRequest {
+	req := ecs.CreateDescribeNetworkInterfacesRequest()
+	if o.VPCID != nil {
+		req.VpcId = *o.VPCID
+	}
+	if o.NetworkInterfaceIDs != nil {
+		req.NetworkInterfaceId = o.NetworkInterfaceIDs
+	}
+	if o.InstanceID != nil {
+		req.InstanceId = *o.InstanceID
+	}
+	if o.InstanceType != nil {
+		req.Type = *o.InstanceType
+	}
+	if o.Status != nil {
+		req.Status = *o.Status
+	}
+	if o.Tags != nil {
+		tags := make([]ecs.DescribeNetworkInterfacesTag, 0)
+		for k, v := range *o.Tags {
+			tags = append(tags, ecs.DescribeNetworkInterfacesTag{
+				Key:   k,
+				Value: v,
+			})
+		}
+		req.Tag = &tags
+	}
+
+	if o.Backoff == nil {
+		o.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	return req
+}
+
+func (o *DescribeNetworkInterfaceOptions) EFLO() *eflo.ListElasticNetworkInterfacesRequest {
+	req := eflo.CreateListElasticNetworkInterfacesRequest()
+	if o.VPCID != nil {
+		req.VpcId = *o.VPCID
+	}
+
+	if o.NetworkInterfaceIDs != nil && len(*o.NetworkInterfaceIDs) > 0 {
+		req.ElasticNetworkInterfaceId = (*o.NetworkInterfaceIDs)[0]
+	}
+	if o.InstanceID != nil {
+		req.NodeId = *o.InstanceID
+	}
+	if o.InstanceType != nil {
+		req.Type = *o.InstanceType
+	}
+	if o.Status != nil {
+		req.Status = *o.Status
+	}
+
+	if o.Backoff == nil {
+		o.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	return req
 }

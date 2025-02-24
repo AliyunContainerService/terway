@@ -850,7 +850,7 @@ func checkInstance(limit *client.Limits, daemonMode string, config *daemon.Confi
 }
 
 // initTrunk to ensure trunk eni is present. Return eni id if found.
-func initTrunk(config *daemon.Config, poolConfig *types.PoolConfig, k8sClient k8s.Kubernetes, f factory.Factory) (string, error) {
+func initTrunk(config *daemon.Config, poolConfig *daemon.PoolConfig, k8sClient k8s.Kubernetes, f factory.Factory) (string, error) {
 	var err error
 
 	// get eni id form node annotation
@@ -909,7 +909,7 @@ func initTrunk(config *daemon.Config, poolConfig *types.PoolConfig, k8sClient k8
 	return trunk.ID, nil
 }
 
-func runDevicePlugin(daemonMode string, config *daemon.Config, poolConfig *types.PoolConfig) {
+func runDevicePlugin(daemonMode string, config *daemon.Config, poolConfig *daemon.PoolConfig) {
 	switch daemonMode {
 	case daemon.ModeENIMultiIP:
 		if config.EnableENITrunking {

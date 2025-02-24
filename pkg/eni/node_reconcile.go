@@ -18,6 +18,7 @@ import (
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
@@ -56,6 +57,9 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, err
+	}
+	if utils.ISLinJunNode(k8sNode.Labels) {
+		return r.handleEFLO(ctx, k8sNode, node)
 	}
 
 	eniConfig, err := daemon.ConfigFromConfigMap(ctx, r.client, node.Name)
@@ -103,7 +107,12 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 	}
 	if len(vswitchOptions) == 0 {
 		// if user forget to set vsw , we still rely on metadata to get the actual one
-		vswitchOptions = append(vswitchOptions, instance.GetInstanceMeta().VSwitchID)
+
+		switchID, err := instance.GetInstanceMeta().GetVSwitchID()
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("failed to get vsw from metadata, %w", err)
+		}
+		vswitchOptions = append(vswitchOptions, switchID)
 	}
 
 	// below fields allows to change
@@ -174,6 +183,105 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
 		Count:                       secondary,
 	})
+
+	node.Spec.Pool = &networkv1beta1.PoolSpec{
+		MaxPoolSize: eniConfig.MaxPoolSize,
+		MinPoolSize: eniConfig.MinPoolSize,
+	}
+
+	afterStatus, err := runtime.DefaultUnstructuredConverter.ToUnstructured(node.DeepCopy())
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	if !reflect.DeepEqual(beforeStatus, afterStatus) {
+		err = r.client.Update(ctx, node)
+		l.Info("update node spec")
+		return reconcile.Result{}, err
+	}
+
+	return reconcile.Result{}, nil
+}
+
+func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, node *networkv1beta1.Node) (reconcile.Result, error) {
+	l := log.FromContext(ctx)
+
+	eniConfig, err := daemon.ConfigFromConfigMap(ctx, r.client, node.Name)
+	if err != nil {
+		r.record.Event(k8sNode, "Warning", "ConfigError", err.Error())
+		return reconcile.Result{}, err
+	}
+
+	beforeStatus, err := runtime.DefaultUnstructuredConverter.ToUnstructured(node.DeepCopy())
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	//node.Spec.ENISpec = nil
+
+	node.Spec.ENISpec = &networkv1beta1.ENISpec{
+		EnableIPv4: true,
+		EnableIPv6: false,
+	}
+
+	if node.Labels == nil {
+		node.Labels = map[string]string{}
+	}
+	node.Labels[types.LinJunNodeLabelKey] = "true"
+
+	regionID, err := instance.GetInstanceMeta().GetRegionID()
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	instanceType, err := instance.GetInstanceMeta().GetInstanceType()
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	instanceID, err := instance.GetInstanceMeta().GetInstanceID()
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	zoneID, err := instance.GetInstanceMeta().GetZoneID()
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	node.Spec.NodeMetadata.RegionID = regionID
+	node.Spec.NodeMetadata.InstanceType = instanceType
+	node.Spec.NodeMetadata.InstanceID = instanceID
+	node.Spec.NodeMetadata.ZoneID = zoneID
+
+	vswitchOptions := []string{}
+	for k, v := range eniConfig.VSwitches {
+		if k == node.Spec.NodeMetadata.ZoneID {
+			vswitchOptions = append(vswitchOptions, v...)
+		}
+	}
+	if len(vswitchOptions) == 0 {
+		return reconcile.Result{}, fmt.Errorf("failed to get vsw for zone %s", zoneID)
+	}
+
+	policy := networkv1beta1.VSwitchSelectionPolicyRandom
+	switch eniConfig.VSwitchSelectionPolicy {
+	case "ordered":
+		// keep the previous behave
+		policy = networkv1beta1.VSwitchSelectionPolicyMost
+	}
+
+	node.Spec.ENISpec.VSwitchOptions = vswitchOptions
+	node.Spec.ENISpec.VSwitchSelectPolicy = policy
+	node.Spec.ENISpec.SecurityGroupIDs = eniConfig.GetSecurityGroups()
+	node.Spec.ENISpec.Tag = eniConfig.ENITags
+	node.Spec.ENISpec.TagFilter = eniConfig.ENITagFilter
+	node.Spec.ENISpec.ResourceGroupID = eniConfig.ResourceGroupID
+
+	if node.Spec.NodeCap.Adapters > 0 {
+		node.Spec.Flavor = nil
+		node.Spec.Flavor = append(node.Spec.Flavor, networkv1beta1.Flavor{
+			NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+			NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+			Count:                       node.Spec.NodeCap.Adapters - 1,
+		})
+	}
 
 	node.Spec.Pool = &networkv1beta1.PoolSpec{
 		MaxPoolSize: eniConfig.MaxPoolSize,

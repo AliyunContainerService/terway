@@ -1,43 +1,22 @@
 package instance
 
-import (
-	"sync"
+//go:generate mockery --name Interface
 
-	"k8s.io/klog/v2"
-)
-
-var defaultIns *Instance
-var once sync.Once
-
-type PopulateFunc func() *Instance
-
-var populate PopulateFunc
-
-type Instance struct {
-	RegionID   string
-	ZoneID     string
-	VPCID      string
-	VSwitchID  string
-	PrimaryMAC string
-
-	InstanceID   string
-	InstanceType string
+type Interface interface {
+	GetRegionID() (string, error)
+	GetZoneID() (string, error)
+	GetVSwitchID() (string, error)
+	GetPrimaryMAC() (string, error)
+	GetInstanceID() (string, error)
+	GetInstanceType() (string, error)
 }
 
-func init() {
-	populate = DefaultPopulate
+var defaultIns Interface = &ECS{}
+
+func Init(in Interface) {
+	defaultIns = in
 }
 
-func SetPopulateFunc(fn PopulateFunc) {
-	populate = fn
-}
-
-func GetInstanceMeta() *Instance {
-	once.Do(func() {
-		defaultIns = populate()
-
-		klog.Infof("load instance metadata %#v", defaultIns)
-	})
-
+func GetInstanceMeta() Interface {
 	return defaultIns
 }

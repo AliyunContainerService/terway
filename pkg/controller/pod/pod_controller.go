@@ -585,7 +585,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 
 			v6 := ""
 			if len(eni.IPv6Set) > 0 {
-				v6 = eni.IPv6Set[0].Ipv6Address
+				v6 = eni.IPv6Set[0].IPAddress
 			}
 			alloc.ENI = v1beta1.ENI{
 				ID:               eni.NetworkInterfaceID,

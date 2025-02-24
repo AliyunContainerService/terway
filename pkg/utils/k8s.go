@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/types"
 )
 
 var stsKinds = []string{"StatefulSet"}
@@ -47,8 +48,8 @@ func ISVKNode(n *corev1.Node) bool {
 	return n.Labels["type"] == "virtual-kubelet"
 }
 
-func ISLinJunNode(n *corev1.Node) bool {
-	return n.Labels["alibabacloud.com/lingjun-worker"] == "true"
+func ISLinJunNode(lb map[string]string) bool {
+	return lb[types.LinJunNodeLabelKey] == "true"
 }
 
 // PodSandboxExited pod sandbox is exited

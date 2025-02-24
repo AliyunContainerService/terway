@@ -37,7 +37,7 @@ type Eflo struct {
 	selectionPolicy  vswpool.SelectionPolicy
 }
 
-func NewEflo(ctx context.Context, openAPI *client.OpenAPI, vsw *vswpool.SwitchPool, cfg *types.ENIConfig) *Eflo {
+func NewEflo(ctx context.Context, openAPI *client.OpenAPI, vsw *vswpool.SwitchPool, cfg *daemon.ENIConfig) *Eflo {
 	return &Eflo{
 		ctx:              ctx,
 		api:              openAPI,

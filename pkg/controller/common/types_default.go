@@ -24,11 +24,17 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 )
 
 func NewNodeInfo(node *corev1.Node) (*NodeInfo, error) {
 	res := &NodeInfo{NodeName: node.Name}
+
+	if utils.ISLinJunNode(node.Labels) {
+		return res, nil
+	}
+
 	ids := strings.Split(node.Spec.ProviderID, ".")
 	if len(ids) < 2 {
 		return nil, fmt.Errorf("error parse providerID %s", node.Spec.ProviderID)

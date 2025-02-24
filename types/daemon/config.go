@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/secret"
 
 	jsonpatch "github.com/evanphx/json-patch"
@@ -179,4 +180,67 @@ func GetAddonSecret() (string, string, error) {
 		return "", "", err
 	}
 	return string(keyID), string(keySecret), nil
+}
+
+type EniSelectionPolicy string
+
+// Network interface Selection Policy
+const (
+	EniSelectionPolicyLeastIPs EniSelectionPolicy = "least_ips"
+	EniSelectionPolicyMostIPs  EniSelectionPolicy = "most_ips"
+)
+
+type ENIConfig struct {
+	ZoneID           string
+	VSwitchOptions   []string
+	ENITags          map[string]string
+	SecurityGroupIDs []string
+	InstanceID       string
+
+	VSwitchSelectionPolicy vswitch.SelectionPolicy
+	EniSelectionPolicy     EniSelectionPolicy
+
+	ResourceGroupID string
+
+	EniTypeAttr Feat
+
+	EnableIPv4 bool
+	EnableIPv6 bool
+
+	TagFilter map[string]string
+}
+
+// PoolConfig configuration of pool and resource factory
+type PoolConfig struct {
+	EnableIPv4 bool
+	EnableIPv6 bool
+
+	Capacity      int // the max res can hold in the pool
+	MaxENI        int // the max eni terway can be created (already exclude main eni)
+	MaxMemberENI  int // the max member eni can be created
+	ERdmaCapacity int // the max erdma res can be created
+	MaxIPPerENI   int
+	BatchSize     int
+
+	MaxPoolSize int
+	MinPoolSize int
+}
+
+type Feat uint8
+
+const (
+	FeatTrunk Feat = 1 << iota
+	FeatERDMA
+)
+
+func EnableFeature(features *Feat, feature Feat) {
+	*features |= feature
+}
+
+func DisableFeature(features *Feat, feature Feat) {
+	*features &= ^feature
+}
+
+func IsFeatureEnabled(features Feat, feature Feat) bool {
+	return features&feature != 0
 }
