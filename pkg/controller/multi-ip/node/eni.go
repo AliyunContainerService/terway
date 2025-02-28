@@ -135,11 +135,28 @@ func newENIFromAPI(eni *aliyunClient.NetworkInterface) *networkv1beta1.NetworkIn
 }
 
 // convertIPSet convert aliyunClient.IPSet to networkv1beta1.IP
-// for eflo case need to handle the ip status here
+// for valid ip , IPAddress is always be set
 func convertIPSet(in []aliyunClient.IPSet) map[string]*networkv1beta1.IP {
 	return lo.SliceToMap(in, func(item aliyunClient.IPSet) (string, *networkv1beta1.IP) {
+		if item.IPName != "" && item.IPStatus != aliyunClient.LENIIPStatusAvailable && !item.Primary {
+			if item.IPAddress == item.IPName {
+				return item.IPAddress, &networkv1beta1.IP{
+					IP:      item.IPAddress,
+					IPName:  item.IPName,
+					Status:  networkv1beta1.IPStatusDeleting,
+					Primary: item.Primary,
+				}
+			}
+			return item.IPAddress, &networkv1beta1.IP{
+				IP:      item.IPAddress,
+				IPName:  item.IPName,
+				Status:  networkv1beta1.IPStatusDeleting,
+				Primary: item.Primary,
+			}
+		}
 		return item.IPAddress, &networkv1beta1.IP{
 			IP:      item.IPAddress,
+			IPName:  item.IPName,
 			Status:  networkv1beta1.IPStatusValid,
 			Primary: item.Primary,
 		}

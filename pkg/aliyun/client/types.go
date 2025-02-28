@@ -44,6 +44,8 @@ const (
 const (
 	LENIStatusAvailable  string = "Available"
 	LENIStatusUnattached string = "Unattached"
+
+	LENIIPStatusAvailable string = "Available"
 )
 
 const (

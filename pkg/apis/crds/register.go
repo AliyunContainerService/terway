@@ -53,7 +53,7 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 		version = "v0.1.0"
 	case CRDNode:
 		crdBytes = crdsNode
-		version = "v0.2.0"
+		version = "v0.3.0"
 	case CRDNodeRuntime:
 		crdBytes = crdsNodeRuntime
 		version = "v0.1.0"

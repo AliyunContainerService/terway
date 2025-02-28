@@ -36,12 +36,9 @@ func (a *OpenAPI) CreateElasticNetworkInterface(zoneID, nodeID, vSwitchID, secur
 }
 
 func (a *OpenAPI) DeleteElasticNetworkInterface(ctx context.Context, eniID string) error {
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "DeleteElasticNetworkInterface",
-		LogFieldENIID, eniID,
-	)
 	req := eflo.CreateDeleteElasticNetworkInterfaceRequest()
 	req.ElasticNetworkInterfaceId = eniID
+	l := LogFields(logf.FromContext(ctx), req)
 
 	start := time.Now()
 	resp, err := a.ClientSet.EFLO().DeleteElasticNetworkInterface(req)
@@ -63,14 +60,10 @@ func (a *OpenAPI) DeleteElasticNetworkInterface(ctx context.Context, eniID strin
 }
 
 func (a *OpenAPI) AssignLeniPrivateIPAddress(ctx context.Context, eniID, prefer string) (string, error) {
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "AssignLeniPrivateIpAddress",
-		LogFieldENIID, eniID,
-	)
-
 	req := eflo.CreateAssignLeniPrivateIpAddressRequest()
 	req.ElasticNetworkInterfaceId = eniID
 	req.PrivateIpAddress = prefer
+	l := LogFields(logf.FromContext(ctx), req)
 
 	start := time.Now()
 	resp, err := a.ClientSet.EFLO().AssignLeniPrivateIpAddress(req)
@@ -93,15 +86,11 @@ func (a *OpenAPI) AssignLeniPrivateIPAddress(ctx context.Context, eniID, prefer 
 }
 
 func (a *OpenAPI) UnassignLeniPrivateIPAddress(ctx context.Context, eniID, ipName string) error {
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "UnassignLeniPrivateIpAddress",
-		LogFieldENIID, eniID,
-		"ipName", ipName,
-	)
-
 	req := eflo.CreateUnassignLeniPrivateIpAddressRequest()
 	req.ElasticNetworkInterfaceId = eniID
 	req.IpName = ipName
+
+	l := LogFields(logf.FromContext(ctx), req)
 
 	start := time.Now()
 	resp, err := a.ClientSet.EFLO().UnassignLeniPrivateIpAddress(req)
@@ -142,16 +131,12 @@ func (a *OpenAPI) GetElasticNetworkInterface(eniID string) (*eflo.Content, error
 }
 
 func (a *OpenAPI) ListLeniPrivateIPAddresses(ctx context.Context, eniID, ipName, ipAddress string) (*eflo.Content, error) {
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "ListLeniPrivateIpAddresses",
-		LogFieldENIID, eniID,
-		"ipName", ipName,
-		"ipAddress", ipAddress,
-	)
 	req := eflo.CreateListLeniPrivateIpAddressesRequest()
 	req.ElasticNetworkInterfaceId = eniID
 	req.IpName = ipName
 	req.PrivateIpAddress = ipAddress
+
+	l := LogFields(logf.FromContext(ctx), req)
 
 	start := time.Now()
 	resp, err := a.ClientSet.EFLO().ListLeniPrivateIpAddresses(req)
@@ -175,15 +160,13 @@ func (a *OpenAPI) ListLeniPrivateIPAddresses(ctx context.Context, eniID, ipName,
 }
 
 func (a *OpenAPI) ListElasticNetworkInterfaces(ctx context.Context, zoneID, nodeID, eniID string) (*eflo.Content, error) {
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "ListElasticNetworkInterfaces",
-		LogFieldInstanceID, nodeID,
-	)
 	req := eflo.CreateListElasticNetworkInterfacesRequest()
 	req.ElasticNetworkInterfaceId = eniID
 	req.ZoneId = zoneID
 	req.NodeId = nodeID
 	req.PageSize = requests.NewInteger(100)
+
+	l := LogFields(logf.FromContext(ctx), req)
 
 	start := time.Now()
 	resp, err := a.ClientSet.EFLO().ListElasticNetworkInterfaces(req)
@@ -207,13 +190,10 @@ func (a *OpenAPI) ListElasticNetworkInterfaces(ctx context.Context, zoneID, node
 }
 
 func (a *OpenAPI) GetNodeInfoForPod(ctx context.Context, nodeID string) (*eflo.Content, error) {
-	l := logf.FromContext(ctx).WithValues(
-		LogFieldAPI, "GetNodeInfoForPod",
-		LogFieldInstanceID, nodeID,
-	)
-
 	req := eflo.CreateGetNodeInfoForPodRequest()
 	req.NodeId = nodeID
+
+	l := LogFields(logf.FromContext(ctx), req)
 
 	start := time.Now()
 	resp, err := a.ClientSet.EFLO().GetNodeInfoForPod(req)
