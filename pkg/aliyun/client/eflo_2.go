@@ -60,7 +60,7 @@ func (a *OpenAPI) CreateElasticNetworkInterfaceV2(ctx context.Context, opts ...C
 		return nil, err
 	}
 
-	l.WithValues(LogFieldRequestID, resp.RequestId).Info("leni created")
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("leni created", "leni", resp.Content.ElasticNetworkInterfaceId)
 
 	return &NetworkInterface{
 		NetworkInterfaceID: resp.Content.ElasticNetworkInterfaceId,
@@ -88,7 +88,7 @@ func (a *OpenAPI) DescribeLeniNetworkInterface(ctx context.Context, opts ...Desc
 	enis := make([]*NetworkInterface, 0)
 	for _, data := range resp.Content.Data {
 
-		logr.FromContextOrDiscard(ctx).Info("ListElasticNetworkInterfaces", "data", data)
+		l.Info("ListElasticNetworkInterfaces", "data", data)
 
 		if data.Type == "DEFAULT" { // CUSTOM for our own card
 			continue
@@ -96,18 +96,12 @@ func (a *OpenAPI) DescribeLeniNetworkInterface(ctx context.Context, opts ...Desc
 
 		var privateIPs []IPSet
 		eni := &NetworkInterface{
-			Status:             data.Status,
-			MacAddress:         data.Mac,
-			NetworkInterfaceID: data.ElasticNetworkInterfaceId,
-			VSwitchID:          data.VSwitchId,
-			VPCID:              data.VpcId,
-			PrivateIPAddress:   data.Ip,
-			PrivateIPSets: []IPSet{
-				{
-					IPAddress: data.Ip,
-					Primary:   true,
-				},
-			},
+			Status:                      data.Status,
+			MacAddress:                  data.Mac,
+			NetworkInterfaceID:          data.ElasticNetworkInterfaceId,
+			VSwitchID:                   data.VSwitchId,
+			VPCID:                       data.VpcId,
+			PrivateIPAddress:            data.Ip,
 			ZoneID:                      data.ZoneId,
 			SecurityGroupIDs:            []string{data.SecurityGroupId},
 			ResourceGroupID:             data.ResourceGroupId,
@@ -224,7 +218,7 @@ func (a *OpenAPI) AssignLeniPrivateIPAddress2(ctx context.Context, opts ...Assig
 			if data.IpName != ipName {
 				continue
 			}
-			if data.Status != "Available" {
+			if data.Status != LENIIPStatusAvailable {
 				return fmt.Errorf("ip %s status %s", data.PrivateIpAddress, data.Status)
 			}
 
@@ -244,6 +238,8 @@ func (a *OpenAPI) AssignLeniPrivateIPAddress2(ctx context.Context, opts ...Assig
 			IPStatus: "",
 		})
 	}
+
+	l.Info("assign leni private ip address", "re", re)
 
 	return re, err
 }

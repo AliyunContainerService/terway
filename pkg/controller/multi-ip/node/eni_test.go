@@ -201,6 +201,32 @@ func Test_mergeIPMap(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "eflo failed ip should be synced",
+			args: args{
+				log: logr.Discard(),
+				remote: map[string]*networkv1beta1.IP{
+					"ipName": {
+						IP:     "",
+						IPName: "ipName",
+						Status: networkv1beta1.IPStatusDeleting,
+					},
+				},
+				current: map[string]*networkv1beta1.IP{
+					"1": {
+						IP:     "1",
+						Status: networkv1beta1.IPStatusDeleting,
+					},
+				},
+			},
+			expect: map[string]*networkv1beta1.IP{
+				"ipName": {
+					IP:     "",
+					IPName: "ipName",
+					Status: networkv1beta1.IPStatusDeleting,
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

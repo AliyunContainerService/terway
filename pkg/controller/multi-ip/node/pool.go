@@ -1239,6 +1239,10 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer rollbackCancel()
 
+			if isEFLO(ctx) {
+				rollbackCtx = aliyunClient.SetBackendAPI(rollbackCtx, aliyunClient.BackendAPIEFLO)
+			}
+
 			innerErr := n.aliyun.DeleteNetworkInterfaceV2(rollbackCtx, result.NetworkInterfaceID)
 			if innerErr == nil {
 				return
@@ -1253,7 +1257,6 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 		}
 	}()
 
-	var status string
 	if !isEFLO(ctx) {
 		err = n.aliyun.AttachNetworkInterface(ctx, result.NetworkInterfaceID, node.Spec.NodeMetadata.InstanceID, "")
 		if err != nil {
@@ -1264,14 +1267,9 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 		}
 
 		time.Sleep(3 * time.Second)
-
-		status = aliyunClient.ENIStatusInUse
-
-	} else {
-		status = aliyunClient.LENIStatusAvailable
 	}
 
-	eni, err := n.aliyun.WaitForNetworkInterfaceV2(ctx, result.NetworkInterfaceID, status, backoff.Backoff(backoff.WaitENIStatus), false)
+	eni, err := n.aliyun.WaitForNetworkInterfaceV2(ctx, result.NetworkInterfaceID, aliyunClient.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
 	if err != nil {
 		return err
 	}
@@ -1309,6 +1307,15 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 				n.vswpool.Block(opt.eniRef.VSwitchID)
 			}
 
+			lo.ForEach(result, func(item aliyunClient.IPSet, index int) {
+				if item.IPName != "" {
+					addIPToMap(opt.eniRef.IPv4, &networkv1beta1.IP{
+						IPName: item.IPName,
+						Status: networkv1beta1.IPStatusDeleting,
+					})
+				}
+			})
+
 			return err
 		} else {
 			MetaCtx(ctx).StatusChanged.Store(true)
@@ -1317,6 +1324,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 			}
 			for _, ip := range result {
 				addIPToMap(opt.eniRef.IPv4, &networkv1beta1.IP{
+					IPName: ip.IPName,
 					IP:     ip.IPAddress,
 					Status: networkv1beta1.IPStatusValid,
 				})
@@ -1337,6 +1345,16 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 				// block
 				n.vswpool.Block(opt.eniRef.VSwitchID)
 			}
+
+			lo.ForEach(result, func(item aliyunClient.IPSet, index int) {
+				if item.IPName != "" {
+					addIPToMap(opt.eniRef.IPv6, &networkv1beta1.IP{
+						IPName: item.IPName,
+						Status: networkv1beta1.IPStatusDeleting,
+					})
+				}
+			})
+
 			return err
 		} else {
 			MetaCtx(ctx).StatusChanged.Store(true)
@@ -1346,6 +1364,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 			}
 			for _, ip := range result {
 				addIPToMap(opt.eniRef.IPv6, &networkv1beta1.IP{
+					IPName: ip.IPName,
 					IP:     ip.IPAddress,
 					Status: networkv1beta1.IPStatusValid,
 				})
