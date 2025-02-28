@@ -10,10 +10,11 @@ import (
 
 func TestPredicateNode(t *testing.T) {
 	tests := []struct {
-		name        string
-		node        *corev1.Node
-		supportEFLO bool
-		expected    bool
+		name string
+		node *corev1.Node
+
+		predicate *predicateForNodeEvent
+		expected  bool
 	}{
 		{
 			name: "SupportEFLOFalseAndNoRegionLabel",
@@ -24,8 +25,10 @@ func TestPredicateNode(t *testing.T) {
 					},
 				},
 			},
-			supportEFLO: false,
-			expected:    false,
+			predicate: &predicateForNodeEvent{
+				supportEFLO: false,
+			},
+			expected: false,
 		},
 		{
 			name: "IgnoredByTerway",
@@ -36,6 +39,9 @@ func TestPredicateNode(t *testing.T) {
 						"k8s.aliyun.com/ignore-by-terway": "true",
 					},
 				},
+			},
+			predicate: &predicateForNodeEvent{
+				supportEFLO: false,
 			},
 			expected: false,
 		},
@@ -49,8 +55,10 @@ func TestPredicateNode(t *testing.T) {
 					},
 				},
 			},
-			supportEFLO: false,
-			expected:    false,
+			predicate: &predicateForNodeEvent{
+				supportEFLO: false,
+			},
+			expected: false,
 		},
 		{
 			name: "Lunjun worker",
@@ -61,8 +69,10 @@ func TestPredicateNode(t *testing.T) {
 					},
 				},
 			},
-			supportEFLO: true,
-			expected:    true,
+			predicate: &predicateForNodeEvent{
+				supportEFLO: true,
+			},
+			expected: true,
 		},
 		{
 			name: "VKNode",
@@ -73,6 +83,9 @@ func TestPredicateNode(t *testing.T) {
 						"type":                          "virtual-kubelet",
 					},
 				},
+			},
+			predicate: &predicateForNodeEvent{
+				supportEFLO: false,
 			},
 			expected: false,
 		},
@@ -85,13 +98,54 @@ func TestPredicateNode(t *testing.T) {
 					},
 				},
 			},
+			predicate: &predicateForNodeEvent{
+				supportEFLO: false,
+			},
+			expected: true,
+		},
+		{
+			name: "Normal with label whitelist",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"topology.kubernetes.io/region": "region",
+					},
+				},
+			},
+			predicate: &predicateForNodeEvent{
+				supportEFLO: false,
+				nodeLabelWhiteList: map[string]string{
+					"kind": "ecs",
+					"zone": "1",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "Normal with label whitelist",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"topology.kubernetes.io/region": "region",
+						"kind":                          "ecs",
+						"aa":                            "bb",
+					},
+				},
+			},
+			predicate: &predicateForNodeEvent{
+				supportEFLO: false,
+				nodeLabelWhiteList: map[string]string{
+					"kind":                          "ecs",
+					"topology.kubernetes.io/region": "region",
+				},
+			},
 			expected: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := predicateNode(test.node, test.supportEFLO)
+			result := test.predicate.predicateNode(test.node)
 			assert.Equal(t, test.expected, result)
 		})
 	}
