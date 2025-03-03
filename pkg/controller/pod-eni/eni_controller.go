@@ -673,7 +673,13 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI)
 		g.Go(func() error {
 			alloc := podENI.Spec.Allocations[ii]
 			ctx := common.WithCtx(ctx, &alloc)
-			err := m.aliyun.AttachNetworkInterface(ctx, alloc.ENI.ID, podENI.Status.InstanceID, podENI.Status.TrunkENIID)
+			err := m.aliyun.AttachNetworkInterface(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
+				NetworkInterfaceID:     &alloc.ENI.ID,
+				InstanceID:             &podENI.Status.InstanceID,
+				TrunkNetworkInstanceID: &podENI.Status.TrunkENIID,
+				NetworkCardIndex:       nil,
+				Backoff:                nil,
+			})
 			if err != nil {
 				return err
 			}

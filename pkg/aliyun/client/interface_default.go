@@ -15,7 +15,7 @@ import (
 type ECS interface {
 	CreateNetworkInterface(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error)
 	DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error)
-	AttachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
+	AttachNetworkInterface(ctx context.Context, opts ...AttachNetworkInterfaceOption) error
 	DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
 	DeleteNetworkInterface(ctx context.Context, eniID string) error
 	WaitForNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error)
@@ -50,7 +50,7 @@ func SetBackendAPI(ctx context.Context, b BackendAPI) context.Context {
 type ENI interface {
 	CreateNetworkInterfaceV2(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error)
 	DescribeNetworkInterfaceV2(ctx context.Context, opts ...DescribeNetworkInterfaceOption) ([]*NetworkInterface, error)
-	AttachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
+	AttachNetworkInterface(ctx context.Context, opts ...AttachNetworkInterfaceOption) error
 	DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error
 	DeleteNetworkInterfaceV2(ctx context.Context, eniID string) error
 	AssignPrivateIPAddressV2(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]IPSet, error)

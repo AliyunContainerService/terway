@@ -1047,7 +1047,15 @@ func TestReconcileNode_createENI(t *testing.T) {
 						InstanceID:                  "",
 						NetworkInterfaceTrafficMode: "",
 					}, nil)
-					openAPI.On("AttachNetworkInterface", mock.Anything, "eni-1", mock.Anything, "").Return(nil)
+					eni := "eni-1"
+					instanceID := "i-x"
+					openAPI.On("AttachNetworkInterface", mock.Anything, &aliyunClient.AttachNetworkInterfaceOptions{
+						NetworkInterfaceID:     &eni,
+						InstanceID:             &instanceID,
+						TrunkNetworkInstanceID: nil,
+						NetworkCardIndex:       nil,
+						Backoff:                nil,
+					}).Return(nil)
 					openAPI.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-1", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
 						Status:             "InUse",
 						MacAddress:         "",
@@ -1105,7 +1113,8 @@ func TestReconcileNode_createENI(t *testing.T) {
 					},
 					Spec: networkv1beta1.NodeSpec{
 						NodeMetadata: networkv1beta1.NodeMetadata{
-							ZoneID: "zone-1",
+							ZoneID:     "zone-1",
+							InstanceID: "i-x",
 						},
 						ENISpec: &networkv1beta1.ENISpec{
 							VSwitchOptions: []string{"vsw-1"},
@@ -1170,10 +1179,10 @@ func TestReconcileNode_createENI(t *testing.T) {
 						},
 						Tags:                        nil,
 						Type:                        "Secondary",
-						InstanceID:                  "",
+						InstanceID:                  "i-x",
 						NetworkInterfaceTrafficMode: "",
 					}, nil)
-					openAPI.On("AttachNetworkInterface", mock.Anything, "eni-1", mock.Anything, "").Return(nil)
+					openAPI.On("AttachNetworkInterface", mock.Anything, mock.Anything).Return(nil)
 					openAPI.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-1", mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("time out"))
 					openAPI.On("DeleteNetworkInterfaceV2", mock.Anything, "eni-1").Return(fmt.Errorf("eni already attached"))
 					return openAPI

@@ -29,10 +29,10 @@ func (a *OpenAPI) DescribeNetworkInterfaceV2(ctx context.Context, opts ...Descri
 	return nil, ErrNotImplemented
 }
 
-func (a *OpenAPI) AttachNetworkInterfaceV2(ctx context.Context, eniID, instanceID, trunkENIID string) error {
+func (a *OpenAPI) AttachNetworkInterfaceV2(ctx context.Context, opts ...AttachNetworkInterfaceOption) error {
 	switch GetBackendAPI(ctx) {
 	case BackendAPIECS:
-		return a.AttachNetworkInterface(ctx, eniID, instanceID, trunkENIID)
+		return a.AttachNetworkInterface(ctx, opts...)
 	case BackendAPIEFLO:
 		return nil
 	}
