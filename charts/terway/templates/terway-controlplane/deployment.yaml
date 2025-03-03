@@ -29,6 +29,9 @@ spec:
             - /usr/bin/terway-controlplane
             - "-v"
             - "{{ .Values.terwayControlplane.logLevel }}"
+            {{- if .Values.featureGates }}
+            - "-feature-gates={{.Values.featureGates}}"
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

@@ -22,12 +22,13 @@ In Terway, each Pod has its own network stack and IP address. Pods on the same E
 - **Security Policies**: Supports NetworkPolicy and traditional security groups for multi-dimensional network security control.
 - **High Performance**: Utilizes eBPF for protocol stack acceleration, ensuring low latency and high throughput.
 - **IPv6 Support**: Dual-stack support for both IPv4 and IPv6.
+- **Intelligent Computing Lingjun**：Linjun support.
 
 ### Deprecated Features
 
 - **VPC Network Mode**: Direct communication to VPC resources using VPC routing.
 
-- **Exclusive ENI Mode**: Direct ENI attachment to Pods for maximum performance.
+- **Exclusive ENI Mode**: Direct ENI attachment to Pods for maximum performance.（Replace with configuring the network mode through node pool dimension as a dedicated ENI.)
 
 ## Version Differences
 

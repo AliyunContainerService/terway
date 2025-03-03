@@ -128,6 +128,9 @@ spec:
               name: host-cni
             - mountPath: /var/lib/kubelet/device-plugins
               name: device-plugin-path
+            - mountPath: /etc/eflo_config
+              name: eflo
+              readOnly: true
         - name: policy
           image: "{{ .Values.terway.image.repository }}:{{ .Values.terway.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
@@ -266,7 +269,10 @@ spec:
             path: /run/xtables.lock
             type: FileOrCreate
           name: xtables-lock
-
+        - hostPath:
+            path: /etc/eflo_config
+            type: DirectoryOrCreate
+          name: eflo
 ---
 
 apiVersion: apiextensions.k8s.io/v1

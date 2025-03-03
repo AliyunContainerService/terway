@@ -1,10 +1,13 @@
 # Default values for terway.
 
+centralizedIPAM: true
+featureGates: ""
+
 terway:
   image:
     repository: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway
     pullPolicy: IfNotPresent
-    tag: "v1.13.1"
+    tag: "v1.13.4"
     podAnnotations: { }
     #  prometheus.io/path: "/metrics"
     #  prometheus.io/port: "9999"
@@ -41,7 +44,7 @@ terwayControlplane:
   image:
     repository: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway-controlplane
     pullPolicy: IfNotPresent
-    tag: "v1.13.1"
+    tag: "v1.13.4"
 
   service:
     type: ClusterIP
@@ -112,9 +115,10 @@ terwayControlplane:
     - pod-eni
     - pod
     - pod-networking
-  #    - node
-  #    - multi-ip-node
-  #    - multi-ip-pod
+    - node
+    - multi-ip-node
+    - multi-ip-pod
+
 
   # secrets
   accessKey: ""

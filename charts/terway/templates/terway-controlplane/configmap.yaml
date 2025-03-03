@@ -25,6 +25,7 @@ data:
     ipStack: "{{ .Values.terwayControlplane.ipStack }}"
     enableTrunk: {{.Values.terwayControlplane.enableTrunk}}
     enableTrace: {{.Values.terwayControlplane.enableTrace}}
+    centralizedIPAM: {{.Values.centralizedIPAM}}
     {{- with .Values.terwayControlplane.controllers }}
     controllers:
     {{- toYaml . | nindent 4 }}
