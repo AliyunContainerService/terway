@@ -106,7 +106,6 @@ func CreateOrUpdateCRD(ctx context.Context, c client.Client, name string) error 
 
 	update := exist.DeepCopy()
 	_, err = controllerutil.CreateOrPatch(ctx, c, update, func() error {
-		update.Status = expect.Status
 		update.Spec = expect.Spec
 		update.Annotations = expect.Annotations
 		return nil

@@ -18,15 +18,19 @@ package podeni
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -48,6 +52,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
+	"github.com/AliyunContainerService/terway/pkg/controller/status"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
@@ -62,7 +67,15 @@ func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &v1beta1.PodENI{})
 
-		r := NewReconcilePod(mgr, ctrlCtx.AliyunClient)
+		r := &ReconcilePodENI{
+			client:          mgr.GetClient(),
+			scheme:          mgr.GetScheme(),
+			record:          mgr.GetEventRecorderFor("TerwayPodENIController"),
+			aliyun:          ctrlCtx.AliyunClient,
+			trunkMode:       *controlplane.GetConfig().EnableTrunk,
+			crdMode:         controlplane.GetConfig().IPAMType == types.IPAMTypeCRD,
+			nodeStatusCache: ctrlCtx.NodeStatusCache,
+		}
 		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
 			Reconciler:              r,
 			MaxConcurrentReconciles: controlplane.GetConfig().PodENIMaxConcurrent,
@@ -110,6 +123,8 @@ type ReconcilePodENI struct {
 	trunkMode bool // use trunk mode or secondary eni mode
 	// deprecated remove after we deprecated eniOnly
 	crdMode bool
+
+	nodeStatusCache *status.Cache[status.NodeStatus]
 }
 
 type Wrapper struct {
@@ -134,19 +149,6 @@ func (w *Wrapper) Start(ctx context.Context) error {
 // NeedLeaderElection need election
 func (w *Wrapper) NeedLeaderElection() bool {
 	return true
-}
-
-// NewReconcilePod watch pod lifecycle events and sync to podENI resource
-func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface) *ReconcilePodENI {
-	r := &ReconcilePodENI{
-		client:    mgr.GetClient(),
-		scheme:    mgr.GetScheme(),
-		record:    mgr.GetEventRecorderFor("TerwayPodENIController"),
-		aliyun:    aliyunClient,
-		trunkMode: *controlplane.GetConfig().EnableTrunk,
-		crdMode:   controlplane.GetConfig().IPAMType == types.IPAMTypeCRD,
-	}
-	return r
 }
 
 // Reconcile all podENI resource
@@ -227,6 +229,8 @@ func (m *ReconcilePodENI) gc(ctx context.Context) {
 func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName client.ObjectKey, podENI *v1beta1.PodENI) (result reconcile.Result, err error) {
 	l := log.FromContext(ctx)
 	l.Info("podENI created")
+
+	ctx = m.injectNodeStatus(ctx, podENI.Namespace, podENI.Name)
 
 	switch podENI.Status.Phase {
 	case v1beta1.ENIPhaseBind:
@@ -359,6 +363,8 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 func (m *ReconcilePodENI) podENIDelete(ctx context.Context, podENI *v1beta1.PodENI) (reconcile.Result, error) {
 	l := log.FromContext(ctx)
 	l.Info("podENI delete")
+
+	ctx = m.injectNodeStatus(ctx, podENI.Namespace, podENI.Name)
 
 	podENICopy := podENI.DeepCopy()
 
@@ -632,6 +638,7 @@ func (m *ReconcilePodENI) detach(ctx context.Context, podENI *v1beta1.PodENI) (r
 		if v.Status == v1beta1.ENIStatusBind {
 			cp := v.DeepCopy()
 			cp.Status = v1beta1.ENIPhaseUnbind
+			cp.NetworkCardIndex = nil
 			podENICopy.Status.ENIInfos[k] = *cp
 		}
 	}
@@ -673,11 +680,16 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI)
 		g.Go(func() error {
 			alloc := podENI.Spec.Allocations[ii]
 			ctx := common.WithCtx(ctx, &alloc)
+
+			var cardIndex *int
+			if podENI.Status.TrunkENIID == "" {
+				cardIndex = m.getENIIndex(ctx, podENI.Namespace, podENI.Name, alloc.ENI.ID)
+			}
 			err := m.aliyun.AttachNetworkInterface(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
 				NetworkInterfaceID:     &alloc.ENI.ID,
 				InstanceID:             &podENI.Status.InstanceID,
 				TrunkNetworkInstanceID: &podENI.Status.TrunkENIID,
-				NetworkCardIndex:       nil,
+				NetworkCardIndex:       cardIndex,
 				Backoff:                nil,
 			})
 			if err != nil {
@@ -690,10 +702,11 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI)
 			}
 
 			ch <- &v1beta1.ENIInfo{
-				ID:     eni.NetworkInterfaceID,
-				Type:   v1beta1.ENIType(eni.Type),
-				Vid:    eni.DeviceIndex,
-				Status: v1beta1.ENIStatusBind,
+				ID:               eni.NetworkInterfaceID,
+				Type:             v1beta1.ENIType(eni.Type),
+				Vid:              eni.DeviceIndex,
+				Status:           v1beta1.ENIStatusBind,
+				NetworkCardIndex: cardIndex,
 			}
 			return nil
 		})
@@ -742,10 +755,11 @@ func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.P
 		}
 
 		_, err = m.aliyun.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyunClient.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
-		if err == nil {
-			continue
-		}
-		if errors.Is(err, apiErr.ErrNotFound) {
+		if err == nil || errors.Is(err, apiErr.ErrNotFound) {
+			nodeSatus, ok := status.MetaCtx[status.NodeStatus](ctx)
+			if ok {
+				nodeSatus.DetachNetworkIndex(alloc.ENI.ID)
+			}
 			continue
 		}
 		return err
@@ -861,4 +875,171 @@ func (m *ReconcilePodENI) podRequirePodENI(ctx context.Context, pod *corev1.Pod)
 	}
 
 	return false
+}
+
+func (m *ReconcilePodENI) getENIIndex(ctx context.Context, namespace, name, eniID string) *int {
+	l := log.FromContext(ctx)
+
+	pod := &corev1.Pod{}
+	if err := m.client.Get(ctx, k8stypes.NamespacedName{
+		Namespace: namespace,
+		Name:      name,
+	}, pod); err != nil {
+		if !k8sErr.IsNotFound(err) {
+			l.Error(err, "failed to get pod")
+		}
+		return nil
+	}
+
+	node := &corev1.Node{}
+	if err := m.client.Get(ctx, k8stypes.NamespacedName{
+		Name: pod.Spec.NodeName,
+	}, node); err != nil {
+		if !k8sErr.IsNotFound(err) {
+			l.Error(err, "failed to get node")
+		}
+		return nil
+	}
+
+	// do a quick check
+	nodeStatus, ok := m.nodeStatusCache.Get(node.Name)
+	if !ok {
+		l.Info("ignore get eni index ,node not found")
+		return nil
+	}
+
+	if len(nodeStatus.NetworkCards) < 2 {
+		// no enough network card
+		l.Info("ignore get eni index ,no enough cards")
+		return nil
+	}
+
+	l.Info("get eni index")
+
+	// get hits form annotations
+	// may have multi network cards,
+	// card 0 2 -> numa 0
+	// card 1 3 -> numa 1
+
+	numaHints := podNumaHints(pod.Annotations)
+
+	var numaIndex *int
+	// if we got multi numa, just ignore it
+	if len(numaHints) == 1 {
+		// use this hit
+		numaIndex = &numaHints[0]
+		if numaIndex != nil && *numaIndex < 0 {
+			numaIndex = nil
+		}
+	}
+
+	return nodeStatus.RequestNetworkIndex(eniID, nil, numaIndex)
+}
+
+// podNumaHints parse the numa hints from pod annotations
+func podNumaHints(anno map[string]string) []int {
+	v := anno["cpuSet"]
+	if v == "" {
+		return nil
+	}
+
+	data := map[string]map[string]any{}
+
+	err := json.Unmarshal([]byte(v), &data)
+	if err != nil {
+		return nil
+	}
+
+	var numa []int
+	lo.ForEach(lo.Uniq(lo.FlatMap(lo.Values(data), func(secondLayerMap map[string]any, _ int) []string {
+		return lo.Keys(secondLayerMap)
+	})), func(item string, index int) {
+		i, err := strconv.Atoi(item)
+		if err != nil {
+			return
+		}
+		numa = append(numa, i)
+	})
+
+	return numa
+}
+
+func (m *ReconcilePodENI) injectNodeStatus(ctx context.Context, namespace, name string) context.Context {
+	l := log.FromContext(ctx)
+
+	pod := &corev1.Pod{}
+	if err := m.client.Get(ctx, k8stypes.NamespacedName{
+		Namespace: namespace,
+		Name:      name,
+	}, pod); err != nil {
+		if !k8sErr.IsNotFound(err) {
+			l.Error(err, "failed to get pod")
+		}
+		l.V(4).Info("ignore inject node status, pod not found")
+		return ctx
+	}
+
+	node := &corev1.Node{}
+	if err := m.client.Get(ctx, k8stypes.NamespacedName{
+		Name: pod.Spec.NodeName,
+	}, node); err != nil {
+		if !k8sErr.IsNotFound(err) {
+			l.Error(err, "failed to get node")
+		}
+		l.V(4).Info("ignore inject node status, node not found")
+		return ctx
+	}
+
+	// do a quick check
+	nodeStatus, ok := m.nodeStatusCache.Get(node.Name)
+	if !ok {
+		instanceType := node.Labels["node.kubernetes.io/instance-type"]
+		if instanceType == "" {
+			l.Info("ignore inject node status, node instanceType not found")
+			return ctx
+		}
+
+		limits, err := aliyunClient.LimitProviders["ecs"].GetLimit(m.aliyun, instanceType)
+		if err != nil {
+			l.Error(err, "failed to get instance type limit")
+			return ctx
+		}
+
+		nodeStatus = status.NewNodeStatus(len(limits.NetworkCards))
+
+		if len(limits.NetworkCards) >= 2 {
+			// a new node ,we need to build the eni index from cache.
+			podENIs := &v1beta1.PodENIList{}
+			err = m.client.List(ctx, podENIs, &client.ListOptions{
+				LabelSelector: labels.SelectorFromSet(map[string]string{
+					"name": node.Name,
+				}),
+			})
+			if err != nil {
+				l.Error(err, "failed to list podeni")
+				return ctx
+			}
+
+			lo.ForEach(podENIs.Items, func(item v1beta1.PodENI, index int) {
+				// for existing podENI
+				if item.Status.Phase != v1beta1.ENIPhaseBind {
+					return
+				}
+				// possible pod has multi eni
+				for _, eni := range item.Status.ENIInfos {
+					eniIndex := 0
+					if eni.NetworkCardIndex != nil {
+						eniIndex = *eni.NetworkCardIndex
+					}
+					nodeStatus.RequestNetworkIndex(eni.ID, &eniIndex, nil)
+				}
+			})
+		}
+
+		nodeStatus, _ = m.nodeStatusCache.LoadOrStore(node.Name, nodeStatus)
+	}
+
+	l.V(4).Info("inject node status", "node", node.Name, "nodeStatus", nodeStatus)
+
+	return status.WithMeta(ctx, nodeStatus)
 }

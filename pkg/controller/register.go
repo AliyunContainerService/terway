@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	"github.com/AliyunContainerService/terway/pkg/controller/status"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 
@@ -52,6 +53,8 @@ type ControllerCtx struct {
 	TracerProvider trace.TracerProvider
 
 	RegisterResource []client.Object
+
+	NodeStatusCache *status.Cache[status.NodeStatus]
 }
 
 type Creator func(mgr manager.Manager, ctrlCtx *ControllerCtx) error
