@@ -62,6 +62,48 @@ func TestGetInstanceType(t *testing.T) {
 				InstanceBandwidthTx:   500,
 			},
 		},
+		{
+			name: "multi card",
+			input: &ecs.InstanceType{
+				EniQuantity:                 4,
+				EniPrivateIpAddressQuantity: 5,
+				EniIpv6AddressQuantity:      10,
+				EniTotalQuantity:            6,
+				EriQuantity:                 2,
+				InstanceBandwidthRx:         1000,
+				InstanceBandwidthTx:         500,
+				EniTrunkSupported:           false,
+				NetworkCards: ecs.NetworkCards{
+					NetworkCardInfo: []ecs.NetworkCardInfo{
+						{
+							NetworkCardIndex: 0,
+						},
+						{
+							NetworkCardIndex: 1,
+						},
+					},
+				},
+			},
+			expected: &Limits{
+				Adapters:              4,
+				TotalAdapters:         6,
+				IPv4PerAdapter:        5,
+				IPv6PerAdapter:        10,
+				MemberAdapterLimit:    0,
+				MaxMemberAdapterLimit: 0,
+				ERdmaAdapters:         2,
+				InstanceBandwidthRx:   1000,
+				InstanceBandwidthTx:   500,
+				NetworkCards: []NetworkCard{
+					{
+						Index: 0,
+					},
+					{
+						Index: 1,
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

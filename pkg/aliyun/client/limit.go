@@ -9,10 +9,15 @@ import (
 	"time"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"github.com/samber/lo"
 	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/util/cache"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+type NetworkCard struct {
+	Index int
+}
 
 // Limits specifies the IPAM relevant instance limits
 type Limits struct {
@@ -44,6 +49,8 @@ type Limits struct {
 	InstanceBandwidthRx int
 
 	InstanceBandwidthTx int
+
+	NetworkCards []NetworkCard
 }
 
 func (l *Limits) SupportMultiIPIPv6() bool {
@@ -203,6 +210,15 @@ func getInstanceType(instanceTypeInfo *ecs.InstanceType) *Limits {
 		memberAdapterLimit = 0
 		maxMemberAdapterLimit = 0
 	}
+
+	cards := lo.Map(instanceTypeInfo.NetworkCards.NetworkCardInfo, func(item ecs.NetworkCardInfo, index int) NetworkCard {
+		return NetworkCard{
+			Index: item.NetworkCardIndex,
+		}
+	})
+	if len(cards) == 0 {
+		cards = nil
+	}
 	return &Limits{
 		InstanceTypeID:        instanceTypeInfo.InstanceTypeId,
 		Adapters:              adapterLimit,
@@ -214,6 +230,7 @@ func getInstanceType(instanceTypeInfo *ecs.InstanceType) *Limits {
 		ERdmaAdapters:         max(eRdmaLimit, 0),
 		InstanceBandwidthRx:   instanceTypeInfo.InstanceBandwidthRx,
 		InstanceBandwidthTx:   instanceTypeInfo.InstanceBandwidthTx,
+		NetworkCards:          cards,
 	}
 }
 
