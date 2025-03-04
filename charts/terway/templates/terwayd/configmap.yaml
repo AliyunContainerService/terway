@@ -15,6 +15,9 @@ data:
       "service_cidr": "{{.Values.terway.serviceCIDR}}",
       "security_groups": {{- toJson .Values.terway.securityGroupIDs }},
       "ip_stack": "{{.Values.terway.ipStack}}",
+    {{- if .Values.centralizedIPAM }}
+      "ipam_type": "crd",
+    {{- end }}
       "vswitch_selection_policy": "ordered"
     }
   10-terway.conf: |
