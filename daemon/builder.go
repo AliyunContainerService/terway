@@ -193,7 +193,7 @@ func (b *NetworkServiceBuilder) initInstanceLimit() error {
 		provider = client.LimitProviders["eflo"]
 		limit, err := provider.GetLimitFromAnno(node.Annotations)
 		if err != nil {
-			return err
+			serviceLog.Error(err, "unable to get instance limit from annotation")
 		}
 		if limit == nil {
 			instanceID, err := instance.GetInstanceMeta().GetInstanceID()
@@ -209,7 +209,7 @@ func (b *NetworkServiceBuilder) initInstanceLimit() error {
 	} else {
 		limit, err := provider.GetLimitFromAnno(node.Annotations)
 		if err != nil {
-			return err
+			serviceLog.Error(err, "unable to get instance limit from annotation")
 		}
 
 		if limit != nil {
@@ -227,12 +227,9 @@ func (b *NetworkServiceBuilder) initInstanceLimit() error {
 			if err != nil {
 				return err
 			}
-
-			if instanceType != limit.InstanceTypeID {
-				limit, err = provider.GetLimit(b.aliyunClient, instanceType)
-				if err != nil {
-					return fmt.Errorf("upable get instance limit, %w", err)
-				}
+			limit, err = provider.GetLimit(b.aliyunClient, instanceType)
+			if err != nil {
+				return fmt.Errorf("upable get instance limit, %w", err)
 			}
 		}
 		b.limit = limit
