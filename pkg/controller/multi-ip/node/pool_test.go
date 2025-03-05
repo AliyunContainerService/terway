@@ -16,15 +16,19 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/mocks"
 	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
@@ -514,7 +518,7 @@ func TestReconcileNodeSyncWithAPI(t *testing.T) {
 		aliyun:             openAPI,
 		vswpool:            vsw,
 		fullSyncNodePeriod: time.Hour,
-		tracer:             trace.NewNoopTracerProvider().Tracer(""),
+		tracer:             noop.NewTracerProvider().Tracer(""),
 	}
 
 	err = reconciler.syncWithAPI(ctx, node)
@@ -931,7 +935,7 @@ func TestReconcileNode_assignIP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			n := &ReconcileNode{
 				aliyun: tt.fields.aliyun,
-				tracer: trace.NewNoopTracerProvider().Tracer(""),
+				tracer: noop.NewTracerProvider().Tracer(""),
 			}
 			tt.wantErr(t, n.assignIP(tt.args.ctx, tt.args.opt), fmt.Sprintf("assignIP(%v, %v)", tt.args.ctx, tt.args.opt))
 
@@ -1235,7 +1239,7 @@ func TestReconcileNode_createENI(t *testing.T) {
 			n := &ReconcileNode{
 				aliyun:  tt.fields.aliyun,
 				vswpool: tt.fields.vswpool,
-				tracer:  trace.NewNoopTracerProvider().Tracer(""),
+				tracer:  noop.NewTracerProvider().Tracer(""),
 			}
 			tt.wantErr(t, n.createENI(tt.args.ctx, tt.args.node, tt.args.opt), fmt.Sprintf("createENI(%v, %v, %v)", tt.args.ctx, tt.args.node, tt.args.opt))
 
@@ -1762,7 +1766,7 @@ func TestReconcileNode_handleStatus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			n := &ReconcileNode{
 				aliyun: tt.fields.aliyun,
-				tracer: trace.NewNoopTracerProvider().Tracer(""),
+				tracer: noop.NewTracerProvider().Tracer(""),
 			}
 			tt.wantErr(t, n.handleStatus(tt.args.ctx, tt.args.node), fmt.Sprintf("handleStatus(%v, %v)", tt.args.ctx, tt.args.node))
 
@@ -2099,7 +2103,7 @@ func TestReconcileNode_adjustPool(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			n := &ReconcileNode{
-				tracer: trace.NewNoopTracerProvider().Tracer(""),
+				tracer: noop.NewTracerProvider().Tracer(""),
 			}
 			tt.wantErr(t, n.adjustPool(tt.args.ctx, tt.args.node), fmt.Sprintf("adjustPool(%v, %v)", tt.args.ctx, tt.args.node))
 
@@ -2280,6 +2284,489 @@ var _ = Describe("Node Controller", func() {
 				return false
 			})
 			Expect(result).To(BeTrue())
+		})
+	})
+})
+
+func TestReconcileNode_validateENI(t *testing.T) {
+	type fields struct {
+		vswpool *vswpool.SwitchPool
+		aliyun  register.Interface
+	}
+	type args struct {
+		ctx      context.Context
+		option   *eniOptions
+		eniTypes []eniTypeKey
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   bool
+	}{
+		{
+			name:   "test deleting eni",
+			fields: fields{},
+			args: args{
+				ctx: context.Background(),
+				option: &eniOptions{
+					eniRef: &networkv1beta1.NetworkInterface{
+						Status: aliyunClient.ENIStatusDeleting,
+					},
+				},
+				eniTypes: []eniTypeKey{
+					secondaryKey,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "test ready eni",
+			fields: fields{
+				vswpool: func() *vswpool.SwitchPool {
+					pool, _ := vswpool.NewSwitchPool(100, "10m")
+					return pool
+				}(),
+				aliyun: func() register.Interface {
+					openAPI := mocks.NewInterface(t)
+					openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+						VSwitchId:               "vsw-1",
+						ZoneId:                  "zone-1",
+						AvailableIpAddressCount: 10,
+						CidrBlock:               "192.168.0.0/16",
+						Ipv6CidrBlock:           "fd00::/64",
+					}, nil)
+
+					return openAPI
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				option: &eniOptions{
+					eniRef: &networkv1beta1.NetworkInterface{
+						VSwitchID:                   "vsw-1",
+						Status:                      aliyunClient.ENIStatusInUse,
+						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+					},
+					eniTypeKey: secondaryKey,
+				},
+				eniTypes: []eniTypeKey{
+					secondaryKey,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "test no ip left eni",
+			fields: fields{
+				vswpool: func() *vswpool.SwitchPool {
+					pool, _ := vswpool.NewSwitchPool(100, "10m")
+					return pool
+				}(),
+				aliyun: func() register.Interface {
+					openAPI := mocks.NewInterface(t)
+					openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+						VSwitchId:               "vsw-1",
+						ZoneId:                  "zone-1",
+						AvailableIpAddressCount: 0,
+						CidrBlock:               "192.168.0.0/16",
+						Ipv6CidrBlock:           "fd00::/64",
+					}, nil)
+
+					return openAPI
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				option: &eniOptions{
+					eniRef: &networkv1beta1.NetworkInterface{
+						VSwitchID:                   "vsw-1",
+						Status:                      aliyunClient.ENIStatusInUse,
+						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+					},
+					eniTypeKey: secondaryKey,
+				},
+				eniTypes: []eniTypeKey{
+					secondaryKey,
+				},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n := &ReconcileNode{
+				vswpool: tt.fields.vswpool,
+				aliyun:  tt.fields.aliyun,
+			}
+			assert.Equalf(t, tt.want, n.validateENI(tt.args.ctx, tt.args.option, tt.args.eniTypes), "validateENI(%v, %v, %v)", tt.args.ctx, tt.args.option, tt.args.eniTypes)
+		})
+	}
+}
+
+var _ = Describe("Test ReconcileNode", func() {
+	ctx := context.Background()
+
+	name := "foo"
+	typeNamespacedName := types.NamespacedName{
+		Name: name,
+	}
+	BeforeEach(func() {
+		k8sNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+		}
+		err := k8sClient.Create(ctx, k8sNode)
+		Expect(err).NotTo(HaveOccurred())
+
+		node := &networkv1beta1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name,
+				Labels: map[string]string{
+					"alibabacloud.com/lingjun-worker": "true",
+				},
+			},
+			Spec: networkv1beta1.NodeSpec{
+				NodeMetadata: networkv1beta1.NodeMetadata{
+					InstanceID:   "instanceID",
+					InstanceType: "instanceType",
+					RegionID:     "regionID",
+					ZoneID:       "zone-1",
+				},
+				NodeCap: networkv1beta1.NodeCap{
+					Adapters:              3,
+					EriQuantity:           0,
+					TotalAdapters:         2,
+					IPv4PerAdapter:        10,
+					IPv6PerAdapter:        0,
+					MemberAdapterLimit:    0,
+					MaxMemberAdapterLimit: 0,
+					InstanceBandwidthRx:   0,
+					InstanceBandwidthTx:   0,
+				},
+				ENISpec: &networkv1beta1.ENISpec{
+					Tag:                 nil,
+					TagFilter:           nil,
+					VSwitchOptions:      []string{"vsw-1"},
+					SecurityGroupIDs:    []string{"sg-1"},
+					ResourceGroupID:     "",
+					EnableIPv4:          true,
+					EnableIPv6:          false,
+					EnableERDMA:         false,
+					EnableTrunk:         false,
+					VSwitchSelectPolicy: "most",
+				},
+				Pool: &networkv1beta1.PoolSpec{
+					MaxPoolSize: 0,
+					MinPoolSize: 0,
+				},
+				Flavor: []networkv1beta1.Flavor{
+					{
+						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+						Count:                       2,
+					},
+				},
+			},
+		}
+
+		err = k8sClient.Create(ctx, node)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("create 5 pedning pods")
+		for i := 0; i < 5; i++ {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("pod-%d", i),
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "test",
+							Image: "foo",
+						},
+					},
+					NodeName: name,
+				},
+			}
+			err := k8sClient.Create(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+		}
+	})
+	AfterEach(func() {
+		k8sNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+		}
+		err := k8sClient.Delete(ctx, k8sNode)
+		Expect(err).NotTo(HaveOccurred())
+
+		node := &networkv1beta1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+		}
+		err = k8sClient.Delete(ctx, node)
+		Expect(err).NotTo(HaveOccurred())
+
+		for i := 0; i < 5; i++ {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("pod-%d", i),
+					Namespace: "default",
+				},
+			}
+			err := k8sClient.Delete(ctx, pod, &client.DeleteOptions{
+				GracePeriodSeconds: func() *int64 {
+					i := int64(0)
+					return &i
+				}(),
+				Preconditions:     nil,
+				PropagationPolicy: nil,
+				Raw:               nil,
+				DryRun:            nil,
+			})
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		// wait for all pods to be deleted
+		Eventually(func() error {
+			pods := &corev1.PodList{}
+			err := k8sClient.List(ctx, pods, client.MatchingFields{"spec.nodeName": name})
+			if err != nil {
+				return err
+			}
+			if len(pods.Items) == 0 {
+				return nil
+			}
+			return fmt.Errorf("pods still exist")
+		}).WithTimeout(10 * time.Second).Should(Succeed())
+	})
+
+	Context("Test create err", func() {
+		It("Test create err", func() {
+
+			ac := mocks.NewInterface(GinkgoT())
+			instanceID := "instanceID"
+			ac.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
+				InstanceID: &instanceID,
+			}).Return([]*aliyunClient.NetworkInterface{}, nil).Maybe()
+			ac.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+				VSwitchId:               "vsw-1",
+				ZoneId:                  "zone-1",
+				AvailableIpAddressCount: 10,
+				CidrBlock:               "172.0.0.0/16",
+				Ipv6CidrBlock:           "fd00::/64",
+			}, nil).Maybe()
+
+			ac.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
+				NetworkInterfaceID:          "eni-1",
+				Type:                        "Secondary",
+				NetworkInterfaceTrafficMode: "Standard",
+			}, nil).Once()
+			ac.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
+				NetworkInterfaceID:          "eni-2",
+				Type:                        "Secondary",
+				NetworkInterfaceTrafficMode: "Standard",
+			}, nil).Once()
+			ac.On("DeleteNetworkInterfaceV2", mock.Anything, "eni-1").Return(fmt.Errorf("faile to del eni"))
+			ac.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-1", mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("timeout"))
+			ac.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-2", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
+				Status:             "InUse",
+				MacAddress:         "",
+				NetworkInterfaceID: "eni-2",
+				VSwitchID:          "vsw-1",
+				PrivateIPAddress:   "127.0.0.2",
+				PrivateIPSets: []aliyunClient.IPSet{
+					{
+						IPAddress: "127.0.0.2",
+						Primary:   true,
+					},
+				},
+				ZoneID:                      "zone-1",
+				SecurityGroupIDs:            nil,
+				ResourceGroupID:             "",
+				Type:                        "Secondary",
+				InstanceID:                  "",
+				TrunkNetworkInterfaceID:     "",
+				NetworkInterfaceTrafficMode: "Standard",
+				DeviceIndex:                 0,
+				CreationTime:                "",
+			}, nil)
+
+			By("reconcile")
+			vsw, _ := vswpool.NewSwitchPool(100, "10m")
+			controllerReconciler := &ReconcileNode{
+				client:  k8sClient,
+				scheme:  k8sClient.Scheme(),
+				aliyun:  ac,
+				tracer:  noop.NewTracerProvider().Tracer(""),
+				vswpool: vsw,
+				record:  record.NewFakeRecorder(100),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("check this cr")
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+			}
+			err = k8sClient.Get(ctx, typeNamespacedName, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(len(node.Status.NetworkInterfaces)).To(Equal(2))
+
+			By("delete failed eni should be kept")
+			Expect(node.Status.NetworkInterfaces["eni-1"].Status).To(Equal("Deleting"))
+			Expect(node.Status.NetworkInterfaces["eni-2"].Status).To(Equal("InUse"))
+
+			Expect(node.Status.NetworkInterfaces["eni-1"].NetworkInterfaceType).To(Equal(networkv1beta1.ENITypeSecondary))
+			Expect(node.Status.NetworkInterfaces["eni-2"].NetworkInterfaceType).To(Equal(networkv1beta1.ENITypeSecondary))
+
+			By("check pods ip should allocated")
+			Expect(node.Status.NetworkInterfaces["eni-2"].IPv4["127.0.0.2"].Primary).To(Equal(true))
+			Expect(node.Status.NetworkInterfaces["eni-2"].IPv4["127.0.0.2"].PodID).To(Not(BeEmpty()))
+		})
+	})
+
+	Context("Test assign err", func() {
+		It("Test assign err", func() {
+
+			ac := mocks.NewInterface(GinkgoT())
+			instanceID := "instanceID"
+			ac.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
+				InstanceID: &instanceID,
+			}).Return([]*aliyunClient.NetworkInterface{
+				{
+					Status:             "InUse",
+					MacAddress:         "",
+					NetworkInterfaceID: "eni-1",
+					VPCID:              "",
+					VSwitchID:          "vsw-1",
+					PrivateIPAddress:   "127.0.0.1",
+					PrivateIPSets: []aliyunClient.IPSet{
+						{
+							Primary:   true,
+							IPAddress: "127.0.0.1",
+							IPName:    "",
+							IPStatus:  "",
+						},
+					},
+					ZoneID:                      "",
+					SecurityGroupIDs:            nil,
+					ResourceGroupID:             "",
+					IPv6Set:                     nil,
+					Tags:                        nil,
+					Type:                        "Secondary",
+					InstanceID:                  "",
+					NetworkInterfaceTrafficMode: "Standard",
+				},
+				{
+					Status:             "InUse",
+					MacAddress:         "",
+					NetworkInterfaceID: "eni-2",
+					VPCID:              "",
+					VSwitchID:          "vsw-1",
+					PrivateIPAddress:   "127.0.0.2",
+					PrivateIPSets: []aliyunClient.IPSet{
+						{
+							Primary:   true,
+							IPAddress: "127.0.0.2",
+							IPName:    "",
+							IPStatus:  "",
+						},
+					},
+					ZoneID:                      "",
+					SecurityGroupIDs:            nil,
+					ResourceGroupID:             "",
+					IPv6Set:                     nil,
+					Tags:                        nil,
+					Type:                        "Secondary",
+					InstanceID:                  "",
+					NetworkInterfaceTrafficMode: "Standard",
+				},
+			}, nil).Maybe()
+			ac.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+				VSwitchId:               "vsw-1",
+				ZoneId:                  "zone-1",
+				AvailableIpAddressCount: 10,
+				CidrBlock:               "172.0.0.0/16",
+				Ipv6CidrBlock:           "fd00::/64",
+			}, nil).Maybe()
+
+			bo1 := backoff.Backoff(backoff.ENIIPOps)
+			bo2 := backoff.Backoff(backoff.ENIIPOps)
+			ac.On("AssignPrivateIPAddressV2", mock.Anything, &aliyunClient.AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-1",
+					IPCount:            1,
+				},
+				Backoff: &bo1,
+			}).Return([]aliyunClient.IPSet{
+				{
+					Primary:   false,
+					IPAddress: "127.0.0.3",
+					IPName:    "ip-127.0.0.3",
+					IPStatus:  "Available",
+				},
+			}, nil).Once()
+			ac.On("AssignPrivateIPAddressV2", mock.Anything, &aliyunClient.AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-2",
+					IPCount:            1,
+				},
+				Backoff: &bo2,
+			}).Return([]aliyunClient.IPSet{
+				{
+					Primary:   false,
+					IPAddress: "127.0.0.4",
+					IPName:    "ip-127.0.0.4",
+					IPStatus:  "Available",
+				},
+			}, nil).Once()
+
+			By("reconcile")
+			vsw, _ := vswpool.NewSwitchPool(100, "10m")
+			controllerReconciler := &ReconcileNode{
+				client:  k8sClient,
+				scheme:  k8sClient.Scheme(),
+				aliyun:  ac,
+				tracer:  noop.NewTracerProvider().Tracer(""),
+				vswpool: vsw,
+				record:  record.NewFakeRecorder(100),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("check this cr")
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+			}
+			err = k8sClient.Get(ctx, typeNamespacedName, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(len(node.Status.NetworkInterfaces)).To(Equal(2))
+
+			By("eni status should be InUse")
+			Expect(node.Status.NetworkInterfaces["eni-1"].Status).To(Equal("InUse"))
+			Expect(node.Status.NetworkInterfaces["eni-2"].Status).To(Equal("InUse"))
+
+			Expect(node.Status.NetworkInterfaces["eni-1"].NetworkInterfaceType).To(Equal(networkv1beta1.ENITypeSecondary))
+			Expect(node.Status.NetworkInterfaces["eni-2"].NetworkInterfaceType).To(Equal(networkv1beta1.ENITypeSecondary))
+
+			By("check pods ip should allocated")
+			Expect(node.Status.NetworkInterfaces["eni-1"].IPv4["127.0.0.1"].Primary).To(Equal(true))
+			Expect(node.Status.NetworkInterfaces["eni-1"].IPv4["127.0.0.1"].PodID).To(Not(BeEmpty()))
+			Expect(node.Status.NetworkInterfaces["eni-2"].IPv4["127.0.0.2"].Primary).To(Equal(true))
+			Expect(node.Status.NetworkInterfaces["eni-2"].IPv4["127.0.0.2"].PodID).To(Not(BeEmpty()))
+
+			Expect(node.Status.NetworkInterfaces["eni-1"].IPv4["127.0.0.3"].PodID).To(Not(BeEmpty()))
+			Expect(node.Status.NetworkInterfaces["eni-2"].IPv4["127.0.0.4"].PodID).To(Not(BeEmpty()))
 		})
 	})
 })

@@ -51,6 +51,9 @@ const (
 	ErrThrottling = "Throttling"
 
 	ErrOperationConflict = "Operation.Conflict"
+
+	ErrEfloPrivateIPQuotaExecuted = 1013
+	ErrEfloResourceNotFound       = 1011
 )
 
 // define well known err
@@ -146,6 +149,25 @@ func ErrorIs(err error, fns ...CheckErr) bool {
 		if fn(err) {
 			return true
 		}
+	}
+	return false
+}
+
+type EFLOCode struct {
+	Code      int
+	Message   string
+	RequestID string
+	Content   any
+}
+
+func (e *EFLOCode) Error() string {
+	return fmt.Sprintf("errCode: %d, msg: %s, requestID: %s", e.Code, e.Message, e.RequestID)
+}
+
+func IsEfloCode(err error, code int) bool {
+	var efloErr *EFLOCode
+	if errors.As(err, &efloErr) {
+		return efloErr.Code == code
 	}
 	return false
 }
