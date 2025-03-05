@@ -193,7 +193,16 @@ func TestReconcilePodENI_attachENI(t *testing.T) {
 	m.On("WaitForNetworkInterface", mock.Anything, "foo", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
 		NetworkInterfaceID: "foo",
 	}, nil)
-	m.On("AttachNetworkInterface", mock.Anything, "foo", "i-x", "eni-x").Return(nil)
+	foo := "foo"
+	ins := "i-x"
+	eniID := "eni-x"
+	m.On("AttachNetworkInterface", mock.Anything, &aliyunClient.AttachNetworkInterfaceOptions{
+		NetworkInterfaceID:     &foo,
+		InstanceID:             &ins,
+		TrunkNetworkInstanceID: &eniID,
+		NetworkCardIndex:       nil,
+		Backoff:                nil,
+	}).Return(nil)
 
 	c := &ReconcilePodENI{
 		client: fake.NewClientBuilder().Build(),

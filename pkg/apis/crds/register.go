@@ -47,7 +47,7 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 	switch name {
 	case CRDPodENI:
 		crdBytes = crdsPodENI
-		version = "v0.3.0"
+		version = "v0.4.0"
 	case CRDPodNetworking:
 		crdBytes = crdsPodNetworking
 		version = "v0.1.0"
@@ -106,7 +106,6 @@ func CreateOrUpdateCRD(ctx context.Context, c client.Client, name string) error 
 
 	update := exist.DeepCopy()
 	_, err = controllerutil.CreateOrPatch(ctx, c, update, func() error {
-		update.Status = expect.Status
 		update.Spec = expect.Spec
 		update.Annotations = expect.Annotations
 		return nil

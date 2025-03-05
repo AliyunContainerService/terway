@@ -1258,7 +1258,13 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 	}()
 
 	if !isEFLO(ctx) {
-		err = n.aliyun.AttachNetworkInterface(ctx, result.NetworkInterfaceID, node.Spec.NodeMetadata.InstanceID, "")
+		err = n.aliyun.AttachNetworkInterface(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
+			NetworkInterfaceID:     &result.NetworkInterfaceID,
+			InstanceID:             &node.Spec.NodeMetadata.InstanceID,
+			TrunkNetworkInstanceID: nil,
+			NetworkCardIndex:       nil,
+			Backoff:                nil,
+		})
 		if err != nil {
 			return err
 		}

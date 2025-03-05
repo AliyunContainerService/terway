@@ -66,6 +66,7 @@ import (
 	multiippod "github.com/AliyunContainerService/terway/pkg/controller/multi-ip/pod"
 	"github.com/AliyunContainerService/terway/pkg/controller/node"
 	"github.com/AliyunContainerService/terway/pkg/controller/preheating"
+	"github.com/AliyunContainerService/terway/pkg/controller/status"
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/utils"
@@ -221,12 +222,13 @@ func main() {
 	}
 	wg := &wait.Group{}
 	ctrlCtx := &register.ControllerCtx{
-		Context:        ctx,
-		Config:         cfg,
-		VSwitchPool:    vSwitchCtrl,
-		AliyunClient:   aliyunClient,
-		Wg:             wg,
-		TracerProvider: tp,
+		Context:         ctx,
+		Config:          cfg,
+		VSwitchPool:     vSwitchCtrl,
+		AliyunClient:    aliyunClient,
+		Wg:              wg,
+		TracerProvider:  tp,
+		NodeStatusCache: status.NewCache[status.NodeStatus](),
 	}
 
 	for name := range register.Controllers {

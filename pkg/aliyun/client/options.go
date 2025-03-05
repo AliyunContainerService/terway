@@ -401,3 +401,61 @@ func (o *DescribeNetworkInterfaceOptions) EFLO() *eflo.ListElasticNetworkInterfa
 
 	return req
 }
+
+type AttachNetworkInterfaceOption interface {
+	ApplyTo(*AttachNetworkInterfaceOptions)
+}
+
+type AttachNetworkInterfaceOptions struct {
+	NetworkInterfaceID     *string
+	InstanceID             *string
+	TrunkNetworkInstanceID *string
+	NetworkCardIndex       *int
+	Backoff                *wait.Backoff
+}
+
+func (o *AttachNetworkInterfaceOptions) ApplyTo(in *AttachNetworkInterfaceOptions) {
+	if o.NetworkInterfaceID != nil {
+		in.NetworkInterfaceID = o.NetworkInterfaceID
+	}
+	if o.InstanceID != nil {
+		in.InstanceID = o.InstanceID
+	}
+	if o.TrunkNetworkInstanceID != nil {
+		in.TrunkNetworkInstanceID = o.TrunkNetworkInstanceID
+	}
+	if o.NetworkCardIndex != nil {
+		in.NetworkCardIndex = o.NetworkCardIndex
+	}
+	if o.Backoff != nil {
+		in.Backoff = o.Backoff
+	}
+}
+
+func (o *AttachNetworkInterfaceOptions) ECS() (*ecs.AttachNetworkInterfaceRequest, error) {
+	req := ecs.CreateAttachNetworkInterfaceRequest()
+	if o.NetworkInterfaceID != nil {
+		req.NetworkInterfaceId = *o.NetworkInterfaceID
+	}
+	if o.InstanceID != nil {
+		req.InstanceId = *o.InstanceID
+	}
+	if o.TrunkNetworkInstanceID != nil {
+		req.TrunkNetworkInstanceId = *o.TrunkNetworkInstanceID
+	}
+	if o.NetworkCardIndex != nil {
+		req.NetworkCardIndex = requests.NewInteger(*o.NetworkCardIndex)
+	}
+
+	if o.Backoff == nil {
+		o.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	if req.InstanceId == "" || req.NetworkInterfaceId == "" {
+		return nil, ErrInvalidArgs
+	}
+
+	return req, nil
+}

@@ -166,7 +166,7 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 }
 
 // AttachNetworkInterface attach eni
-func (a *OpenAPI) AttachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error {
+func (a *OpenAPI) AttachNetworkInterface(ctx context.Context, opts ...AttachNetworkInterfaceOption) error {
 	ctx, span := a.Tracer.Start(ctx, APIAttachNetworkInterface)
 	defer span.End()
 
@@ -175,11 +175,15 @@ func (a *OpenAPI) AttachNetworkInterface(ctx context.Context, eniID, instanceID,
 		return err
 	}
 
-	req := ecs.CreateAttachNetworkInterfaceRequest()
-	req.NetworkInterfaceId = eniID
-	req.InstanceId = instanceID
-	req.TrunkNetworkInstanceId = trunkENIID
+	option := &AttachNetworkInterfaceOptions{}
+	for _, opt := range opts {
+		opt.ApplyTo(option)
+	}
 
+	req, err := option.ECS()
+	if err != nil {
+		return err
+	}
 	l := LogFields(logf.FromContext(ctx), req)
 
 	start := time.Now()

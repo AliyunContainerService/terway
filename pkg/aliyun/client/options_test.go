@@ -128,3 +128,103 @@ func TestCreateNetworkInterfaceOptions_ApplyCreateNetworkInterface(t *testing.T)
 		})
 	}
 }
+
+func TestApplyTo(t *testing.T) {
+	t.Run("All fields are nil", func(t *testing.T) {
+		src := &AttachNetworkInterfaceOptions{}
+		dst := &AttachNetworkInterfaceOptions{
+			NetworkInterfaceID: ptr("old-nic"),
+			InstanceID:         ptr("old-instance"),
+		}
+		src.ApplyTo(dst)
+		assert.Equal(t, "old-nic", *dst.NetworkInterfaceID)
+		assert.Equal(t, "old-instance", *dst.InstanceID)
+	})
+
+	t.Run("Some fields are non-nil", func(t *testing.T) {
+		src := &AttachNetworkInterfaceOptions{
+			NetworkInterfaceID: ptr("new-nic"),
+		}
+		dst := &AttachNetworkInterfaceOptions{
+			NetworkInterfaceID: ptr("old-nic"),
+			InstanceID:         ptr("old-instance"),
+		}
+		src.ApplyTo(dst)
+		assert.Equal(t, "new-nic", *dst.NetworkInterfaceID)
+		assert.Equal(t, "old-instance", *dst.InstanceID)
+	})
+
+	t.Run("All fields are non-nil", func(t *testing.T) {
+		src := &AttachNetworkInterfaceOptions{
+			NetworkInterfaceID: ptr("new-nic"),
+			InstanceID:         ptr("new-instance"),
+		}
+		dst := &AttachNetworkInterfaceOptions{
+			NetworkInterfaceID: ptr("old-nic"),
+			InstanceID:         ptr("old-instance"),
+		}
+		src.ApplyTo(dst)
+		assert.Equal(t, "new-nic", *dst.NetworkInterfaceID)
+		assert.Equal(t, "new-instance", *dst.InstanceID)
+	})
+}
+
+func TestECS(t *testing.T) {
+	t.Run("All fields are non-nil", func(t *testing.T) {
+		opts := &AttachNetworkInterfaceOptions{
+			NetworkInterfaceID:     ptr("nic-123"),
+			InstanceID:             ptr("instance-456"),
+			TrunkNetworkInstanceID: ptr("trunk-789"),
+			NetworkCardIndex:       ptr(1),
+			Backoff:                &wait.Backoff{Steps: 2},
+		}
+		req, err := opts.ECS()
+		assert.NoError(t, err)
+		assert.Equal(t, "nic-123", req.NetworkInterfaceId)
+		assert.Equal(t, "instance-456", req.InstanceId)
+		assert.Equal(t, "trunk-789", req.TrunkNetworkInstanceId)
+		val, _ := req.NetworkCardIndex.GetValue()
+		assert.Equal(t, 1, val)
+		assert.Equal(t, 2, opts.Backoff.Steps)
+	})
+
+	t.Run("Missing required fields", func(t *testing.T) {
+		opts := &AttachNetworkInterfaceOptions{
+			NetworkInterfaceID: ptr("nic-123"),
+			InstanceID:         nil,
+		}
+		_, err := opts.ECS()
+		assert.Equal(t, ErrInvalidArgs, err)
+	})
+
+	t.Run("Backoff is nil", func(t *testing.T) {
+		opts := &AttachNetworkInterfaceOptions{
+			NetworkInterfaceID: ptr("nic-123"),
+			InstanceID:         ptr("instance-456"),
+			Backoff:            nil,
+		}
+		_, err := opts.ECS()
+		assert.NoError(t, err)
+		assert.Equal(t, 1, opts.Backoff.Steps)
+	})
+
+	t.Run("Partial fields are nil", func(t *testing.T) {
+		opts := &AttachNetworkInterfaceOptions{
+			NetworkInterfaceID:     ptr("nic-123"),
+			InstanceID:             ptr("instance-456"),
+			TrunkNetworkInstanceID: nil,
+			NetworkCardIndex:       nil,
+		}
+		req, err := opts.ECS()
+		assert.NoError(t, err)
+		assert.Equal(t, "nic-123", req.NetworkInterfaceId)
+		assert.Equal(t, "instance-456", req.InstanceId)
+		assert.Empty(t, req.TrunkNetworkInstanceId)
+		assert.Equal(t, requests.Integer(""), req.NetworkCardIndex)
+	})
+}
+
+// Helper function to create pointers for string and int values
+func ptr[T any](v T) *T {
+	return &v
+}

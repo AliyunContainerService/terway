@@ -30,6 +30,7 @@ import (
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/controller/multi-ip/node"
+	"github.com/AliyunContainerService/terway/pkg/controller/status"
 	"github.com/AliyunContainerService/terway/pkg/feature"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
@@ -74,12 +75,13 @@ func init() {
 			Watches(&networkv1beta1.Node{}, &handler.EnqueueRequestForObject{}).
 			Watches(&networkv1beta1.NodeRuntime{}, &handler.EnqueueRequestForObject{}).
 			Complete(&ReconcileNode{
-				client:        mgr.GetClient(),
-				scheme:        mgr.GetScheme(),
-				record:        mgr.GetEventRecorderFor(ControllerName),
-				aliyun:        ctrlCtx.AliyunClient,
-				supportEFLO:   utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
-				nodePredicate: nodePredicate,
+				client:          mgr.GetClient(),
+				scheme:          mgr.GetScheme(),
+				record:          mgr.GetEventRecorderFor(ControllerName),
+				aliyun:          ctrlCtx.AliyunClient,
+				supportEFLO:     utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
+				nodePredicate:   nodePredicate,
+				nodeStatusCache: ctrlCtx.NodeStatusCache,
 			})
 	}, false)
 }
@@ -95,6 +97,8 @@ type ReconcileNode struct {
 
 	supportEFLO   bool
 	nodePredicate *predicateForNodeEvent
+
+	nodeStatusCache *status.Cache[status.NodeStatus]
 }
 
 func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
@@ -104,11 +108,13 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 	err := r.client.Get(ctx, request.NamespacedName, k8sNode)
 	if err != nil {
 		if k8sErr.IsNotFound(err) {
+			r.nodeStatusCache.Delete(request.Name)
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, err
 	}
 	if r.nodePredicate != nil && !r.nodePredicate.predicateNode(k8sNode) {
+		r.nodeStatusCache.Delete(request.Name)
 		return reconcile.Result{}, nil
 	}
 	if !k8sNode.DeletionTimestamp.IsZero() {

@@ -166,10 +166,11 @@ const (
 )
 
 type ENIInfo struct {
-	ID     string        `json:"id,omitempty"`
-	Type   ENIType       `json:"type,omitempty"`
-	Vid    int           `json:"vid,omitempty"`    // vlan id for trunk
-	Status ENIBindStatus `json:"status,omitempty"` // the status for operate the eni
+	ID               string        `json:"id,omitempty"`
+	Type             ENIType       `json:"type,omitempty"`
+	Vid              int           `json:"vid,omitempty"`    // vlan id for trunk
+	Status           ENIBindStatus `json:"status,omitempty"` // the status for operate the eni
+	NetworkCardIndex *int          `json:"networkCardIndex,omitempty"`
 }
 
 // ENIType for this eni, only Secondary and Member is supported

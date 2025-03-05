@@ -175,7 +175,13 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 	}
 
 	// 2. attach eni
-	err = a.openAPI.AttachNetworkInterface(ctx, eni.NetworkInterfaceID, a.instanceID, "")
+	err = a.openAPI.AttachNetworkInterface(ctx, &client.AttachNetworkInterfaceOptions{
+		NetworkInterfaceID:     &eni.NetworkInterfaceID,
+		InstanceID:             &a.instanceID,
+		TrunkNetworkInstanceID: nil,
+		NetworkCardIndex:       nil,
+		Backoff:                nil,
+	})
 	if err != nil {
 		return r, nil, nil, err
 	}
