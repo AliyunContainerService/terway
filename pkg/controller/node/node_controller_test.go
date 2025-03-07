@@ -20,8 +20,10 @@ import (
 	"context"
 	"time"
 
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/mock"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
@@ -33,6 +35,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/controller/mocks"
 )
 
 var _ = Describe("Node Controller", func() {
@@ -292,6 +295,122 @@ var _ = Describe("Node Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sNode.Annotations["k8s.aliyun.com/trunk-on"]).To(Equal("eni-1"))
 			Expect(k8sNode.Annotations["k8s.aliyun.com/max-available-ip"]).To(Equal("30"))
+		})
+	})
+
+	Context("EFLO node", func() {
+		const resourceName = "test-resource"
+
+		ctx := context.Background()
+
+		typeNamespacedName := types.NamespacedName{
+			Name: resourceName,
+		}
+
+		BeforeEach(func() {
+			By("create a k8s node")
+			k8sNode := &corev1.Node{}
+			err := k8sClient.Get(ctx, typeNamespacedName, k8sNode)
+			if err != nil && errors.IsNotFound(err) {
+				resource := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: resourceName,
+						Labels: map[string]string{
+							"alibabacloud.com/lingjun-worker": "true",
+						},
+					},
+					Spec: corev1.NodeSpec{},
+				}
+				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+			}
+		})
+
+		AfterEach(func() {
+			err := k8sClient.Delete(ctx, &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+			})
+			if err != nil {
+				Expect(err).To(BeNil())
+			}
+
+			crNode := &networkv1beta1.Node{}
+
+			err = k8sClient.Get(ctx, typeNamespacedName, crNode)
+			if err != nil && errors.IsNotFound(err) {
+				return
+			}
+			if err != nil {
+				Expect(err).To(BeNil())
+			}
+
+			patch := cc.MergeFrom(crNode.DeepCopy())
+			controllerutil.RemoveFinalizer(crNode, finalizer)
+
+			err = k8sClient.Patch(ctx, crNode, patch)
+			if err != nil {
+				Expect(err).To(BeNil())
+			}
+
+			_ = k8sClient.Delete(ctx, &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+			})
+			Eventually(func() bool {
+				crNode := &networkv1beta1.Node{}
+				err := k8sClient.Get(context.TODO(), typeNamespacedName, crNode)
+				return k8sErr.IsNotFound(err)
+			}, 5*time.Second, 500*time.Millisecond).Should(BeTrue())
+		})
+
+		It("new eflo node", func() {
+			By("Reconciling the created resource")
+
+			ac := mocks.NewInterface(GinkgoT())
+			ac.On("GetNodeInfoForPod", mock.Anything, "instanceID").Return(&eflo.Content{
+				LeniQuota:   20,
+				LniSipQuota: 10,
+			}, nil).Maybe()
+
+			controllerReconciler := &ReconcileNode{
+				client: k8sClient,
+				scheme: k8sClient.Scheme(),
+				aliyun: ac,
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			resource := &networkv1beta1.Node{}
+			err = k8sClient.Get(ctx, typeNamespacedName, resource)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resource.Labels["name"]).To(Equal(resourceName))
+			Expect(resource.Labels["alibabacloud.com/lingjun-worker"]).To(Equal("true"))
+
+			By("ds modify the node cr")
+			_, err = controllerutil.CreateOrPatch(ctx, k8sClient, resource, func() error {
+				resource.Spec.NodeMetadata.InstanceID = "instanceID"
+				resource.Spec.NodeMetadata.RegionID = "regionID"
+				resource.Spec.NodeMetadata.InstanceType = "instanceType"
+				resource.Spec.NodeMetadata.ZoneID = "zoneID"
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("reconcile again, should modify the node cap")
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			resource = &networkv1beta1.Node{}
+			err = k8sClient.Get(ctx, typeNamespacedName, resource)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(resource.Spec.NodeCap.Adapters, 20)
+			Expect(resource.Spec.NodeCap.TotalAdapters, 20)
+			Expect(resource.Spec.NodeCap.IPv4PerAdapter, 10)
 		})
 	})
 })

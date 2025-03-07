@@ -42,8 +42,12 @@ const (
 )
 
 const (
-	LENIStatusAvailable  string = "Available"
-	LENIStatusUnattached string = "Unattached"
+	LENIStatusAvailable    string = "Available"
+	LENIStatusUnattached   string = "Unattached"
+	LENIStatusExecuting    string = "Executing"
+	LENIStatusCreateFailed string = "Create Failed"
+	LENIStatusDeleteFailed string = "Delete Failed"
+	LENIStatusDeleting     string = "Deleting"
 
 	LENIIPStatusAvailable string = "Available"
 )
@@ -94,7 +98,7 @@ type IPSet struct {
 }
 
 func FromCreateResp(in *ecs.CreateNetworkInterfaceResponse) *NetworkInterface {
-	return &NetworkInterface{
+	r := &NetworkInterface{
 		Status:             in.Status,
 		MacAddress:         in.MacAddress,
 		NetworkInterfaceID: in.NetworkInterfaceId,
@@ -117,6 +121,10 @@ func FromCreateResp(in *ecs.CreateNetworkInterfaceResponse) *NetworkInterface {
 		Type:            in.Type,
 		ResourceGroupID: in.ResourceGroupId,
 	}
+	if r.Type == "" {
+		r.Type = ENITypeSecondary
+	}
+	return r
 }
 
 func FromDescribeResp(in *ecs.NetworkInterfaceSet) *NetworkInterface {

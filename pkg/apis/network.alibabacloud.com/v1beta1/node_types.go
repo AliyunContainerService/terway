@@ -49,14 +49,10 @@ const (
 )
 
 type NodeMetadata struct {
-	// +kubebuilder:validation:Required
-	RegionID string `json:"regionID,omitempty"`
-	// +kubebuilder:validation:Required
+	RegionID     string `json:"regionID,omitempty"`
 	InstanceType string `json:"instanceType,omitempty"`
-	// +kubebuilder:validation:Required
-	InstanceID string `json:"instanceID,omitempty"`
-	// +kubebuilder:validation:Required
-	ZoneID string `json:"zoneID,omitempty"`
+	InstanceID   string `json:"instanceID,omitempty"`
+	ZoneID       string `json:"zoneID,omitempty"`
 }
 
 type NodeCap struct {
@@ -135,25 +131,25 @@ type NetworkInterface struct {
 	ID string `json:"id"`
 	// +kubebuilder:validation:Required
 	Status string `json:"status"`
-	// +kubebuilder:validation:Required
-	MacAddress string `json:"macAddress"`
-	// +kubebuilder:validation:Required
-	VSwitchID string `json:"vSwitchID"`
-	// +kubebuilder:validation:Required
-	SecurityGroupIDs []string `json:"securityGroupIDs"`
-	// +kubebuilder:validation:Required
-	PrimaryIPAddress string `json:"primaryIPAddress"`
-	// +kubebuilder:validation:Required
-	NetworkInterfaceTrafficMode NetworkInterfaceTrafficMode `json:"networkInterfaceTrafficMode"`
-	// +kubebuilder:validation:Required
-	NetworkInterfaceType ENIType `json:"networkInterfaceType"`
-	// +kubebuilder:validation:Required
+
+	MacAddress string `json:"macAddress,omitempty"`
+
+	VSwitchID string `json:"vSwitchID,omitempty"`
+
+	SecurityGroupIDs []string `json:"securityGroupIDs,omitempty"`
+
+	PrimaryIPAddress string `json:"primaryIPAddress,omitempty"`
+
+	NetworkInterfaceTrafficMode NetworkInterfaceTrafficMode `json:"networkInterfaceTrafficMode,omitempty"`
+
+	NetworkInterfaceType ENIType `json:"networkInterfaceType,omitempty"`
+
 	IPv4 map[string]*IP `json:"ipv4,omitempty"`
 	IPv6 map[string]*IP `json:"ipv6,omitempty"`
-	// +kubebuilder:validation:Required
-	IPv4CIDR string `json:"ipv4CIDR"`
-	// +kubebuilder:validation:Required
-	IPv6CIDR string `json:"ipv6CIDR"`
+
+	IPv4CIDR string `json:"ipv4CIDR,omitempty"`
+
+	IPv6CIDR string `json:"ipv6CIDR,omitempty"`
 
 	Conditions map[string]Condition `json:"conditions,omitempty"`
 }

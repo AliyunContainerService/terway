@@ -105,6 +105,7 @@ func init() {
 				fullSyncNodePeriod: fullSyncPeriod,
 				gcPeriod:           gcPeriod,
 				tracer:             tracer,
+				eniBatchSize:       5, // operate eni on one reconcile
 			},
 			RateLimiter: workqueue.NewTypedMaxOfRateLimiter(
 				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](minSyncPeriod, maxSyncPeriod),
@@ -132,6 +133,8 @@ type NodeStatus struct {
 	StatusChanged     *atomic.Bool
 	LastGCTime        time.Time
 	LastReconcileTime time.Time
+
+	Mutex sync.Mutex
 }
 
 type ReconcileNode struct {
@@ -148,6 +151,8 @@ type ReconcileNode struct {
 	gcPeriod           time.Duration
 
 	tracer trace.Tracer
+
+	eniBatchSize int
 }
 
 type ctxMetaKey struct{}
@@ -211,20 +216,20 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 	}
 
 	// check if daemon has ready
+	if node.Spec.NodeMetadata.InstanceID == "" ||
+		node.Spec.NodeMetadata.InstanceType == "" ||
+		node.Spec.NodeMetadata.RegionID == "" ||
+		node.Spec.NodeMetadata.ZoneID == "" ||
+		node.Spec.ENISpec == nil ||
+		node.Spec.Pool == nil ||
+		node.Spec.NodeCap.Adapters == 0 {
+		return reconcile.Result{}, nil
+	}
 
 	if utils.ISLinJunNode(node.Labels) {
 		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
-		if node.Spec.ENISpec == nil ||
-			node.Spec.Pool == nil ||
-			node.Spec.NodeCap.Adapters == 0 {
-			return reconcile.Result{}, nil
-		}
 	} else {
 		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIECS)
-		if node.Spec.ENISpec == nil ||
-			node.Spec.Pool == nil {
-			return reconcile.Result{}, nil
-		}
 	}
 
 	if types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
@@ -346,12 +351,19 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	eniIDMap := map[string]struct{}{}
 	// add ip
 
+	hasMiddleStatus := false
 	for _, item := range enis {
 		log := l.WithValues("eni", item.NetworkInterfaceID, "status", item.Status)
 
 		eniIDMap[item.NetworkInterfaceID] = struct{}{}
 		remote := newENIFromAPI(item)
 
+		if item.Status == aliyunClient.LENIStatusExecuting ||
+			item.Status == aliyunClient.LENIStatusDeleting ||
+			item.Status == aliyunClient.ENIStatusAttaching ||
+			item.Status == aliyunClient.ENIStatusDetaching {
+			hasMiddleStatus = true
+		}
 		crENI, ok := node.Status.NetworkInterfaces[item.NetworkInterfaceID]
 		if !ok {
 			log.Info("sync eni with remote, new eni added")
@@ -369,6 +381,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 			remote.IPv6CIDR = vsw.IPv6CIDR
 			node.Status.NetworkInterfaces[item.NetworkInterfaceID] = remote
 		} else {
+			log.Info("sync eni with remote, old eni merged")
 			// exist record
 			// only ip is updated
 			mergeIPMap(log, remote.IPv4, crENI.IPv4)
@@ -424,7 +437,12 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	}
 
 	// change the ts
-	node.Status.NextSyncOpenAPITime = metav1.NewTime(time.Now().Add(wait.Jitter(n.fullSyncNodePeriod, 1)))
+	if hasMiddleStatus {
+		node.Status.NextSyncOpenAPITime = metav1.NewTime(time.Now().Add(wait.Jitter(30*time.Second, 1)))
+		return nil
+	} else {
+		node.Status.NextSyncOpenAPITime = metav1.NewTime(time.Now().Add(wait.Jitter(n.fullSyncNodePeriod, 1)))
+	}
 	node.Status.LastSyncOpenAPITime = metav1.Now()
 
 	MetaCtx(ctx).NeedSyncOpenAPI.Store(false)
@@ -879,6 +897,10 @@ func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eni
 	}
 
 	if option.eniRef != nil {
+		if option.eniRef.Status != aliyunClient.ENIStatusInUse {
+			return false
+		}
+
 		vsw, err := n.vswpool.GetByID(ctx, n.aliyun, option.eniRef.VSwitchID)
 		if err != nil {
 			logf.FromContext(ctx).Error(err, "failed to get vsw")
@@ -979,11 +1001,20 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 	lock := sync.Mutex{}
 	var errs []error
 
+	inFlight := 0
+
+	createBatchSize := min(n.eniBatchSize, 1)
+	if isEFLO(ctx) {
+		createBatchSize = 2
+	}
 	for _, option := range options {
 		if option.addIPv6N <= 0 && option.addIPv4N <= 0 {
 			continue
 		}
-
+		if inFlight >= createBatchSize {
+			continue
+		}
+		inFlight++
 		opt := option
 		// start a gr for each eni
 		wg.StartWithContext(ctx, func(ctx context.Context) {
@@ -998,7 +1029,8 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 			if err != nil {
 				opt.errors = append(opt.errors, err)
 
-				if apiErr.ErrorCodeIs(err, apiErr.ErrEniPerInstanceLimitExceeded, apiErr.ErrIPv4CountExceeded, apiErr.ErrIPv6CountExceeded) {
+				if apiErr.ErrorCodeIs(err, apiErr.ErrEniPerInstanceLimitExceeded, apiErr.ErrIPv4CountExceeded, apiErr.ErrIPv6CountExceeded) ||
+					apiErr.IsEfloCode(err, apiErr.ErrEfloPrivateIPQuotaExecuted) {
 					MetaCtx(ctx).NeedSyncOpenAPI.Store(true)
 				}
 
@@ -1230,9 +1262,11 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 		return err
 	}
 
+	MetaCtx(ctx).Mutex.Lock()
 	if node.Status.NetworkInterfaces == nil {
 		node.Status.NetworkInterfaces = make(map[string]*networkv1beta1.NetworkInterface)
 	}
+	MetaCtx(ctx).Mutex.Unlock()
 
 	defer func() {
 		if err != nil {
@@ -1249,10 +1283,15 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			}
 			logf.FromContext(ctx).Error(innerErr, "failed to delete eni, this may result leak", "eni", result.NetworkInterfaceID)
 			// if we failed to delete the eni , we need to store the eni
+			MetaCtx(ctx).Mutex.Lock()
 			node.Status.NetworkInterfaces[result.NetworkInterfaceID] = &networkv1beta1.NetworkInterface{
-				ID:     result.NetworkInterfaceID,
-				Status: aliyunClient.ENIStatusDeleting,
+				ID:                          result.NetworkInterfaceID,
+				Status:                      aliyunClient.ENIStatusDeleting,
+				NetworkInterfaceType:        networkv1beta1.ENIType(result.Type),
+				NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficMode(result.NetworkInterfaceTrafficMode),
 			}
+			MetaCtx(ctx).Mutex.Unlock()
+
 			MetaCtx(ctx).StatusChanged.Store(true)
 		}
 	}()
@@ -1285,8 +1324,10 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 	networkInterface.IPv4CIDR = vsw.IPv4CIDR
 	networkInterface.IPv6CIDR = vsw.IPv6CIDR
 
+	MetaCtx(ctx).Mutex.Lock()
 	node.Status.NetworkInterfaces[eni.NetworkInterfaceID] = networkInterface
 	// if changed , but we update failed , that case ,need to sync openAPI...
+	MetaCtx(ctx).Mutex.Unlock()
 
 	MetaCtx(ctx).StatusChanged.Store(true)
 	return nil
@@ -1298,6 +1339,12 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 
 	// nb(l1b0k): ENi does not support assigning both IPv4 and IPv6 simultaneously.
 	if opt.addIPv4N > 0 {
+		MetaCtx(ctx).Mutex.Lock()
+		if opt.eniRef.IPv4 == nil {
+			opt.eniRef.IPv4 = make(map[string]*networkv1beta1.IP)
+		}
+		MetaCtx(ctx).Mutex.Unlock()
+
 		bo := backoff.Backoff(backoff.ENIIPOps)
 		result, err := n.aliyun.AssignPrivateIPAddressV2(ctx, &aliyunClient.AssignPrivateIPAddressOptions{
 			NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
@@ -1313,6 +1360,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 				n.vswpool.Block(opt.eniRef.VSwitchID)
 			}
 
+			MetaCtx(ctx).Mutex.Lock()
 			lo.ForEach(result, func(item aliyunClient.IPSet, index int) {
 				if item.IPName != "" {
 					addIPToMap(opt.eniRef.IPv4, &networkv1beta1.IP{
@@ -1321,13 +1369,13 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 					})
 				}
 			})
+			MetaCtx(ctx).Mutex.Unlock()
 
 			return err
 		} else {
 			MetaCtx(ctx).StatusChanged.Store(true)
-			if opt.eniRef.IPv4 == nil {
-				opt.eniRef.IPv4 = make(map[string]*networkv1beta1.IP)
-			}
+
+			MetaCtx(ctx).Mutex.Lock()
 			for _, ip := range result {
 				addIPToMap(opt.eniRef.IPv4, &networkv1beta1.IP{
 					IPName: ip.IPName,
@@ -1335,9 +1383,16 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 					Status: networkv1beta1.IPStatusValid,
 				})
 			}
+			MetaCtx(ctx).Mutex.Unlock()
 		}
 	}
 	if opt.addIPv6N > 0 {
+		MetaCtx(ctx).Mutex.Lock()
+		if opt.eniRef.IPv6 == nil {
+			opt.eniRef.IPv6 = make(map[string]*networkv1beta1.IP)
+		}
+		MetaCtx(ctx).Mutex.Unlock()
+
 		bo := backoff.Backoff(backoff.ENIIPOps)
 		result, err := n.aliyun.AssignIpv6AddressesV2(ctx, &aliyunClient.AssignIPv6AddressesOptions{
 			NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
@@ -1352,6 +1407,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 				n.vswpool.Block(opt.eniRef.VSwitchID)
 			}
 
+			MetaCtx(ctx).Mutex.Lock()
 			lo.ForEach(result, func(item aliyunClient.IPSet, index int) {
 				if item.IPName != "" {
 					addIPToMap(opt.eniRef.IPv6, &networkv1beta1.IP{
@@ -1360,14 +1416,14 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 					})
 				}
 			})
+			MetaCtx(ctx).Mutex.Unlock()
 
 			return err
 		} else {
 			MetaCtx(ctx).StatusChanged.Store(true)
 
-			if opt.eniRef.IPv6 == nil {
-				opt.eniRef.IPv6 = make(map[string]*networkv1beta1.IP)
-			}
+			MetaCtx(ctx).Mutex.Lock()
+
 			for _, ip := range result {
 				addIPToMap(opt.eniRef.IPv6, &networkv1beta1.IP{
 					IPName: ip.IPName,
@@ -1375,6 +1431,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 					Status: networkv1beta1.IPStatusValid,
 				})
 			}
+			MetaCtx(ctx).Mutex.Unlock()
 		}
 	}
 	return nil

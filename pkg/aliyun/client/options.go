@@ -390,7 +390,12 @@ func (o *DescribeNetworkInterfaceOptions) EFLO() *eflo.ListElasticNetworkInterfa
 		req.Type = *o.InstanceType
 	}
 	if o.Status != nil {
-		req.Status = *o.Status
+		switch *o.Status {
+		case ENIStatusInUse:
+			req.Status = LENIStatusAvailable
+		default:
+			req.Status = *o.Status
+		}
 	}
 
 	if o.Backoff == nil {

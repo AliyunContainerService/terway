@@ -365,6 +365,8 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	if node.Labels == nil {
 		node.Labels = make(map[string]string)
 	}
+	node.Labels["name"] = k8sNode.Name
+	node.Labels[types.LinJunNodeLabelKey] = "true"
 
 	if node.Spec.NodeMetadata.InstanceID != "" && node.Spec.NodeCap.Adapters == 0 {
 		resp, err := r.aliyun.GetNodeInfoForPod(ctx, node.Spec.NodeMetadata.InstanceID)

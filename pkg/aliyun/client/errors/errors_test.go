@@ -2,6 +2,7 @@ package errors
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	apiErr "github.com/aliyun/alibaba-cloud-sdk-go/sdk/errors"
@@ -124,4 +125,17 @@ func TestErrorIsReturnsFalseWhenNoCheckErrMatches(t *testing.T) {
 	checkFunc1 := WarpFn("anotherErr")
 	checkFunc2 := WarpFn("yetAnotherErr")
 	assert.False(t, ErrorIs(err, checkFunc1, checkFunc2))
+}
+
+func TestEflo(t *testing.T) {
+	err := &EFLOCode{
+		Code:      403,
+		Content:   "{\"Code\": \"err\"}",
+		Message:   "message",
+		RequestID: "requestId",
+	}
+
+	assert.True(t, IsEfloCode(err, 403))
+	assert.True(t, IsEfloCode(fmt.Errorf("warp %w", err), 403))
+	assert.False(t, IsEfloCode(fmt.Errorf("warp %w", err), 00))
 }

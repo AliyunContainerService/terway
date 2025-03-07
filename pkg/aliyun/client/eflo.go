@@ -29,7 +29,12 @@ func (a *OpenAPI) CreateElasticNetworkInterface(zoneID, nodeID, vSwitchID, secur
 	}
 
 	if resp.Code != 0 {
-		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
 		return "", "", err
 	}
 	return resp.Content.NodeId, resp.Content.ElasticNetworkInterfaceId, nil
@@ -50,9 +55,17 @@ func (a *OpenAPI) DeleteElasticNetworkInterface(ctx context.Context, eniID strin
 	}
 
 	if resp.Code != 0 {
-		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
-		l.Error(err, "failed")
-		return err
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
+		// 1011 IpName/leni not exist
+		if !apiErr.IsEfloCode(err, apiErr.ErrEfloResourceNotFound) {
+			l.Error(err, "failed")
+			return err
+		}
 	}
 
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("succeed")
@@ -76,7 +89,12 @@ func (a *OpenAPI) AssignLeniPrivateIPAddress(ctx context.Context, eniID, prefer 
 	}
 
 	if resp.Code != 0 {
-		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
 		l.Error(err, "failed")
 		return "", err
 	}
@@ -102,9 +120,17 @@ func (a *OpenAPI) UnassignLeniPrivateIPAddress(ctx context.Context, eniID, ipNam
 	}
 
 	if resp.Code != 0 {
-		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
-		l.Error(err, "failed")
-		return err
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
+		// 1011 IpName/leni not exist
+		if !apiErr.IsEfloCode(err, apiErr.ErrEfloResourceNotFound) {
+			l.Error(err, "failed")
+			return err
+		}
 	}
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
 
@@ -123,7 +149,12 @@ func (a *OpenAPI) GetElasticNetworkInterface(eniID string) (*eflo.Content, error
 	}
 
 	if resp.Code != 0 {
-		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
 		return nil, err
 	}
 
@@ -149,7 +180,12 @@ func (a *OpenAPI) ListLeniPrivateIPAddresses(ctx context.Context, eniID, ipName,
 	}
 
 	if resp.Code != 0 {
-		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
 		l.Error(err, "failed")
 		return nil, err
 	}
@@ -179,7 +215,12 @@ func (a *OpenAPI) ListElasticNetworkInterfaces(ctx context.Context, zoneID, node
 	}
 
 	if resp.Code != 0 {
-		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
 		l.Error(err, "failed")
 		return nil, err
 	}
@@ -204,7 +245,12 @@ func (a *OpenAPI) GetNodeInfoForPod(ctx context.Context, nodeID string) (*eflo.C
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
 
 	if resp.Code != 0 {
-		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
 		l.Error(err, "failed")
 		return nil, err
 	}

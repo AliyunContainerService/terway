@@ -55,7 +55,12 @@ func (a *OpenAPI) CreateElasticNetworkInterfaceV2(ctx context.Context, opts ...C
 	}
 
 	if resp.Code != 0 {
-		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
 		l.Error(err, "failed")
 		return nil, err
 	}
@@ -63,7 +68,9 @@ func (a *OpenAPI) CreateElasticNetworkInterfaceV2(ctx context.Context, opts ...C
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("leni created", "leni", resp.Content.ElasticNetworkInterfaceId)
 
 	return &NetworkInterface{
-		NetworkInterfaceID: resp.Content.ElasticNetworkInterfaceId,
+		NetworkInterfaceID:          resp.Content.ElasticNetworkInterfaceId,
+		Type:                        ENITypeSecondary,
+		NetworkInterfaceTrafficMode: ENITrafficModeStandard,
 	}, err
 }
 
@@ -78,11 +85,17 @@ func (a *OpenAPI) DescribeLeniNetworkInterface(ctx context.Context, opts ...Desc
 
 	resp, err := a.ClientSet.EFLO().ListElasticNetworkInterfaces(req)
 	if err != nil {
+		l.Error(err, "failed to list leni")
 		return nil, err
 	}
 	if resp.Code != 0 {
-		err = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
-		l.Error(err, "failed")
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
+		l.Error(err, "failed to list leni")
 		return nil, err
 	}
 	enis := make([]*NetworkInterface, 0)
@@ -90,7 +103,7 @@ func (a *OpenAPI) DescribeLeniNetworkInterface(ctx context.Context, opts ...Desc
 
 		l.Info("ListElasticNetworkInterfaces", "data", data)
 
-		if data.Type == "DEFAULT" { // CUSTOM for our own card
+		if data.Type != "CUSTOM" { // CUSTOM for our own card
 			continue
 		}
 
@@ -120,6 +133,9 @@ func (a *OpenAPI) DescribeLeniNetworkInterface(ctx context.Context, opts ...Desc
 			eni.Status = ENIStatusAvailable
 		case LENIStatusAvailable:
 			eni.Status = ENIStatusInUse
+
+		case LENIStatusCreateFailed, LENIStatusDeleting, LENIStatusDeleteFailed:
+			eni.Status = ENIStatusDeleting
 		}
 
 		privateIPs = append(privateIPs, IPSet{
@@ -186,11 +202,15 @@ func (a *OpenAPI) AssignLeniPrivateIPAddress2(ctx context.Context, opts ...Assig
 		}
 
 		if resp.Code != 0 {
-			innerErr = fmt.Errorf("%s requestID %s", resp.Message, resp.RequestId)
+			err = &apiErr.EFLOCode{
+				Code:      resp.Code,
+				Message:   resp.Message,
+				RequestID: resp.RequestId,
+				Content:   resp.Content,
+			}
 			l.Error(err, "failed")
-			return true, innerErr
+			return true, err
 		}
-
 		return true, nil
 	})
 	if err != nil {
