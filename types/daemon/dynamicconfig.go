@@ -60,7 +60,7 @@ func ConfigFromConfigMap(ctx context.Context, client client.Client, nodeName str
 	}
 
 	sgs := eniConf.GetSecurityGroups()
-	if len(sgs) > 5 {
+	if len(sgs) > 10 {
 		return nil, fmt.Errorf("security groups should not be more than 5, current %d", len(sgs))
 	}
 

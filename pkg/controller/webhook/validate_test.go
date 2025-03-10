@@ -113,7 +113,7 @@ func TestValidateHookDeniesWhenSecurityGroupIDsExceedsLimit(t *testing.T) {
 				PodSelector: &metav1.LabelSelector{},
 			},
 			VSwitchOptions:   []string{"vsw-123"},
-			SecurityGroupIDs: []string{"sg-1", "sg-2", "sg-3", "sg-4", "sg-5", "sg-6"},
+			SecurityGroupIDs: []string{"sg-1", "sg-2", "sg-3", "sg-4", "sg-5", "sg-6", "sg-7", "8", "9", "10", "11"},
 		},
 	}
 	raw, _ := json.Marshal(podNetworking)
@@ -131,7 +131,7 @@ func TestValidateHookDeniesWhenSecurityGroupIDsExceedsLimit(t *testing.T) {
 	}
 	resp := ValidateHook().Handle(context.Background(), req)
 	assert.False(t, resp.Allowed)
-	assert.Equal(t, "security group can not more than 5", resp.Result.Message)
+	assert.Equal(t, "security group can not more than 10", resp.Result.Message)
 }
 
 func TestValidateHookDeniesWhenReleaseAfterIsInvalid(t *testing.T) {

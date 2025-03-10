@@ -49,7 +49,7 @@ func TestConfigFromConfigMapReturnsErrorWhenSecurityGroupsExceedLimit(t *testing
 			Name:      "eni-config",
 			Namespace: "kube-system",
 		},
-		Data: map[string]string{"eni_conf": `{"security_groups": ["sg-1", "sg-2", "sg-3", "sg-4", "sg-5", "sg-6"]}`},
+		Data: map[string]string{"eni_conf": `{"security_groups": ["sg-1", "sg-2", "sg-3", "sg-4", "sg-5", "sg-6","sg-7","sg-8","sg-9","sg-10","sg-11"]}`},
 	})
 	_, err := ConfigFromConfigMap(context.Background(), client, "")
 	assert.Error(t, err)

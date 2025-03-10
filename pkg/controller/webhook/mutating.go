@@ -169,8 +169,8 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		if len(n.VSwitchOptions) == 0 || len(n.SecurityGroupIDs) == 0 {
 			require = true
 		}
-		if len(n.SecurityGroupIDs) > 5 {
-			return admission.Denied("security group can not more than 5")
+		if len(n.SecurityGroupIDs) > 10 {
+			return admission.Denied("security group can not more than 10")
 		}
 		if len(n.Interface) <= 0 || len(n.Interface) >= 6 {
 			return admission.Denied("interface name should >0 and <6 ")

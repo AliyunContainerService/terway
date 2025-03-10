@@ -43,8 +43,8 @@ func ValidateHook() *webhook.Admission {
 			if len(podNetworking.Spec.SecurityGroupIDs) == 0 {
 				return admission.Denied("security group is not set")
 			}
-			if len(podNetworking.Spec.SecurityGroupIDs) > 5 {
-				return admission.Denied("security group can not more than 5")
+			if len(podNetworking.Spec.SecurityGroupIDs) > 10 {
+				return admission.Denied("security group can not more than 10")
 			}
 
 			if podNetworking.Spec.AllocationType.ReleaseStrategy == v1beta1.ReleaseStrategyTTL {
