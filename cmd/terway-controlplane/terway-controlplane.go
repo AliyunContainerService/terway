@@ -195,7 +195,7 @@ func main() {
 	}
 
 	if !cfg.DisableWebhook {
-		mgr.GetWebhookServer().Register("/mutating", webhook.MutatingHook(mgr.GetClient()))
+		mgr.GetWebhookServer().Register("/mutating", webhook.MutatingHook(mgr.GetClient(), cfg))
 		mgr.GetWebhookServer().Register("/validate", webhook.ValidateHook())
 	}
 

@@ -52,12 +52,12 @@ var log = ctrl.Log.WithName("mutating-webhook")
 const eth0 = "eth0"
 
 // MutatingHook MutatingHook
-func MutatingHook(client client.Client) *webhook.Admission {
+func MutatingHook(client client.Client, config *controlplane.Config) *webhook.Admission {
 	return &webhook.Admission{
 		Handler: admission.HandlerFunc(func(ctx context.Context, req webhook.AdmissionRequest) webhook.AdmissionResponse {
 			switch req.Kind.Kind {
 			case "Pod":
-				return podWebhook(ctx, &req, client)
+				return podWebhook(ctx, &req, client, config)
 			case "PodNetworking":
 				return podNetworkingWebhook(ctx, req, client)
 			}
@@ -66,7 +66,7 @@ func MutatingHook(client client.Client) *webhook.Admission {
 	}
 }
 
-func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client client.Client) webhook.AdmissionResponse {
+func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client client.Client, config *controlplane.Config) webhook.AdmissionResponse {
 	original := req.Object.Raw
 	pod := &corev1.Pod{}
 	err := json.Unmarshal(original, pod)
@@ -91,7 +91,13 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		return webhook.Allowed("pod is not managed by terway")
 	}
 
-	config := controlplane.GetConfig()
+	_, hasPodNetworks := pod.Annotations[types.PodNetworks]
+	_, hasPodNetworksRequest := pod.Annotations[types.PodNetworksRequest]
+	_, hasPodNetworking := pod.Annotations[types.PodNetworking]
+
+	if (hasPodNetworks && hasPodNetworksRequest) || (hasPodNetworks && hasPodNetworking) || (hasPodNetworksRequest && hasPodNetworking) {
+		return webhook.Denied(fmt.Sprintf("pod annotations %s, %s, and %s must be mutually exclusive", types.PodNetworks, types.PodNetworksRequest, types.PodNetworking))
+	}
 
 	if pod.Annotations == nil {
 		pod.Annotations = map[string]string{}
@@ -105,14 +111,10 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		return webhook.Errored(1, errors.New(msg))
 	}
 
-	// 1. check pod annotation config first
-	if pod.Annotations[types.PodNetworking] != "" && pod.Annotations[types.PodNetworks] != "" {
-		return webhook.Denied("can not use pod annotation and podNetworking at same time")
-	}
-
 	// 1. pod annotation config
-	// 2. pod match podNetworking
-	// 3. write default config from eni-config
+	// 2. pod network requests
+	// 3. pod match podNetworking
+	// 4. write default config from eni-config
 	networks, err := controlplane.ParsePodNetworksFromAnnotation(pod)
 	if err != nil {
 		return webhook.Denied(fmt.Sprintf("unable parse annotation field %s, %s", types.PodNetworks, err))
@@ -122,57 +124,49 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 	vSwitchZone := sets.NewString()
 
 	if len(networks.PodNetworks) == 0 {
-		// get pn
-		podNetworking, err := matchOnePodNetworking(ctx, req.Namespace, client, pod)
+		podNetworks, zones, err := getPodNetworkRequests(ctx, client, pod.Annotations)
 		if err != nil {
-			l.Error(err, "error match podNetworking")
-			return webhook.Errored(1, err)
+			return webhook.Denied(fmt.Sprintf("unable parse annotation %s, %s", types.PodNetworksRequest, err))
 		}
-		if podNetworking == nil {
-			if config.IPAMType != types.IPAMTypeCRD {
-				if !types.PodUseENI(pod) {
-					l.V(5).Info("no selector is matched or CRD is not ready")
-					return webhook.Allowed("not match")
-				}
-				// allow use default config if in CRD mode
-			}
 
-			networks.PodNetworks = append(networks.PodNetworks, controlplane.PodNetworks{Interface: eth0})
+		if len(podNetworks) > 0 {
+			networks.PodNetworks = podNetworks
+			vSwitchZone = vSwitchZone.Insert(zones...)
 		} else {
-			// use config from pn
-			pod.Annotations[types.PodNetworking] = podNetworking.Name
-			networks.PodNetworks = append(networks.PodNetworks, controlplane.PodNetworks{
-				Interface:            eth0,
-				VSwitchOptions:       podNetworking.Spec.VSwitchOptions,
-				SecurityGroupIDs:     podNetworking.Spec.SecurityGroupIDs,
-				ENIOptions:           podNetworking.Spec.ENIOptions,
-				VSwitchSelectOptions: podNetworking.Spec.VSwitchSelectOptions,
-			})
 
-			for _, vsw := range podNetworking.Status.VSwitches {
-				vSwitchZone.Insert(vsw.Zone)
-			}
-
-			allocBytes, err := json.Marshal(podNetworking.Spec.AllocationType)
+			// get pn
+			podNetworking, err := matchOnePodNetworking(ctx, req.Namespace, client, pod)
 			if err != nil {
-				l.Error(err, "error parse allocationType")
+				l.Error(err, "error match podNetworking")
 				return webhook.Errored(1, err)
 			}
-			pod.Annotations[types.PodAllocType] = string(allocBytes)
-		}
-	}
+			if podNetworking == nil {
+				if config.IPAMType != types.IPAMTypeCRD {
+					if !types.PodUseENI(pod) {
+						l.V(5).Info("no selector is matched or CRD is not ready")
+						return webhook.Allowed("not match")
+					}
+					// allow use default config if in CRD mode
+				}
 
-	alloc, err := controlplane.ParsePodIPType(pod.Annotations[types.PodAllocType])
-	if err != nil {
-		l.Error(err, "failed to parse alloc type")
-		return webhook.Denied("failed to parse alloc type")
+				networks.PodNetworks = append(networks.PodNetworks, controlplane.PodNetworks{Interface: eth0})
+			} else {
+				// use config from pn
+				pod.Annotations[types.PodNetworking] = podNetworking.Name
+				networks.PodNetworks = append(networks.PodNetworks, podNetworkingToPodNetworks(podNetworking))
+
+				for _, vsw := range podNetworking.Status.VSwitches {
+					vSwitchZone.Insert(vsw.Zone)
+				}
+			}
+		}
 	}
 
 	// validate and set default
 	require := false
 	iF := sets.NewString()
-	for _, n := range networks.PodNetworks {
-		if len(n.VSwitchOptions) == 0 || len(n.SecurityGroupIDs) == 0 || len(n.ExtraRoutes) == 0 {
+	for i, n := range networks.PodNetworks {
+		if len(n.VSwitchOptions) == 0 || len(n.SecurityGroupIDs) == 0 {
 			require = true
 		}
 		if len(n.SecurityGroupIDs) > 5 {
@@ -186,8 +180,13 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 		}
 		iF.Insert(n.Interface)
 
+		if n.AllocationType == nil {
+			networks.PodNetworks[i].AllocationType = &v1beta1.AllocationType{
+				Type: v1beta1.IPAllocTypeElastic,
+			}
+		}
 		// only set prev zone for fixed ip
-		if alloc.Type == v1beta1.IPAllocTypeFixed && previousZone != "" {
+		if networks.PodNetworks[i].AllocationType.Type == v1beta1.IPAllocTypeFixed && previousZone != "" {
 			prevZone.Insert(previousZone)
 		}
 	}
@@ -208,9 +207,6 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 			if len(networks.PodNetworks[i].SecurityGroupIDs) == 0 {
 				networks.PodNetworks[i].SecurityGroupIDs = cfg.GetSecurityGroups()
 			}
-			if len(networks.PodNetworks[i].ExtraRoutes) == 0 {
-				networks.PodNetworks[i].ExtraRoutes = cfg.ExtraRoutes
-			}
 		}
 
 	}
@@ -221,7 +217,9 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 	pod.Annotations[types.PodNetworks] = string(pnaBytes)
 	pod.Annotations[types.PodENI] = "true"
 
-	setResourceRequest(pod, networks.PodNetworks, *config.EnableTrunk)
+	if *config.EnableWebhookInjectResource {
+		setResourceRequest(pod, networks.PodNetworks, *config.EnableTrunk)
+	}
 
 	setNodeAffinityByZones(pod, prevZone.List(), vSwitchZone.List())
 
@@ -255,6 +253,10 @@ func podNetworkingWebhook(ctx context.Context, req webhook.AdmissionRequest, cli
 
 	cfg, err := daemon.ConfigFromConfigMap(ctx, client, "")
 	if err != nil {
+		if k8sErr.IsNotFound(err) {
+			// let the validate do the job
+			return webhook.Allowed("no terway eni-config found")
+		}
 		return webhook.Errored(1, err)
 	}
 	if len(podNetworking.Spec.SecurityGroupIDs) == 0 {
@@ -444,4 +446,73 @@ func PodMatchSelector(labelSelector *metav1.LabelSelector, l labels.Set) (bool, 
 		return false, err
 	}
 	return selector.Matches(l), nil
+}
+
+func podNetworkingToPodNetworks(pn *v1beta1.PodNetworking) controlplane.PodNetworks {
+	return controlplane.PodNetworks{
+		Interface:            eth0,
+		VSwitchOptions:       pn.Spec.VSwitchOptions,
+		SecurityGroupIDs:     pn.Spec.SecurityGroupIDs,
+		ENIOptions:           pn.Spec.ENIOptions,
+		VSwitchSelectOptions: pn.Spec.VSwitchSelectOptions,
+		AllocationType:       &pn.Spec.AllocationType,
+	}
+}
+
+// getPodNetworkRequests parse the PodNetworking to PodNetworksAnnotation, and vswitch zone is checked
+func getPodNetworkRequests(ctx context.Context, client client.Client, anno map[string]string) ([]controlplane.PodNetworks, []string, error) {
+	reqs, err := controlplane.ParsePodNetworksFromRequest(anno)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if len(reqs) == 0 {
+		return nil, nil, nil
+	}
+
+	unioned := sets.NewString()
+	// if present convert to the PodNetworksAnnotation
+	podNetworks := make([]controlplane.PodNetworks, 0, len(reqs))
+	for index, req := range reqs {
+		podNetworking := &v1beta1.PodNetworking{}
+
+		err = client.Get(ctx, k8stypes.NamespacedName{
+			Name: req.Network,
+		}, podNetworking)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if podNetworking.Status.Status != v1beta1.NetworkingStatusReady {
+			return nil, nil, fmt.Errorf("pod networking %s is not ready", req.Network)
+		}
+		if podNetworking.Spec.Selector.PodSelector != nil || podNetworking.Spec.Selector.NamespaceSelector != nil {
+			return nil, nil, fmt.Errorf("pod networking %s should not have selector", req.Network)
+		}
+
+		zones := sets.NewString()
+		lo.ForEach(podNetworking.Status.VSwitches, func(item v1beta1.VSwitch, index int) {
+			zones.Insert(item.Zone)
+		})
+
+		if index == 0 {
+			unioned = zones
+		} else {
+			unioned = unioned.Intersection(zones)
+		}
+
+		parsed := podNetworkingToPodNetworks(podNetworking)
+		if req.InterfaceName != "" {
+			parsed.Interface = req.InterfaceName
+		}
+		if req.DefaultRoute {
+			parsed.DefaultRoute = true
+		}
+		if req.Routes != nil {
+			parsed.ExtraRoutes = req.Routes
+		}
+		podNetworks = append(podNetworks, parsed)
+	}
+
+	return podNetworks, unioned.List(), nil
 }

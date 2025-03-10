@@ -19,16 +19,22 @@ package controlplane
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/route"
 
 	corev1 "k8s.io/api/core/v1"
 )
 
 type PodNetworksAnnotation struct {
 	PodNetworks []PodNetworks `json:"podNetworks"`
+}
+
+type PodNetworkRef struct {
+	InterfaceName string        `json:"interfaceName"`
+	Network       string        `json:"network"`
+	DefaultRoute  bool          `json:"defaultRoute,omitempty"`
+	Routes        []route.Route `json:"routes,omitempty"`
 }
 
 // ParsePodNetworksFromAnnotation parse annotation and convert to PodNetworksAnnotation
@@ -46,53 +52,16 @@ func ParsePodNetworksFromAnnotation(pod *corev1.Pod) (*PodNetworksAnnotation, er
 	return &annoConf, nil
 }
 
-// ParsePodIPTypeFromAnnotation parse annotation and convert to v1beta1.AllocationType
-func ParsePodIPTypeFromAnnotation(pod *corev1.Pod) (*v1beta1.AllocationType, error) {
-	return ParsePodIPType(pod.GetAnnotations()[terwayTypes.PodAllocType])
-}
-
-func ParsePodIPType(str string) (*v1beta1.AllocationType, error) {
-	if str == "" {
-		return defaultAllocType(), nil
+func ParsePodNetworksFromRequest(anno map[string]string) ([]PodNetworkRef, error) {
+	v, ok := anno[terwayTypes.PodNetworksRequest]
+	if !ok {
+		return nil, nil
 	}
 
-	// will not be nil
-	var annoConf v1beta1.AllocationType
-	err := json.Unmarshal([]byte(str), &annoConf)
+	var annoConf []PodNetworkRef
+	err := json.Unmarshal([]byte(v), &annoConf)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse %s from pod annotataion, %w", terwayTypes.PodNetworksRequest, err)
 	}
-	return ParseAllocationType(&annoConf)
-}
-
-func defaultAllocType() *v1beta1.AllocationType {
-	return &v1beta1.AllocationType{
-		Type: v1beta1.IPAllocTypeElastic,
-	}
-}
-
-// ParseAllocationType parse and set default val
-func ParseAllocationType(old *v1beta1.AllocationType) (*v1beta1.AllocationType, error) {
-	res := defaultAllocType()
-	if old == nil {
-		return res, nil
-	}
-
-	if old.Type == v1beta1.IPAllocTypeFixed {
-		res.Type = v1beta1.IPAllocTypeFixed
-		res.ReleaseStrategy = v1beta1.ReleaseStrategyTTL
-		res.ReleaseAfter = "10m"
-
-		if old.ReleaseStrategy == v1beta1.ReleaseStrategyNever {
-			res.ReleaseStrategy = v1beta1.ReleaseStrategyNever
-		}
-		if old.ReleaseAfter != "" {
-			_, err := time.ParseDuration(old.ReleaseAfter)
-			if err != nil {
-				return nil, fmt.Errorf("error parse ReleaseAfter, %w", err)
-			}
-			res.ReleaseAfter = old.ReleaseAfter
-		}
-	}
-	return res, nil
+	return annoConf, nil
 }

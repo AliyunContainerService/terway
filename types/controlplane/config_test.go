@@ -22,6 +22,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/utils/ptr"
 )
 
 func TestParseAndValidateCredential(t *testing.T) {
@@ -183,4 +184,5 @@ accessSecret: bar`), os.ModeType)
 	assert.NoError(t, err)
 
 	assert.Equal(t, "cn-hangzhou", cfg.RegionID)
+	assert.Equal(t, ptr.To(true), cfg.EnableWebhookInjectResource)
 }

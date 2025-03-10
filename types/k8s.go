@@ -43,6 +43,8 @@ const (
 	// PodNetworks for additional net config
 	PodNetworks = AnnotationPrefix + "pod-networks"
 
+	PodNetworksRequest = AnnotationPrefix + "pod-networks-request"
+
 	// PodAllocType for additional net config
 	PodAllocType = AnnotationPrefix + "pod-alloc-type"
 
