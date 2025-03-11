@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
@@ -115,6 +116,7 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 				InstanceID:       a.instanceID,
 				Tags:             a.eniTags,
 				ResourceGroupID:  a.resourceGroupID,
+				SourceDestCheck:  ptr.To(false),
 			},
 			Backoff: &bo,
 		}

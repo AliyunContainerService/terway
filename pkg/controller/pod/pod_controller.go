@@ -24,6 +24,7 @@ import (
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
@@ -555,6 +556,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 						types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
 					},
 					DeleteENIOnECSRelease: &deleteENIOnECSRelease,
+					SourceDestCheck:       ptr.To(false),
 				},
 				Backoff: &bo,
 			}

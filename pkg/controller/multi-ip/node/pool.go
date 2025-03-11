@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -1245,9 +1246,9 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			Tags:             tags,
 			IPCount:          opt.addIPv4N,
 			IPv6Count:        opt.addIPv6N,
-
-			ZoneID:     node.Spec.NodeMetadata.ZoneID, // eflo
-			InstanceID: node.Spec.NodeMetadata.InstanceID,
+			SourceDestCheck:  ptr.To(false),
+			ZoneID:           node.Spec.NodeMetadata.ZoneID, // eflo
+			InstanceID:       node.Spec.NodeMetadata.InstanceID,
 		},
 
 		Backoff: &bo,

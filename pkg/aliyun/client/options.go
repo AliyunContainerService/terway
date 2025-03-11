@@ -22,6 +22,7 @@ type NetworkInterfaceOptions struct {
 	Status                string
 	NetworkInterfaceID    string
 	DeleteENIOnECSRelease *bool
+	SourceDestCheck       *bool
 
 	ZoneID string
 }
@@ -90,6 +91,10 @@ func (c *CreateNetworkInterfaceOptions) ApplyCreateNetworkInterface(options *Cre
 		if c.NetworkInterfaceOptions.ZoneID != "" {
 			options.NetworkInterfaceOptions.ZoneID = c.NetworkInterfaceOptions.ZoneID
 		}
+
+		if c.NetworkInterfaceOptions.SourceDestCheck != nil {
+			options.NetworkInterfaceOptions.SourceDestCheck = c.NetworkInterfaceOptions.SourceDestCheck
+		}
 	}
 }
 
@@ -121,6 +126,9 @@ func (c *CreateNetworkInterfaceOptions) Finish(idempotentKeyGen IdempotentKeyGen
 
 	if c.NetworkInterfaceOptions.DeleteENIOnECSRelease != nil {
 		req.DeleteOnRelease = requests.NewBoolean(*c.NetworkInterfaceOptions.DeleteENIOnECSRelease)
+	}
+	if c.NetworkInterfaceOptions.SourceDestCheck != nil {
+		req.SourceDestCheck = requests.NewBoolean(*c.NetworkInterfaceOptions.SourceDestCheck)
 	}
 
 	var tags []ecs.CreateNetworkInterfaceTag
