@@ -278,6 +278,21 @@ func TestSelector(t *testing.T) {
 			return ctx
 		}).
 		Feature()
+
+	emptySelector := features.New("PodNetworking/EmptySelector").WithLabel("env", "trunking").
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			pn := &v1beta1.PodNetworking{
+				ObjectMeta: metav1.ObjectMeta{Name: "empty-selector"},
+				Spec: v1beta1.PodNetworkingSpec{
+					Selector:         v1beta1.Selector{},
+					VSwitchOptions:   []string{"foo"},
+					SecurityGroupIDs: securityGroupIDs,
+					ENIOptions: v1beta1.ENIOptions{
+						ENIAttachType: v1beta1.ENIOptionTypeTrunk,
+					},
+				},
+			}
+		})
 	testenv.Test(t, podSelector, nsSelector)
 }
 

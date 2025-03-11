@@ -60,6 +60,8 @@ type Config struct {
 	EnableDevicePlugin bool   `json:"enableDevicePlugin"`
 	IPStack            string `json:"ipStack,omitempty" validate:"oneof=ipv4 ipv6 dual" mod:"default=ipv4"`
 
+	EnableWebhookInjectResource *bool `json:"enableWebhookInjectResource,omitempty" mod:"default=true"`
+
 	KubeClientQPS   float32 `json:"kubeClientQPS" validate:"gt=0,lte=10000" mod:"default=20"`
 	KubeClientBurst int     `json:"kubeClientBurst" validate:"gt=0,lte=10000" mod:"default=30"`
 

@@ -24,10 +24,15 @@ import (
 )
 
 type PodNetworks struct {
-	VSwitchOptions       []string                     `json:"vSwitchOptions"`
-	SecurityGroupIDs     []string                     `json:"securityGroupIDs"`
-	Interface            string                       `json:"interface"`
-	ExtraRoutes          []route.Route                `json:"extraRoutes,omitempty"`
-	ENIOptions           v1beta1.ENIOptions           `json:"eniOptions,omitempty"`
-	VSwitchSelectOptions v1beta1.VSwitchSelectOptions `json:"vSwitchSelectOptions,omitempty"`
+	VSwitchOptions              []string                     `json:"vSwitchOptions"`
+	SecurityGroupIDs            []string                     `json:"securityGroupIDs"`
+	Interface                   string                       `json:"interface"`
+	ExtraRoutes                 []route.Route                `json:"extraRoutes,omitempty"`
+	ENIOptions                  v1beta1.ENIOptions           `json:"eniOptions,omitempty"`
+	VSwitchSelectOptions        v1beta1.VSwitchSelectOptions `json:"vSwitchSelectOptions,omitempty"`
+	ResourceGroupID             string                       `json:"resourceGroupID"`
+	NetworkInterfaceTrafficMode string                       `json:"networkInterfaceTrafficMode"` // "Standard"|"HighPerformance"
+	DefaultRoute                bool                         `json:"defaultRoute"`
+
+	AllocationType *v1beta1.AllocationType `json:"allocationType"`
 }

@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strconv"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
@@ -742,4 +744,205 @@ func TestMatchOnePodNetworkingReturnsNilWhenPodNetworkingNotReady(t *testing.T) 
 	result, err := matchOnePodNetworking(context.Background(), "default", fakeClient, pod)
 	assert.NoError(t, err)
 	assert.Nil(t, result)
+}
+
+func Test_getPodNetworkRequests(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta1.AddToScheme(scheme)
+
+	type args struct {
+		ctx    context.Context
+		client client.Client
+		anno   map[string]string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    []controlplane.PodNetworks
+		want1   []string
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "returns error when annotation is invalid",
+			args: args{
+				ctx:    context.Background(),
+				client: fake.NewClientBuilder().Build(),
+				anno:   map[string]string{"k8s.aliyun.com/pod-networks-request": "annotation"},
+			},
+			want:    nil,
+			want1:   nil,
+			wantErr: assert.Error,
+		},
+		{
+			name: "returns nil when no pod network refs",
+			args: args{
+				ctx:    context.Background(),
+				client: fake.NewClientBuilder().Build(),
+				anno:   map[string]string{},
+			},
+			want:    nil,
+			want1:   nil,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "returns pod networks and zones",
+			args: args{
+				ctx: context.Background(),
+				client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+					&v1beta1.PodNetworking{
+						ObjectMeta: metav1.ObjectMeta{Name: "test-network"},
+						Spec: v1beta1.PodNetworkingSpec{
+							ENIOptions: v1beta1.ENIOptions{},
+							AllocationType: v1beta1.AllocationType{
+								Type: v1beta1.IPAllocTypeElastic,
+							},
+							Selector:         v1beta1.Selector{},
+							SecurityGroupIDs: []string{"sg-1"},
+							VSwitchOptions:   []string{"vsw-a", "vsw-b"},
+							VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+								VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyMost,
+							}},
+						Status: v1beta1.PodNetworkingStatus{
+							Status: v1beta1.NetworkingStatusReady,
+							VSwitches: []v1beta1.VSwitch{
+								{Zone: "zone-a", ID: "vsw-a"},
+								{Zone: "zone-b", ID: "vsw-b"},
+							},
+						},
+					},
+				).Build(),
+				anno: map[string]string{
+					"k8s.aliyun.com/pod-networks-request": `[{"network": "test-network"}]`,
+				},
+			},
+			want: []controlplane.PodNetworks{
+				{
+					Interface:        "eth0",
+					VSwitchOptions:   []string{"vsw-a", "vsw-b"},
+					SecurityGroupIDs: []string{"sg-1"},
+					ENIOptions:       v1beta1.ENIOptions{},
+					VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+						VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyMost,
+					},
+					AllocationType: &v1beta1.AllocationType{Type: v1beta1.IPAllocTypeElastic},
+				},
+			},
+			want1:   []string{"zone-a", "zone-b"},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "returns error when pod networking not ready",
+			args: args{
+				ctx: context.Background(),
+				client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+					&v1beta1.PodNetworking{
+						ObjectMeta: metav1.ObjectMeta{Name: "test-network"},
+						Status:     v1beta1.PodNetworkingStatus{Status: v1beta1.NetworkingStatusFail},
+					},
+				).Build(),
+				anno: map[string]string{
+					"k8s.aliyun.com/pod-networks-request": `[{"network": "test-network"}]`,
+				},
+			},
+			want:    nil,
+			want1:   nil,
+			wantErr: assert.Error,
+		},
+		{
+			name: "returns intersection of zones",
+			args: args{
+				ctx: context.Background(),
+				client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+					&v1beta1.PodNetworking{
+						ObjectMeta: metav1.ObjectMeta{Name: "network-1"},
+						Spec: v1beta1.PodNetworkingSpec{
+							ENIOptions: v1beta1.ENIOptions{},
+							AllocationType: v1beta1.AllocationType{
+								Type: v1beta1.IPAllocTypeElastic,
+							},
+							Selector:         v1beta1.Selector{},
+							SecurityGroupIDs: []string{"sg-1"},
+							VSwitchOptions:   []string{"vsw-a", "vsw-b"},
+							VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+								VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyMost,
+							}},
+						Status: v1beta1.PodNetworkingStatus{
+							Status: v1beta1.NetworkingStatusReady,
+							VSwitches: []v1beta1.VSwitch{
+								{Zone: "zone-a", ID: "vsw-a"},
+								{Zone: "zone-b", ID: "vsw-b"},
+							},
+						},
+					},
+					&v1beta1.PodNetworking{
+						ObjectMeta: metav1.ObjectMeta{Name: "network-2"},
+						Spec: v1beta1.PodNetworkingSpec{
+							ENIOptions: v1beta1.ENIOptions{},
+							AllocationType: v1beta1.AllocationType{
+								Type: v1beta1.IPAllocTypeElastic,
+							},
+							Selector:         v1beta1.Selector{},
+							SecurityGroupIDs: []string{"sg-1"},
+							VSwitchOptions:   []string{"vsw-b", "vsw-c"},
+							VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+								VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyMost,
+							}},
+						Status: v1beta1.PodNetworkingStatus{
+							Status: v1beta1.NetworkingStatusReady,
+							VSwitches: []v1beta1.VSwitch{
+								{Zone: "zone-b", ID: "vsw-b"},
+								{Zone: "zone-c", ID: "vsw-c"},
+							},
+						},
+					},
+				).Build(),
+				anno: map[string]string{
+					"k8s.aliyun.com/pod-networks-request": `[{"network": "network-1","interfaceName":"eth0"}, {"network": "network-2","interfaceName":"eth1","defaultRoute": true}]`,
+				},
+			},
+			want: []controlplane.PodNetworks{
+				{
+					Interface:        "eth0",
+					VSwitchOptions:   []string{"vsw-a", "vsw-b"},
+					SecurityGroupIDs: []string{"sg-1"},
+					ENIOptions:       v1beta1.ENIOptions{},
+					VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+						VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyMost,
+					},
+					AllocationType: &v1beta1.AllocationType{
+						Type:            v1beta1.IPAllocTypeElastic,
+						ReleaseStrategy: "",
+						ReleaseAfter:    "",
+					},
+				},
+				{
+					Interface:        "eth1",
+					VSwitchOptions:   []string{"vsw-b", "vsw-c"},
+					SecurityGroupIDs: []string{"sg-1"},
+					ENIOptions:       v1beta1.ENIOptions{},
+					VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+						VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyMost,
+					},
+					DefaultRoute: true,
+					AllocationType: &v1beta1.AllocationType{
+						Type:            v1beta1.IPAllocTypeElastic,
+						ReleaseStrategy: "",
+						ReleaseAfter:    "",
+					},
+				},
+			},
+			want1:   []string{"zone-b"},
+			wantErr: assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got1, err := getPodNetworkRequests(tt.args.ctx, tt.args.client, tt.args.anno)
+			if !tt.wantErr(t, err, fmt.Sprintf("getPodNetworkRequests(%v, %v, %v)", tt.args.ctx, tt.args.client, tt.args.anno)) {
+				return
+			}
+			assert.Equalf(t, tt.want, got, "getPodNetworkRequests(%v, %v, %v)", tt.args.ctx, tt.args.client, tt.args.anno)
+			assert.Equalf(t, tt.want1, got1, "getPodNetworkRequests(%v, %v, %v)", tt.args.ctx, tt.args.client, tt.args.anno)
+		})
+	}
 }

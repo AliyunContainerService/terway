@@ -1,9 +1,8 @@
 package podnetworking
 
 import (
-	"fmt"
+	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -41,8 +40,9 @@ var _ = BeforeSuite(func() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "apis", "crds")},
 		ErrorIfCRDPathMissing: true,
-		BinaryAssetsDirectory: filepath.Join("..", "..", "..", "bin", "k8s",
-			fmt.Sprintf("1.29.0-%s-%s", runtime.GOOS, runtime.GOARCH)),
+	}
+	if getFirstFoundEnvTestBinaryDir() != "" {
+		testEnv.BinaryAssetsDirectory = getFirstFoundEnvTestBinaryDir()
 	}
 
 	var err error
@@ -68,3 +68,18 @@ var _ = AfterSuite(func() {
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
+
+func getFirstFoundEnvTestBinaryDir() string {
+	basePath := filepath.Join("..", "..", "..", "bin", "k8s")
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		logf.Log.Error(err, "Failed to read directory", "path", basePath)
+		return ""
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return filepath.Join(basePath, entry.Name())
+		}
+	}
+	return ""
+}

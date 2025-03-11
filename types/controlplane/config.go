@@ -24,6 +24,7 @@ import (
 	"github.com/go-playground/mold/v4/modifiers"
 	"github.com/go-playground/validator/v10"
 	"k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/utils/ptr"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
@@ -83,8 +84,10 @@ func ParseAndValidate(configFilePath, credentialFilePath string) (*Config, error
 	}
 
 	if c.EnableTrunk == nil {
-		t := true
-		c.EnableTrunk = &t
+		c.EnableTrunk = ptr.To(true)
+	}
+	if c.EnableWebhookInjectResource == nil {
+		c.EnableWebhookInjectResource = ptr.To(true)
 	}
 	if c.RegionID == "" {
 		c.RegionID, err = metadata.GetLocalRegion()

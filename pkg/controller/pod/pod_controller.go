@@ -206,7 +206,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	}
 
 	// 2. cr is not found , so we will create new
-	nodeInfo, allocType, allocs, err := m.parse(ctx, pod, node)
+	nodeInfo, allocs, err := m.parse(ctx, pod, node)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("error parse config, %w", err)
 	}
@@ -242,7 +242,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	podENI.Spec.Zone = nodeInfo.ZoneID
 
 	// 2.2 create eni
-	err = m.createENI(ctx, &allocs, allocType, pod, podENI)
+	err = m.createENI(ctx, &allocs, pod, podENI)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("error batch create eni,%w", err)
 	}
@@ -348,23 +348,21 @@ func (m *ReconcilePod) getNode(ctx context.Context, name string) (*corev1.Node, 
 	return node, err
 }
 
-func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.Node) (*common.NodeInfo, *v1beta1.AllocationType, []*v1beta1.Allocation, error) {
+func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.Node) (*common.NodeInfo, []*v1beta1.Allocation, error) {
 	nodeInfo, err := common.NewNodeInfo(node)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	// 2.1 fill config
-	var allocType *v1beta1.AllocationType
-
 	anno, err := controlplane.ParsePodNetworksFromAnnotation(pod)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error parse pod annotation, %w", err)
+		return nil, nil, fmt.Errorf("error parse pod annotation, %w", err)
 	}
 
 	allocs, err := m.ParsePodNetworksFromAnnotation(ctx, nodeInfo.ZoneID, anno)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error parse pod annotation, %w", err)
+		return nil, nil, fmt.Errorf("error parse pod annotation, %w", err)
 	}
 
 	if len(allocs) == 0 {
@@ -378,14 +376,17 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 
 				cfg, err := daemon.ConfigFromConfigMap(ctx, m.client, "")
 				if err != nil {
-					return nil, nil, nil, err
+					return nil, nil, err
 				}
 
 				vsw, err := m.swPool.GetOne(ctx, m.aliyun, nodeInfo.ZoneID, cfg.GetVSwitchIDs())
 				if err != nil {
-					return nil, nil, nil, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.ZoneID, err)
+					return nil, nil, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.ZoneID, err)
 				}
 				allocs = append(allocs, &v1beta1.Allocation{
+					AllocationType: v1beta1.AllocationType{
+						Type: v1beta1.IPAllocTypeElastic,
+					},
 					ENI: v1beta1.ENI{
 						SecurityGroupIDs: cfg.GetSecurityGroups(),
 						VSwitchID:        vsw.ID,
@@ -393,14 +394,10 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 					IPv4CIDR: vsw.IPv4CIDR,
 					IPv6CIDR: vsw.IPv6CIDR,
 				})
-				allocType, err = controlplane.ParsePodIPTypeFromAnnotation(pod)
-				if err != nil {
-					return nil, nil, nil, err
-				}
 
-				return nodeInfo, allocType, allocs, nil
+				return nodeInfo, allocs, nil
 			}
-			return nil, nil, nil, fmt.Errorf("podNetworking is empty")
+			return nil, nil, fmt.Errorf("podNetworking is empty")
 		}
 		var podNetworking v1beta1.PodNetworking
 
@@ -408,15 +405,16 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 			Name: podNetwokingName,
 		}, &podNetworking)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("error get podNetworking %s, %w", podNetwokingName, err)
+			return nil, nil, fmt.Errorf("error get podNetworking %s, %w", podNetwokingName, err)
 		}
 		var vsw *vswitch.Switch
 		vsw, err = m.swPool.GetOne(ctx, m.aliyun, nodeInfo.ZoneID, podNetworking.Spec.VSwitchOptions)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.ZoneID, err)
+			return nil, nil, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.ZoneID, err)
 		}
 
 		allocs = append(allocs, &v1beta1.Allocation{
+			AllocationType: podNetworking.Spec.AllocationType,
 			ENI: v1beta1.ENI{
 				SecurityGroupIDs: podNetworking.Spec.SecurityGroupIDs,
 				VSwitchID:        vsw.ID,
@@ -425,19 +423,6 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 			IPv6CIDR: vsw.IPv6CIDR,
 		})
 
-		allocType, err = controlplane.ParseAllocationType(&podNetworking.Spec.AllocationType)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("error parse ReleaseAfter, %w", err)
-		}
-	} else {
-		// try get v1beta1.PodAllocType from annotation
-		allocType, err = controlplane.ParsePodIPTypeFromAnnotation(pod)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	}
-	if allocType == nil {
-		return nil, nil, nil, fmt.Errorf("allocType is nil")
 	}
 
 	// set the attachment type
@@ -461,7 +446,7 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 		}
 	})
 
-	return nodeInfo, allocType, allocs, nil
+	return nodeInfo, allocs, nil
 }
 
 // reConfig this phase will re-config the eni if possible
@@ -503,7 +488,7 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 	return reconcile.Result{Requeue: true}, err
 }
 
-func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocation, allocType *v1beta1.AllocationType, pod *corev1.Pod, podENI *v1beta1.PodENI) error {
+func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocation, pod *corev1.Pod, podENI *v1beta1.PodENI) error {
 	if allocs == nil || len(*allocs) == 0 {
 		return nil
 	}
@@ -552,7 +537,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 			ctx := common.WithCtx(ctx, alloc)
 
 			deleteENIOnECSRelease := true
-			if allocType.Type == v1beta1.IPAllocTypeFixed {
+			if alloc.AllocationType.Type == v1beta1.IPAllocTypeFixed {
 				deleteENIOnECSRelease = false
 			}
 			bo := backoff.Backoff(backoff.ENICreate)
@@ -597,7 +582,6 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 			}
 			alloc.IPv4 = eni.PrivateIPAddress
 			alloc.IPv6 = v6
-			alloc.AllocationType = *allocType
 
 			ch <- alloc
 			return nil

@@ -6,8 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
 
 func TestParsePodNetworksFromAnnotation(t *testing.T) {
@@ -68,16 +66,4 @@ func TestParsePodNetworksFromAnnotation(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestReturnsParsedAllocTypeWhenStringIsValidJSON(t *testing.T) {
-	input := `{"Type": "Fixed", "ReleaseStrategy": "Never", "ReleaseAfter": "5m"}`
-	expected := &v1beta1.AllocationType{
-		Type:            v1beta1.IPAllocTypeFixed,
-		ReleaseStrategy: v1beta1.ReleaseStrategyNever,
-		ReleaseAfter:    "5m",
-	}
-	result, err := ParsePodIPType(input)
-	assert.NoError(t, err)
-	assert.Equal(t, expected, result)
 }
