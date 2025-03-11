@@ -32,14 +32,17 @@ func NewNodeInfo(node *corev1.Node) (*NodeInfo, error) {
 	res := &NodeInfo{NodeName: node.Name}
 
 	if utils.ISLinJunNode(node.Labels) {
-		return res, nil
+		res.InstanceID = node.Spec.ProviderID
+	} else {
+		ids := strings.Split(node.Spec.ProviderID, ".")
+		if len(ids) < 2 {
+			return nil, fmt.Errorf("error parse providerID %s", node.Spec.ProviderID)
+		}
+		res.InstanceID = ids[1]
 	}
-
-	ids := strings.Split(node.Spec.ProviderID, ".")
-	if len(ids) < 2 {
-		return nil, fmt.Errorf("error parse providerID %s", node.Spec.ProviderID)
+	if res.InstanceID == "" {
+		return nil, fmt.Errorf("can not found instanceID from node %s", node.Name)
 	}
-	res.InstanceID = ids[1]
 
 	res.TrunkENIID = node.GetAnnotations()[types.TrunkOn]
 

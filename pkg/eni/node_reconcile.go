@@ -216,8 +216,7 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-
-	//node.Spec.ENISpec = nil
+	node.Spec.ENISpec = nil
 
 	node.Spec.ENISpec = &networkv1beta1.ENISpec{
 		EnableIPv4: true,
@@ -227,28 +226,6 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	if node.Labels == nil {
 		node.Labels = map[string]string{}
 	}
-	node.Labels[types.LinJunNodeLabelKey] = "true"
-
-	regionID, err := instance.GetInstanceMeta().GetRegionID()
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-	instanceType, err := instance.GetInstanceMeta().GetInstanceType()
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-	instanceID, err := instance.GetInstanceMeta().GetInstanceID()
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-	zoneID, err := instance.GetInstanceMeta().GetZoneID()
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-	node.Spec.NodeMetadata.RegionID = regionID
-	node.Spec.NodeMetadata.InstanceType = instanceType
-	node.Spec.NodeMetadata.InstanceID = instanceID
-	node.Spec.NodeMetadata.ZoneID = zoneID
 
 	vswitchOptions := []string{}
 	for k, v := range eniConfig.VSwitches {
@@ -257,7 +234,7 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		}
 	}
 	if len(vswitchOptions) == 0 {
-		return reconcile.Result{}, fmt.Errorf("failed to get vsw for zone %s", zoneID)
+		return reconcile.Result{}, fmt.Errorf("failed to get vsw for zone %s", node.Spec.NodeMetadata.ZoneID)
 	}
 
 	policy := networkv1beta1.VSwitchSelectionPolicyRandom

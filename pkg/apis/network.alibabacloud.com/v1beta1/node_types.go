@@ -49,10 +49,14 @@ const (
 )
 
 type NodeMetadata struct {
-	RegionID     string `json:"regionID,omitempty"`
+	// +kubebuilder:validation:Required
+	RegionID string `json:"regionID,omitempty"`
+	// +kubebuilder:validation:Required
 	InstanceType string `json:"instanceType,omitempty"`
-	InstanceID   string `json:"instanceID,omitempty"`
-	ZoneID       string `json:"zoneID,omitempty"`
+	// +kubebuilder:validation:Required
+	InstanceID string `json:"instanceID,omitempty"`
+	// +kubebuilder:validation:Required
+	ZoneID string `json:"zoneID,omitempty"`
 }
 
 type NodeCap struct {
