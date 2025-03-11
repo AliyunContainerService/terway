@@ -29,7 +29,6 @@ func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
 
 	openAPI = mocks.NewInterface(t)
-
 	RunSpecs(t, "Controller Suite")
 }
 

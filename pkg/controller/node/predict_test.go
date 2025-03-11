@@ -65,6 +65,7 @@ func TestPredicateNode(t *testing.T) {
 			node: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
+						"topology.kubernetes.io/region":   "region",
 						"alibabacloud.com/lingjun-worker": "true",
 					},
 				},

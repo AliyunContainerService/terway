@@ -316,10 +316,16 @@ var _ = Describe("Node Controller", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: resourceName,
 						Labels: map[string]string{
-							"alibabacloud.com/lingjun-worker": "true",
+							"alibabacloud.com/lingjun-worker":  "true",
+							"node.kubernetes.io/instance-type": "instanceType",
+							"topology.kubernetes.io/region":    "regionID",
+							"topology.kubernetes.io/zone":      "zoneID",
 						},
 					},
-					Spec: corev1.NodeSpec{},
+
+					Spec: corev1.NodeSpec{
+						ProviderID: "instanceID",
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -371,9 +377,10 @@ var _ = Describe("Node Controller", func() {
 			}, nil).Maybe()
 
 			controllerReconciler := &ReconcileNode{
-				client: k8sClient,
-				scheme: k8sClient.Scheme(),
-				aliyun: ac,
+				client:      k8sClient,
+				scheme:      k8sClient.Scheme(),
+				aliyun:      ac,
+				supportEFLO: true,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -386,28 +393,7 @@ var _ = Describe("Node Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(resource.Labels["name"]).To(Equal(resourceName))
 			Expect(resource.Labels["alibabacloud.com/lingjun-worker"]).To(Equal("true"))
-
-			By("ds modify the node cr")
-			_, err = controllerutil.CreateOrPatch(ctx, k8sClient, resource, func() error {
-				resource.Spec.NodeMetadata.InstanceID = "instanceID"
-				resource.Spec.NodeMetadata.RegionID = "regionID"
-				resource.Spec.NodeMetadata.InstanceType = "instanceType"
-				resource.Spec.NodeMetadata.ZoneID = "zoneID"
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			By("reconcile again, should modify the node cap")
-
-			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			resource = &networkv1beta1.Node{}
-			err = k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-
+			
 			Expect(resource.Spec.NodeCap.Adapters, 20)
 			Expect(resource.Spec.NodeCap.TotalAdapters, 20)
 			Expect(resource.Spec.NodeCap.IPv4PerAdapter, 10)

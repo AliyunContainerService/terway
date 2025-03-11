@@ -55,8 +55,6 @@ const (
 	commandResDB   = "resdb"
 
 	IfEth0 = "eth0"
-
-	envEFLO = "eflo"
 )
 
 type networkService struct {

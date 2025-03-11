@@ -305,7 +305,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 		return fmt.Errorf("error init vsw pool, %w", err)
 	}
 	var factory factory.Factory
-	if os.Getenv("TERWAY_DEPLOY_ENV") == envEFLO {
+	if b.eflo {
 		factory = aliyun.NewEflo(b.ctx, b.aliyunClient, vswPool, eniConfig)
 	} else {
 		factory = aliyun.NewAliyun(b.ctx, b.aliyunClient, eni2.NewENIMetadata(enableIPv4, enableIPv6), vswPool, eniConfig)
