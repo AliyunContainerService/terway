@@ -3,6 +3,7 @@ module github.com/AliyunContainerService/terway
 go 1.24.0
 
 require (
+	github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider v0.16.1
 	github.com/Jeffail/gabs/v2 v2.7.0
 	github.com/Microsoft/go-winio v0.6.0
 	github.com/Microsoft/hcsshim v0.9.9
@@ -11,7 +12,6 @@ require (
 	github.com/boltdb/bolt v1.3.1
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.3.0
-	github.com/denverdino/aliyungo v0.0.0-20201215054313-f635de23c5e0
 	github.com/evanphx/json-patch v5.6.0+incompatible
 	github.com/go-logr/logr v1.4.2
 	github.com/go-playground/mold/v4 v4.2.0

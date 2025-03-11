@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"time"
+
+	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
@@ -40,13 +43,17 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	providers := []credential.Interface{
-		credential.NewAKPairProvider(accessKeyID, accessKeySecret),
-		credential.NewEncryptedCredentialProvider(credentialPath),
-		credential.NewMetadataProvider(),
-	}
 
-	c, err := credential.NewClientMgr(regionID, providers...)
+	prov := provider.NewChainProvider(
+		provider.NewAccessKeyProvider(accessKeyID, accessKeySecret),
+		provider.NewEncryptedFileProvider(provider.EncryptedFileProviderOptions{
+			FilePath:      credentialPath,
+			RefreshPeriod: 30 * time.Minute,
+		}),
+		provider.NewECSMetadataProvider(provider.ECSMetadataProviderOptions{}),
+	)
+
+	c, err := credential.NewClientMgr(regionID, prov)
 	if err != nil {
 		panic(err)
 	}
