@@ -34,9 +34,15 @@ func ValidateHook() *webhook.Admission {
 			}
 			l := log.WithName(podNetworking.Name)
 			l.Info("checking podNetworking")
+
 			if podNetworking.Spec.Selector.PodSelector == nil && podNetworking.Spec.Selector.NamespaceSelector == nil {
-				return admission.Denied("neither the PodSelector nor the NamespaceSelector is set")
+				switch podNetworking.Spec.ENIOptions.ENIAttachType {
+				case "", v1beta1.ENIOptionTypeDefault:
+				default:
+					return admission.Denied("attachType must be default when podSelector and namespaceSelector are not set")
+				}
 			}
+
 			if len(podNetworking.Spec.VSwitchOptions) == 0 {
 				return admission.Denied("vSwitchOptions is not set")
 			}

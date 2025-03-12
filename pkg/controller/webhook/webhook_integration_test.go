@@ -9,11 +9,13 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	admissionv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -34,6 +36,7 @@ var _ = Describe("Webhook", func() {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	_ = v1beta1.AddToScheme(scheme)
+	_ = admissionv1.AddToScheme(scheme)
 	BeforeEach(func() {
 		Expect(cfg).NotTo(BeNil())
 		var err error
@@ -68,6 +71,7 @@ var _ = Describe("Webhook", func() {
 				EnableTrunk:                 ptr.To(true),
 				IPAMType:                    "",
 			}))
+			server.Register("/validate", ValidateHook())
 
 			go func() {
 				err := server.Start(ctx)
@@ -193,6 +197,7 @@ var _ = Describe("Webhook", func() {
 				EnableTrunk:                 ptr.To(true),
 				IPAMType:                    "",
 			}))
+			server.Register("/validate", ValidateHook())
 
 			go func() {
 				err := server.Start(ctx)
@@ -435,6 +440,7 @@ var _ = Describe("Webhook", func() {
 				EnableTrunk:                 ptr.To(false),
 				IPAMType:                    "crd",
 			}))
+			server.Register("/validate", ValidateHook())
 
 			go func() {
 				err := server.Start(ctx)
@@ -504,6 +510,111 @@ var _ = Describe("Webhook", func() {
 			cancel()
 		})
 
+	})
+
+	It("test podNetworking create", func() {
+		server.Register("/mutating", MutatingHook(c, &controlplane.Config{
+			EnableWebhookInjectResource: ptr.To(true),
+			EnableTrunk:                 ptr.To(true),
+		}))
+		server.Register("/validate", ValidateHook())
+		ctrl.SetLogger(GinkgoLogr)
+		go func() {
+			err := server.Start(ctx)
+			Expect(err).NotTo(HaveOccurred())
+		}()
+
+		By("create a valid PodNetworking")
+		podNetworking := &v1beta1.PodNetworking{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-podnetworking",
+				Namespace: "default",
+			},
+			Spec: v1beta1.PodNetworkingSpec{
+				ENIOptions: v1beta1.ENIOptions{
+					ENIAttachType: v1beta1.ENIOptionTypeENI,
+				},
+				Selector: v1beta1.Selector{
+					PodSelector: &metav1.LabelSelector{},
+				},
+				AllocationType: v1beta1.AllocationType{
+					ReleaseStrategy: v1beta1.ReleaseStrategyTTL,
+					ReleaseAfter:    "5m",
+				},
+				SecurityGroupIDs: []string{"sg-1"},
+				VSwitchOptions:   []string{"vsw-1", "vsw-2"},
+			},
+		}
+
+		err := c.Create(context.TODO(), podNetworking)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("create a empty selector PodNetworking")
+		emptySelectorPodNetworking := &v1beta1.PodNetworking{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "empty-selector-podnetworking",
+			},
+			Spec: v1beta1.PodNetworkingSpec{
+				ENIOptions: v1beta1.ENIOptions{
+					ENIAttachType: v1beta1.ENIOptionTypeDefault,
+				},
+				AllocationType: v1beta1.AllocationType{
+					ReleaseStrategy: v1beta1.ReleaseStrategyTTL,
+					ReleaseAfter:    "5m",
+				},
+				SecurityGroupIDs: []string{"sg-1"},
+				VSwitchOptions:   []string{"vsw-1", "vsw-2"},
+			},
+		}
+
+		err = c.Create(context.TODO(), emptySelectorPodNetworking)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("create an invalid PodNetworking with too many security groups")
+		invalidPodNetworking := &v1beta1.PodNetworking{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "invalid-podnetworking",
+			},
+			Spec: v1beta1.PodNetworkingSpec{
+				ENIOptions: v1beta1.ENIOptions{
+					ENIAttachType: v1beta1.ENIOptionTypeDefault,
+				},
+				AllocationType: v1beta1.AllocationType{
+					ReleaseStrategy: v1beta1.ReleaseStrategyTTL,
+					ReleaseAfter:    "5m",
+				},
+				SecurityGroupIDs: []string{"sg-1", "sg-2", "sg-3", "sg-4", "sg-5", "sg-6", "sg-7", "sg-8", "sg-9", "sg-10", "sg-11"},
+				VSwitchOptions:   []string{"vsw-1", "vsw-2"},
+			},
+		}
+
+		err = c.Create(context.TODO(), invalidPodNetworking)
+		Expect(err).To(HaveOccurred())
+		Expect(strings.Contains(err.Error(), "security group can not more than 10")).To(BeTrue())
+
+		By("networking used as netplan")
+		netplanPodNetworking := &v1beta1.PodNetworking{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "netplan-podnetworking",
+			},
+			Spec: v1beta1.PodNetworkingSpec{
+				ENIOptions: v1beta1.ENIOptions{
+					ENIAttachType: v1beta1.ENIOptionTypeENI,
+				},
+				AllocationType: v1beta1.AllocationType{
+					Type:            v1beta1.IPAllocTypeFixed,
+					ReleaseStrategy: v1beta1.ReleaseStrategyTTL,
+					ReleaseAfter:    "10m",
+				},
+				VSwitchOptions:   []string{"vsw-1", "vsw-2"},
+				SecurityGroupIDs: []string{"sg-1"},
+			},
+		}
+		err = c.Create(context.TODO(), netplanPodNetworking)
+		Expect(err).To(HaveOccurred())
+		Expect(strings.Contains(err.Error(), "attachType must be default")).To(BeTrue())
+
+		cancel()
 	})
 
 })

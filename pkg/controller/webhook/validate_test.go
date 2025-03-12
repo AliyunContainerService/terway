@@ -29,30 +29,6 @@ func TestValidateHookAllowsWhenKindIsNotPodNetworking(t *testing.T) {
 	assert.Equal(t, "not care", resp.Result.Message)
 }
 
-func TestValidateHookDeniesWhenPodSelectorAndNamespaceSelectorAreNil(t *testing.T) {
-	podNetworking := &v1beta1.PodNetworking{
-		Spec: v1beta1.PodNetworkingSpec{
-			Selector: v1beta1.Selector{},
-		},
-	}
-	raw, _ := json.Marshal(podNetworking)
-	req := webhook.AdmissionRequest{
-		AdmissionRequest: v1.AdmissionRequest{
-			Kind: metav1.GroupVersionKind{
-				Group:   "",
-				Version: "",
-				Kind:    "PodNetworking",
-			},
-			Object: runtime.RawExtension{
-				Raw: raw,
-			},
-		},
-	}
-	resp := ValidateHook().Handle(context.Background(), req)
-	assert.False(t, resp.Allowed)
-	assert.Equal(t, "neither the PodSelector nor the NamespaceSelector is set", resp.Result.Message)
-}
-
 func TestValidateHookDeniesWhenVSwitchOptionsIsEmpty(t *testing.T) {
 	podNetworking := &v1beta1.PodNetworking{
 		Spec: v1beta1.PodNetworkingSpec{
