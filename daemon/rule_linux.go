@@ -76,7 +76,9 @@ func ruleSync(ctx context.Context, res daemon.PodResources) error {
 		setUp := &types.SetupConfig{
 			ContainerIPNet: &terwayTypes.IPNetSet{},
 			GatewayIP:      &terwayTypes.IPSet{},
+			ENIGatewayIP:   &terwayTypes.IPSet{},
 			ENIIndex:       eni.Attrs().Index,
+			StripVlan:      conf.ENIInfo.Trunk,
 		}
 		if conf.BasicInfo.PodIP.IPv4 != "" {
 			setUp.ContainerIPNet.SetIPNet(conf.BasicInfo.PodIP.IPv4 + "/32")
@@ -84,6 +86,15 @@ func ruleSync(ctx context.Context, res daemon.PodResources) error {
 		if conf.BasicInfo.PodIP.IPv6 != "" {
 			setUp.ContainerIPNet.SetIPNet(conf.BasicInfo.PodIP.IPv6 + "/128")
 		}
+
+		if setUp.StripVlan {
+			if conf.ENIInfo.GatewayIP == nil {
+				continue
+			}
+			setUp.ENIGatewayIP.SetIP(conf.ENIInfo.GatewayIP.IPv4)
+			setUp.ENIGatewayIP.SetIP(conf.ENIInfo.GatewayIP.IPv6)
+		}
+
 		setUp.GatewayIP.SetIP(conf.BasicInfo.GatewayIP.IPv4)
 		setUp.GatewayIP.SetIP(conf.BasicInfo.GatewayIP.IPv6)
 
