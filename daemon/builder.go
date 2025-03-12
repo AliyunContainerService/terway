@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
 	"github.com/samber/lo"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
@@ -162,14 +163,16 @@ func (b *NetworkServiceBuilder) setupAliyunClient() error {
 		return err
 	}
 
-	var providers []credential.Interface
-	if string(b.config.AccessID) != "" && string(b.config.AccessSecret) != "" {
-		providers = append(providers, credential.NewAKPairProvider(string(b.config.AccessID), string(b.config.AccessSecret)))
-	}
-	providers = append(providers, credential.NewEncryptedCredentialProvider(utils.NormalizePath(b.config.CredentialPath)))
-	providers = append(providers, credential.NewMetadataProvider())
+	prov := provider.NewChainProvider(
+		provider.NewAccessKeyProvider(string(b.config.AccessID), string(b.config.AccessSecret)),
+		provider.NewEncryptedFileProvider(provider.EncryptedFileProviderOptions{
+			FilePath:      b.config.CredentialPath,
+			RefreshPeriod: 30 * time.Minute,
+		}),
+		provider.NewECSMetadataProvider(provider.ECSMetadataProviderOptions{}),
+	)
 
-	clientSet, err := credential.NewClientMgr(regionID, providers...)
+	clientSet, err := credential.NewClientMgr(regionID, prov)
 	if err != nil {
 		return err
 	}

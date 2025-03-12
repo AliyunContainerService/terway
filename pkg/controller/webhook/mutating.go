@@ -186,8 +186,13 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 			}
 		}
 		// only set prev zone for fixed ip
-		if networks.PodNetworks[i].AllocationType.Type == v1beta1.IPAllocTypeFixed && previousZone != "" {
-			prevZone.Insert(previousZone)
+		if networks.PodNetworks[i].AllocationType.Type == v1beta1.IPAllocTypeFixed {
+			if !utils.IsFixedNamePod(pod) {
+				return admission.Denied("fixed ip only support for fixed name pod")
+			}
+			if previousZone != "" {
+				prevZone.Insert(previousZone)
+			}
 		}
 	}
 

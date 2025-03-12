@@ -46,6 +46,7 @@ var _ = AfterSuite(func() {
 })
 
 func initializeWebhookInEnvironment() {
+	clusterScope := admissionv1.ClusterScope
 	namespacedScopeV1 := admissionv1.NamespacedScope
 	failedTypeV1 := admissionv1.Fail
 	equivalentTypeV1 := admissionv1.Equivalent
@@ -65,7 +66,7 @@ func initializeWebhookInEnvironment() {
 				},
 				Webhooks: []admissionv1.ValidatingWebhook{
 					{
-						Name: "terway-controlplane.mutating.k8s.io",
+						Name: "terway-controlplane.validate.k8s.io",
 						Rules: []admissionv1.RuleWithOperations{
 							{
 								Operations: []admissionv1.OperationType{"CREATE"},
@@ -73,7 +74,7 @@ func initializeWebhookInEnvironment() {
 									APIGroups:   []string{"network.alibabacloud.com"},
 									APIVersions: []string{"*"},
 									Resources:   []string{"podnetworkings"},
-									Scope:       &namespacedScopeV1,
+									Scope:       &clusterScope,
 								},
 							},
 						},
@@ -120,7 +121,7 @@ func initializeWebhookInEnvironment() {
 									APIGroups:   []string{"network.alibabacloud.com"},
 									APIVersions: []string{"*"},
 									Resources:   []string{"podnetworkings"},
-									Scope:       &namespacedScopeV1,
+									Scope:       &clusterScope,
 								},
 							},
 						},
