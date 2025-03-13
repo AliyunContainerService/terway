@@ -139,6 +139,9 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 	}
 
 	if utils.ISLinJunNode(k8sNode.Labels) {
+		if !r.supportEFLO {
+			return reconcile.Result{}, nil
+		}
 		return r.handleEFLO(ctx, k8sNode, node)
 	}
 	// create or update the crdNode
@@ -368,7 +371,18 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	node.Labels["name"] = k8sNode.Name
 	node.Labels[types.LinJunNodeLabelKey] = "true"
 
-	if node.Spec.NodeMetadata.InstanceID != "" && node.Spec.NodeCap.Adapters == 0 {
+	nodeInfo, err := common.NewNodeInfo(k8sNode)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	if node.Spec.NodeMetadata.InstanceID != nodeInfo.InstanceID {
+
+		node.Spec.NodeMetadata.InstanceID = nodeInfo.InstanceID
+		node.Spec.NodeMetadata.InstanceType = nodeInfo.InstanceType
+		node.Spec.NodeMetadata.ZoneID = nodeInfo.ZoneID
+		node.Spec.NodeMetadata.RegionID = nodeInfo.RegionID
+
 		resp, err := r.aliyun.GetNodeInfoForPod(ctx, node.Spec.NodeMetadata.InstanceID)
 		if err != nil {
 			return reconcile.Result{}, err
@@ -379,7 +393,7 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	}
 
 	update := node.DeepCopy()
-	_, err := controllerutil.CreateOrPatch(ctx, r.client, update, func() error {
+	_, err = controllerutil.CreateOrPatch(ctx, r.client, update, func() error {
 		update.Status = node.Status
 		update.Spec = node.Spec
 		update.Labels = node.Labels

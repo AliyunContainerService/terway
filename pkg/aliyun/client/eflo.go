@@ -14,32 +14,6 @@ import (
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 )
 
-func (a *OpenAPI) CreateElasticNetworkInterface(zoneID, nodeID, vSwitchID, securityGroupID string) (string, string, error) {
-	req := eflo.CreateCreateElasticNetworkInterfaceRequest()
-	req.ZoneId = zoneID
-	req.NodeId = nodeID
-	req.VSwitchId = vSwitchID
-	req.SecurityGroupId = securityGroupID
-
-	start := time.Now()
-	resp, err := a.ClientSet.EFLO().CreateElasticNetworkInterface(req)
-	metric.OpenAPILatency.WithLabelValues("CreateElasticNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
-	if err != nil {
-		return "", "", err
-	}
-
-	if resp.Code != 0 {
-		err = &apiErr.EFLOCode{
-			Code:      resp.Code,
-			Message:   resp.Message,
-			RequestID: resp.RequestId,
-			Content:   resp.Content,
-		}
-		return "", "", err
-	}
-	return resp.Content.NodeId, resp.Content.ElasticNetworkInterfaceId, nil
-}
-
 func (a *OpenAPI) DeleteElasticNetworkInterface(ctx context.Context, eniID string) error {
 	req := eflo.CreateDeleteElasticNetworkInterfaceRequest()
 	req.ElasticNetworkInterfaceId = eniID

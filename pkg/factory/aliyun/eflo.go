@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/factory"
 	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
@@ -29,7 +29,7 @@ type Eflo struct {
 	instanceID string
 	zoneID     string
 
-	api              *client.OpenAPI
+	api              *aliyunClient.OpenAPI
 	vSwitchOptions   []string
 	securityGroupIDs []string
 	resourceGroupID  string
@@ -37,7 +37,7 @@ type Eflo struct {
 	selectionPolicy  vswpool.SelectionPolicy
 }
 
-func NewEflo(ctx context.Context, openAPI *client.OpenAPI, vsw *vswpool.SwitchPool, cfg *daemon.ENIConfig) *Eflo {
+func NewEflo(ctx context.Context, openAPI *aliyunClient.OpenAPI, vsw *vswpool.SwitchPool, cfg *daemon.ENIConfig) *Eflo {
 	return &Eflo{
 		ctx:              ctx,
 		api:              openAPI,
@@ -54,25 +54,27 @@ func NewEflo(ctx context.Context, openAPI *client.OpenAPI, vsw *vswpool.SwitchPo
 }
 
 func (p *Eflo) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon.ENI, []netip.Addr, []netip.Addr, error) {
-	ctx, cancel := context.WithTimeout(p.ctx, time.Second*60)
-	defer cancel()
-
-	vsw, innerErr := p.vsw.GetOne(ctx, p.api, p.zoneID, p.vSwitchOptions, &vswpool.SelectOptions{
+	vsw, innerErr := p.vsw.GetOne(p.ctx, p.api, p.zoneID, p.vSwitchOptions, &vswpool.SelectOptions{
 		VSwitchSelectPolicy: p.selectionPolicy,
 	})
 	if innerErr != nil {
 		return nil, nil, nil, innerErr
 	}
 
-	klog.Infof("CreateNetworkInterface %s %s %s %s", p.zoneID, p.instanceID, vsw.ID, p.securityGroupIDs[0])
-
-	_, eniID, err := p.api.CreateElasticNetworkInterface(p.zoneID, p.instanceID, vsw.ID, p.securityGroupIDs[0])
+	leni, err := p.api.CreateElasticNetworkInterfaceV2(p.ctx, &aliyunClient.CreateNetworkInterfaceOptions{
+		NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
+			VSwitchID:        vsw.ID,
+			SecurityGroupIDs: p.securityGroupIDs,
+			InstanceID:       p.instanceID,
+			ZoneID:           p.zoneID,
+		},
+	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	eni := &daemon.ENI{
-		ID: eniID,
+		ID: leni.NetworkInterfaceID,
 	}
 
 	var resp *eflo.Content
@@ -84,22 +86,19 @@ func (p *Eflo) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon.E
 	}, func(err error) bool {
 		return true
 	}, func() error {
-		resp, err = p.api.GetElasticNetworkInterface(eniID)
+		resp, err = p.api.GetElasticNetworkInterface(leni.NetworkInterfaceID)
 		if err != nil {
 			return err
 		}
 
 		if resp.Status != "Available" {
-			klog.Infof("eni status is not ready %s %s", eniID, resp.Status)
+			klog.Infof("eni status is not ready %s %s", leni.NetworkInterfaceID, resp.Status)
 			return fmt.Errorf("not ready %s", resp.Status)
 		}
 		return nil
 	})
 	if err != nil {
 		return eni, nil, nil, err
-	}
-	if resp == nil {
-		return eni, nil, nil, fmt.Errorf("GetElasticNetworkInterface return nil resp %s", eniID)
 	}
 
 	paimaryAddr, err := netip.ParseAddr(resp.Ip)
@@ -169,6 +168,26 @@ func (p *Eflo) AssignNIPv4(eniID string, count int, mac string) ([]netip.Addr, e
 		}
 		return nil
 	})
+
+	if err != nil {
+		innerErr := retry.OnError(wait.Backoff{
+			Duration: 2 * time.Second,
+			Factor:   1,
+			Jitter:   0,
+			Steps:    3,
+		}, func(err error) bool {
+			return true
+		}, func() error {
+			innerErr := p.api.UnassignLeniPrivateIPAddress(p.ctx, eniID, ipName)
+			if innerErr != nil {
+				klog.Error(innerErr, "failed to unassign ip")
+			}
+			return nil
+		})
+		if innerErr != nil {
+			klog.Error(innerErr, "failed to unassign ip, resource may leak")
+		}
+	}
 
 	return re, err
 }

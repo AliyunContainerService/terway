@@ -65,20 +65,16 @@ func (p *predicateForNodeEvent) predicateNode(o client.Object) bool {
 		}
 	}
 
-	if !p.supportEFLO {
-		if node.Labels[corev1.LabelTopologyRegion] == "" {
-			return false
-		}
+	if node.Labels[corev1.LabelTopologyRegion] == "" {
+		return false
 	}
 
 	if types.IgnoredByTerway(node.Labels) {
 		return false
 	}
 
-	if !p.supportEFLO {
-		if utils.ISLinJunNode(node.Labels) {
-			return false
-		}
+	if !p.supportEFLO && utils.ISLinJunNode(node.Labels) {
+		return false
 	}
 
 	if utils.ISVKNode(node) {

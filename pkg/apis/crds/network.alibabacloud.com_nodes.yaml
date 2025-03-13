@@ -138,6 +138,11 @@ spec:
                     type: string
                   zoneID:
                     type: string
+                required:
+                - instanceID
+                - instanceType
+                - regionID
+                - zoneID
                 type: object
               pool:
                 properties:
