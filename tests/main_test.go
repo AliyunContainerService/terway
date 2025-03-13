@@ -14,14 +14,12 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"go.uber.org/atomic"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -41,6 +39,7 @@ var (
 )
 
 var (
+	regionID           string
 	testIPv4           bool
 	testIPv6           bool
 	testNetworkPolicy  bool
@@ -69,6 +68,7 @@ var (
 )
 
 func init() {
+	flag.StringVar(&regionID, "region-id", "cn-hangzhou", "region id")
 	flag.StringVar(&repo, "repo", "registry.cn-hangzhou.aliyuncs.com/build-test", "image repo")
 	flag.StringVar(&timeout, "timeout", "2m", "2m")
 	flag.StringVar(&vSwitchIDs, "vswitch-ids", "", "extra vSwitchIDs")
@@ -102,8 +102,6 @@ func TestMain(m *testing.M) {
 		envfuncs.CreateNamespace(envCfg.Namespace()),
 		patchNamespace,
 		checkENIConfig,
-		//setNodeLabel,
-		setPodNetworking,
 	)
 	testenv.AfterEachFeature(func(ctx context.Context, config *envconf.Config, t *testing.T, feature features.Feature) (context.Context, error) {
 		pod := &corev1.PodList{}
@@ -214,65 +212,6 @@ func checkENIConfig(ctx context.Context, config *envconf.Config) (context.Contex
 	}
 
 	return ctx, nil
-}
-
-func setNodeLabel(ctx context.Context, config *envconf.Config) (context.Context, error) {
-	nodes := &corev1.NodeList{}
-	err := config.Client().Resources().List(ctx, nodes)
-	if err != nil {
-		return nil, err
-	}
-	for _, node := range nodes.Items {
-		val := ""
-		if strings.Contains(node.Status.NodeInfo.OSImage, "Soaring Falcon") {
-			val = "alinux3"
-		}
-		if strings.Contains(node.Status.NodeInfo.OSImage, "Hunting Beagle") {
-			val = "alinux2"
-		}
-		mergePatch, _ := json.Marshal(map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"labels": map[string]interface{}{
-					"e2e-os": val,
-				},
-			},
-		})
-		err = config.Client().Resources().Patch(ctx, &node, k8s.Patch{PatchType: types.StrategicMergePatchType, Data: mergePatch})
-		if err != nil {
-			return nil, err
-		}
-	}
-	return ctx, nil
-}
-
-func setPodNetworking(ctx context.Context, config *envconf.Config) (context.Context, error) {
-	if !testTrunk {
-		return ctx, nil
-	}
-
-	pn := &networkv1beta1.PodNetworking{}
-	pn.Name = defaultPodNetworkingName
-	pn.Spec.ENIOptions = networkv1beta1.ENIOptions{ENIAttachType: networkv1beta1.ENIOptionTypeTrunk}
-	pn.Spec.Selector = networkv1beta1.Selector{PodSelector: &metav1.LabelSelector{
-		MatchLabels: map[string]string{"netplan": "default"},
-	}}
-	if securityGroupIDs != "" {
-		pn.Spec.SecurityGroupIDs = strings.Split(securityGroupIDs, ",")
-	}
-	if vSwitchIDs != "" {
-		pn.Spec.VSwitchOptions = strings.Split(vSwitchIDs, ",")
-	}
-
-	err := config.Client().Resources().Create(ctx, pn)
-	if err != nil {
-		if !k8sErr.IsAlreadyExists(err) {
-			return nil, err
-		}
-	}
-
-	err = WaitPodNetworkingReady(pn.Name, config.Client())
-
-	return ctx, err
 }
 
 func patchNamespace(ctx context.Context, config *envconf.Config) (context.Context, error) {
