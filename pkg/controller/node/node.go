@@ -174,7 +174,9 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 	}
 
 	if node.Spec.NodeMetadata.InstanceType != nodeInfo.InstanceType ||
-		node.Spec.NodeMetadata.InstanceID != nodeInfo.InstanceID {
+		node.Spec.NodeMetadata.InstanceID != nodeInfo.InstanceID ||
+		node.Spec.NodeMetadata.ZoneID != nodeInfo.ZoneID ||
+		node.Spec.NodeMetadata.RegionID != nodeInfo.RegionID {
 
 		node.Spec.NodeMetadata = networkv1beta1.NodeMetadata{
 			InstanceType: nodeInfo.InstanceType,
@@ -376,7 +378,10 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		return reconcile.Result{}, err
 	}
 
-	if node.Spec.NodeMetadata.InstanceID != nodeInfo.InstanceID {
+	if node.Spec.NodeMetadata.InstanceID != nodeInfo.InstanceID ||
+		node.Spec.NodeMetadata.InstanceType != nodeInfo.InstanceType ||
+		node.Spec.NodeMetadata.ZoneID != nodeInfo.ZoneID ||
+		node.Spec.NodeMetadata.RegionID != nodeInfo.RegionID {
 
 		node.Spec.NodeMetadata.InstanceID = nodeInfo.InstanceID
 		node.Spec.NodeMetadata.InstanceType = nodeInfo.InstanceType
