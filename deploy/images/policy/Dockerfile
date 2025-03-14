@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.11.1
-FROM --platform=$TARGETPLATFORM calico/go-build:v0.90 AS felix-builder
+FROM --platform=$TARGETPLATFORM calico/go-build:v0.94 AS felix-builder
 ARG GOPROXY
 ARG GIT_VERSION
 ENV GOPROXY $GOPROXY
