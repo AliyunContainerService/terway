@@ -35,7 +35,7 @@ RUN git clone -b $GIT_TAG --depth 1 https://github.com/cilium/cilium.git && \
     cd cilium && git config --global user.email terway && git config --global user.name terway && \
     [ "`git rev-parse HEAD`" = "${GIT_COMMIT}" ]
 COPY ../../../policy/cilium /cilium_patch
-RUN cd cilium && git am /cilium_patch/*.patch
+RUN cd cilium && git am --whitespace=fix /cilium_patch/*.patch
 ARG NOSTRIP
 ARG LOCKDEBUG
 ARG V
