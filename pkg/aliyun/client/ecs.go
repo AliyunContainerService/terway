@@ -264,6 +264,7 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 	if eniID == "" {
 		return nil, fmt.Errorf("eniID not set")
 	}
+	start := time.Now()
 	err := wait.ExponentialBackoff(backoff,
 		func() (done bool, err error) {
 			eni, err := a.DescribeNetworkInterface(ctx, "", []string{eniID}, "", "", "", nil)
@@ -285,7 +286,7 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("error wait for eni %v to status %s, %w", eniID, status, err)
+		return nil, fmt.Errorf("error wait for eni %v to status %s,took %s, %w", eniID, status, time.Since(start).String(), err)
 	}
 	return eniInfo, nil
 }

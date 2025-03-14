@@ -1308,9 +1308,6 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 		if err != nil {
 			return err
 		}
-		if err != nil {
-			return err
-		}
 
 		time.Sleep(3 * time.Second)
 	}
