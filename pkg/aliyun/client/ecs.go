@@ -59,6 +59,7 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, opts ...CreateNetw
 	}
 	l := LogFields(logf.FromContext(ctx), req)
 
+	req.SourceDestCheck = requests.NewBoolean(false)
 	var (
 		resp     *ecs.CreateNetworkInterfaceResponse
 		innerErr error
