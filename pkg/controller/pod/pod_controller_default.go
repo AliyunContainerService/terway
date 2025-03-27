@@ -73,6 +73,10 @@ func (m *ReconcilePod) ParsePodNetworksFromAnnotation(ctx context.Context, zoneI
 			alloc.ENI.AttachmentOptions.Trunk = &trunk
 		}
 
+		if c.AllocationType != nil {
+			alloc.AllocationType = *c.AllocationType
+		}
+
 		allocs = append(allocs, alloc)
 	}
 
