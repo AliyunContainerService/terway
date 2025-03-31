@@ -194,7 +194,7 @@ func (b *NetworkServiceBuilder) initInstanceLimit() error {
 	} else {
 		limit, err := provider.GetLimitFromAnno(node.Annotations)
 		if err != nil {
-			return err
+			serviceLog.Error(err, "unable to get instance limit from annotation")
 		}
 		if limit == nil || instance.GetInstanceMeta().InstanceType != limit.InstanceTypeID {
 			limit, err = provider.GetLimit(b.aliyunClient, instance.GetInstanceMeta().InstanceType)
