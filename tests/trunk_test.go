@@ -502,6 +502,7 @@ func TestFixedIP(t *testing.T) {
 func TestExclusiveENI(t *testing.T) {
 	exclusiveENI := func() features.Feature {
 		pnName := "exclusive-eni"
+		podName := "exclusive-eni"
 		return features.New("ExclusiveENI").WithLabel("env", "trunking").
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 				nodes := corev1.NodeList{}
@@ -510,18 +511,22 @@ func TestExclusiveENI(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				hasExclusioveENI := false
+				hasExclusiveENI := false
 				for _, node := range nodes.Items {
 					r := node.Status.Allocatable.Name("aliyun/eni", resource.DecimalSI)
 					if r != nil && !r.IsZero() {
-						hasExclusioveENI = true
+						hasExclusiveENI = true
 						break
 					}
 				}
-				if !hasExclusioveENI {
+				if !hasExclusiveENI {
 					t.Skip()
 				}
 
+				err = WaitPodNetworkingDeleted(pnName, config.Client())
+				if err != nil {
+					t.Fatal(err)
+				}
 				pn := &v1beta1.PodNetworking{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: pnName,
@@ -552,7 +557,7 @@ func TestExclusiveENI(t *testing.T) {
 				return ctx
 			}).
 			Assess("wait for pod ready", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-				pod := newPod(cfg.Namespace(), "exclusive-eni", map[string]string{"netplan": pnName}, nil)
+				pod := newPod(cfg.Namespace(), podName, map[string]string{"netplan": pnName}, nil)
 				err := cfg.Client().Resources().Create(ctx, pod)
 				if err != nil {
 					t.Fatal(err)
@@ -563,16 +568,23 @@ func TestExclusiveENI(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+
 				// check pod have exclusive eni
 				err = cfg.Client().Resources().Get(ctx, pod.Name, cfg.Namespace(), pod)
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				v := pod.Spec.Resources.Requests[corev1.ResourceName("aliyun/eni")]
-				if v.IsZero() {
-					t.Fatalf("pod %s should have exclusive eni", pod.Name)
+				pod, err = waitPodENIPod(cfg.Namespace(), pod.Name, cfg.Client())
+				if err != nil {
+					t.Fatalf("wait pod %s ready failed, %v", pod.Name, err)
 				}
+
+				assert.Equal(t, pnName, pod.Annotations[terwayTypes.PodNetworking])
+
+				assert.True(t, pod.Spec.Containers[0].Resources.Limits[corev1.ResourceName("aliyun/eni")].Equal(resource.MustParse("1")))
+				assert.True(t, pod.Spec.Containers[0].Resources.Requests[corev1.ResourceName("aliyun/eni")].Equal(resource.MustParse("1")))
+
 				return ctx
 			}).
 			Feature()
@@ -644,6 +656,25 @@ func WaitPodHaveValidateConfig(namespace, name string, client klient.Client, pod
 		return err
 	}
 	return nil
+}
+
+func waitPodENIPod(namespace, name string, client klient.Client) (*corev1.Pod, error) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+	}
+	err := wait.For(conditions.New(client.Resources()).ResourceMatch(pod, func(object k8s.Object) bool {
+		pod = object.(*corev1.Pod)
+		if !terwayTypes.PodUseENI(pod) {
+			return false
+		}
+		return true
+	}),
+		wait.WithImmediate(),
+		wait.WithInterval(1*time.Second),
+		wait.WithTimeout(10*time.Second),
+	)
+
+	return pod, err
 }
 
 func newPodNetworking(name string, vSwitchOptions, securityGroupIDs []string, podSelector, namespaceSelector *metav1.LabelSelector) *v1beta1.PodNetworking {

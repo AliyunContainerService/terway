@@ -223,9 +223,7 @@ func patchNamespace(ctx context.Context, config *envconf.Config) (context.Contex
 	mergePatch, _ := json.Marshal(map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"labels": map[string]interface{}{
-				"ns":                       config.Namespace(),
 				"node-local-dns-injection": "enabled",
-				"ns-trunking":              "true",
 			},
 		},
 	})
