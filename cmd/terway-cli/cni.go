@@ -9,8 +9,6 @@ import (
 
 	"github.com/Jeffail/gabs/v2"
 	"github.com/spf13/cobra"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	cliflag "k8s.io/component-base/cli/flag"
 
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 )
@@ -51,8 +49,6 @@ var (
 func init() {
 	fs := cniCmd.Flags()
 	fs.StringVar(&outPutPath, "output", "", "output path")
-	fs.Var(cliflag.NewMapStringBool(&featureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features. "+
-		"Options are:\n"+strings.Join(utilfeature.DefaultFeatureGate.KnownFeatures(), "\n"))
 }
 
 var cniCmd = &cobra.Command{
@@ -74,12 +70,7 @@ func processCNIConfig(cmd *cobra.Command, args []string) error {
 
 	_switchDataPathV2 = switchDataPathV2
 
-	err := utilfeature.DefaultMutableFeatureGate.SetFromMap(featureGates)
-	if err != nil {
-		return fmt.Errorf("failed to set feature gates: %v", err)
-	}
-
-	err = processInput()
+	err := processInput()
 	if err != nil {
 		return fmt.Errorf("failed process input: %v", err)
 	}
