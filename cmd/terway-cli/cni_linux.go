@@ -75,7 +75,7 @@ func checkKernelVersion(iMajor, iMinor, iPatch int) bool {
 	major, minor, patch, ok := parseRelease(sb.String())
 	return ok && (major > iMajor ||
 		major == iMajor && minor > iMinor ||
-		major == iMajor && minor == iMinor && iPatch >= patch)
+		major == iMajor && minor == iMinor && patch >= iPatch)
 }
 
 // parseRelease parses a dot-separated version number. It follows the semver
