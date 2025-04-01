@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	cliflag "k8s.io/component-base/cli/flag"
 
+	_ "github.com/AliyunContainerService/terway/pkg/feature"
 	"github.com/AliyunContainerService/terway/rpc"
 )
 
@@ -51,6 +55,11 @@ var (
 
 			grpcConn = conn
 			client = rpc.NewTerwayTracingClient(conn)
+
+			err = utilfeature.DefaultMutableFeatureGate.SetFromMap(featureGates)
+			if err != nil {
+				return err
+			}
 			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
@@ -94,6 +103,9 @@ var (
 )
 
 func init() {
+	rootCmd.PersistentFlags().Var(cliflag.NewMapStringBool(&featureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features. "+
+		"Options are:\n"+strings.Join(utilfeature.DefaultFeatureGate.KnownFeatures(), "\n"))
+
 	rootCmd.AddCommand(listCmd, showCmd, mappingCmd, executeCmd, metadataCmd, cniCmd, nodeconfigCmd, policyCmd)
 }
 

@@ -10,9 +10,11 @@ chmod +x /opt/cni/bin/terway
 cp -f /usr/bin/cilium-cni /opt/cni/bin/
 chmod +x /opt/cni/bin/cilium-cni
 
+EXTRA_FLAGS="${1:-}"
+
 # init cni config
-terway-cli cni --output /etc/cni/net.d/10-terway.conflist
-terway-cli nodeconfig
+terway-cli cni --output /etc/cni/net.d/10-terway.conflist "$EXTRA_FLAGS"
+terway-cli nodeconfig "$EXTRA_FLAGS"
 cat /etc/cni/net.d/10-terway.conflist
 
 node_capabilities=/var/run/eni/node_capabilities
