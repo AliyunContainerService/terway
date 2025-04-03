@@ -1,0 +1,1304 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Thu, 5 Sep 2024 14:33:14 +0800
+Subject: cni: add terway cni
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ bpf/bpf_host.c                                |   6 +-
+ bpf/bpf_lxc.c                                 |  41 +-
+ bpf/include/bpf/ctx/skb.h                     |   5 +
+ bpf/lib/icmp6.h                               |   7 +-
+ daemon/cmd/daemon_main.go                     |   4 +
+ daemon/cmd/endpoint.go                        |  11 +
+ daemon/cmd/kube_proxy_replacement.go          |   7 +-
+ daemon/cmd/watchdogs.go                       |   5 +
+ pkg/datapath/linux/bandwidth/ops.go           |   1 +
+ pkg/datapath/linux/config/config.go           |  16 +
+ pkg/datapath/loader/loader.go                 | 103 +++--
+ pkg/datapath/loader/tc.go                     |   7 +
+ pkg/datapath/maps/map.go                      |   1 +
+ pkg/datapath/option/option.go                 |   3 +
+ pkg/datapath/types/config.go                  |   2 +
+ pkg/datapath/types/endpoint.go                |   1 +
+ pkg/defaults/defaults.go                      |   2 +-
+ pkg/defaults/node.go                          |   2 +
+ pkg/endpoint/api.go                           |  19 +
+ pkg/endpoint/bpf.go                           |  10 +
+ pkg/endpoint/cache.go                         |   6 +
+ pkg/endpoint/endpoint.go                      |  11 +
+ pkg/endpoint/restore.go                       |   7 +
+ pkg/endpoint/terway.go                        |  55 +++
+ pkg/option/config.go                          |   4 +-
+ pkg/testutils/endpoint.go                     |   4 +
+ .../chaining/generic-veth/generic-veth.go     |  54 +++
+ plugins/cilium-cni/chaining/terway/terway.go  | 363 ++++++++++++++++++
+ plugins/cilium-cni/cmd/cmd.go                 |   1 +
+ plugins/cilium-cni/types/types.go             |   1 +
+ 30 files changed, 716 insertions(+), 43 deletions(-)
+ create mode 100644 pkg/endpoint/terway.go
+ create mode 100644 plugins/cilium-cni/chaining/terway/terway.go
+
+diff --git a/bpf/bpf_host.c b/bpf/bpf_host.c
+index 0b5ea843a3..27de726b02 100644
+--- a/bpf/bpf_host.c
++++ b/bpf/bpf_host.c
+@@ -1365,7 +1365,7 @@ int cil_to_netdev(struct __ctx_buff *ctx __maybe_unused)
+ 	};
+ 	__be16 __maybe_unused proto = 0;
+ 	__u32 __maybe_unused vlan_id;
+-	int ret = CTX_ACT_OK;
++	int ret = CTX_ACT_PIPE;
+ 	__s8 ext_err = 0;
+ 
+ 	bpf_clear_meta(ctx);
+@@ -1613,6 +1613,10 @@ exit:
+ 			  TRACE_EP_ID_UNKNOWN,
+ 			  NATIVE_DEV_IFINDEX, trace.reason, trace.monitor);
+ 
++    if ( ret == CTX_ACT_OK ) {
++        return CTX_ACT_PIPE;
++    }
++
+ 	return ret;
+ 
+ drop_err:
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index 36ecfde895..fd46558a86 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -688,9 +688,18 @@ ct_recreate6:
+ 	}
+ #endif
+ 	if (is_defined(ENABLE_HOST_ROUTING)) {
++#ifdef ENDPOINT_DIRECT_ROUTING_DEV_IFINDEX
++		int oif = ENDPOINT_DIRECT_ROUTING_DEV_IFINDEX;
++#else
+ 		int oif = 0;
+-
+-		ret = fib_redirect_v6(ctx, ETH_HLEN, ip6, false, false, ext_err, &oif);
++#endif
++		if (oif > 0) {
++			ret = ipv6_l3(ctx, ETH_HLEN, NULL, NULL, METRIC_EGRESS);
++			if (ret == CTX_ACT_OK)
++				ret = redirect_neigh(oif, NULL, 0, 0);
++		} else {
++			ret = fib_redirect_v6(ctx, ETH_HLEN, ip6, false, false, ext_err, &oif);
++		}
+ 		if (fib_ok(ret))
+ 			send_trace_notify(ctx, TRACE_TO_NETWORK, SECLABEL_IPV6,
+ 					  *dst_sec_identity, TRACE_EP_ID_UNKNOWN, oif,
+@@ -1251,9 +1260,18 @@ skip_vtep:
+ 
+ maybe_pass_to_stack: __maybe_unused;
+ 	if (is_defined(ENABLE_HOST_ROUTING)) {
++#ifdef ENDPOINT_DIRECT_ROUTING_DEV_IFINDEX
++		int oif = ENDPOINT_DIRECT_ROUTING_DEV_IFINDEX;
++#else
+ 		int oif = 0;
+-
+-		ret = fib_redirect_v4(ctx, ETH_HLEN, ip4, false, false, ext_err, &oif);
++#endif
++		if (oif > 0) {
++			ret = ipv4_l3(ctx, ETH_HLEN, NULL, NULL, ip4);
++			if (ret == CTX_ACT_OK)
++				ret = redirect_neigh(oif, NULL, 0, 0);
++		} else {
++			ret = fib_redirect_v4(ctx, ETH_HLEN, ip4, false, false, ext_err, &oif);
++		}
+ 		if (fib_ok(ret))
+ 			send_trace_notify(ctx, TRACE_TO_NETWORK, SECLABEL_IPV4,
+ 					  *dst_sec_identity, TRACE_EP_ID_UNKNOWN, oif,
+@@ -1460,17 +1478,32 @@ int cil_from_container(struct __ctx_buff *ctx)
+ 		goto out;
+ 	}
+ 
++#if defined(ENABLE_BANDWIDTH_MANAGER) && defined(DATAPATH_IPVLAN)
++    edt_set_aggregate(ctx, LXC_ID);
++	ret = edt_sched_departure(ctx, proto);
++	/* No send_drop_notify_error() here given we're rate-limiting. */
++	if (ret == CTX_ACT_DROP) {
++		update_metrics(ctx_full_len(ctx), METRIC_EGRESS,
++			       -DROP_EDT_HORIZON);
++		return ret;
++	}
++#endif
++
+ 	switch (proto) {
+ #ifdef ENABLE_IPV6
+ 	case bpf_htons(ETH_P_IPV6):
++#if defined(DATAPATH_VETH)
+ 		edt_set_aggregate(ctx, LXC_ID);
++#endif
+ 		ret = tail_call_internal(ctx, CILIUM_CALL_IPV6_FROM_LXC, &ext_err);
+ 		sec_label = SECLABEL_IPV6;
+ 		break;
+ #endif /* ENABLE_IPV6 */
+ #ifdef ENABLE_IPV4
+ 	case bpf_htons(ETH_P_IP):
++#if defined(DATAPATH_VETH)
+ 		edt_set_aggregate(ctx, LXC_ID);
++#endif
+ 		ret = tail_call_internal(ctx, CILIUM_CALL_IPV4_FROM_LXC, &ext_err);
+ 		sec_label = SECLABEL_IPV4;
+ 		break;
+diff --git a/bpf/include/bpf/ctx/skb.h b/bpf/include/bpf/ctx/skb.h
+index e47d0350b8..ad2f5e6a97 100644
+--- a/bpf/include/bpf/ctx/skb.h
++++ b/bpf/include/bpf/ctx/skb.h
+@@ -19,12 +19,17 @@
+ # define TC_ACT_SHOT		2
+ #endif
+ 
++#ifndef TC_ACT_PIPE
++# define TC_ACT_PIPE		3
++#endif
++
+ #ifndef TC_ACT_REDIRECT
+ # define TC_ACT_REDIRECT	7
+ #endif
+ 
+ #define CTX_ACT_OK		TC_ACT_OK
+ #define CTX_ACT_DROP		TC_ACT_SHOT
++#define CTX_ACT_PIPE		TC_ACT_PIPE
+ #define CTX_ACT_TX		TC_ACT_REDIRECT
+ #define CTX_ACT_REDIRECT	TC_ACT_REDIRECT
+ 
+diff --git a/bpf/lib/icmp6.h b/bpf/lib/icmp6.h
+index 0e69797dcd..22e66c86ed 100644
+--- a/bpf/lib/icmp6.h
++++ b/bpf/lib/icmp6.h
+@@ -327,9 +327,12 @@ static __always_inline int __icmp6_handle_ns(struct __ctx_buff *ctx, int nh_off)
+ 		}
+ 		return send_icmp6_ndisc_adv(ctx, nh_off, &router_mac, false);
+ 	}
+-
++#ifdef DATAPATH_IPVLAN
++	return CTX_ACT_OK;
++#else
+ 	/* Unknown target address, drop */
+-	return ACTION_UNKNOWN_ICMP6_NS;
++    return ACTION_UNKNOWN_ICMP6_NS;
++#endif
+ }
+ 
+ #ifndef SKIP_ICMPV6_NS_HANDLING
+diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
+index 2d1b82e27e..4370dc2617 100644
+--- a/daemon/cmd/daemon_main.go
++++ b/daemon/cmd/daemon_main.go
+@@ -1365,6 +1365,10 @@ func initEnv(vp *viper.Viper) {
+ 
+ 	switch option.Config.DatapathMode {
+ 	case datapathOption.DatapathModeVeth:
++		if option.Config.TCFilterPriority <= 20000 {
++			option.Config.TCFilterPriority = 25000
++		}
++	case datapathOption.DatapathModeIPvlan:
+ 	case datapathOption.DatapathModeNetkit, datapathOption.DatapathModeNetkitL2:
+ 		// For netkit we enable also tcx for all non-netkit devices.
+ 		// The underlying kernel does support it given tcx got merged
+diff --git a/daemon/cmd/endpoint.go b/daemon/cmd/endpoint.go
+index 5a60c814ea..082378a708 100644
+--- a/daemon/cmd/endpoint.go
++++ b/daemon/cmd/endpoint.go
+@@ -13,6 +13,7 @@ import (
+ 	"runtime"
+ 	"sync"
+ 
++	datapathOption "github.com/cilium/cilium/pkg/datapath/option"
+ 	"github.com/go-openapi/runtime/middleware"
+ 	"github.com/sirupsen/logrus"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+@@ -355,6 +356,10 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
+ 		epTemplate.DatapathConfiguration.RequireRouting = &disabled
+ 	}
+ 
++	if option.Config.DatapathMode == datapathOption.DatapathModeIPvlan {
++		epTemplate.DatapathConfiguration.InstallEndpointRoute = false
++	}
++
+ 	log.WithFields(logrus.Fields{
+ 		"addressing":                 epTemplate.Addressing,
+ 		logfields.ContainerID:        epTemplate.ContainerID,
+@@ -513,6 +518,12 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
+ 		return d.errorDuringCreation(ep, fmt.Errorf("unable to insert endpoint into manager: %w", err))
+ 	}
+ 
++	// Now that we have ep.ID we can pin the map from this point. This
++	// also has to happen before the first build takes place.
++	if err = ep.PinDatapathMap(); err != nil {
++		return d.errorDuringCreation(ep, fmt.Errorf("unable to pin datapath maps: %s", err))
++	}
++
+ 	var regenTriggered bool
+ 	if ep.K8sNamespaceAndPodNameIsSet() && d.clientset.IsEnabled() {
+ 		// We need to refetch the pod labels again because we have just added
+diff --git a/daemon/cmd/kube_proxy_replacement.go b/daemon/cmd/kube_proxy_replacement.go
+index 4e7faa14da..0292bc8d89 100644
+--- a/daemon/cmd/kube_proxy_replacement.go
++++ b/daemon/cmd/kube_proxy_replacement.go
+@@ -441,11 +441,16 @@ func finishKubeProxyReplacementInit(sysctl sysctl.Sysctl, devices []*tables.Devi
+ // disableNodePort disables BPF NodePort and friends who are dependent from
+ // the latter.
+ func disableNodePort() {
++	log.Infof("disableNodePort %s", option.Config.DatapathMode)
+ 	option.Config.EnableNodePort = false
+ 	option.Config.EnableHostPort = false
+ 	option.Config.EnableExternalIPs = false
+ 	option.Config.EnableSVCSourceRangeCheck = false
+-	option.Config.EnableHostLegacyRouting = true
++
++	if option.Config.DatapathMode == datapathOption.DatapathModeIPvlan {
++		option.Config.EnableHostLegacyRouting = true
++		log.Infof("IPvlan mode, fall back to legacy routing")
++	}
+ }
+ 
+ // markHostExtension tells the socket LB that MKE managed containers belong
+diff --git a/daemon/cmd/watchdogs.go b/daemon/cmd/watchdogs.go
+index 1bd26db706..e3f21e4fa6 100644
+--- a/daemon/cmd/watchdogs.go
++++ b/daemon/cmd/watchdogs.go
+@@ -107,6 +107,11 @@ func (d *Daemon) checkEndpointBPFPrograms(ctx context.Context, p epBPFProgWatchd
+ 			// Skip Endpoints without BPF datapath
+ 			continue
+ 		}
++
++		if ep.HostInterface() == "" {
++			continue
++		}
++
+ 		loaded, err = loader.DeviceHasSKBProgramLoaded(ep.HostInterface(), ep.RequireEgressProg())
+ 		if err != nil {
+ 			log.WithField(logfields.Endpoint, ep.HostInterface()).
+diff --git a/pkg/datapath/linux/bandwidth/ops.go b/pkg/datapath/linux/bandwidth/ops.go
+index 123531e301..ab1ceeadc1 100644
+--- a/pkg/datapath/linux/bandwidth/ops.go
++++ b/pkg/datapath/linux/bandwidth/ops.go
+@@ -40,6 +40,7 @@ func (*ops) Prune(context.Context, statedb.ReadTxn, statedb.Iterator[*tables.Ban
+ 
+ // Update implements reconciler.Operations.
+ func (ops *ops) Update(ctx context.Context, txn statedb.ReadTxn, q *tables.BandwidthQDisc) error {
++	return nil
+ 	if !ops.isEnabled() {
+ 		// Probe results show that the system doesn't support BandwidthManager, so
+ 		// bail out.
+diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
+index 744ce3a2d7..f984dfaaed 100644
+--- a/pkg/datapath/linux/config/config.go
++++ b/pkg/datapath/linux/config/config.go
+@@ -1081,6 +1081,22 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, devices []strin
+ 		}
+ 	}
+ 
++	switch option.Config.DatapathMode {
++	case datapathOption.DatapathModeIPvlan:
++		fmt.Fprintf(fw, "#define DATAPATH_IPVLAN 1\n")
++	case datapathOption.DatapathModeVeth:
++		fmt.Fprintf(fw, "#define DATAPATH_VETH 1\n")
++
++		if !e.IsHost() {
++			if e.GetENIIndex() == 0 {
++				return fmt.Errorf("ENI index is 0")
++			}
++			fmt.Fprintf(fw, "#define ENDPOINT_DIRECT_ROUTING_DEV_IFINDEX %d\n", e.GetENIIndex())
++		}
++	default:
++		return fmt.Errorf("unsupported datapath mode: %s", option.Config.DatapathMode)
++	}
++
+ 	if e.IsHost() {
+ 		// Only used to differentiate between host endpoint template and other templates.
+ 		fmt.Fprintf(fw, "#define HOST_ENDPOINT 1\n")
+diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
+index effd40458e..df3ad3fd0a 100644
+--- a/pkg/datapath/loader/loader.go
++++ b/pkg/datapath/loader/loader.go
+@@ -26,6 +26,7 @@ import (
+ 	"github.com/cilium/cilium/pkg/datapath/linux/safenetlink"
+ 	"github.com/cilium/cilium/pkg/datapath/linux/sysctl"
+ 	"github.com/cilium/cilium/pkg/datapath/loader/metrics"
++	datapathOption "github.com/cilium/cilium/pkg/datapath/option"
+ 	"github.com/cilium/cilium/pkg/datapath/tables"
+ 	datapath "github.com/cilium/cilium/pkg/datapath/types"
+ 	"github.com/cilium/cilium/pkg/defaults"
+@@ -385,6 +386,14 @@ func (l *loader) reloadHostDatapath(ep datapath.Endpoint, spec *ebpf.CollectionS
+ 			continue
+ 		}
+ 
++		if _, ok := iface.(*netlink.IPVlan); ok {
++			continue
++		}
++
++		if option.Config.DatapathMode == datapathOption.DatapathModeIPvlan && device == "eth0" {
++			continue
++		}
++
+ 		linkDir := bpffsDeviceLinksDir(bpf.CiliumPath(), iface)
+ 
+ 		netdevConsts, netdevRenames, err := l.patchHostNetdevDatapath(ep, device)
+@@ -484,45 +493,73 @@ func (l *loader) reloadDatapath(ep datapath.Endpoint, spec *ebpf.CollectionSpec)
+ 		}
+ 		defer coll.Close()
+ 
+-		iface, err := safenetlink.LinkByName(device)
+-		if err != nil {
+-			return fmt.Errorf("retrieving device %s: %w", device, err)
+-		}
++		switch option.Config.DatapathMode {
++		case datapathOption.DatapathModeIPvlan:
++			log.Infof("ipvlan map path %s", ep.IPvlanMapPath())
++			progMap, err := ebpf.LoadPinnedMap(ep.IPvlanMapPath(), &ebpf.LoadPinOptions{})
++			if err != nil {
++				return fmt.Errorf("loading ipvlan prog map: %w", err)
++			}
++			defer progMap.Close()
+ 
+-		linkDir := bpffsEndpointLinksDir(bpf.CiliumPath(), ep)
+-		if err := attachSKBProgram(iface, coll.Programs[symbolFromEndpoint], symbolFromEndpoint,
+-			linkDir, netlink.HANDLE_MIN_INGRESS, option.Config.EnableTCX); err != nil {
+-			return fmt.Errorf("interface %s ingress: %w", device, err)
+-		}
++			err = progMap.Update(uint32(0), uint32(coll.Programs[symbolFromEndpoint].FD()), ebpf.UpdateAny)
++			if err != nil {
++				return fmt.Errorf("updating prog map 0: %w", err)
++			}
++			err = progMap.Update(uint32(1), uint32(coll.Programs[symbolToEndpoint].FD()), ebpf.UpdateAny)
++			if err != nil {
++				return fmt.Errorf("updating prog map 1: %w", err)
++			}
+ 
+-		if ep.RequireEgressProg() {
+-			if err := attachSKBProgram(iface, coll.Programs[symbolToEndpoint], symbolToEndpoint,
+-				linkDir, netlink.HANDLE_MIN_EGRESS, option.Config.EnableTCX); err != nil {
+-				return fmt.Errorf("interface %s egress: %w", device, err)
++			if err := commit(); err != nil {
++				return fmt.Errorf("committing bpf pins: %w", err)
+ 			}
+-		} else {
+-			if err := detachSKBProgram(iface, symbolToEndpoint, linkDir, netlink.HANDLE_MIN_EGRESS); err != nil {
+-				log.WithField("device", device).Error(err)
++			log.Infof("ipvlan finished")
++
++		case datapathOption.DatapathModeVeth:
++			log.Infof("veth mode")
++
++			iface, err := safenetlink.LinkByName(device)
++			if err != nil {
++				return fmt.Errorf("retrieving device %s: %w", device, err)
+ 			}
+-		}
+ 
+-		if err := commit(); err != nil {
+-			return fmt.Errorf("committing bpf pins: %w", err)
+-		}
+-	}
++			linkDir := bpffsEndpointLinksDir(bpf.CiliumPath(), ep)
++			if err := attachSKBProgram(iface, coll.Programs[symbolFromEndpoint], symbolFromEndpoint,
++				linkDir, netlink.HANDLE_MIN_INGRESS, option.Config.EnableTCX); err != nil {
++				return fmt.Errorf("interface %s ingress: %w", device, err)
++			}
+ 
+-	if ep.RequireEndpointRoute() {
+-		scopedLog := ep.Logger(subsystem).WithFields(logrus.Fields{
+-			logfields.Interface: device,
+-		})
+-		if ip := ep.IPv4Address(); ip.IsValid() {
+-			if err := upsertEndpointRoute(ep, *iputil.AddrToIPNet(ip)); err != nil {
+-				scopedLog.WithError(err).Warn("Failed to upsert route")
++			if ep.RequireEgressProg() {
++				if err := attachSKBProgram(iface, coll.Programs[symbolToEndpoint], symbolToEndpoint,
++					linkDir, netlink.HANDLE_MIN_EGRESS, option.Config.EnableTCX); err != nil {
++					return fmt.Errorf("interface %s egress: %w", device, err)
++				}
++			} else {
++				if err := detachSKBProgram(iface, symbolToEndpoint, linkDir, netlink.HANDLE_MIN_EGRESS); err != nil {
++					log.WithField("device", device).Error(err)
++				}
+ 			}
+-		}
+-		if ip := ep.IPv6Address(); ip.IsValid() {
+-			if err := upsertEndpointRoute(ep, *iputil.AddrToIPNet(ip)); err != nil {
+-				scopedLog.WithError(err).Warn("Failed to upsert route")
++
++			if err := commit(); err != nil {
++				return fmt.Errorf("committing bpf pins: %w", err)
++			}
++		default:
++			return fmt.Errorf("unsupported datapath mode: %s", option.Config.DatapathMode)
++		}
++		if ep.RequireEndpointRoute() {
++			scopedLog := ep.Logger(subsystem).WithFields(logrus.Fields{
++				logfields.Interface: device,
++			})
++			if ip := ep.IPv4Address(); ip.IsValid() {
++				if err := upsertEndpointRoute(ep, *iputil.AddrToIPNet(ip)); err != nil {
++					scopedLog.WithError(err).Warn("Failed to upsert route")
++				}
++			}
++			if ip := ep.IPv6Address(); ip.IsValid() {
++				if err := upsertEndpointRoute(ep, *iputil.AddrToIPNet(ip)); err != nil {
++					scopedLog.WithError(err).Warn("Failed to upsert route")
++				}
+ 			}
+ 		}
+ 	}
+@@ -635,7 +672,7 @@ func (l *loader) ReloadDatapath(ctx context.Context, ep datapath.Endpoint, stats
+ 
+ // Unload removes the datapath specific program aspects
+ func (l *loader) Unload(ep datapath.Endpoint) {
+-	if ep.RequireEndpointRoute() {
++	if ep.RequireEndpointRoute() && option.Config.DatapathMode == datapathOption.DatapathModeVeth {
+ 		if ip := ep.IPv4Address(); ip.IsValid() {
+ 			removeEndpointRoute(ep, *iputil.AddrToIPNet(ip))
+ 		}
+diff --git a/pkg/datapath/loader/tc.go b/pkg/datapath/loader/tc.go
+index 0e4e152c9f..fe765c9805 100644
+--- a/pkg/datapath/loader/tc.go
++++ b/pkg/datapath/loader/tc.go
+@@ -187,6 +187,13 @@ func removeTCFilters(device netlink.Link, parent uint32) error {
+ 	}
+ 
+ 	for _, f := range filters {
++		if f.Type() != "netkit" {
++			_, ok := f.(*netlink.BpfFilter)
++			if !ok {
++				continue
++			}
++		}
++
+ 		if err := netlink.FilterDel(f); err != nil {
+ 			return err
+ 		}
+diff --git a/pkg/datapath/maps/map.go b/pkg/datapath/maps/map.go
+index 759aa0578e..ddde740b64 100644
+--- a/pkg/datapath/maps/map.go
++++ b/pkg/datapath/maps/map.go
+@@ -97,6 +97,7 @@ func (ms *MapSweeper) walk(path string, _ os.FileInfo, _ error) error {
+ 		ctmap.MapNameAny4,
+ 		callsmap.MapName,
+ 		callsmap.CustomCallsMapName,
++		"cilium_lxc_ipve_",
+ 	}
+ 
+ 	ms.checkStaleGlobalMap(path, filename)
+diff --git a/pkg/datapath/option/option.go b/pkg/datapath/option/option.go
+index d58a91336d..c8994cf103 100644
+--- a/pkg/datapath/option/option.go
++++ b/pkg/datapath/option/option.go
+@@ -9,6 +9,9 @@ const (
+ 	// attached to a network via veth pairs).
+ 	DatapathModeVeth = "veth"
+ 
++	// DatapathModeIPvlan specifies ipvlan datapath mode.
++	DatapathModeIPvlan = "ipvlan"
++
+ 	// DatapathModeNetkit specifies netkit datapath mode (i.e. containers
+ 	// are attached to a network via netkit pairs). netkit is created in
+ 	// L3 mode.
+diff --git a/pkg/datapath/types/config.go b/pkg/datapath/types/config.go
+index 9080b458e1..659a26742a 100644
+--- a/pkg/datapath/types/config.go
++++ b/pkg/datapath/types/config.go
+@@ -84,6 +84,8 @@ type CompileTimeConfiguration interface {
+ 
+ 	// IsHost returns true if the endpoint is the host endpoint.
+ 	IsHost() bool
++
++	GetENIIndex() int64
+ }
+ 
+ // EndpointConfiguration provides datapath implementations a clean interface
+diff --git a/pkg/datapath/types/endpoint.go b/pkg/datapath/types/endpoint.go
+index df3bc01aa0..df52e84cdc 100644
+--- a/pkg/datapath/types/endpoint.go
++++ b/pkg/datapath/types/endpoint.go
+@@ -12,4 +12,5 @@ type Endpoint interface {
+ 	InterfaceName() string
+ 	Logger(subsystem string) *logrus.Entry
+ 	StateDir() string
++	IPvlanMapPath() string
+ }
+diff --git a/pkg/defaults/defaults.go b/pkg/defaults/defaults.go
+index a404fb6e61..c7864f6a27 100644
+--- a/pkg/defaults/defaults.go
++++ b/pkg/defaults/defaults.go
+@@ -295,7 +295,7 @@ const (
+ 	ClientConnectTimeout = 30 * time.Second
+ 
+ 	// DatapathMode is the default value for the datapath mode.
+-	DatapathMode = "veth"
++	DatapathMode = "ipvlan"
+ 
+ 	// EnableBPFTProxy is the default value for EnableBPFTProxy
+ 	EnableBPFTProxy = false
+diff --git a/pkg/defaults/node.go b/pkg/defaults/node.go
+index 4cfeef0027..8246834142 100644
+--- a/pkg/defaults/node.go
++++ b/pkg/defaults/node.go
+@@ -72,5 +72,7 @@ var (
+ 		"lxc",
+ 		"cni",
+ 		"docker",
++		"ipvl_",
++		"cali",
+ 	}
+ )
+diff --git a/pkg/endpoint/api.go b/pkg/endpoint/api.go
+index 48131fbc98..10c459e7c1 100644
+--- a/pkg/endpoint/api.go
++++ b/pkg/endpoint/api.go
+@@ -16,6 +16,7 @@ import (
+ 	"github.com/sirupsen/logrus"
+ 
+ 	"github.com/cilium/cilium/api/v1/models"
++	datapathOption "github.com/cilium/cilium/pkg/datapath/option"
+ 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
+ 	"github.com/cilium/cilium/pkg/identity/cache"
+ 	identitymodel "github.com/cilium/cilium/pkg/identity/model"
+@@ -163,6 +164,19 @@ func NewEndpointFromChangeModel(ctx context.Context, owner regeneration.Owner, p
+ 		ep.properties = base.Properties
+ 	}
+ 
++	ep.datapathMapID = int(base.DatapathMapID)
++	if v, ok := ep.properties["terway-eni-index"]; ok {
++		var err error
++		ep.eniInterfaceIndex, err = strconv.ParseInt(v.(string), 10, 64)
++		if err != nil {
++			return nil, err
++		}
++	}
++
++	if option.Config.DatapathMode == datapathOption.DatapathModeVeth &&
++		ep.eniInterfaceIndex == 0 {
++		return nil, fmt.Errorf("eniInterfaceIndex is 0")
++	}
+ 	return ep, nil
+ }
+ 
+@@ -538,6 +552,11 @@ func (e *Endpoint) ProcessChangeRequest(newEp *Endpoint, validPatchTransitionSta
+ 		}
+ 	}
+ 
++	if newEp.eniInterfaceIndex != e.eniInterfaceIndex {
++		e.eniInterfaceIndex = newEp.eniInterfaceIndex
++		changed = true
++	}
++
+ 	if newContainerName := newEp.containerName.Load(); newContainerName != nil && *newContainerName != "" {
+ 		e.containerName.Store(newContainerName)
+ 		// no need to set changed here
+diff --git a/pkg/endpoint/bpf.go b/pkg/endpoint/bpf.go
+index dc5a62c49d..594dad4677 100644
+--- a/pkg/endpoint/bpf.go
++++ b/pkg/endpoint/bpf.go
+@@ -1069,6 +1069,9 @@ func (e *Endpoint) deleteMaps() []error {
+ 		}
+ 	}
+ 
++	if err := os.RemoveAll(e.BPFIpvlanMapPath()); err != nil {
++		errors = append(errors, fmt.Errorf("removing ipvlan map pin for endpoint %s: %w", e.StringID(), err))
++	}
+ 	return errors
+ }
+ 
+@@ -1580,6 +1583,12 @@ type linkCheckerFunc func(string) error
+ 
+ // ValidateConnectorPlumbing checks whether the endpoint is correctly plumbed.
+ func (e *Endpoint) ValidateConnectorPlumbing(linkChecker linkCheckerFunc) error {
++	if e.datapathMapID > 0 {
++		if _, err := os.Stat(e.BPFIpvlanMapPath()); err != nil {
++			return fmt.Errorf("tail call map for IPvlan unavailable: %s", err)
++		}
++		return nil
++	}
+ 	if linkChecker == nil {
+ 		return fmt.Errorf("cannot check state of datapath; link checker is nil")
+ 	}
+@@ -1587,6 +1596,7 @@ func (e *Endpoint) ValidateConnectorPlumbing(linkChecker linkCheckerFunc) error
+ 	if err != nil {
+ 		return fmt.Errorf("interface %s could not be found", e.ifName)
+ 	}
++
+ 	return nil
+ }
+ 
+diff --git a/pkg/endpoint/cache.go b/pkg/endpoint/cache.go
+index 07b6afca7c..fd69aab5e6 100644
+--- a/pkg/endpoint/cache.go
++++ b/pkg/endpoint/cache.go
+@@ -45,6 +45,9 @@ type epInfoCache struct {
+ 	ifIndex                int
+ 	netNsCookie            uint64
+ 
++	ipvlan   bool
++	eniIndex int64
++
+ 	// endpoint is used to get the endpoint's logger.
+ 	//
+ 	// Do NOT use this for fetching endpoint data directly; this structure
+@@ -91,6 +94,9 @@ func (e *Endpoint) createEpInfoCache(epdir string) *epInfoCache {
+ 		ifIndex:                e.ifIndex,
+ 		netNsCookie:            e.NetNsCookie,
+ 
++		ipvlan:                 e.datapathMapID > 0,
++		eniIndex:               e.eniInterfaceIndex,
++
+ 		endpoint: e,
+ 	}
+ }
+diff --git a/pkg/endpoint/endpoint.go b/pkg/endpoint/endpoint.go
+index bba3bc2aed..ae7e11b752 100644
+--- a/pkg/endpoint/endpoint.go
++++ b/pkg/endpoint/endpoint.go
+@@ -31,6 +31,7 @@ import (
+ 	"github.com/cilium/cilium/pkg/datapath/linux/bandwidth"
+ 	linuxrouting "github.com/cilium/cilium/pkg/datapath/linux/routing"
+ 	"github.com/cilium/cilium/pkg/datapath/linux/safenetlink"
++	datapathOption "github.com/cilium/cilium/pkg/datapath/option"
+ 	dptypes "github.com/cilium/cilium/pkg/datapath/types"
+ 	"github.com/cilium/cilium/pkg/defaults"
+ 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
+@@ -429,6 +430,10 @@ type Endpoint struct {
+ 
+ 	// NetNsCookie is the network namespace cookie of the Endpoint.
+ 	NetNsCookie uint64
++
++	datapathMapID int
++	// eniInterfaceIndex the actual nic id route to this eni
++	eniInterfaceIndex int64
+ }
+ 
+ func (e *Endpoint) GetRealizedRedirects() (redirects map[string]uint16) {
+@@ -711,6 +716,9 @@ func (e *Endpoint) GetID16() uint16 {
+ // In some datapath modes, it may return an empty string as there is no unique
+ // host netns network interface for this endpoint.
+ func (e *Endpoint) HostInterface() string {
++	if e.datapathMapID > 0 {
++		return ""
++	}
+ 	return e.ifName
+ }
+ 
+@@ -2590,6 +2598,9 @@ func (e *Endpoint) Delete(conf DeleteConfig) []error {
+ // setDown sets the Endpoint's underlying interface down. If the interface
+ // cannot be retrieved, returns nil.
+ func (e *Endpoint) setDown() error {
++	if option.Config.DatapathMode == datapathOption.DatapathModeIPvlan {
++		return nil
++	}
+ 	link, err := safenetlink.LinkByName(e.HostInterface())
+ 	if errors.As(err, &netlink.LinkNotFoundError{}) {
+ 		// No interface, nothing to do.
+diff --git a/pkg/endpoint/restore.go b/pkg/endpoint/restore.go
+index 1ef441aded..104c800600 100644
+--- a/pkg/endpoint/restore.go
++++ b/pkg/endpoint/restore.go
+@@ -413,6 +413,7 @@ func (e *Endpoint) toSerializedEndpoint() *serializableEndpoint {
+ 		CiliumEndpointUID:        e.ciliumEndpointUID,
+ 		Properties:               e.properties,
+ 		NetnsCookie:              e.NetNsCookie,
++		EniInterfaceIndex:        e.eniInterfaceIndex,
+ 	}
+ }
+ 
+@@ -531,6 +532,9 @@ type serializableEndpoint struct {
+ 
+ 	// NetnsCookie is the network namespace cookie of the Endpoint.
+ 	NetnsCookie uint64
++
++	DatapathMapID     int
++	EniInterfaceIndex int64
+ }
+ 
+ // UnmarshalJSON expects that the contents of `raw` are a serializableEndpoint,
+@@ -591,4 +595,7 @@ func (ep *Endpoint) fromSerializedEndpoint(r *serializableEndpoint) {
+ 		ep.properties = map[string]interface{}{}
+ 	}
+ 	ep.NetNsCookie = r.NetnsCookie
++
++	ep.datapathMapID = r.DatapathMapID
++	ep.eniInterfaceIndex = r.EniInterfaceIndex
+ }
+diff --git a/pkg/endpoint/terway.go b/pkg/endpoint/terway.go
+new file mode 100644
+index 0000000000..16d42d2e7b
+--- /dev/null
++++ b/pkg/endpoint/terway.go
+@@ -0,0 +1,55 @@
++package endpoint
++
++import (
++	"github.com/cilium/ebpf"
++
++	"github.com/cilium/cilium/pkg/bpf"
++)
++
++// BPFIpvlanMapPath returns the path to the ipvlan tail call map of an endpoint.
++func (e *Endpoint) BPFIpvlanMapPath() string {
++	return bpf.LocalMapPath("cilium_lxc_ipve_", e.ID)
++}
++
++// PinDatapathMap retrieves a file descriptor from the map ID from the API call
++// and pins the corresponding map into the BPF file system.
++func (e *Endpoint) PinDatapathMap() error {
++	if err := e.lockAlive(); err != nil {
++		return err
++	}
++	defer e.unlock()
++	return e.pinDatapathMap()
++}
++
++// PinDatapathMap retrieves a file descriptor from the map ID from the API call
++// and pins the corresponding map into the BPF file system.
++func (e *Endpoint) pinDatapathMap() error {
++	if e.datapathMapID == 0 {
++		return nil
++	}
++
++	mapFd, err := ebpf.NewMapFromID(ebpf.MapID(e.datapathMapID))
++	if err != nil {
++		return err
++	}
++	defer mapFd.Close()
++
++	return mapFd.Pin(e.BPFIpvlanMapPath())
++}
++
++func (e *Endpoint) GetENIIndex() int64{
++	return e.eniInterfaceIndex
++}
++
++func (ep *epInfoCache) HasIPVlanDataPath() bool {
++	return ep.ipvlan
++}
++
++// IPvlanMapPath MapPath returns tail call map path
++func (ep *epInfoCache) IPvlanMapPath() string {
++	return ep.endpoint.BPFIpvlanMapPath()
++}
++
++func (ep *epInfoCache) GetENIIndex() int64 {
++	return ep.eniIndex
++}
+diff --git a/pkg/option/config.go b/pkg/option/config.go
+index 29683dbd5a..2e9be9f766 100644
+--- a/pkg/option/config.go
++++ b/pkg/option/config.go
+@@ -40,6 +40,7 @@ import (
+ 	"github.com/cilium/cilium/pkg/cidr"
+ 	clustermeshTypes "github.com/cilium/cilium/pkg/clustermesh/types"
+ 	"github.com/cilium/cilium/pkg/command"
++	datapathOption "github.com/cilium/cilium/pkg/datapath/option"
+ 	"github.com/cilium/cilium/pkg/defaults"
+ 	"github.com/cilium/cilium/pkg/ip"
+ 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
+@@ -2574,7 +2575,8 @@ func (c *DaemonConfig) TunnelingEnabled() bool {
+ func (c *DaemonConfig) AreDevicesRequired() bool {
+ 	return c.EnableNodePort || c.EnableHostFirewall || c.EnableWireguard ||
+ 		c.EnableHighScaleIPcache || c.EnableL2Announcements || c.ForceDeviceRequired ||
+-		c.EnableIPSecEncryptedOverlay
++		c.EnableIPSecEncryptedOverlay ||
++		(c.DatapathMode == datapathOption.DatapathModeVeth)
+ }
+ 
+ // NeedBPFHostOnWireGuardDevice returns true if the agent needs to attach
+diff --git a/pkg/testutils/endpoint.go b/pkg/testutils/endpoint.go
+index ac2faed02d..8af77254b9 100644
+--- a/pkg/testutils/endpoint.go
++++ b/pkg/testutils/endpoint.go
+@@ -100,3 +100,7 @@ func (e *TestEndpoint) StateDir() string {
+ 	}
+ 	return "test_loader"
+ }
++
++func (e *TestEndpoint) IPvlanMapPath() string {
++	return "ipvl_"
++}
+diff --git a/plugins/cilium-cni/chaining/generic-veth/generic-veth.go b/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
+index a339986ffb..0b1187c6dc 100644
+--- a/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
++++ b/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
+@@ -7,6 +7,7 @@ import (
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	"net"
+ 
+ 	cniTypes "github.com/containernetworking/cni/pkg/types"
+ 	cniTypesVer "github.com/containernetworking/cni/pkg/types/100"
+@@ -158,6 +159,7 @@ func (f *GenericVethChainer) Add(ctx context.Context, pluginCtx chainingapi.Plug
+ 	hostMac = peer.Attrs().HardwareAddr.String()
+ 	vethHostName = peer.Attrs().Name
+ 	vethHostIdx = peer.Attrs().Index
++	eniIndex := getEniInterfaceIndex(vethIP, vethIPv6)
+ 
+ 	switch {
+ 	case vethHostName == "":
+@@ -172,6 +174,9 @@ func (f *GenericVethChainer) Add(ctx context.Context, pluginCtx chainingapi.Plug
+ 	case vethHostIdx == 0:
+ 		err = errors.New("unable to determine index interface of veth pair on the host side")
+ 		return
++	case eniIndex <= 0:
++		err = errors.New("unable to determine eni index of veth pair on the host side")
++		return
+ 	}
+ 
+ 	var disabled = false
+@@ -208,6 +213,9 @@ func (f *GenericVethChainer) Add(ctx context.Context, pluginCtx chainingapi.Plug
+ 			// All routing is performed by the Linux stack
+ 			RequireRouting: &disabled,
+ 		},
++		Properties: map[string]interface{}{
++			"terway-eni-index": fmt.Sprintf("%d", eniIndex),
++		},
+ 	}
+ 
+ 	scopedLog := pluginCtx.Logger.WithFields(logrus.Fields{
+@@ -273,3 +281,49 @@ func (f *GenericVethChainer) Check(ctx context.Context, pluginCtx chainingapi.Pl
+ func init() {
+ 	chainingapi.Register("generic-veth", &GenericVethChainer{})
+ }
++
++func getEniInterfaceIndex(v4, v6 string) int64 {
++	if v4 != "" {
++		rules, err := netlink.RuleList(netlink.FAMILY_V4)
++		if err != nil {
++			return 0
++		}
++		for _, rule := range rules {
++			if rule.Src == nil {
++				continue
++			}
++			if rule.Src.IP.Equal(net.ParseIP(v4)) {
++				return int64(getGW(netlink.FAMILY_V4, rule.Table))
++			}
++		}
++	}
++	if v6 != "" {
++		rules, err := netlink.RuleList(netlink.FAMILY_V6)
++		if err != nil {
++			return 0
++		}
++		for _, rule := range rules {
++			if rule.Src == nil {
++				continue
++			}
++			if rule.Src.IP.Equal(net.ParseIP(v6)) {
++				return int64(getGW(netlink.FAMILY_V6, rule.Table))
++			}
++		}
++	}
++	return 0
++}
++
++func getGW(family int, table int) int {
++	routes, err := netlink.RouteListFiltered(family, &netlink.Route{Table: table}, netlink.RT_FILTER_TABLE)
++	if err != nil {
++		return 0
++	}
++	for _, route := range routes {
++		// only single route for now
++		if route.Src == nil {
++			return route.LinkIndex
++		}
++	}
++	return 0
++}
+diff --git a/plugins/cilium-cni/chaining/terway/terway.go b/plugins/cilium-cni/chaining/terway/terway.go
+new file mode 100644
+index 0000000000..bb3bff48d6
+--- /dev/null
++++ b/plugins/cilium-cni/chaining/terway/terway.go
+@@ -0,0 +1,363 @@
++// Copyright 2019 Authors of Cilium
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package terway
++
++import (
++	"context"
++	"fmt"
++
++	"github.com/cilium/ebpf"
++	"github.com/cilium/ebpf/asm"
++	"github.com/cilium/ebpf/rlimit"
++	cniTypesVer "github.com/containernetworking/cni/pkg/types/100"
++	cniVersion "github.com/containernetworking/cni/pkg/version"
++	"github.com/sirupsen/logrus"
++	"github.com/vishvananda/netlink"
++
++	"github.com/cilium/cilium/api/v1/models"
++	"github.com/cilium/cilium/pkg/client"
++	"github.com/cilium/cilium/pkg/datapath/link"
++	endpointid "github.com/cilium/cilium/pkg/endpoint/id"
++	"github.com/cilium/cilium/pkg/logging"
++	"github.com/cilium/cilium/pkg/logging/logfields"
++	"github.com/cilium/cilium/pkg/netns"
++	chainingapi "github.com/cilium/cilium/plugins/cilium-cni/chaining/api"
++	genericveth "github.com/cilium/cilium/plugins/cilium-cni/chaining/generic-veth"
++	"github.com/cilium/cilium/plugins/cilium-cni/lib"
++)
++
++var (
++	name = "terway-chainer"
++	log  = logging.DefaultLogger.WithField(logfields.LogSubsys, name)
++)
++
++// TerwayChainer is terway chain object
++type TerwayChainer struct {
++	ipvlan  *datapathIPvlan
++	generic *genericveth.GenericVethChainer
++}
++
++func (f *TerwayChainer) Add(ctx context.Context, pluginCtx chainingapi.PluginContext, client *client.Client) (res *cniTypesVer.Result, err error) {
++	switch pluginCtx.NetConf.DataPath {
++	case "", "ipvlan":
++		return f.ipvlan.Add(ctx, pluginCtx, client)
++	case "datapathv2", "veth":
++		return f.generic.Add(ctx, pluginCtx, client)
++	}
++	return nil, fmt.Errorf("unknown datapath %s", pluginCtx.NetConf.DataPath)
++}
++
++func (f *TerwayChainer) Delete(ctx context.Context, pluginCtx chainingapi.PluginContext, client *lib.DeletionFallbackClient) (err error) {
++	switch pluginCtx.NetConf.DataPath {
++	case "", "ipvlan":
++		return f.ipvlan.Delete(ctx, pluginCtx, client)
++	case "datapathv2", "veth":
++		return f.generic.Delete(ctx, pluginCtx, client)
++	}
++	return fmt.Errorf("unknown datapath %s", pluginCtx.NetConf.DataPath)
++}
++
++func (f *TerwayChainer) Check(ctx context.Context, pluginCtx chainingapi.PluginContext, client *client.Client) error {
++	return nil
++}
++
++// ImplementsAdd returns true if method 'add' is available
++func (f *TerwayChainer) ImplementsAdd() bool {
++	return true
++}
++
++// ImplementsDelete return true if method 'delete' is available
++func (f *TerwayChainer) ImplementsDelete() bool {
++	return true
++}
++
++func init() {
++	chainingapi.Register(name, &TerwayChainer{
++		ipvlan:  &datapathIPvlan{},
++		generic: &genericveth.GenericVethChainer{},
++	})
++}
++
++type datapathIPvlan struct{}
++
++func (d *datapathIPvlan) Add(ctx context.Context, pluginCtx chainingapi.PluginContext, client *client.Client) (res *cniTypesVer.Result, err error) {
++	err = cniVersion.ParsePrevResult(&pluginCtx.NetConf.NetConf)
++	if err != nil {
++		err = fmt.Errorf("unable to understand network config: %s", err)
++		return
++	}
++
++	var prevRes *cniTypesVer.Result
++	prevRes, err = cniTypesVer.NewResultFromResult(pluginCtx.NetConf.PrevResult)
++	if err != nil {
++		err = fmt.Errorf("unable to get previous network result: %s", err)
++		return
++	}
++	defer func() {
++		if err != nil {
++			pluginCtx.Logger.WithError(err).
++				WithFields(logrus.Fields{"cni-pre-result": pluginCtx.NetConf.PrevResult}).
++				Errorf("Unable to create endpoint")
++		}
++	}()
++
++	netNs, err := netns.OpenPinned(pluginCtx.Args.Netns)
++	if err != nil {
++		err = fmt.Errorf("failed to open netns %q: %s", pluginCtx.Args.Netns, err)
++		return
++	}
++	defer netNs.Close()
++
++	var (
++		ifName                                     = ""
++		disabled                                   = false
++		containerIPv4, containerIPv6, containerMac string
++		containerIfIndex                           int
++	)
++
++	if len(prevRes.Interfaces) == 0 {
++		err = fmt.Errorf("unable to get previous network interface: %v", prevRes)
++		return
++	}
++	ifName = prevRes.Interfaces[0].Name
++
++	for _, ip := range prevRes.IPs {
++		if ip == nil {
++			continue
++		}
++		if ip.Address.IP.To4() != nil {
++			containerIPv4 = ip.Address.IP.String()
++		} else {
++			containerIPv6 = ip.Address.IP.String()
++		}
++	}
++
++	if err = netNs.Do(func() error {
++		link, err := netlink.LinkByName(ifName)
++		if err != nil {
++			return fmt.Errorf("failed to list link %s", pluginCtx.Args.Netns)
++		}
++		containerMac = link.Attrs().HardwareAddr.String()
++		containerIfIndex = link.Attrs().Index
++		return nil
++	}); err != nil {
++		return
++	}
++
++	// set bpf
++	m, err := setupIpvlanInRemoteNs(netNs, ifName, ifName, true, true)
++	if err != nil {
++		pluginCtx.Logger.WithError(err).Warn("Unable to set ipvlan ebpf")
++		return
++	}
++	defer m.Close()
++	info, err := m.Info()
++	if err != nil {
++		return nil, fmt.Errorf("failed to get map info: %w", err)
++	}
++
++	mapID, ok := info.ID()
++	if !ok {
++		return nil, fmt.Errorf("failed to get map ID: %w", err)
++	}
++	// create endpoint
++	ep := &models.EndpointChangeRequest{
++		Addressing: &models.AddressPair{
++			IPV4: containerIPv4,
++			IPV6: containerIPv6,
++		},
++		ContainerID:       pluginCtx.Args.ContainerID,
++		State:             models.EndpointStateWaitingDashForDashIdentity.Pointer(),
++		HostMac:           containerMac,
++		InterfaceIndex:    int64(containerIfIndex),
++		Mac:               containerMac,
++		InterfaceName:     ifName,
++		K8sPodName:        string(pluginCtx.CniArgs.K8S_POD_NAME),
++		K8sNamespace:      string(pluginCtx.CniArgs.K8S_POD_NAMESPACE),
++		SyncBuildEndpoint: true,
++		DatapathMapID:     int64(mapID),
++		DatapathConfiguration: &models.EndpointDatapathConfiguration{
++			DisableSipVerification: true,
++			RequireArpPassthrough:  true,
++			RequireEgressProg:      true,
++			ExternalIpam:           true,
++			RequireRouting:         &disabled,
++		},
++	}
++
++	_, err = client.EndpointCreate(ep)
++	if err != nil {
++		pluginCtx.Logger.WithError(err).WithFields(logrus.Fields{
++			logfields.ContainerID: ep.ContainerID}).Warn("Unable to create endpoint")
++		err = fmt.Errorf("unable to create endpoint: %s", err)
++		return
++	}
++
++	pluginCtx.Logger.WithFields(logrus.Fields{
++		logfields.ContainerID: ep.ContainerID}).Debug("Endpoint successfully created")
++
++	res = prevRes
++	return
++}
++
++func (d *datapathIPvlan) Delete(ctx context.Context, pluginContext chainingapi.PluginContext, client *lib.DeletionFallbackClient) (err error) {
++	id := endpointid.NewID(endpointid.ContainerIdPrefix, pluginContext.Args.ContainerID)
++	if err := client.EndpointDelete(id); err != nil {
++		log.WithError(err).Warning("Errors encountered while deleting endpoint")
++	}
++	return nil
++}
++
++// setupIpvlanInRemoteNs creates a tail call map, renames the netdevice inside
++// the target netns and attaches a BPF program to it on egress path which
++// then jumps into the tail call map index 0.
++//
++// NB: Do not close the returned map before it has been pinned. Otherwise,
++// the map will be destroyed.
++func setupIpvlanInRemoteNs(netNs *netns.NetNS, srcIfName, dstIfName string, ingress, egress bool) (*ebpf.Map, error) {
++	if err := rlimit.RemoveMemlock(); err != nil {
++		return nil, fmt.Errorf("unable to increase rlimit: %s", err)
++	}
++	maxEntries := uint32(0)
++	if ingress {
++		maxEntries++
++	}
++	if egress {
++		maxEntries++
++	}
++	m, err := ebpf.NewMap(&ebpf.MapSpec{
++		Type:       ebpf.ProgramArray,
++		KeySize:    4,
++		ValueSize:  4,
++		MaxEntries: maxEntries,
++	})
++	if err != nil {
++		return nil, fmt.Errorf("failed to create root BPF map for %q: %s", dstIfName, err)
++	}
++
++	err = netNs.Do(func() error {
++		var err error
++
++		if srcIfName != dstIfName {
++			err = link.Rename(srcIfName, dstIfName)
++			if err != nil {
++				return fmt.Errorf("failed to rename ipvlan from %q to %q: %s", srcIfName, dstIfName, err)
++			}
++		}
++
++		ipvlan, err := netlink.LinkByName(dstIfName)
++		if err != nil {
++			return fmt.Errorf("failed to lookup ipvlan device %q: %s", dstIfName, err)
++		}
++
++		qdiscAttrs := netlink.QdiscAttrs{
++			LinkIndex: ipvlan.Attrs().Index,
++			Handle:    netlink.MakeHandle(0xffff, 0),
++			Parent:    netlink.HANDLE_CLSACT,
++		}
++		qdisc := &netlink.GenericQdisc{
++			QdiscAttrs: qdiscAttrs,
++			QdiscType:  "clsact",
++		}
++		if err = netlink.QdiscAdd(qdisc); err != nil {
++			return fmt.Errorf("failed to create clsact qdisc on %q: %s", dstIfName, err)
++		}
++
++		if egress {
++			prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
++				Type:         ebpf.SchedCLS,
++				Instructions: getEntryProgInstructions(m.FD()),
++				License:      "ASL2",
++			})
++			if err != nil {
++				return fmt.Errorf("failed to load root BPF prog for %q: %s", dstIfName, err)
++			}
++
++			filterAttrs := netlink.FilterAttrs{
++				LinkIndex: ipvlan.Attrs().Index,
++				Parent:    netlink.HANDLE_MIN_EGRESS,
++				Handle:    netlink.MakeHandle(0, 1),
++				Protocol:  3,
++				Priority:  1,
++			}
++			filter := &netlink.BpfFilter{
++				FilterAttrs:  filterAttrs,
++				Fd:           prog.FD(),
++				Name:         "polEntry",
++				DirectAction: true,
++			}
++			if err = netlink.FilterAdd(filter); err != nil {
++				prog.Close()
++				return fmt.Errorf("failed to create cls_bpf filter on %q: %s", dstIfName, err)
++			}
++		}
++
++		if ingress {
++			prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
++				Type:         ebpf.SchedCLS,
++				Instructions: getIngressEntryProgInstructions(m.FD()),
++				License:      "ASL2",
++			})
++			if err != nil {
++				return fmt.Errorf("failed to load root BPF prog for %q: %s", dstIfName, err)
++			}
++
++			filterAttrs := netlink.FilterAttrs{
++				LinkIndex: ipvlan.Attrs().Index,
++				Parent:    netlink.HANDLE_MIN_INGRESS,
++				Handle:    netlink.MakeHandle(0, 1),
++				Protocol:  3,
++				Priority:  1,
++			}
++			filter := &netlink.BpfFilter{
++				FilterAttrs:  filterAttrs,
++				Fd:           prog.FD(),
++				Name:         "ingressPolEntry",
++				DirectAction: true,
++			}
++			if err = netlink.FilterAdd(filter); err != nil {
++				prog.Close()
++				return fmt.Errorf("failed to create cls_bpf filter on %q: %s", dstIfName, err)
++			}
++		}
++
++		return nil
++	})
++	if err != nil {
++		m.Close()
++		return nil, err
++	}
++	return m, nil
++}
++
++func getEntryProgInstructions(fd int) asm.Instructions {
++	return asm.Instructions{
++		asm.LoadMapPtr(asm.R2, fd),
++		asm.Mov.Imm(asm.R3, 0),
++		asm.FnTailCall.Call(),
++		asm.Mov.Imm(asm.R0, 0),
++		asm.Return(),
++	}
++}
++
++func getIngressEntryProgInstructions(fd int) asm.Instructions {
++	return asm.Instructions{
++		asm.LoadMapPtr(asm.R2, fd),
++		asm.Mov.Imm(asm.R3, 1),
++		asm.FnTailCall.Call(),
++		asm.Mov.Imm(asm.R0, 0),
++		asm.Return(),
++	}
++}
+diff --git a/plugins/cilium-cni/cmd/cmd.go b/plugins/cilium-cni/cmd/cmd.go
+index fe405c9c27..29912acedd 100644
+--- a/plugins/cilium-cni/cmd/cmd.go
++++ b/plugins/cilium-cni/cmd/cmd.go
+@@ -47,6 +47,7 @@ import (
+ 	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/azure"
+ 	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/flannel"
+ 	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/generic-veth"
++	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/terway"
+ 	"github.com/cilium/cilium/plugins/cilium-cni/lib"
+ 	"github.com/cilium/cilium/plugins/cilium-cni/types"
+ )
+diff --git a/plugins/cilium-cni/types/types.go b/plugins/cilium-cni/types/types.go
+index cd4b2f673e..fceb272841 100644
+--- a/plugins/cilium-cni/types/types.go
++++ b/plugins/cilium-cni/types/types.go
+@@ -32,6 +32,7 @@ type NetConf struct {
+ 	LogFormat      string                 `json:"log-format"`
+ 	LogFile        string                 `json:"log-file"`
+ 	ChainingMode   string                 `json:"chaining-mode"`
++	DataPath       string                 `json:"data-path,omitempty"`
+ }
+ 
+ // IPAM is the Cilium specific CNI IPAM configuration
+-- 
+2.39.5 (Apple Git-154)
+

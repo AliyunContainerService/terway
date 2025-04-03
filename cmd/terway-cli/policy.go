@@ -188,27 +188,26 @@ func runCilium(cfg *PolicyConfig) error {
 
 	args := []string{
 		"cilium-agent",
+		"--routing-mode=native",
 		"--cni-chaining-mode=terway-chainer",
-		"--tunnel=disabled",
 		"--enable-ipv4-masquerade=false",
 		"--enable-ipv6-masquerade=false",
 		"--disable-envoy-version-check=true",
-		"--ipv4-range=169.254.10.0/30",
-		"--ipv6-range=fe80:2400:3200:baba::/30",
+		"--local-router-ipv4=169.254.10.1",
+		"--local-router-ipv6=fe80:2400:3200:baba::1",
 		"--enable-local-node-route=false",
 		"--enable-endpoint-health-checking=false",
 		"--enable-health-checking=false",
 		"--enable-service-topology=true",
-		"--disable-cnp-status-updates=true",
 		"--k8s-heartbeat-timeout=0",
 		"--enable-session-affinity=true",
 		"--install-iptables-rules=false",
 		"--enable-l7-proxy=false",
-		"--ipam=cluster-pool",
-		"--enable-runtime-device-detection=true",
+		"--ipam=delegated-plugin",
 		"--enable-bandwidth-manager=true",
 		"--agent-health-port=" + cfg.HealthCheckPort,
 	}
+
 	if cfg.EnableNetworkPolicy {
 		args = append(args, "--enable-policy=default")
 	} else {
@@ -221,9 +220,10 @@ func runCilium(cfg *PolicyConfig) error {
 		args = append(args, "--datapath-mode=ipvlan")
 	case dataPathV2:
 		args = append(args, "--datapath-mode=veth")
-	default:
-		args = append(args, "--kube-proxy-replacement=disabled")
 	}
+
+	args = append(args, "--enable-endpoint-routes=true")
+	args = append(args, "--enable-l2-neigh-discovery=false")
 
 	if cfg.InClusterLoadBalance {
 		args = append(args, "--enable-in-cluster-loadbalance=true")

@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Wed, 13 Nov 2024 11:01:53 +0800
+Subject: deprecated: disable per-package-lb
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ bpf/bpf_lxc.c                       | 5 +++--
+ pkg/datapath/linux/config/config.go | 5 +++++
+ pkg/option/config.go                | 6 ++++++
+ 3 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index c35ed9dc60..b6c5359ddb 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -62,11 +62,12 @@
+  * Furthermore, since SCTP cannot be handled as part of bpf_sock, also
+  * enable per-packet LB is SCTP is enabled.
+  */
+-#if !defined(ENABLE_SOCKET_LB_FULL) || \
++#if (!defined(ENABLE_SOCKET_LB_FULL) || \
+     defined(ENABLE_SOCKET_LB_HOST_ONLY) || \
+     defined(ENABLE_L7_LB)               || \
+     defined(ENABLE_SCTP)                || \
+-    defined(ENABLE_CLUSTER_AWARE_ADDRESSING)
++    defined(ENABLE_CLUSTER_AWARE_ADDRESSING)) && \
++    !defined(DISABLE_PER_PACKET_LB)
+ # define ENABLE_PER_PACKET_LB 1
+ #endif
+ 
+diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
+index f984dfaaed..cfe2fe1a66 100644
+--- a/pkg/datapath/linux/config/config.go
++++ b/pkg/datapath/linux/config/config.go
+@@ -20,6 +20,7 @@ import (
+ 	"strings"
+ 	"text/template"
+ 
++	log "github.com/sirupsen/logrus"
+ 	"github.com/vishvananda/netlink"
+ 
+ 	"github.com/cilium/cilium/pkg/bpf"
+@@ -168,6 +169,10 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
+ 		fw.WriteString(defineIPv6("HOST_IP", hostIP))
+ 	}
+ 
++	if option.Config.DisablePerPacketLB {
++		log.Infof("Disabling per-packet LB policy")
++		cDefinesMap["DISABLE_PER_PACKET_LB"] = "1"
++	}
+ 	cDefinesMap["UNKNOWN_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameUnknown))
+ 	cDefinesMap["HOST_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameHost))
+ 	cDefinesMap["WORLD_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameWorld))
+diff --git a/pkg/option/config.go b/pkg/option/config.go
+index 4abd5c38ff..87f4fe20dd 100644
+--- a/pkg/option/config.go
++++ b/pkg/option/config.go
+@@ -1233,6 +1233,8 @@ const (
+ 
+ 	// BPFEventsTraceEnabled defines the TraceNotification setting for any endpoint
+ 	BPFEventsTraceEnabled = "bpf-events-trace-enabled"
++
++	DisablePerPacketLB = "disable-per-package-lb"
+ )
+ 
+ // Default string arguments
+@@ -2435,6 +2437,8 @@ type DaemonConfig struct {
+ 	// EnableSocketLBPodConnectionTermination enables the termination of connections from pods
+ 	// to deleted service backends when socket-LB is enabled
+ 	EnableSocketLBPodConnectionTermination bool
++
++	DisablePerPacketLB bool
+ }
+ 
+ var (
+@@ -3171,6 +3175,8 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
+ 	c.BPFEventsTraceEnabled = vp.GetBool(BPFEventsTraceEnabled)
+ 	c.EnableIPSecEncryptedOverlay = vp.GetBool(EnableIPSecEncryptedOverlay)
+ 
++	c.DisablePerPacketLB = vp.GetBool(DisablePerPacketLB)
++
+ 	c.ServiceNoBackendResponse = vp.GetString(ServiceNoBackendResponse)
+ 	switch c.ServiceNoBackendResponse {
+ 	case ServiceNoBackendResponseReject, ServiceNoBackendResponseDrop:
+-- 
+2.39.5 (Apple Git-154)
+

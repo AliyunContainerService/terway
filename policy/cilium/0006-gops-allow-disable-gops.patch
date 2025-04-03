@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Wed, 13 Nov 2024 15:56:13 +0800
+Subject: gops: allow disable gops
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ pkg/gops/cell.go | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/pkg/gops/cell.go b/pkg/gops/cell.go
+index 707835d816..0e2da2efa6 100644
+--- a/pkg/gops/cell.go
++++ b/pkg/gops/cell.go
+@@ -36,6 +36,9 @@ func (def GopsConfig) Flags(flags *pflag.FlagSet) {
+ }
+ 
+ func registerGopsHooks(lc cell.Lifecycle, log logrus.FieldLogger, cfg GopsConfig) {
++	if cfg.GopsPort == 0 {
++		return
++	}
+ 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.GopsPort)
+ 	addrField := logrus.Fields{"address": addr, logfields.LogSubsys: "gops"}
+ 	log = log.WithFields(addrField)
+-- 
+2.39.5 (Apple Git-154)
+

@@ -96,7 +96,7 @@ eniip_datapathv2_setup(){
 }
 
 eniip_datapathv2_check() {
-  echo "Checking eniip default setup..." >&2
+  echo "Checking eniip datapathv2 setup..." >&2
   local current=""
   for ((i=1; i<=10; i++)); do
     set +e
@@ -136,7 +136,7 @@ eniip_legacy_ciliumargs_setup(){
 
 
 eniip_legacy_ciliumargs_check() {
-  echo "Checking eniip default setup..." >&2
+  echo "Checking eniip legacy setup..." >&2
   local current=""
   for ((i=1; i<=10; i++)); do
     set +e

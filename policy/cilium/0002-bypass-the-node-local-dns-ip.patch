@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Mon, 24 Mar 2025 16:43:22 +0800
+Subject: bypass the node local dns ip
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ bpf/bpf_lxc.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index fd46558a86..0701bddf5e 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -14,6 +14,7 @@
+ #define IS_BPF_LXC 1
+ 
+ #define EVENT_SOURCE LXC_ID
++#define LOCAL_DNS_IP 0x0A14FEA9
+ 
+ #include "lib/auth.h"
+ #include "lib/tailcall.h"
+@@ -1265,6 +1266,10 @@ maybe_pass_to_stack: __maybe_unused;
+ #else
+ 		int oif = 0;
+ #endif
++
++        if (ip4->daddr == LOCAL_DNS_IP )
++            goto pass_to_stack;
++
+ 		if (oif > 0) {
+ 			ret = ipv4_l3(ctx, ETH_HLEN, NULL, NULL, ip4);
+ 			if (ret == CTX_ACT_OK)
+-- 
+2.39.5 (Apple Git-154)
+

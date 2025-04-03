@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Fri, 27 Sep 2024 16:21:26 +0800
+Subject: lb: enable in cluster load balancer
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+---
+ bpf/bpf_lxc.c             | 4 ++--
+ daemon/cmd/daemon_main.go | 3 +++
+ pkg/k8s/service.go        | 2 +-
+ pkg/option/config.go      | 7 +++++++
+ 4 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index 0701bddf5e..c35ed9dc60 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -98,7 +98,7 @@ static __always_inline int __per_packet_lb_svc_xlate_4(void *ctx, struct iphdr *
+ 
+ 	lb4_fill_key(&key, &tuple);
+ 
+-	svc = lb4_lookup_service(&key, is_defined(ENABLE_NODEPORT));
++	svc = lb4_lookup_service(&key, true);
+ 	if (svc) {
+ #if defined(ENABLE_L7_LB)
+ 		if (lb4_svc_is_l7loadbalancer(svc)) {
+@@ -164,7 +164,7 @@ static __always_inline int __per_packet_lb_svc_xlate_6(void *ctx, struct ipv6hdr
+ 	 * the CT entry for destination endpoints where we can't encode the
+ 	 * state in the address.
+ 	 */
+-	svc = lb6_lookup_service(&key, is_defined(ENABLE_NODEPORT));
++	svc = lb6_lookup_service(&key, true);
+ 	if (svc) {
+ #if defined(ENABLE_L7_LB)
+ 		if (lb6_svc_is_l7loadbalancer(svc)) {
+diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
+index 4370dc2617..5a80538e8d 100644
+--- a/daemon/cmd/daemon_main.go
++++ b/daemon/cmd/daemon_main.go
+@@ -375,6 +375,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
+ 	flags.Bool(option.EnableExternalIPs, false, fmt.Sprintf("Enable k8s service externalIPs feature (requires enabling %s)", option.EnableNodePort))
+ 	option.BindEnv(vp, option.EnableExternalIPs)
+ 
++	flags.Bool(option.EnableInClusterLoadBalance, false, "Enable k8s in cluster loadbalance")
++	option.BindEnv(vp, option.EnableInClusterLoadBalance)
++
+ 	flags.Bool(option.EnableL7Proxy, defaults.EnableL7Proxy, "Enable L7 proxy for L7 policy enforcement")
+ 	option.BindEnv(vp, option.EnableL7Proxy)
+ 
+diff --git a/pkg/k8s/service.go b/pkg/k8s/service.go
+index 486d4669c6..9e453da546 100644
+--- a/pkg/k8s/service.go
++++ b/pkg/k8s/service.go
+@@ -505,7 +505,7 @@ func NewService(ips []net.IP, externalIPs, loadBalancerIPs, loadBalancerSourceRa
+ 	// By omitting these IPs in the returned Service object, they
+ 	// are no longer considered in equality checks and thus save
+ 	// CPU cycles processing events Cilium will not act upon.
+-	if option.Config.EnableNodePort {
++	if option.Config.EnableNodePort || option.Config.EnableInClusterLoadBalance {
+ 		k8sExternalIPs = parseIPs(externalIPs)
+ 		k8sLoadBalancerIPs = parseIPs(loadBalancerIPs)
+ 	} else if option.Config.BGPAnnounceLBIP {
+diff --git a/pkg/option/config.go b/pkg/option/config.go
+index 2e9be9f766..4abd5c38ff 100644
+--- a/pkg/option/config.go
++++ b/pkg/option/config.go
+@@ -245,6 +245,9 @@ const (
+ 	// EnableNodePort enables NodePort services implemented by Cilium in BPF
+ 	EnableNodePort = "enable-node-port"
+ 
++	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
++	EnableInClusterLoadBalance = "enable-in-cluster-loadbalance"
++
+ 	// EnableSVCSourceRangeCheck enables check of service source range checks
+ 	EnableSVCSourceRangeCheck = "enable-svc-source-range-check"
+ 
+@@ -1919,6 +1922,9 @@ type DaemonConfig struct {
+ 	// EnableNodePort enables k8s NodePort service implementation in BPF
+ 	EnableNodePort bool
+ 
++	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
++	EnableInClusterLoadBalance bool
++
+ 	// EnableSVCSourceRangeCheck enables check of loadBalancerSourceRanges
+ 	EnableSVCSourceRangeCheck bool
+ 
+@@ -3053,6 +3059,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
+ 	c.EnableIPIPTermination = vp.GetBool(EnableIPIPTermination)
+ 	c.EnableUnreachableRoutes = vp.GetBool(EnableUnreachableRoutes)
+ 	c.EnableNodePort = vp.GetBool(EnableNodePort)
++	c.EnableInClusterLoadBalance = viper.GetBool(EnableInClusterLoadBalance)
+ 	c.EnableSVCSourceRangeCheck = vp.GetBool(EnableSVCSourceRangeCheck)
+ 	c.EnableHostPort = vp.GetBool(EnableHostPort)
+ 	c.EnableHostLegacyRouting = vp.GetBool(EnableHostLegacyRouting)
+-- 
+2.39.5 (Apple Git-154)
+
