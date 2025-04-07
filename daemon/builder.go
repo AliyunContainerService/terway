@@ -248,16 +248,17 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 		nodeAnnotations = map[string]string{}
 	)
 
-	enableIPv4 := b.service.enableIPv4
-	enableIPv6 := b.service.enableIPv6
-	eniConfig := getENIConfig(b.config)
-	eniConfig.EnableIPv4 = enableIPv4
-	eniConfig.EnableIPv6 = enableIPv6
-
 	zoneID, err := instance.GetInstanceMeta().GetZoneID()
 	if err != nil {
 		return err
 	}
+
+	enableIPv4 := b.service.enableIPv4
+	enableIPv6 := b.service.enableIPv6
+	eniConfig := getENIConfig(b.config, zoneID)
+	eniConfig.EnableIPv4 = enableIPv4
+	eniConfig.EnableIPv6 = enableIPv6
+
 	instanceID, err := instance.GetInstanceMeta().GetInstanceID()
 	if err != nil {
 		return err
