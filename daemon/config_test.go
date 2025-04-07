@@ -93,7 +93,7 @@ func TestGetENIConfig(t *testing.T) {
 		},
 	}
 
-	eniConfig := getENIConfig(cfg)
+	eniConfig := getENIConfig(cfg, "zoneID")
 
 	assert.Equal(t, 1, len(eniConfig.ENITags))
 	assert.Equal(t, []string{"sg1", "sg2"}, eniConfig.SecurityGroupIDs)
@@ -101,4 +101,5 @@ func TestGetENIConfig(t *testing.T) {
 	assert.Equal(t, daemon.EniSelectionPolicyMostIPs, eniConfig.EniSelectionPolicy)
 	assert.Equal(t, "rgID", eniConfig.ResourceGroupID)
 	assert.Equal(t, daemon.Feat(3), eniConfig.EniTypeAttr)
+	assert.Equal(t, []string{"vswitch1", "vswitch2"}, eniConfig.VSwitchOptions)
 }
