@@ -24,7 +24,7 @@ func getDynamicConfig(ctx context.Context, k8s k8s.Kubernetes) (string, string, 
 	return cfg, label, err
 }
 
-func getENIConfig(cfg *daemon.Config) *daemon.ENIConfig {
+func getENIConfig(cfg *daemon.Config, zoneID string) *daemon.ENIConfig {
 	vswitchSelectionPolicy := vswitch.VSwitchSelectionPolicyRandom
 	switch cfg.VSwitchSelectionPolicy {
 	case "ordered":
@@ -39,6 +39,7 @@ func getENIConfig(cfg *daemon.Config) *daemon.ENIConfig {
 	}
 
 	eniConfig := &daemon.ENIConfig{
+		ZoneID:                 zoneID,
 		VSwitchOptions:         nil,
 		ENITags:                cfg.ENITags,
 		SecurityGroupIDs:       cfg.GetSecurityGroups(),
