@@ -93,6 +93,8 @@ const (
 
 	EventSyncPodNetworkingSucceed = "SyncPodNetworkingSucceed"
 	EventSyncPodNetworkingFailed  = "SyncPodNetworkingFailed"
+
+	EventConfigError = "ConfigError"
 )
 
 // PodUseENI whether pod is use podENI cr res
