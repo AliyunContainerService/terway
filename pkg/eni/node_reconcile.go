@@ -64,7 +64,7 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 
 	eniConfig, err := daemon.ConfigFromConfigMap(ctx, r.client, node.Name)
 	if err != nil {
-		r.record.Event(k8sNode, "Warning", "ConfigError", err.Error())
+		r.record.Event(k8sNode, "Warning", types.EventConfigError, err.Error())
 		return reconcile.Result{}, err
 	}
 
@@ -85,7 +85,7 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		ipv4, ipv6 = true, true
 		if node.Spec.NodeCap.IPv6PerAdapter != node.Spec.NodeCap.IPv4PerAdapter {
 			l.Info("unsupported dual stack instance")
-			r.record.Eventf(node, "Warning", "ConfigError", "Instance not support k8s dual stack. ipv4 and ipv6 count is not equal.")
+			r.record.Eventf(node, "Warning", types.EventConfigError, "Instance not support k8s dual stack. ipv4 and ipv6 count is not equal.")
 			ipv6 = false
 		}
 	case "ipv6":
@@ -208,7 +208,7 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 
 	eniConfig, err := daemon.ConfigFromConfigMap(ctx, r.client, node.Name)
 	if err != nil {
-		r.record.Event(k8sNode, "Warning", "ConfigError", err.Error())
+		r.record.Event(k8sNode, "Warning", types.EventConfigError, err.Error())
 		return reconcile.Result{}, err
 	}
 
@@ -234,7 +234,9 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		}
 	}
 	if len(vswitchOptions) == 0 {
-		return reconcile.Result{}, fmt.Errorf("failed to get vsw for zone %s", node.Spec.NodeMetadata.ZoneID)
+		err = fmt.Errorf("failed to get vsw for zone %s", node.Spec.NodeMetadata.ZoneID)
+		r.record.Event(k8sNode, "Warning", types.EventConfigError, err.Error())
+		return reconcile.Result{}, err
 	}
 
 	policy := networkv1beta1.VSwitchSelectionPolicyRandom
