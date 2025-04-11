@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1-labs
-ARG TERWAY_POLICY_IMAGE=registry-cn-zhangjiakou.ack.aliyuncs.com/acs/terway:policy-fbc8264d@sha256:61c97736b07f5ad6e1536f91eee8d4da64e085068baf334310e787cc7b6a2988
+ARG TERWAY_POLICY_IMAGE=registry-cn-zhangjiakou.ack.aliyuncs.com/acs/terway:policy-3d61882b@sha256:a91e6922309e08076f685f77f02881beec9c7f4410a6f410be48840fab907e04
 
 FROM --platform=$TARGETPLATFORM ${TERWAY_POLICY_IMAGE} AS policy-dist
 

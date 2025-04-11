@@ -30,7 +30,7 @@ index c35ed9dc60..b6c5359ddb 100644
  #endif
  
 diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
-index f984dfaaed..cfe2fe1a66 100644
+index 0db9f8a1fa..28ff4c121f 100644
 --- a/pkg/datapath/linux/config/config.go
 +++ b/pkg/datapath/linux/config/config.go
 @@ -20,6 +20,7 @@ import (
