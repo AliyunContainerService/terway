@@ -40,6 +40,7 @@ get_cilium_cmdline() {
 
 tear_down_callback(){
   helm uninstall -n kube-system terway-eniip
+  kind delete cluster || true
 }
 
 eniip_default_setup(){
