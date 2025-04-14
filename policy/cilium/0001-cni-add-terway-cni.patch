@@ -14,7 +14,7 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  daemon/cmd/kube_proxy_replacement.go          |   7 +-
  daemon/cmd/watchdogs.go                       |   5 +
  pkg/datapath/linux/bandwidth/ops.go           |   1 +
- pkg/datapath/linux/config/config.go           |  16 +
+ pkg/datapath/linux/config/config.go           |  20 +
  pkg/datapath/loader/loader.go                 | 103 +++--
  pkg/datapath/loader/tc.go                     |   7 +
  pkg/datapath/maps/map.go                      |   1 +
@@ -35,7 +35,7 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  plugins/cilium-cni/chaining/terway/terway.go  | 363 ++++++++++++++++++
  plugins/cilium-cni/cmd/cmd.go                 |   1 +
  plugins/cilium-cni/types/types.go             |   1 +
- 30 files changed, 716 insertions(+), 43 deletions(-)
+ 30 files changed, 720 insertions(+), 43 deletions(-)
  create mode 100644 pkg/endpoint/terway.go
  create mode 100644 plugins/cilium-cni/chaining/terway/terway.go
 
@@ -285,10 +285,21 @@ index 123531e301..ab1ceeadc1 100644
  		// Probe results show that the system doesn't support BandwidthManager, so
  		// bail out.
 diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
-index 744ce3a2d7..f984dfaaed 100644
+index 744ce3a2d7..0db9f8a1fa 100644
 --- a/pkg/datapath/linux/config/config.go
 +++ b/pkg/datapath/linux/config/config.go
-@@ -1081,6 +1081,22 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, devices []strin
+@@ -402,6 +402,10 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
+ 	cDefinesMap["NAT_46X64_PREFIX_2"] = "0"
+ 	cDefinesMap["NAT_46X64_PREFIX_3"] = "0"
+ 
++	if !option.Config.EnableHostLegacyRouting {
++		cDefinesMap["ENABLE_HOST_ROUTING"] = "1"
++	}
++
+ 	if option.Config.EnableNodePort {
+ 		if option.Config.EnableHealthDatapath {
+ 			cDefinesMap["ENABLE_HEALTH_CHECK"] = "1"
+@@ -1081,6 +1085,22 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, devices []strin
  		}
  	}
  

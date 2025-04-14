@@ -32,8 +32,8 @@ the same configuration mechanisms.
 Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
  bpf/bpf_alignchecker.c                    |  2 +
- bpf/bpf_host.c                            |  8 +-
  bpf/lib/common.h                          | 11 +++
+ bpf/lib/l3.h                              | 12 +++
  bpf/lib/tb.h                              | 72 +++++++++++++++++
  bpf/node_config.h                         |  1 +
  bugtool/cmd/configuration.go              |  1 +
@@ -54,7 +54,7 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  pkg/maps/ibwmap/cell.go                   | 57 +++++++++++++
  pkg/maps/ibwmap/doc.go                    |  7 ++
  pkg/maps/ibwmap/table.go                  | 98 +++++++++++++++++++++++
- 23 files changed, 475 insertions(+), 43 deletions(-)
+ 23 files changed, 480 insertions(+), 42 deletions(-)
  create mode 100644 bpf/lib/tb.h
  create mode 100644 pkg/maps/ibwmap/bwmap.go
  create mode 100644 pkg/maps/ibwmap/cell.go
@@ -74,39 +74,6 @@ index 4916cc7668..abafd6b01e 100644
  add_type(struct egress_gw_policy_key);
  add_type(struct egress_gw_policy_entry);
  add_type(struct vtep_key);
-diff --git a/bpf/bpf_host.c b/bpf/bpf_host.c
-index 27de726b02..1b2cdc4ca9 100644
---- a/bpf/bpf_host.c
-+++ b/bpf/bpf_host.c
-@@ -54,6 +54,7 @@
- #include "lib/encrypt.h"
- #include "lib/wireguard.h"
- #include "lib/vxlan.h"
-+#include "lib/tb.h"
- 
-  #define host_egress_policy_hook(ctx, src_sec_identity, ext_err) CTX_ACT_OK
- 
-@@ -348,6 +349,9 @@ handle_ipv6_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
- 			l3_off += __ETH_HLEN;
- 		}
- #endif
-+		ret = accept(ctx,ep->lxc_id);
-+		if (IS_ERR(ret))
-+			return ret;
- 		return ipv6_local_delivery(ctx, l3_off, secctx, magic, ep,
- 					   METRIC_INGRESS, from_host, false);
- 	}
-@@ -779,7 +783,9 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
- 				return DROP_INVALID;
- 		}
- #endif
--
-+		ret = accept(ctx,ep->lxc_id);
-+		if (IS_ERR(ret))
-+			return ret;
- 		return ipv4_local_delivery(ctx, l3_off, secctx, magic, ip4, ep,
- 					   METRIC_INGRESS, from_host, false, 0);
- 	}
 diff --git a/bpf/lib/common.h b/bpf/lib/common.h
 index 3e93b47cc2..7b32f32756 100644
 --- a/bpf/lib/common.h
@@ -129,9 +96,39 @@ index 3e93b47cc2..7b32f32756 100644
  struct remote_endpoint_info {
  	__u32		sec_identity;
  	__u32		tunnel_endpoint;
+diff --git a/bpf/lib/l3.h b/bpf/lib/l3.h
+index 9ebab28ef9..eadfe2afb0 100644
+--- a/bpf/lib/l3.h
++++ b/bpf/lib/l3.h
+@@ -12,6 +12,7 @@
+ #include "l4.h"
+ #include "icmp6.h"
+ #include "csum.h"
++#include "lib/tb.h"
+ 
+ /*
+  * When the host routing is enabled we need to check policies at source, as in
+@@ -86,6 +87,17 @@ l3_local_delivery(struct __ctx_buff *ctx, __u32 seclabel,
+ 	update_metrics(ctx_full_len(ctx), direction, REASON_FORWARDED);
+ #endif
+ 
++	if (direction == METRIC_INGRESS && !from_host) {
++		/*
++		 * Traffic from nodes, local endpoints, or hairpin connections is ignored
++		 */
++		int ret;
++
++		ret = accept(ctx, ep->lxc_id);
++		if (IS_ERR(ret))
++			return ret;
++	}
++
+ #if defined(USE_BPF_PROG_FOR_INGRESS_POLICY) && \
+ 	!defined(FORCE_LOCAL_POLICY_EVAL_AT_SOURCE)
+ 	set_identity_mark(ctx, seclabel, magic);
 diff --git a/bpf/lib/tb.h b/bpf/lib/tb.h
 new file mode 100644
-index 0000000000..d983e26292
+index 0000000000..4031db1499
 --- /dev/null
 +++ b/bpf/lib/tb.h
 @@ -0,0 +1,72 @@
@@ -165,8 +162,8 @@ index 0000000000..d983e26292
 +static __always_inline int accept(struct __ctx_buff *ctx,
 +					      __u32 ep_id)
 +{
-+    __u64 tokens, now, t_last, elapsed_time, bps;
-+	struct throttle_id aggregate;
++	__u64 tokens, now, t_last, elapsed_time, bps;
++	struct throttle_id aggregate = {};
 +	struct throttle_info *info;
 +	__u32 ret = CTX_ACT_OK;
 +
@@ -189,7 +186,7 @@ index 0000000000..d983e26292
 +		if (tokens > bps) {
 +			tokens = bps;
 +		}
-+    }
++	}
 +	if (tokens >= ctx_wire_len(ctx)) {
 +		tokens -= ctx_wire_len(ctx);
 +	}else {
