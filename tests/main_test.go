@@ -95,7 +95,7 @@ func TestMain(m *testing.M) {
 		panic("error get home path")
 	}
 	envCfg := envconf.NewWithKubeConfig(filepath.Join(home, ".kube", "config")).
-		WithRandomNamespace()
+		WithRandomNamespace().WithParallelTestEnabled()
 
 	testenv = env.NewWithConfig(envCfg)
 	testenv.Setup(
@@ -132,19 +132,6 @@ func TestMain(m *testing.M) {
 				t.Fatal("failed waiting for pods to be deleted", err)
 			}
 		})
-		return ctx, nil
-	})
-
-	testenv.Finish(func(ctx context.Context, config *envconf.Config) (context.Context, error) {
-		if !isFailed.Load() {
-			return envfuncs.DeleteNamespace(envCfg.Namespace())(ctx, config)
-		}
-
-		pn := &networkv1beta1.PodNetworking{}
-		pn.Name = "trunk"
-		pn.Spec.ENIOptions = networkv1beta1.ENIOptions{ENIAttachType: networkv1beta1.ENIOptionTypeTrunk}
-
-		_ = config.Client().Resources().Delete(ctx, pn)
 		return ctx, nil
 	})
 

@@ -25,7 +25,7 @@ import (
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 )
 
-func TestCreatePodNetworking(t *testing.T) {
+func TestNormal_CreatePodNetworking(t *testing.T) {
 	defaultConfig := func() features.Feature {
 		pnName := "empty-pn"
 
@@ -115,7 +115,7 @@ func TestCreatePodNetworking(t *testing.T) {
 	testenv.TestInParallel(t, defaultConfig, defaultVSwitch, defaultSecurityGroup)
 }
 
-func TestSelector(t *testing.T) {
+func TestNormal_Selector(t *testing.T) {
 	podSelector := func() features.Feature {
 		pnName := "pn-pod-selector"
 		podName := "pod-selector"
@@ -234,7 +234,7 @@ func TestSelector(t *testing.T) {
 	testenv.TestInParallel(t, podSelector, nsSelector)
 }
 
-func TestZoneLimit(t *testing.T) {
+func TestNormal_ZoneLimit(t *testing.T) {
 	zoneLimit := func() features.Feature {
 		pnName := "zone-limit"
 		podName := "zone-limit"
@@ -374,7 +374,7 @@ func TestZoneLimit(t *testing.T) {
 	testenv.Test(t, zoneLimit)
 }
 
-func TestFixedIP(t *testing.T) {
+func TestNormal_FixedIP(t *testing.T) {
 	fixedIP := func() features.Feature {
 		pnName := "fixed-ip"
 		return features.New("FixedIP").WithLabel("env", "trunking").
@@ -499,7 +499,7 @@ func TestFixedIP(t *testing.T) {
 	testenv.Test(t, fixedIP)
 }
 
-func TestExclusiveENI(t *testing.T) {
+func TestNormal_ExclusiveENI(t *testing.T) {
 	exclusiveENI := func() features.Feature {
 		pnName := "exclusive-eni"
 		podName := "exclusive-eni"
