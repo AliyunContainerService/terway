@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 	"github.com/alexflint/go-filemutex"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -231,7 +232,7 @@ func runDebugServer(ctx context.Context, wg *sync.WaitGroup, debugSocketListen s
 func registerPrometheus() {
 	prometheus.MustRegister(metric.RPCLatency)
 	prometheus.MustRegister(metric.OpenAPILatency)
-	prometheus.MustRegister(metric.MetadataLatency)
+	prometheus.MustRegister(metadata.MetadataLatency)
 	// ResourcePool
 	prometheus.MustRegister(metric.ResourcePoolTotal)
 	prometheus.MustRegister(metric.ResourcePoolIdle)
