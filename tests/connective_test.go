@@ -33,7 +33,7 @@ func getStack() []string {
 	return r
 }
 
-func TestConnective(t *testing.T) {
+func TestNormal_Connective(t *testing.T) {
 	var feats []features.Feature
 
 	type PodConfig struct {
@@ -392,7 +392,7 @@ func TestConnective(t *testing.T) {
 	}
 }
 
-func TestNetworkPolicy(t *testing.T) {
+func TestNormal_NetworkPolicy(t *testing.T) {
 	if !testNetworkPolicy {
 		t.Log("Skip networkPolicy tests")
 		return
