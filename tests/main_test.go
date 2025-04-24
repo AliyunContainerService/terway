@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"golang.org/x/mod/semver"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"go.uber.org/atomic"
@@ -48,7 +49,8 @@ var (
 
 	ipvlan bool
 
-	terway string
+	terway        string
+	terwayVersion string
 
 	vSwitchIDs       string
 	securityGroupIDs string
@@ -148,6 +150,10 @@ func checkENIConfig(ctx context.Context, config *envconf.Config) (context.Contex
 		switch d.Name {
 		case "terway", "terway-eni", "terway-eniip":
 			terway = d.Name
+
+			tag := strings.Split(d.Spec.Template.Spec.Containers[0].Image, ":")[1]
+			terwayVersion = tag
+
 			break
 		}
 	}
@@ -179,6 +185,11 @@ func checkENIConfig(ctx context.Context, config *envconf.Config) (context.Contex
 			ipvlan = true
 		}
 	}
+
+	if ebpf && semver.Compare(terwayVersion, "v1.9.0") > 0 && semver.Compare(terwayVersion, "v1.10.0") < 0 {
+		ipvlan = true
+	}
+
 	cfg := &Config{}
 	err = json.Unmarshal([]byte(cm.Data["eni_conf"]), cfg)
 	if err != nil {
