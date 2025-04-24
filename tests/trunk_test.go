@@ -165,6 +165,7 @@ func TestNormal_Selector(t *testing.T) {
 	nsSelector := func() features.Feature {
 		pnName := "pn-ns-selector"
 		podName := "ns-selector"
+		namespace := "pn-ns-test"
 		return features.New("PodNetworking/NamespaceSelector").WithLabel("env", "trunking").
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 				err := WaitPodNetworkingDeleted(pnName, config.Client())
@@ -172,19 +173,25 @@ func TestNormal_Selector(t *testing.T) {
 					t.Fatalf("delete podNetworking %s failed, %v", pnName, err)
 				}
 
-				ns := &corev1.Namespace{}
-				err = config.Client().Resources().Get(ctx, config.Namespace(), "", ns)
+				err = waitNamespaceDeleted(ctx, namespace, config.Client())
+				if err != nil {
+					t.Fatalf("delete namespace %s failed, %v", namespace, err)
+				}
+
+				ns := &corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: namespace,
+						Labels: map[string]string{
+							"netplan": pnName,
+						},
+					},
+				}
+				err = config.Client().Resources().Create(ctx, ns)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if ns.Labels == nil {
-					ns.Labels = make(map[string]string)
-				}
-				ns.Labels["netplan"] = pnName
-				err = config.Client().Resources().Update(ctx, ns)
-				if err != nil {
-					t.Fatal(err)
-				}
+
+				ctx = SaveResources(ctx, ns)
 
 				pn := newPodNetworking(pnName, nil, nil, nil, &metav1.LabelSelector{
 					MatchLabels: map[string]string{"netplan": pnName},
@@ -200,7 +207,7 @@ func TestNormal_Selector(t *testing.T) {
 				return ctx
 			}).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				pod := newPod(config.Namespace(), podName, nil, nil)
+				pod := newPod(namespace, podName, nil, nil)
 				err := config.Client().Resources().Create(ctx, pod)
 				if err != nil {
 					t.Error(err)
@@ -209,20 +216,7 @@ func TestNormal_Selector(t *testing.T) {
 				return ctx
 			}).
 			Assess("pod have trunking config", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				err := WaitPodHaveValidateConfig(config.Namespace(), podName, config.Client(), pnName)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return ctx
-			}).
-			Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				ns := &corev1.Namespace{}
-				err := config.Client().Resources().Get(ctx, config.Namespace(), "", ns)
-				if err != nil {
-					t.Fatal(err)
-				}
-				delete(ns.Labels, "netplan")
-				err = config.Client().Resources().Update(ctx, ns)
+				err := WaitPodHaveValidateConfig(namespace, podName, config.Client(), pnName)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -656,6 +650,17 @@ func WaitPodHaveValidateConfig(namespace, name string, client klient.Client, pod
 		return err
 	}
 	return nil
+}
+
+func waitNamespaceDeleted(ctx context.Context, name string, client klient.Client) error {
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+
+	_ = client.Resources().Delete(ctx, ns)
+
+	return wait.For(conditions.New(client.Resources()).ResourceDeleted(ns),
+		wait.WithImmediate(),
+		wait.WithInterval(1*time.Second),
+		wait.WithTimeout(60*time.Second))
 }
 
 func waitPodENIPod(namespace, name string, client klient.Client) (*corev1.Pod, error) {
