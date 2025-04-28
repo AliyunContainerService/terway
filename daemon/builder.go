@@ -120,6 +120,8 @@ func (b *NetworkServiceBuilder) InitK8S() *NetworkServiceBuilder {
 
 	if types.NodeExclusiveENIMode(b.service.k8s.Node().Labels) == types.ExclusiveENIOnly {
 		b.service.daemonMode = daemon.ModeENIOnly
+		b.daemonMode = daemon.ModeENIOnly
+		b.service.ipamType = types.IPAMTypeCRD
 	}
 
 	if utils.ISLinJunNode(b.service.k8s.Node().Labels) {
@@ -382,34 +384,40 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 
 	var eniList []eni.NetworkInterface
 
-	var (
-		normalENICount int
-		erdmaENICount  int
-	)
-	for _, ni := range attached {
-		serviceLog.V(5).Info("found attached eni", "eni", ni)
-		if b.config.EnableENITrunking && ni.Trunk && trunkENIID == ni.ID {
-			lo := eni.NewLocal(ni, "trunk", factory, poolConfig)
-			normalENICount++
-			eniList = append(eniList, eni.NewTrunk(b.service.k8s.GetClient(), lo))
-		} else if b.config.EnableERDMA && ni.ERdma {
-			erdmaENICount++
-			eniList = append(eniList, eni.NewLocal(ni, "erdma", factory, poolConfig))
-		} else {
-			normalENICount++
-			eniList = append(eniList, eni.NewLocal(ni, "secondary", factory, poolConfig))
-		}
-	}
-	normalENINeeded := poolConfig.MaxENI - normalENICount
-	if b.config.EnableERDMA {
-		normalENINeeded = poolConfig.MaxENI - b.limit.ERDMARes() - normalENICount
-		for i := 0; i < b.limit.ERDMARes()-erdmaENICount; i++ {
-			eniList = append(eniList, eni.NewLocal(nil, "erdma", factory, poolConfig))
-		}
-	}
+	if b.daemonMode == daemon.ModeENIOnly {
+		eniList = append(eniList, eni.NewRemote(b.service.k8s.GetClient(), nil))
+	} else {
+		var (
+			normalENICount int
+			erdmaENICount  int
+		)
+		for _, ni := range attached {
+			serviceLog.Info("found attached eni", "eni", ni)
+			if b.config.EnableENITrunking && ni.Trunk && trunkENIID == ni.ID {
+				lo := eni.NewLocal(ni, "trunk", factory, poolConfig)
 
-	for i := 0; i < normalENINeeded; i++ {
-		eniList = append(eniList, eni.NewLocal(nil, "secondary", factory, poolConfig))
+				serviceLog.Info("trunk inited")
+				normalENICount++
+				eniList = append(eniList, eni.NewTrunk(b.service.k8s.GetClient(), lo))
+			} else if b.config.EnableERDMA && ni.ERdma {
+				erdmaENICount++
+				eniList = append(eniList, eni.NewLocal(ni, "erdma", factory, poolConfig))
+			} else {
+				normalENICount++
+				eniList = append(eniList, eni.NewLocal(ni, "secondary", factory, poolConfig))
+			}
+		}
+		normalENINeeded := poolConfig.MaxENI - normalENICount
+		if b.config.EnableERDMA {
+			normalENINeeded = poolConfig.MaxENI - b.limit.ERDMARes() - normalENICount
+			for i := 0; i < b.limit.ERDMARes()-erdmaENICount; i++ {
+				eniList = append(eniList, eni.NewLocal(nil, "erdma", factory, poolConfig))
+			}
+		}
+
+		for i := 0; i < normalENINeeded; i++ {
+			eniList = append(eniList, eni.NewLocal(nil, "secondary", factory, poolConfig))
+		}
 	}
 
 	eniManager := eni.NewManager(poolConfig.MinPoolSize, poolConfig.MaxPoolSize, poolConfig.Capacity, 30*time.Second, eniList, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), b.service.k8s)
