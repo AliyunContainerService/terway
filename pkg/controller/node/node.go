@@ -394,7 +394,7 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		}
 		node.Spec.NodeCap.Adapters = resp.LeniQuota
 		node.Spec.NodeCap.TotalAdapters = resp.LeniQuota
-		node.Spec.NodeCap.IPv4PerAdapter = resp.LniSipQuota
+		node.Spec.NodeCap.IPv4PerAdapter = resp.LeniSipQuota
 	}
 
 	update := node.DeepCopy()
