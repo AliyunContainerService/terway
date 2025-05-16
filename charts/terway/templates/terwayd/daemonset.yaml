@@ -17,7 +17,6 @@ spec:
       labels:
         app: terway-eniip
     spec:
-      hostPID: true
       priorityClassName: system-node-critical
       affinity:
         nodeAffinity:
@@ -175,12 +174,8 @@ spec:
                 - SYS_MODULE
 {{- if or .Values.terway.enableDatapathV2 (eq .Values.terway.networkPolicyProvider "ebpf") }}
                 - CHOWN
-                - KILL
                 - IPC_LOCK
                 - SYS_RESOURCE
-                - FOWNER
-                - SETGID
-                - SETUID
 {{- end }}
           resources:
             requests:
