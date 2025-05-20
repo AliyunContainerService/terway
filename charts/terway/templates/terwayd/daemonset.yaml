@@ -61,6 +61,9 @@ spec:
                   key: disable_network_policy
                   optional: true
           volumeMounts:
+            - name: bpf-maps
+              mountPath: /sys/fs/bpf
+              mountPropagation: Bidirectional
             - name: eni-config
               mountPath: /etc/eni
             - mountPath: /var-run-eni
@@ -208,8 +211,13 @@ spec:
               name: cni
               readOnly: true
             # volumes use by cilium
-            - mountPath: /sys/fs
-              name: sys-fs
+            - name: bpf-maps
+              mountPath: /sys/fs/bpf
+              # Unprivileged containers can't set mount propagation to bidirectional
+              # in this case we will mount the bpf fs from an init container that
+              # is privileged and set the mount propagation from host to container
+              # in Cilium.
+              mountPropagation: HostToContainer
             - mountPath: /var/run/cilium
               name: cilium-run
               # Needed to be able to load kernel modules
@@ -255,10 +263,10 @@ spec:
             type: DirectoryOrCreate
           name: cilium-run
         # To keep state between restarts / upgrades for bpf maps
-        - hostPath:
-            path: /sys/fs/
+        - name: bpf-maps
+          hostPath:
+            path: /sys/fs/bpf
             type: DirectoryOrCreate
-          name: sys-fs
           # To access iptables concurrently with other processes (e.g. kube-proxy)
         - hostPath:
             path: /run/xtables.lock
