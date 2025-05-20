@@ -1,0 +1,195 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: networkinterfaces.network.alibabacloud.com
+spec:
+  group: network.alibabacloud.com
+  names:
+    kind: NetworkInterface
+    listKind: NetworkInterfaceList
+    plural: networkinterfaces
+    singular: networkinterface
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.instanceID
+      name: InstanceID
+      type: string
+    - jsonPath: .status.trunkENIID
+      name: TrunkENIID
+      type: string
+    - jsonPath: .status.nodeName
+      name: NodeName
+      type: string
+    - jsonPath: .spec.podENIRef.namespace
+      name: PodNamespace
+      type: string
+    - jsonPath: .spec.podENIRef.name
+      name: PodName
+      type: string
+    - jsonPath: .status.eniInfo.type
+      name: Type
+      type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: NetworkInterface is the Schema for the NetworkInterface API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              eni:
+                description: ENI eni info
+                properties:
+                  attachmentOptions:
+                    properties:
+                      trunk:
+                        type: boolean
+                    type: object
+                  id:
+                    type: string
+                  mac:
+                    type: string
+                  resourceGroupID:
+                    type: string
+                  securityGroupIDs:
+                    items:
+                      type: string
+                    type: array
+                  vSwitchID:
+                    type: string
+                  vpcID:
+                    type: string
+                  zone:
+                    type: string
+                type: object
+              extraConfig:
+                additionalProperties:
+                  type: string
+                type: object
+              ipv4:
+                type: string
+              ipv4CIDR:
+                type: string
+              ipv6:
+                type: string
+              ipv6CIDR:
+                type: string
+              managePolicy:
+                properties:
+                  cache:
+                    description: whether to cache on node
+                    type: boolean
+                  unManaged:
+                    type: boolean
+                type: object
+              podENIRef:
+                description: PodENIRef only some filed is used, uid, name, namespace
+                properties:
+                  apiVersion:
+                    description: API version of the referent.
+                    type: string
+                  fieldPath:
+                    description: |-
+                      If referring to a piece of an object instead of an entire object, this string
+                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                      For example, if the object reference is to a container within a pod, this would take on a value like:
+                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                      the event) or if no container name is specified "spec.containers[2]" (container with
+                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                      referencing a part of an object.
+                    type: string
+                  kind:
+                    description: |-
+                      Kind of the referent.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                    type: string
+                  name:
+                    description: |-
+                      Name of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                    type: string
+                  resourceVersion:
+                    description: |-
+                      Specific resourceVersion to which this reference is made, if any.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                    type: string
+                  uid:
+                    description: |-
+                      UID of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+            type: object
+          status:
+            properties:
+              cardIndex:
+                type: integer
+              eniInfo:
+                properties:
+                  id:
+                    type: string
+                  networkCardIndex:
+                    type: integer
+                  status:
+                    description: ENIBindStatus is the current status for the eni
+                    type: string
+                  type:
+                    description: ENIType for this eni, only Secondary and Member is
+                      supported
+                    enum:
+                    - Secondary
+                    - Trunk
+                    - Primary
+                    - Member
+                    type: string
+                  vid:
+                    type: integer
+                type: object
+              instanceID:
+                description: InstanceID for ecs
+                type: string
+              nodeName:
+                type: string
+              phase:
+                type: string
+              trunkENIID:
+                description: TrunkENIID is the trunk eni id
+                type: string
+            required:
+            - eniInfo
+            - phase
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

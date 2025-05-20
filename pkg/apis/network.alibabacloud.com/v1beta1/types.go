@@ -90,6 +90,7 @@ type Route struct {
 // ENI eni info
 type ENI struct {
 	ID                string            `json:"id,omitempty"`
+	VPCID             string            `json:"vpcID,omitempty"`
 	MAC               string            `json:"mac,omitempty"`
 	Zone              string            `json:"zone,omitempty"`
 	VSwitchID         string            `json:"vSwitchID,omitempty"`
