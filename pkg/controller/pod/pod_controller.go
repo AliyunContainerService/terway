@@ -23,9 +23,10 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
@@ -214,12 +215,25 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 
 	l.Info("creating eni")
 
+	if utils.ISLinJunNode(node.Labels) {
+		crNode := &v1beta1.Node{}
+		err = m.client.Get(ctx, k8stypes.NamespacedName{Name: node.Name}, crNode)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		backend := aliyunClient.BackendAPIEFLO
+		if crNode.Annotations[types.ENOApi] == "hdeni" {
+			backend = aliyunClient.BackendAPIEFLOHDENI
+		}
+		ctx = aliyunClient.SetBackendAPI(ctx, backend)
+	}
+
 	podENI := &v1beta1.PodENI{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pod.Name,
 			Namespace: pod.Namespace,
 			Finalizers: []string{
-				types.FinalizerPodENI,
+				types.FinalizerPodENIV2,
 			},
 			Annotations: map[string]string{
 				types.PodUID: string(pod.UID),
@@ -255,17 +269,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	}
 
 	// 2.4 wait cr created
-	_ = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
-		podENI := &v1beta1.PodENI{}
-		err := m.client.Get(ctx, k8stypes.NamespacedName{
-			Namespace: pod.Namespace,
-			Name:      pod.Name,
-		}, podENI)
-		if err != nil {
-			return false, nil
-		}
-		return true, nil
-	})
+	common.WaitCreated(ctx, m.client, &v1beta1.PodENI{}, pod.Namespace, pod.Name)
 
 	return reconcile.Result{}, nil
 }
@@ -514,6 +518,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 	}()
 
 	clusterID := controlplane.GetConfig().ClusterID
+	vpcID := controlplane.GetConfig().VPCID
 
 	ipv6Count := 0
 	switch controlplane.GetConfig().IPStack {
@@ -557,10 +562,16 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 					},
 					DeleteENIOnECSRelease: &deleteENIOnECSRelease,
 					SourceDestCheck:       ptr.To(false),
+
+					// eflo
+					ZoneID: podENI.Spec.Zone,
+					VPCID:  vpcID,
+					// for leni do not attach it
+					// for hdeni , require instanceID
 				},
 				Backoff: &bo,
 			}
-			eni, err := m.aliyun.CreateNetworkInterface(ctx, option)
+			eni, err := m.aliyun.CreateNetworkInterfaceV2(ctx, option)
 			if err != nil {
 
 				if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
@@ -570,17 +581,48 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 				return fmt.Errorf("create eni with openAPI err, %w", err)
 			}
 
+			// store cr
+			cr := common.ToNetworkInterfaceCR(eni)
+			controllerutil.AddFinalizer(cr, types.FinalizerENI)
+			cr.Spec.PodENIRef = &corev1.ObjectReference{
+				Kind:      "Pod",
+				Name:      podENI.Name,
+				Namespace: podENI.Namespace,
+			}
+
+			err = m.client.Create(ctx, cr)
+			if err != nil {
+				// delete the eni, as we can not store the eni info
+				rollbackCtx := context.Background()
+				// TODO , for eflo case , we have to check the error
+
+				innerErr := retry.OnError(backoff.Backoff(backoff.ENIRelease), func(err error) bool {
+					return true
+				}, func() error {
+					innerErr := m.aliyun.DeleteNetworkInterfaceV2(rollbackCtx, eni.NetworkInterfaceID)
+					return innerErr
+				})
+				if innerErr != nil {
+					m.record.Eventf(pod, corev1.EventTypeWarning, types.EventCreateENIFailed, "rollbackErr %s, createErr %s", innerErr, err)
+				}
+
+				return fmt.Errorf("create eni cr err,rollbackErr %s %w", innerErr, err)
+			}
+
+			common.WaitCreated(ctx, m.client, &v1beta1.NetworkInterface{}, cr.Namespace, cr.Name)
+
 			v6 := ""
 			if len(eni.IPv6Set) > 0 {
 				v6 = eni.IPv6Set[0].IPAddress
 			}
 			alloc.ENI = v1beta1.ENI{
 				ID:               eni.NetworkInterfaceID,
+				VPCID:            eni.VPCID,
 				MAC:              eni.MacAddress,
 				Zone:             eni.ZoneID,
 				VSwitchID:        eni.VSwitchID,
-				SecurityGroupIDs: eni.SecurityGroupIDs,
 				ResourceGroupID:  eni.ResourceGroupID,
+				SecurityGroupIDs: eni.SecurityGroupIDs,
 			}
 			alloc.IPv4 = eni.PrivateIPAddress
 			alloc.IPv6 = v6

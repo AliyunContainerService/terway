@@ -31,6 +31,7 @@ type BackendAPI int
 const (
 	BackendAPIECS BackendAPI = iota
 	BackendAPIEFLO
+	BackendAPIEFLOHDENI
 )
 
 type backendAPIKey struct{}

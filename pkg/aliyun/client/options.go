@@ -25,6 +25,7 @@ type NetworkInterfaceOptions struct {
 	SourceDestCheck       *bool
 
 	ZoneID string
+	VPCID  string
 }
 
 type CreateNetworkInterfaceOption interface {
@@ -94,6 +95,10 @@ func (c *CreateNetworkInterfaceOptions) ApplyCreateNetworkInterface(options *Cre
 
 		if c.NetworkInterfaceOptions.SourceDestCheck != nil {
 			options.NetworkInterfaceOptions.SourceDestCheck = c.NetworkInterfaceOptions.SourceDestCheck
+		}
+
+		if c.NetworkInterfaceOptions.VPCID != "" {
+			options.NetworkInterfaceOptions.VPCID = c.NetworkInterfaceOptions.VPCID
 		}
 	}
 }
@@ -182,8 +187,11 @@ func (c *CreateNetworkInterfaceOptions) EFLO(idempotentKeyGen IdempotentKeyGen) 
 	if c.NetworkInterfaceOptions.ZoneID != "" {
 		req.ZoneId = c.NetworkInterfaceOptions.ZoneID
 	}
+	if c.NetworkInterfaceOptions.VPCID != "" {
+		req.VpcId = c.NetworkInterfaceOptions.VPCID
+	}
 
-	if req.SecurityGroupId == "" {
+	if req.SecurityGroupId == "" || req.ZoneId == "" {
 		return nil, nil, ErrInvalidArgs
 	}
 
@@ -319,6 +327,8 @@ type DescribeNetworkInterfaceOptions struct {
 	Tags                *map[string]string
 
 	Backoff *wait.Backoff
+
+	RawStatus *bool
 }
 
 func (o *DescribeNetworkInterfaceOptions) ApplyTo(in *DescribeNetworkInterfaceOptions) {
@@ -342,6 +352,9 @@ func (o *DescribeNetworkInterfaceOptions) ApplyTo(in *DescribeNetworkInterfaceOp
 	}
 	if o.Backoff != nil {
 		in.Backoff = o.Backoff
+	}
+	if o.RawStatus != nil {
+		in.RawStatus = o.RawStatus
 	}
 }
 

@@ -61,6 +61,8 @@ const (
 	ENIRelatedNodeName = AnnotationPrefix + "node"
 
 	PodIPs = AnnotationPrefix + "pod-ips"
+
+	ENOApi = AnnotationPrefix + "eno-api"
 )
 
 // labels
@@ -75,7 +77,12 @@ const (
 )
 
 // FinalizerPodENI finalizer for podENI resource
-const FinalizerPodENI = "pod-eni"
+const (
+	// deprecated
+	FinalizerPodENI   = "pod-eni"
+	FinalizerPodENIV2 = "network.alibabacloud.com/pod-eni"
+	FinalizerENI      = "network.alibabacloud.com/eni"
+)
 
 // events for control plane
 const (

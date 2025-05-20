@@ -127,15 +127,17 @@ func (a *OpenAPI) DescribeLeniNetworkInterface(ctx context.Context, opts ...Desc
 			DeviceIndex:                 0,
 		}
 
-		// For now use ecs status
-		switch eni.Status {
-		case LENIStatusUnattached:
-			eni.Status = ENIStatusAvailable
-		case LENIStatusAvailable:
-			eni.Status = ENIStatusInUse
+		if options.RawStatus == nil || !*options.RawStatus {
+			// For now use ecs status
+			switch eni.Status {
+			case LENIStatusUnattached:
+				eni.Status = ENIStatusAvailable
+			case LENIStatusAvailable:
+				eni.Status = ENIStatusInUse
 
-		case LENIStatusCreateFailed, LENIStatusDeleting, LENIStatusDeleteFailed:
-			eni.Status = ENIStatusDeleting
+			case LENIStatusCreateFailed, LENIStatusDeleting, LENIStatusDeleteFailed:
+				eni.Status = ENIStatusDeleting
+			}
 		}
 
 		privateIPs = append(privateIPs, IPSet{

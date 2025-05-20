@@ -40,6 +40,7 @@ var _ = Describe("Pod controller", func() {
 		ctx := context.Background()
 		name := "normal-pod-pod-networks"
 		ns := "default"
+		eniID := "eni-0"
 		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
 		request := reconcile.Request{
 			NamespacedName: key,
@@ -85,11 +86,11 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 			openAPI = mocks.NewInterface(GinkgoT())
-			openAPI.On("CreateNetworkInterface", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
+			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
-				NetworkInterfaceID: "eni-0",
-				VPCID:              "cn-hangzhou-a",
+				NetworkInterfaceID: eniID,
+				VPCID:              "vpc-0",
 				VSwitchID:          "vsw-0",
 				PrivateIPAddress:   "127.0.0.1",
 				PrivateIPSets:      nil,
@@ -139,6 +140,19 @@ var _ = Describe("Pod controller", func() {
 
 		})
 
+		It("networkinterface should be created", func() {
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      eniID,
+					Namespace: podENI.Namespace,
+				},
+			}
+			Expect(k8sClient.Get(ctx, k8stypes.NamespacedName{Name: eni.Name, Namespace: eni.Namespace}, eni)).Should(Succeed())
+
+			Expect(eni.Spec.PodENIRef.Name).To(Equal(pod.Name))
+			Expect(eni.Spec.PodENIRef.Namespace).To(Equal(pod.Namespace))
+		})
+
 		It("PodENI should be created", func() {
 			Expect(podENI.Annotations[types.PodUID]).Should(BeEquivalentTo(pod.UID))
 
@@ -151,9 +165,10 @@ var _ = Describe("Pod controller", func() {
 			}))
 
 			Expect(podENI.Spec.Allocations[0].ENI).To(Equal(networkv1beta1.ENI{
-				ID:               "eni-0",
+				ID:               eniID,
 				MAC:              "mac",
 				Zone:             "cn-hangzhou-a",
+				VPCID:            "vpc-0",
 				VSwitchID:        "vsw-0",
 				ResourceGroupID:  "rg-0",
 				SecurityGroupIDs: []string{"sg-0"},
@@ -171,6 +186,8 @@ var _ = Describe("Pod controller", func() {
 		name := "fixed-ip-pod-pod-networks"
 		ns := "default"
 		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+		eniID := "eni-1"
+
 		request := reconcile.Request{
 			NamespacedName: key,
 		}
@@ -215,11 +232,11 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 			openAPI = mocks.NewInterface(GinkgoT())
-			openAPI.On("CreateNetworkInterface", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
+			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
-				NetworkInterfaceID: "eni-0",
-				VPCID:              "cn-hangzhou-a",
+				NetworkInterfaceID: eniID,
+				VPCID:              "vpc-0",
 				VSwitchID:          "vsw-0",
 				PrivateIPAddress:   "127.0.0.1",
 				PrivateIPSets:      nil,
@@ -281,7 +298,8 @@ var _ = Describe("Pod controller", func() {
 			}))
 
 			Expect(podENI.Spec.Allocations[0].ENI).To(Equal(networkv1beta1.ENI{
-				ID:               "eni-0",
+				ID:               eniID,
+				VPCID:            "vpc-0",
 				MAC:              "mac",
 				Zone:             "cn-hangzhou-a",
 				VSwitchID:        "vsw-0",
@@ -300,6 +318,7 @@ var _ = Describe("Pod controller", func() {
 		ctx := context.Background()
 		name := "fixed-ip-pod-legacy-pn"
 		ns := "default"
+		eniID := "eni-2"
 		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
 		request := reconcile.Request{
 			NamespacedName: key,
@@ -367,11 +386,11 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 			openAPI = mocks.NewInterface(GinkgoT())
-			openAPI.On("CreateNetworkInterface", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
+			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
-				NetworkInterfaceID: "eni-0",
-				VPCID:              "cn-hangzhou-a",
+				NetworkInterfaceID: eniID,
+				VPCID:              "vpc-0",
 				VSwitchID:          "vsw-0",
 				PrivateIPAddress:   "127.0.0.1",
 				PrivateIPSets:      nil,
@@ -433,7 +452,8 @@ var _ = Describe("Pod controller", func() {
 			}))
 
 			Expect(podENI.Spec.Allocations[0].ENI).To(Equal(networkv1beta1.ENI{
-				ID:               "eni-0",
+				ID:               eniID,
+				VPCID:            "vpc-0",
 				MAC:              "mac",
 				Zone:             "cn-hangzhou-a",
 				VSwitchID:        "vsw-0",
@@ -452,6 +472,7 @@ var _ = Describe("Pod controller", func() {
 		ctx := context.Background()
 		name := "fixed-ip-pod-exclusive-eni"
 		ns := "default"
+		eniID := "eni-3"
 		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
 		request := reconcile.Request{
 			NamespacedName: key,
@@ -522,11 +543,11 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			openAPI = mocks.NewInterface(GinkgoT())
-			openAPI.On("CreateNetworkInterface", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
+			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
-				NetworkInterfaceID: "eni-0",
-				VPCID:              "cn-hangzhou-a",
+				NetworkInterfaceID: eniID,
+				VPCID:              "vpc-0",
 				VSwitchID:          "vsw-0",
 				PrivateIPAddress:   "127.0.0.1",
 				PrivateIPSets:      nil,
@@ -588,7 +609,8 @@ var _ = Describe("Pod controller", func() {
 			}))
 
 			Expect(podENI.Spec.Allocations[0].ENI).To(Equal(networkv1beta1.ENI{
-				ID:               "eni-0",
+				ID:               eniID,
+				VPCID:            "vpc-0",
 				MAC:              "mac",
 				Zone:             "cn-hangzhou-a",
 				VSwitchID:        "vsw-0",
@@ -607,6 +629,7 @@ var _ = Describe("Pod controller", func() {
 		ctx := context.Background()
 		name := "fixed-ip-pod-prev-eni"
 		ns := "default"
+		eniID := "eni-4"
 		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
 		request := reconcile.Request{
 			NamespacedName: key,
@@ -662,7 +685,7 @@ var _ = Describe("Pod controller", func() {
 							ReleaseStrategy: networkv1beta1.ReleaseStrategyNever,
 						},
 						ENI: networkv1beta1.ENI{
-							ID:               "eni-0",
+							ID:               eniID,
 							MAC:              "mac",
 							Zone:             "zone",
 							VSwitchID:        "vsw-0",
@@ -685,8 +708,8 @@ var _ = Describe("Pod controller", func() {
 			},
 			Status: networkv1beta1.PodENIStatus{
 				ENIInfos: map[string]networkv1beta1.ENIInfo{
-					"eni-0": {
-						ID:               "eni-0",
+					eniID: {
+						ID:               eniID,
 						Type:             "",
 						Vid:              0,
 						Status:           networkv1beta1.ENIStatusUnBind,
@@ -732,6 +755,120 @@ var _ = Describe("Pod controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(podENI.Labels[types.ENIRelatedNodeName]).Should(BeEquivalentTo(nodeName))
+		})
+	})
+
+	Context("create failed should rollback", func() {
+		ctx := context.Background()
+		name := "create-eni-failed"
+		ns := "default"
+		eniID := "eni-5" // exist cr`
+		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+		request := reconcile.Request{
+			NamespacedName: key,
+		}
+
+		vsw, _ := vswitch.NewSwitchPool(100, "10m")
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      key.Name,
+				Namespace: key.Namespace,
+				Annotations: map[string]string{
+					types.PodENI:      "true",
+					types.PodNetworks: "{\"podNetworks\":[{\"vSwitchOptions\":[\"vsw-0\",\"vsw-1\",\"vsw-2\"],\"securityGroupIDs\":[\"sg-1\"],\"interface\":\"eth0\",\"eniOptions\":{\"eniType\":\"Default\"},\"vSwitchSelectOptions\":{\"vSwitchSelectionPolicy\":\"ordered\"},\"resourceGroupID\":\"\",\"networkInterfaceTrafficMode\":\"\",\"defaultRoute\":false,\"allocationType\":{\"type\":\"Elastic\",\"releaseStrategy\":\"\",\"releaseAfter\":\"\"}}]}",
+				},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: nodeName,
+				Containers: []corev1.Container{
+					{
+						Name:  "foo",
+						Image: "busybox",
+					},
+				},
+			},
+		}
+
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Labels: map[string]string{
+					"topology.kubernetes.io/region":    "cn-hangzhou",
+					"topology.kubernetes.io/zone":      "cn-hangzhou-a",
+					"node.kubernetes.io/instance-type": "instanceType",
+				},
+			},
+			Spec: corev1.NodeSpec{ProviderID: "cn-hangzhou.i-xxx"},
+		}
+
+		podENI := &networkv1beta1.PodENI{}
+
+		eni := &networkv1beta1.NetworkInterface{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: eniID,
+			},
+		}
+
+		It("Create podENI should succeed", func() {
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+			Expect(k8sClient.Create(ctx, eni)).Should(Succeed())
+
+			openAPI = mocks.NewInterface(GinkgoT())
+			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
+				Status:             "Available",
+				MacAddress:         "mac",
+				NetworkInterfaceID: eniID,
+				VPCID:              "vpc-0",
+				VSwitchID:          "vsw-0",
+				PrivateIPAddress:   "127.0.0.1",
+				PrivateIPSets:      nil,
+				ZoneID:             "cn-hangzhou-a",
+				SecurityGroupIDs: []string{
+					"sg-0",
+				},
+				ResourceGroupID:             "rg-0",
+				IPv6Set:                     nil,
+				Tags:                        nil,
+				Type:                        "Secondary",
+				InstanceID:                  "",
+				TrunkNetworkInterfaceID:     "",
+				NetworkInterfaceTrafficMode: "Standard",
+				DeviceIndex:                 0,
+				CreationTime:                "",
+			}, nil).Once()
+
+			openAPI.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
+				VpcId:                   "vpc-0",
+				Status:                  "",
+				AvailableIpAddressCount: 10,
+				VSwitchId:               "vsw-0",
+				CidrBlock:               "127.0.0.0/24",
+				ZoneId:                  "cn-hangzhou-a",
+				Ipv6CidrBlock:           "fd00::0/120",
+				EnabledIpv6:             true,
+			}, nil).Once()
+
+			openAPI.On("DeleteNetworkInterfaceV2", mock.Anything, eniID).Return(nil).Once()
+
+			controlplane.SetConfig(&controlplane.Config{})
+
+			r := &ReconcilePod{
+				client:    k8sClient,
+				scheme:    scheme.Scheme,
+				aliyun:    openAPI,
+				swPool:    vsw,
+				record:    record.NewFakeRecorder(1000),
+				trunkMode: false,
+				crdMode:   false,
+			}
+
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).To(HaveOccurred())
+
+			err = k8sClient.Get(ctx, key, podENI)
+			Expect(err).To(HaveOccurred())
 		})
 	})
 })

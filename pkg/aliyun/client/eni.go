@@ -15,6 +15,8 @@ func (a *OpenAPI) CreateNetworkInterfaceV2(ctx context.Context, opts ...CreateNe
 		return a.CreateNetworkInterface(ctx, opts...)
 	case BackendAPIEFLO:
 		return a.CreateElasticNetworkInterfaceV2(ctx, opts...)
+	case BackendAPIEFLOHDENI:
+		return a.CreateHDENI(ctx, opts...)
 	}
 	return nil, ErrNotImplemented
 }
@@ -25,6 +27,8 @@ func (a *OpenAPI) DescribeNetworkInterfaceV2(ctx context.Context, opts ...Descri
 		return a.DescribeNetworkInterface2(ctx, opts...)
 	case BackendAPIEFLO:
 		return a.DescribeLeniNetworkInterface(ctx, opts...)
+	case BackendAPIEFLOHDENI:
+		return a.DescribeHDENI(ctx, opts...)
 	}
 	return nil, ErrNotImplemented
 }
@@ -34,6 +38,8 @@ func (a *OpenAPI) AttachNetworkInterfaceV2(ctx context.Context, opts ...AttachNe
 	case BackendAPIECS:
 		return a.AttachNetworkInterface(ctx, opts...)
 	case BackendAPIEFLO:
+		return nil
+	case BackendAPIEFLOHDENI:
 		return nil
 	}
 	return ErrNotImplemented
@@ -45,6 +51,8 @@ func (a *OpenAPI) DetachNetworkInterfaceV2(ctx context.Context, eniID, instanceI
 		return a.DetachNetworkInterface(ctx, eniID, instanceID, trunkENIID)
 	case BackendAPIEFLO:
 		return nil
+	case BackendAPIEFLOHDENI:
+		return nil
 	}
 	return ErrNotImplemented
 }
@@ -55,6 +63,8 @@ func (a *OpenAPI) DeleteNetworkInterfaceV2(ctx context.Context, eniID string) er
 		return a.DeleteNetworkInterface(ctx, eniID)
 	case BackendAPIEFLO:
 		return a.DeleteElasticNetworkInterface(ctx, eniID)
+	case BackendAPIEFLOHDENI:
+		return a.DeleteHDENI(ctx, eniID)
 	}
 	return ErrNotImplemented
 }
@@ -105,6 +115,8 @@ func (a *OpenAPI) WaitForNetworkInterfaceV2(ctx context.Context, eniID string, s
 		return a.WaitForNetworkInterface(ctx, eniID, status, backoff, ignoreNotExist)
 	case BackendAPIEFLO:
 		return a.WaitForLeniNetworkInterface(ctx, eniID, status, backoff, ignoreNotExist)
+	case BackendAPIEFLOHDENI:
+		return a.WaitForHDENI(ctx, eniID, status, backoff, ignoreNotExist)
 	}
 	return nil, ErrNotImplemented
 }

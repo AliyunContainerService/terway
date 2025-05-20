@@ -129,35 +129,8 @@ func TestReconcilePodENI_podRequirePodENI(t *testing.T) {
 	}
 }
 
-func TestReconcilePodENI_deleteMemberENI(t *testing.T) {
-	m := mocks.NewInterface(t)
-	m.On("DeleteNetworkInterface", mock.Anything, "foo").Return(nil)
-
-	c := &ReconcilePodENI{
-		client: fake.NewClientBuilder().Build(),
-		aliyun: m,
-		record: record.NewFakeRecorder(10),
-	}
-	err := c.deleteMemberENI(context.Background(), &v1beta1.PodENI{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "foo",
-		},
-		Spec: v1beta1.PodENISpec{
-			Allocations: []v1beta1.Allocation{
-				{
-					ENI: v1beta1.ENI{ID: "foo"},
-				},
-			},
-			Zone: "",
-		},
-	})
-	assert.NoError(t, err)
-}
-
 func TestReconcilePodENI_detachMemberENI(t *testing.T) {
 	m := mocks.NewInterface(t)
-	m.On("WaitForNetworkInterface", mock.Anything, "foo", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
-	m.On("DetachNetworkInterface", mock.Anything, "foo", "i-x", "eni-x").Return(nil)
 
 	c := &ReconcilePodENI{
 		client: fake.NewClientBuilder().Build(),
@@ -229,7 +202,7 @@ func TestReconcilePodENI_attachENI(t *testing.T) {
 			ENIInfos:    nil,
 		},
 	}
-	err := c.attachENI(context.Background(), podENI)
+	err := c.attachENI(context.Background(), podENI, "node-1")
 	assert.NoError(t, err)
 
 	assert.Equal(t, v1beta1.ENIStatusBind, podENI.Status.ENIInfos["foo"].Status)

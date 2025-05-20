@@ -216,7 +216,12 @@ func (a *OpenAPI) GetNodeInfoForPod(ctx context.Context, nodeID string) (*eflo.C
 	if err != nil {
 		return nil, err
 	}
-	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success",
+		"HdeniQuota",
+		resp.Content.HdeniQuota,
+		"LeniQuota",
+		resp.Content.LeniQuota,
+	)
 
 	if resp.Code != 0 {
 		err = &apiErr.EFLOCode{

@@ -46,7 +46,9 @@ const (
 	LENIStatusUnattached   string = "Unattached"
 	LENIStatusExecuting    string = "Executing"
 	LENIStatusCreateFailed string = "Create Failed"
+	LENIStatusAttachFailed string = "Attach Failed"
 	LENIStatusDeleteFailed string = "Delete Failed"
+	LENIStatusDetachFailed string = "Detach Failed"
 	LENIStatusDeleting     string = "Deleting"
 
 	LENIIPStatusAvailable string = "Available"
@@ -88,6 +90,7 @@ type NetworkInterface struct {
 	NetworkInterfaceTrafficMode string `json:"network_interface_traffic_mode"`
 	DeviceIndex                 int    `json:"device_index,omitempty"`
 	CreationTime                string `json:"creation_time,omitempty"`
+	NetworkCardIndex            int    `json:"network_card_index,omitempty"`
 }
 
 type IPSet struct {
