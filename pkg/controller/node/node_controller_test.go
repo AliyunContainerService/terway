@@ -170,7 +170,7 @@ var _ = Describe("Node Controller", func() {
 				update.Status = networkv1beta1.NodeStatus{
 					NextSyncOpenAPITime: metav1.Time{},
 					LastSyncOpenAPITime: metav1.Time{},
-					NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
 						"eni-1": {
 							ID:                          "eni-1",
 							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
@@ -259,7 +259,7 @@ var _ = Describe("Node Controller", func() {
 				update.Status = networkv1beta1.NodeStatus{
 					NextSyncOpenAPITime: metav1.Time{},
 					LastSyncOpenAPITime: metav1.Time{},
-					NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
 						"eni-1": {
 							ID:                          "eni-1",
 							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
@@ -393,7 +393,7 @@ var _ = Describe("Node Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(resource.Labels["name"]).To(Equal(resourceName))
 			Expect(resource.Labels["alibabacloud.com/lingjun-worker"]).To(Equal("true"))
-			
+
 			Expect(resource.Spec.NodeCap.Adapters, 20)
 			Expect(resource.Spec.NodeCap.TotalAdapters, 20)
 			Expect(resource.Spec.NodeCap.IPv4PerAdapter, 10)
@@ -534,7 +534,7 @@ var _ = Describe("Node Exclusive eni node", func() {
 				update.Status = networkv1beta1.NodeStatus{
 					NextSyncOpenAPITime: metav1.Time{},
 					LastSyncOpenAPITime: metav1.Time{},
-					NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
 						"eni-1": {
 							ID:                          "eni-1",
 							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,

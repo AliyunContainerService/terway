@@ -18,7 +18,7 @@ func Test_sortNetworkInterface(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want []*networkv1beta1.NetworkInterface
+		want []*networkv1beta1.Nic
 	}{
 		{
 			name: "trunk",
@@ -33,7 +33,7 @@ func Test_sortNetworkInterface(t *testing.T) {
 					Status: networkv1beta1.NodeStatus{
 						NextSyncOpenAPITime: metav1.Time{},
 						LastSyncOpenAPITime: metav1.Time{},
-						NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
 							"eni-1": {
 								ID:                          "eni-1",
 								NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
@@ -52,7 +52,7 @@ func Test_sortNetworkInterface(t *testing.T) {
 					},
 				},
 			},
-			want: []*networkv1beta1.NetworkInterface{
+			want: []*networkv1beta1.Nic{
 				{
 					ID:                          "trunk",
 					NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
@@ -82,7 +82,7 @@ func Test_sortNetworkInterface(t *testing.T) {
 					Status: networkv1beta1.NodeStatus{
 						NextSyncOpenAPITime: metav1.Time{},
 						LastSyncOpenAPITime: metav1.Time{},
-						NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
 							"eni-1": {
 								ID:                          "eni-1",
 								NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
@@ -101,7 +101,7 @@ func Test_sortNetworkInterface(t *testing.T) {
 					},
 				},
 			},
-			want: []*networkv1beta1.NetworkInterface{
+			want: []*networkv1beta1.Nic{
 				{
 					ID:                          "eni-2",
 					NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,

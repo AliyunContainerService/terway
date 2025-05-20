@@ -41,7 +41,7 @@ type eniOptions struct {
 	eniTypeKey eniTypeKey
 
 	// if eniRef is nil , we use options to create the eni
-	eniRef *networkv1beta1.NetworkInterface
+	eniRef *networkv1beta1.Nic
 
 	addIPv4N int
 	addIPv6N int
@@ -72,7 +72,7 @@ var EniOptions = map[eniTypeKey]*aliyunClient.CreateNetworkInterfaceOptions{
 }
 
 // releaseUnUsedIP toDel is the number of idle ip need to del
-func releaseUnUsedIP(log logr.Logger, eni *networkv1beta1.NetworkInterface, toDel int) int {
+func releaseUnUsedIP(log logr.Logger, eni *networkv1beta1.Nic, toDel int) int {
 	_, inUse := IPUsage(eni.IPv4)
 	_, inUseV6 := IPUsage(eni.IPv6)
 	// try delete eni, only if no one use it
@@ -118,9 +118,9 @@ func releaseUnUsedIP(log logr.Logger, eni *networkv1beta1.NetworkInterface, toDe
 	return max(releasedV4, releasedV6)
 }
 
-func newENIFromAPI(eni *aliyunClient.NetworkInterface) *networkv1beta1.NetworkInterface {
+func newENIFromAPI(eni *aliyunClient.NetworkInterface) *networkv1beta1.Nic {
 
-	return &networkv1beta1.NetworkInterface{
+	return &networkv1beta1.Nic{
 		ID:                          eni.NetworkInterfaceID,
 		Status:                      eni.Status,
 		MacAddress:                  eni.MacAddress,
@@ -187,7 +187,7 @@ func mergeIPMap(log logr.Logger, remote, current map[string]*networkv1beta1.IP) 
 }
 
 // sortNetworkInterface by eni's ip desc. We won't delete trunk or rdma card ,we should use those first.
-func sortNetworkInterface(node *networkv1beta1.Node) []*networkv1beta1.NetworkInterface {
+func sortNetworkInterface(node *networkv1beta1.Node) []*networkv1beta1.Nic {
 	sorted := lo.Values(node.Status.NetworkInterfaces)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if sorted[i].NetworkInterfaceType == networkv1beta1.ENITypeTrunk && sorted[j].NetworkInterfaceType != networkv1beta1.ENITypeTrunk {
