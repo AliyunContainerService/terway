@@ -39,6 +39,13 @@ rules:
   - apiGroups:
       - network.alibabacloud.com
     resources:
+      - networkinterfaces
+      - networkinterfaces/status
+    verbs:
+      - "*"
+  - apiGroups:
+      - network.alibabacloud.com
+    resources:
       - podenis
       - podenis/status
       - podnetworkings
@@ -78,6 +85,7 @@ rules:
       - update
       - patch
     resourceNames:
+      - networkinterfaces.network.alibabacloud.com
       - podnetworkings.network.alibabacloud.com
       - podenis.network.alibabacloud.com
       - nodes.network.alibabacloud.com
