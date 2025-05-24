@@ -126,7 +126,6 @@ func (b *NetworkServiceBuilder) InitK8S() *NetworkServiceBuilder {
 
 	if utils.ISLinJunNode(b.service.k8s.Node().Labels) {
 		b.eflo = true
-		instance.Init(&instance.EFLO{})
 	}
 	return b
 }
@@ -309,7 +308,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 	}
 	var factory factory.Factory
 	if b.eflo {
-		factory = aliyun.NewEflo(b.ctx, b.aliyunClient, vswPool, eniConfig)
+		return fmt.Errorf("eflo unsupported")
 	} else {
 		factory = aliyun.NewAliyun(b.ctx, b.aliyunClient, eni2.NewENIMetadata(enableIPv4, enableIPv6), vswPool, eniConfig)
 	}
