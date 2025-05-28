@@ -171,6 +171,9 @@ spec:
                     - Primary
                     - Member
                     type: string
+                  vfID:
+                    format: int32
+                    type: integer
                   vid:
                     type: integer
                 type: object

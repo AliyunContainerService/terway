@@ -172,6 +172,7 @@ type ENIInfo struct {
 	Vid              int           `json:"vid,omitempty"`    // vlan id for trunk
 	Status           ENIBindStatus `json:"status,omitempty"` // the status for operate the eni
 	NetworkCardIndex *int          `json:"networkCardIndex,omitempty"`
+	VfID             *uint32       `json:"vfID,omitempty"`
 }
 
 // ENIType for this eni, only Secondary and Member is supported
