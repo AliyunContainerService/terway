@@ -138,7 +138,7 @@ func TestGetTrunkENIReturnsValidENI(t *testing.T) {
 					EnableIPv6:  true,
 				}},
 			Status: networkv1beta1.NodeStatus{
-				NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+				NetworkInterfaces: map[string]*networkv1beta1.Nic{
 					"eni-1": {
 						ID:                          "eni-1",
 						MacAddress:                  "00:00:00:00:00:01",
@@ -263,7 +263,7 @@ func TestInUsedPodUIDs(t *testing.T) {
 					Name: "test-node",
 				},
 				Status: networkv1beta1.NodeStatus{
-					NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
 						"eni-1": {
 							ID: "eni-1",
 							IPv4: map[string]*networkv1beta1.IP{

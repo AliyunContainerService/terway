@@ -17,6 +17,8 @@ limitations under the License.
 
 package v1beta1
 
+type NetworkInterfaceExpansion interface{}
+
 type NodeExpansion interface{}
 
 type NodeRuntimeExpansion interface{}

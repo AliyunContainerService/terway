@@ -86,6 +86,8 @@ spec:
                           type: array
                         vSwitchID:
                           type: string
+                        vpcID:
+                          type: string
                         zone:
                           type: string
                       type: object
@@ -138,6 +140,9 @@ spec:
                       - Primary
                       - Member
                       type: string
+                    vfID:
+                      format: int32
+                      type: integer
                     vid:
                       type: integer
                   type: object

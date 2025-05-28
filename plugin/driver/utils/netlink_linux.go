@@ -96,6 +96,16 @@ func LinkSetMTU(ctx context.Context, link netlink.Link, mtu int) error {
 	return nil
 }
 
+func LinkSetMAC(ctx context.Context, link netlink.Link, mac net.HardwareAddr) error {
+	cmd := fmt.Sprintf("ip link set %s address %s", link.Attrs().Name, mac.String())
+	logr.FromContextOrDiscard(ctx).Info(cmd)
+	err := netlink.LinkSetHardwareAddr(link, mac)
+	if err != nil {
+		return fmt.Errorf("error %s, %w", cmd, err)
+	}
+	return nil
+}
+
 func AddrDel(ctx context.Context, link netlink.Link, addr *netlink.Addr) error {
 	cmd := fmt.Sprintf("ip addr del %s dev %s", addr.IPNet.String(), link.Attrs().Name)
 	logr.FromContextOrDiscard(ctx).Info(cmd)

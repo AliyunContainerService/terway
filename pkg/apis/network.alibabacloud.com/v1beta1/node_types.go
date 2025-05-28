@@ -130,7 +130,7 @@ type IP struct {
 
 type IPMap map[string]*IP
 
-type NetworkInterface struct {
+type Nic struct {
 	// +kubebuilder:validation:Required
 	ID string `json:"id"`
 	// +kubebuilder:validation:Required
@@ -165,9 +165,9 @@ type Condition struct {
 
 // NodeStatus defines the observed state of Node
 type NodeStatus struct {
-	NextSyncOpenAPITime metav1.Time                  `json:"nextSyncOpenAPITime,omitempty"`
-	LastSyncOpenAPITime metav1.Time                  `json:"lastSyncOpenAPITime,omitempty"`
-	NetworkInterfaces   map[string]*NetworkInterface `json:"networkInterfaces,omitempty"`
+	NextSyncOpenAPITime metav1.Time     `json:"nextSyncOpenAPITime,omitempty"`
+	LastSyncOpenAPITime metav1.Time     `json:"lastSyncOpenAPITime,omitempty"`
+	NetworkInterfaces   map[string]*Nic `json:"networkInterfaces,omitempty"`
 }
 
 // +genclient

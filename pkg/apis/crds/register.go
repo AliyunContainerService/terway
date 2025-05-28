@@ -19,10 +19,11 @@ var log = ctrl.Log.WithName("crd")
 
 // crd names
 const (
-	CRDPodENI        = "podenis.network.alibabacloud.com"
-	CRDPodNetworking = "podnetworkings.network.alibabacloud.com"
-	CRDNode          = "nodes.network.alibabacloud.com"
-	CRDNodeRuntime   = "noderuntimes.network.alibabacloud.com"
+	CRDPodENI           = "podenis.network.alibabacloud.com"
+	CRDPodNetworking    = "podnetworkings.network.alibabacloud.com"
+	CRDNode             = "nodes.network.alibabacloud.com"
+	CRDNodeRuntime      = "noderuntimes.network.alibabacloud.com"
+	CRDNetworkInterface = "networkinterfaces.network.alibabacloud.com"
 
 	crdVersionKey = "crd.network.alibabacloud.com/version"
 )
@@ -39,6 +40,9 @@ var (
 
 	//go:embed network.alibabacloud.com_noderuntimes.yaml
 	crdsNodeRuntime []byte
+
+	//go:embed network.alibabacloud.com_networkinterfaces.yaml
+	crdsNetworkInterface []byte
 )
 
 func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
@@ -47,15 +51,19 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 	switch name {
 	case CRDPodENI:
 		crdBytes = crdsPodENI
-		version = "v0.4.1"
+		version = "v0.4.2"
 	case CRDPodNetworking:
 		crdBytes = crdsPodNetworking
+		//nolint
 		version = "v0.1.0"
 	case CRDNode:
 		crdBytes = crdsNode
 		version = "v0.3.2"
 	case CRDNodeRuntime:
 		crdBytes = crdsNodeRuntime
+		version = "v0.1.0"
+	case CRDNetworkInterface:
+		crdBytes = crdsNetworkInterface
 		version = "v0.1.0"
 	default:
 		panic(fmt.Sprintf("crd %s name not exist", name))

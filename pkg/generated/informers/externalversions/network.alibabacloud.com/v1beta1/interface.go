@@ -23,6 +23,8 @@ import (
 
 // Interface provides access to all the informers in this group version.
 type Interface interface {
+	// NetworkInterfaces returns a NetworkInterfaceInformer.
+	NetworkInterfaces() NetworkInterfaceInformer
 	// Nodes returns a NodeInformer.
 	Nodes() NodeInformer
 	// NodeRuntimes returns a NodeRuntimeInformer.
@@ -42,6 +44,11 @@ type version struct {
 // New returns a new Interface.
 func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc) Interface {
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
+}
+
+// NetworkInterfaces returns a NetworkInterfaceInformer.
+func (v *version) NetworkInterfaces() NetworkInterfaceInformer {
+	return &networkInterfaceInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
 // Nodes returns a NodeInformer.

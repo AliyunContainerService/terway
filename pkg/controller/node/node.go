@@ -260,7 +260,7 @@ func (r *ReconcileNode) k8sAnno(ctx context.Context, k8sNode *corev1.Node, node 
 			preferID := k8sNode.Annotations[types.TrunkOn]
 
 			// verify eni is present
-			_, found := lo.FindKeyBy(node.Status.NetworkInterfaces, func(key string, eni *networkv1beta1.NetworkInterface) bool {
+			_, found := lo.FindKeyBy(node.Status.NetworkInterfaces, func(key string, eni *networkv1beta1.Nic) bool {
 				return eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk &&
 					preferID == eni.ID
 			})
@@ -269,7 +269,7 @@ func (r *ReconcileNode) k8sAnno(ctx context.Context, k8sNode *corev1.Node, node 
 				// either new node or trunk eni is missing
 
 				// add one
-				trunkID, _ := lo.FindKeyBy(node.Status.NetworkInterfaces, func(key string, eni *networkv1beta1.NetworkInterface) bool {
+				trunkID, _ := lo.FindKeyBy(node.Status.NetworkInterfaces, func(key string, eni *networkv1beta1.Nic) bool {
 					return eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk && eni.Status == aliyunClient.ENIStatusInUse
 				})
 
@@ -324,7 +324,7 @@ func (r *ReconcileNode) patchNodeRes(ctx context.Context, k8sNode *corev1.Node, 
 		// report trunk if node has one
 		if node.Spec.ENISpec.EnableTrunk {
 			// report only when trunk is ready
-			_, found := lo.FindKeyBy(node.Status.NetworkInterfaces, func(key string, eni *networkv1beta1.NetworkInterface) bool {
+			_, found := lo.FindKeyBy(node.Status.NetworkInterfaces, func(key string, eni *networkv1beta1.Nic) bool {
 				return eni.NetworkInterfaceType == networkv1beta1.ENITypeTrunk && eni.Status == aliyunClient.ENIStatusInUse
 			})
 

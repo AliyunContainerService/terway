@@ -24,7 +24,7 @@ type PodRequest struct {
 }
 
 type EniIP struct {
-	NetworkInterface *networkv1beta1.NetworkInterface
+	NetworkInterface *networkv1beta1.Nic
 	IP               *networkv1beta1.IP
 }
 

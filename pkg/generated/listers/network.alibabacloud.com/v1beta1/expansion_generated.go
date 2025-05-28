@@ -17,6 +17,10 @@ limitations under the License.
 
 package v1beta1
 
+// NetworkInterfaceListerExpansion allows custom methods to be added to
+// NetworkInterfaceLister.
+type NetworkInterfaceListerExpansion interface{}
+
 // NodeListerExpansion allows custom methods to be added to
 // NodeLister.
 type NodeListerExpansion interface{}

@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/AliyunContainerService/terway/plugin/driver/vf"
 	"github.com/containernetworking/cni/pkg/skel"
 	cniTypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/go-logr/logr"
+	"github.com/vishvananda/netlink"
 
 	"github.com/AliyunContainerService/terway/pkg/link"
 	"github.com/AliyunContainerService/terway/plugin/datapath"
@@ -184,7 +186,7 @@ func doCmdAdd(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniC
 
 	for _, netConf := range allocResult.NetConfs {
 		var setupCfg *types.SetupConfig
-		setupCfg, err = parseSetupConf(args, netConf, conf, allocResult.IPType)
+		setupCfg, err = parseSetupConf(ctx, args, netConf, conf, allocResult.IPType)
 		if err != nil {
 			err = fmt.Errorf("error parse config, %w", err)
 			return
@@ -462,4 +464,18 @@ func doCmdCheck(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cn
 		}
 	}
 	return nil
+}
+
+func prepareVF(ctx context.Context, id int, mac string) (int32, error) {
+	deviceID, err := vf.SetupDriverAndGetNetInterface(id, "")
+	if err != nil {
+		return 0, err
+	}
+	link, err := netlink.LinkByIndex(deviceID)
+	if err != nil {
+		return 0, err
+	}
+	logr.FromContextOrDiscard(ctx).Info("config vf", "index", deviceID, "link", link.Attrs().Name, "link_mac", link.Attrs().HardwareAddr, "expect_mac", mac)
+
+	return int32(link.Attrs().Index), utils.EnsureLinkMAC(ctx, link, mac)
 }

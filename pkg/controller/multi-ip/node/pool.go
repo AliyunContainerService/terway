@@ -371,7 +371,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 
 			// new eni, need add to local
 			if node.Status.NetworkInterfaces == nil {
-				node.Status.NetworkInterfaces = make(map[string]*networkv1beta1.NetworkInterface)
+				node.Status.NetworkInterfaces = make(map[string]*networkv1beta1.Nic)
 			}
 			// we need cidr info
 			vsw, err := n.vswpool.GetByID(ctx, n.aliyun, remote.VSwitchID)
@@ -1265,7 +1265,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 
 	MetaCtx(ctx).Mutex.Lock()
 	if node.Status.NetworkInterfaces == nil {
-		node.Status.NetworkInterfaces = make(map[string]*networkv1beta1.NetworkInterface)
+		node.Status.NetworkInterfaces = make(map[string]*networkv1beta1.Nic)
 	}
 	MetaCtx(ctx).Mutex.Unlock()
 
@@ -1285,7 +1285,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			logf.FromContext(ctx).Error(innerErr, "failed to delete eni, this may result leak", "eni", result.NetworkInterfaceID)
 			// if we failed to delete the eni , we need to store the eni
 			MetaCtx(ctx).Mutex.Lock()
-			node.Status.NetworkInterfaces[result.NetworkInterfaceID] = &networkv1beta1.NetworkInterface{
+			node.Status.NetworkInterfaces[result.NetworkInterfaceID] = &networkv1beta1.Nic{
 				ID:                          result.NetworkInterfaceID,
 				Status:                      aliyunClient.ENIStatusDeleting,
 				NetworkInterfaceType:        networkv1beta1.ENIType(result.Type),
@@ -1436,7 +1436,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 }
 
 // buildIPMap put the relating from node.Status.NetworkInterfaces to ipv4Map and ipv6Map
-func buildIPMap(podsMapper map[string]*PodRequest, enis map[string]*networkv1beta1.NetworkInterface) (map[string]*EniIP, map[string]*EniIP) {
+func buildIPMap(podsMapper map[string]*PodRequest, enis map[string]*networkv1beta1.Nic) (map[string]*EniIP, map[string]*EniIP) {
 	// build a allocated ip map
 	ipv4Map := make(map[string]*EniIP)
 	ipv6Map := make(map[string]*EniIP)
@@ -1491,7 +1491,7 @@ func getEniOptions(node *networkv1beta1.Node) []*eniOptions {
 
 	// cal exists eni
 	sorted := sortNetworkInterface(node)
-	lo.ForEach(sorted, func(item *networkv1beta1.NetworkInterface, index int) {
+	lo.ForEach(sorted, func(item *networkv1beta1.Nic, index int) {
 		key := eniTypeKey{
 			ENIType:                     item.NetworkInterfaceType,
 			NetworkInterfaceTrafficMode: item.NetworkInterfaceTrafficMode,
@@ -1529,7 +1529,7 @@ func getEniOptions(node *networkv1beta1.Node) []*eniOptions {
 	}
 
 	// 2. put current eni to result
-	lo.ForEach(sorted, func(item *networkv1beta1.NetworkInterface, index int) {
+	lo.ForEach(sorted, func(item *networkv1beta1.Nic, index int) {
 		result = append(result, &eniOptions{
 			eniTypeKey: eniTypeKey{
 				ENIType:                     item.NetworkInterfaceType,

@@ -27,6 +27,10 @@ type FakeNetworkV1beta1 struct {
 	*testing.Fake
 }
 
+func (c *FakeNetworkV1beta1) NetworkInterfaces() v1beta1.NetworkInterfaceInterface {
+	return &FakeNetworkInterfaces{c}
+}
+
 func (c *FakeNetworkV1beta1) Nodes() v1beta1.NodeInterface {
 	return &FakeNodes{c}
 }

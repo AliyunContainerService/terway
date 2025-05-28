@@ -241,7 +241,7 @@ func (r *CRDV2) multiIP(ctx context.Context, cni *daemon.CNI, request ResourceRe
 			}
 			// cni.PodName
 			var ipv4, ipv6 netip.Addr
-			var eniInfo *networkv1beta1.NetworkInterface
+			var eniInfo *networkv1beta1.Nic
 			for _, eni := range node.Status.NetworkInterfaces {
 				if eni.Status != aliyunClient.ENIStatusInUse {
 					continue

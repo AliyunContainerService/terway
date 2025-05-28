@@ -233,7 +233,7 @@ func getNetworkClient(ctx context.Context) (rpc.TerwayBackendClient, *grpc.Clien
 	return client, conn, nil
 }
 
-func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf, ipType rpc.IPType) (*types.SetupConfig, error) {
+func parseSetupConf(ctx context.Context, args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf, ipType rpc.IPType) (*types.SetupConfig, error) {
 	var (
 		err            error
 		containerIPNet *terwayTypes.IPNetSet
@@ -252,6 +252,8 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 		routes []cniTypes.Route
 
 		disableCreatePeer bool
+
+		vfID *uint32
 	)
 
 	serviceCIDR, err = terwayTypes.ToIPNetSet(alloc.GetBasicInfo().GetServiceCIDR())
@@ -287,22 +289,32 @@ func parseSetupConf(args *skel.CmdArgs, alloc *rpc.NetConf, conf *types.CNIConf,
 
 	if alloc.GetENIInfo() != nil {
 		mac := alloc.GetENIInfo().GetMAC()
-		if mac != "" {
-			err = retry.OnError(wait.Backoff{
-				Steps:    10,
-				Duration: 1 * time.Second,
-				Factor:   1.0,
-				Jitter:   0,
-			}, func(err error) bool {
-				return errors.Is(err, link.ErrNotFound)
-			}, func() error {
-				deviceID, err = link.GetDeviceNumber(mac)
-				return err
-			})
+		vfID = alloc.GetENIInfo().VfId
+		if vfID != nil {
+			// when do setup , this link must present
+			deviceID, err = prepareVF(ctx, int(*vfID), mac)
 			if err != nil {
 				return nil, err
 			}
+		} else {
+			if mac != "" {
+				err = retry.OnError(wait.Backoff{
+					Steps:    10,
+					Duration: 1 * time.Second,
+					Factor:   1.0,
+					Jitter:   0,
+				}, func(err error) bool {
+					return errors.Is(err, link.ErrNotFound)
+				}, func() error {
+					deviceID, err = link.GetDeviceNumber(mac)
+					return err
+				})
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
+
 		trunkENI = alloc.GetENIInfo().GetTrunk()
 		vid = alloc.GetENIInfo().GetVid()
 		erdma = alloc.GetENIInfo().GetERDMA()

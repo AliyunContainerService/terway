@@ -57,6 +57,7 @@ message ENIInfo {
   uint32 Vid = 3; // vlan ID
   IPSet GatewayIP = 4;
   bool eRDMA = 5; // eni is eRDMA
+  optional uint32 VfId = 6;
 }
 
 message Route {

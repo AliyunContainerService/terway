@@ -61,7 +61,7 @@ func TestReleasePodNotFound(t *testing.T) {
 			podsMapper: map[string]*PodRequest{},
 			ipMapper: map[string]*EniIP{
 				"ip1": {
-					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					NetworkInterface: &networkv1beta1.Nic{},
 					IP: &networkv1beta1.IP{
 						PodID: "pod-id",
 					},
@@ -75,7 +75,7 @@ func TestReleasePodNotFound(t *testing.T) {
 			},
 			expectPods: map[string]*EniIP{
 				"ip1": {
-					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					NetworkInterface: &networkv1beta1.Nic{},
 					IP: &networkv1beta1.IP{
 						PodID: "pod-id",
 					},
@@ -90,7 +90,7 @@ func TestReleasePodNotFound(t *testing.T) {
 			},
 			ipMapper: map[string]*EniIP{
 				"ip1": {
-					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					NetworkInterface: &networkv1beta1.Nic{},
 					IP: &networkv1beta1.IP{
 						PodID:  "pod-id",
 						PodUID: "old",
@@ -106,7 +106,7 @@ func TestReleasePodNotFound(t *testing.T) {
 			},
 			expectPods: map[string]*EniIP{
 				"ip1": {
-					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					NetworkInterface: &networkv1beta1.Nic{},
 					IP: &networkv1beta1.IP{
 						PodID:  "pod-id",
 						PodUID: "pod-uid-1",
@@ -120,7 +120,7 @@ func TestReleasePodNotFound(t *testing.T) {
 			podsMapper: map[string]*PodRequest{},
 			ipMapper: map[string]*EniIP{
 				"ip1": {
-					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					NetworkInterface: &networkv1beta1.Nic{},
 					IP: &networkv1beta1.IP{
 						PodID:  "pod-id",
 						PodUID: "pod-uid-1",
@@ -139,7 +139,7 @@ func TestReleasePodNotFound(t *testing.T) {
 			},
 			expectPods: map[string]*EniIP{
 				"ip1": {
-					NetworkInterface: &networkv1beta1.NetworkInterface{},
+					NetworkInterface: &networkv1beta1.Nic{},
 					IP:               &networkv1beta1.IP{},
 				},
 			},
@@ -333,7 +333,7 @@ func Test_getEniOptions(t *testing.T) {
 						},
 					},
 					Status: networkv1beta1.NodeStatus{
-						NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
 							"eni-1": {
 								NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
 								NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
@@ -352,21 +352,21 @@ func Test_getEniOptions(t *testing.T) {
 			},
 			want: []*eniOptions{
 				{
-					eniRef: &networkv1beta1.NetworkInterface{
+					eniRef: &networkv1beta1.Nic{
 						NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
 						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
 					},
 					eniTypeKey: trunkKey,
 				},
 				{
-					eniRef: &networkv1beta1.NetworkInterface{
+					eniRef: &networkv1beta1.Nic{
 						NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
 						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
 					},
 					eniTypeKey: trunkKey,
 				},
 				{
-					eniRef: &networkv1beta1.NetworkInterface{
+					eniRef: &networkv1beta1.Nic{
 						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
 						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeHighPerformance,
 					},
@@ -481,7 +481,7 @@ func TestReconcileNodeSyncWithAPI(t *testing.T) {
 			ENISpec: &networkv1beta1.ENISpec{},
 		},
 		Status: networkv1beta1.NodeStatus{
-			NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+			NetworkInterfaces: map[string]*networkv1beta1.Nic{
 				"eni-3": {
 					ID: "eni-3",
 					IPv4: map[string]*networkv1beta1.IP{
@@ -567,7 +567,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "192.168.0.1",
 							Status: networkv1beta1.IPStatusDeleting,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "InUse",
 						},
@@ -577,7 +577,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "192.168.0.2",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-2",
 							Status: "InUse",
 						},
@@ -589,7 +589,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "fd00::1",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "InUse",
 						},
@@ -599,7 +599,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "fd00::2",
 							Status: networkv1beta1.IPStatusDeleting,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-2",
 							Status: "InUse",
 						},
@@ -636,7 +636,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "192.168.0.1",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "InUse",
 						},
@@ -646,7 +646,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "192.168.0.2",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-2",
 							Status: "InUse",
 						},
@@ -658,7 +658,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "fd00::1",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "InUse",
 						},
@@ -668,7 +668,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "fd00::2",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-2",
 							Status: "InUse",
 						},
@@ -713,7 +713,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "192.168.0.1",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "InUse",
 						},
@@ -723,7 +723,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "192.168.0.2",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-2",
 							Status: "InUse",
 						},
@@ -735,7 +735,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "fd00::1",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "InUse",
 						},
@@ -745,7 +745,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "fd00::2",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "InUse",
 						},
@@ -793,7 +793,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "192.168.0.1",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "InUse",
 						},
@@ -803,7 +803,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "192.168.0.2",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-2",
 							Status: "InUse",
 						},
@@ -815,7 +815,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "fd00::1",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "InUse",
 						},
@@ -825,7 +825,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							IP:     "fd00::2",
 							Status: networkv1beta1.IPStatusValid,
 						},
-						NetworkInterface: &networkv1beta1.NetworkInterface{
+						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-2",
 							Status: "InUse",
 						},
@@ -902,7 +902,7 @@ func TestReconcileNode_assignIP(t *testing.T) {
 			args: args{
 				ctx: MetaIntoCtx(context.TODO()),
 				opt: &eniOptions{
-					eniRef: &networkv1beta1.NetworkInterface{
+					eniRef: &networkv1beta1.Nic{
 						ID: "eni-1",
 					},
 					addIPv4N: 2,
@@ -1414,7 +1414,7 @@ func Test_assignEniWithOptions(t *testing.T) {
 				options: []*eniOptions{
 					{
 						eniTypeKey: trunkKey,
-						eniRef: &networkv1beta1.NetworkInterface{
+						eniRef: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "Available",
 							IPv4: map[string]*networkv1beta1.IP{
@@ -1466,7 +1466,7 @@ func Test_assignEniWithOptions(t *testing.T) {
 				options: []*eniOptions{
 					{
 						eniTypeKey: trunkKey,
-						eniRef: &networkv1beta1.NetworkInterface{
+						eniRef: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "Available",
 							IPv4: map[string]*networkv1beta1.IP{
@@ -1545,7 +1545,7 @@ func Test_assignEniWithOptions(t *testing.T) {
 				options: []*eniOptions{
 					{
 						eniTypeKey: trunkKey,
-						eniRef: &networkv1beta1.NetworkInterface{
+						eniRef: &networkv1beta1.Nic{
 							ID:     "eni-1",
 							Status: "Available",
 							IPv4: map[string]*networkv1beta1.IP{
@@ -1634,7 +1634,7 @@ func TestReconcileNode_handleStatus(t *testing.T) {
 				ctx: MetaIntoCtx(context.TODO()),
 				node: &networkv1beta1.Node{
 					Status: networkv1beta1.NodeStatus{
-						NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
 							"eni-1": {
 								ID:     "eni-1",
 								Status: "InUse",
@@ -1723,7 +1723,7 @@ func TestReconcileNode_handleStatus(t *testing.T) {
 				ctx: MetaIntoCtx(context.TODO()),
 				node: &networkv1beta1.Node{
 					Status: networkv1beta1.NodeStatus{
-						NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
 							"eni-1": {
 								ID:     "eni-1",
 								Status: "Deleting",
@@ -1796,7 +1796,7 @@ func TestReconcileNode_adjustPool(t *testing.T) {
 						Pool:    &networkv1beta1.PoolSpec{MaxPoolSize: 0},
 					},
 					Status: networkv1beta1.NodeStatus{
-						NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
 							"eni-1": {
 								ID:                          "eni-1",
 								Status:                      "InUse",
@@ -1856,7 +1856,7 @@ func TestReconcileNode_adjustPool(t *testing.T) {
 						Pool:    &networkv1beta1.PoolSpec{MaxPoolSize: 3},
 					},
 					Status: networkv1beta1.NodeStatus{
-						NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
 							"eni-1": {
 								ID:                          "eni-1",
 								Status:                      "InUse",
@@ -1904,7 +1904,7 @@ func TestReconcileNode_adjustPool(t *testing.T) {
 				assert.Equal(t, 2, len(node.Status.NetworkInterfaces))
 				assert.Equal(t, "InUse", node.Status.NetworkInterfaces["eni-1"].Status)
 				assert.Equal(t, "InUse", node.Status.NetworkInterfaces["eni-2"].Status)
-				assert.Equal(t, &networkv1beta1.NetworkInterface{
+				assert.Equal(t, &networkv1beta1.Nic{
 					ID:                          "eni-1",
 					Status:                      "InUse",
 					NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
@@ -1924,7 +1924,7 @@ func TestReconcileNode_adjustPool(t *testing.T) {
 					},
 				}, node.Status.NetworkInterfaces["eni-1"])
 
-				assert.Equal(t, &networkv1beta1.NetworkInterface{
+				assert.Equal(t, &networkv1beta1.Nic{
 					ID:                          "eni-2",
 					Status:                      "InUse",
 					NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
@@ -1955,7 +1955,7 @@ func TestReconcileNode_adjustPool(t *testing.T) {
 						Pool:    &networkv1beta1.PoolSpec{MaxPoolSize: 1},
 					},
 					Status: networkv1beta1.NodeStatus{
-						NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
 							"eni-1": {
 								ID:                          "eni-1",
 								Status:                      "InUse",
@@ -2030,7 +2030,7 @@ func TestReconcileNode_adjustPool(t *testing.T) {
 						Pool:    &networkv1beta1.PoolSpec{MaxPoolSize: 3},
 					},
 					Status: networkv1beta1.NodeStatus{
-						NetworkInterfaces: map[string]*networkv1beta1.NetworkInterface{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
 							"eni-1": {
 								ID:                          "eni-1",
 								Status:                      "InUse",
@@ -2122,13 +2122,13 @@ func TestUpdateCrCondition(t *testing.T) {
 			name: "no errors",
 			options: []*eniOptions{
 				{
-					eniRef: &networkv1beta1.NetworkInterface{},
+					eniRef: &networkv1beta1.Nic{},
 				},
 			},
 			checkFunc: func(t *testing.T, options []*eniOptions) {
 				assert.Equal(t, []*eniOptions{
 					{
-						eniRef: &networkv1beta1.NetworkInterface{},
+						eniRef: &networkv1beta1.Nic{},
 					},
 				}, options)
 			},
@@ -2137,7 +2137,7 @@ func TestUpdateCrCondition(t *testing.T) {
 			name: "ip not enough error",
 			options: []*eniOptions{
 				{
-					eniRef: &networkv1beta1.NetworkInterface{
+					eniRef: &networkv1beta1.Nic{
 						VSwitchID: "test-vswitch",
 					},
 					errors: []error{
@@ -2155,7 +2155,7 @@ func TestUpdateCrCondition(t *testing.T) {
 			name: "generic error",
 			options: []*eniOptions{
 				{
-					eniRef: &networkv1beta1.NetworkInterface{
+					eniRef: &networkv1beta1.Nic{
 						VSwitchID: "test-vswitch",
 					},
 					errors: []error{
@@ -2172,7 +2172,7 @@ func TestUpdateCrCondition(t *testing.T) {
 			name: "multiple errors",
 			options: []*eniOptions{
 				{
-					eniRef: &networkv1beta1.NetworkInterface{
+					eniRef: &networkv1beta1.Nic{
 						VSwitchID: "test-vswitch",
 					},
 					errors: []error{
@@ -2310,7 +2310,7 @@ func TestReconcileNode_validateENI(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				option: &eniOptions{
-					eniRef: &networkv1beta1.NetworkInterface{
+					eniRef: &networkv1beta1.Nic{
 						Status: aliyunClient.ENIStatusDeleting,
 					},
 				},
@@ -2343,7 +2343,7 @@ func TestReconcileNode_validateENI(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				option: &eniOptions{
-					eniRef: &networkv1beta1.NetworkInterface{
+					eniRef: &networkv1beta1.Nic{
 						VSwitchID:                   "vsw-1",
 						Status:                      aliyunClient.ENIStatusInUse,
 						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
@@ -2380,7 +2380,7 @@ func TestReconcileNode_validateENI(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				option: &eniOptions{
-					eniRef: &networkv1beta1.NetworkInterface{
+					eniRef: &networkv1beta1.Nic{
 						VSwitchID:                   "vsw-1",
 						Status:                      aliyunClient.ENIStatusInUse,
 						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
