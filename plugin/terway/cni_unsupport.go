@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/containernetworking/cni/pkg/skel"
 
@@ -54,4 +55,7 @@ func doCmdDel(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniC
 
 func doCmdCheck(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
 	panic("not implement")
+}
+func prepareVF(ctx context.Context, id int, mac string) (int32, error) {
+	return 0, fmt.Errorf("not support")
 }

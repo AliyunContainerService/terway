@@ -158,7 +158,7 @@ func doCmdAdd(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniC
 
 	for _, netConf := range allocResult.NetConfs {
 		var setupCfg *types.SetupConfig
-		setupCfg, err = parseSetupConf(args, netConf, conf, allocResult.IPType)
+		setupCfg, err = parseSetupConf(ctx, args, netConf, conf, allocResult.IPType)
 		if err != nil {
 			err = fmt.Errorf("error parse config, %w", err)
 			return
@@ -486,4 +486,8 @@ func doCmdCheck(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cn
 		}
 	}
 	return nil
+}
+
+func prepareVF(ctx context.Context, id int, mac string) (int32, error) {
+	return 0, fmt.Errorf("not support")
 }

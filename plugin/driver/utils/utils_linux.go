@@ -66,6 +66,18 @@ func EnsureLinkName(ctx context.Context, link netlink.Link, name string) (bool, 
 	return true, LinkSetName(ctx, link, name)
 }
 
+func EnsureLinkMAC(ctx context.Context, link netlink.Link, mac string) error {
+	hw, err := net.ParseMAC(mac)
+	if err != nil {
+		return err
+	}
+	if link.Attrs().HardwareAddr.String() == hw.String() {
+		return nil
+	}
+
+	return LinkSetMAC(ctx, link, hw)
+}
+
 // DelLinkByName del by name and ignore if link not present
 func DelLinkByName(ctx context.Context, ifName string) error {
 	contLink, err := netlink.LinkByName(ifName)
