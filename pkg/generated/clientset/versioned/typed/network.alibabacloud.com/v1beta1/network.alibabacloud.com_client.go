@@ -27,6 +27,7 @@ import (
 
 type NetworkV1beta1Interface interface {
 	RESTClient() rest.Interface
+	NetworkInterfacesGetter
 	NodesGetter
 	NodeRuntimesGetter
 	PodENIsGetter
@@ -36,6 +37,10 @@ type NetworkV1beta1Interface interface {
 // NetworkV1beta1Client is used to interact with features provided by the network.alibabacloud.com group.
 type NetworkV1beta1Client struct {
 	restClient rest.Interface
+}
+
+func (c *NetworkV1beta1Client) NetworkInterfaces() NetworkInterfaceInterface {
+	return newNetworkInterfaces(c)
 }
 
 func (c *NetworkV1beta1Client) Nodes() NodeInterface {
