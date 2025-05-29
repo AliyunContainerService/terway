@@ -22,12 +22,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/samber/lo"
-	"k8s.io/client-go/util/retry"
-	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
@@ -39,7 +33,7 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 	"github.com/AliyunContainerService/terway/types/daemon"
-
+	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
@@ -47,8 +41,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -69,6 +68,7 @@ func init() {
 				MaxConcurrentReconciles: controlplane.GetConfig().PodMaxConcurrent,
 			}).
 			For(&corev1.Pod{}, builder.WithPredicates(&predicateForPodEvent{})).
+			Watches(&v1beta1.PodENI{}, &handler.EnqueueRequestForObject{}).
 			Complete(NewReconcilePod(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool, crdMode))
 
 		return err
@@ -257,7 +257,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	podENI.Spec.Zone = nodeInfo.ZoneID
 
 	// 2.2 create eni
-	err = m.createENI(ctx, &allocs, pod, podENI)
+	err = m.createENI(ctx, &allocs, pod, podENI, nodeInfo)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("error batch create eni,%w", err)
 	}
@@ -336,7 +336,10 @@ func (m *ReconcilePod) deleteAllENI(ctx context.Context, podENI *v1beta1.PodENI)
 		if alloc.ENI.ID == "" {
 			continue
 		}
-		err := m.aliyun.DeleteNetworkInterface(common.WithCtx(ctx, &alloc), alloc.ENI.ID)
+		err := common.Delete(ctx, m.client, &common.DeleteOption{
+			NetworkInterfaceID: alloc.ENI.ID,
+			IgnoreCache:        false,
+		})
 		if err != nil {
 			return err
 		}
@@ -493,7 +496,7 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 	return reconcile.Result{Requeue: true}, err
 }
 
-func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocation, pod *corev1.Pod, podENI *v1beta1.PodENI) error {
+func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocation, pod *corev1.Pod, podENI *v1beta1.PodENI, nodeInfo *common.NodeInfo) error {
 	if allocs == nil || len(*allocs) == 0 {
 		return nil
 	}
@@ -564,10 +567,9 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 					SourceDestCheck:       ptr.To(false),
 
 					// eflo
-					ZoneID: podENI.Spec.Zone,
-					VPCID:  vpcID,
-					// for leni do not attach it
-					// for hdeni , require instanceID
+					ZoneID:     podENI.Spec.Zone,
+					VPCID:      vpcID,
+					InstanceID: nodeInfo.InstanceID,
 				},
 				Backoff: &bo,
 			}
@@ -594,7 +596,6 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 			if err != nil {
 				// delete the eni, as we can not store the eni info
 				rollbackCtx := context.Background()
-				// TODO , for eflo case , we have to check the error
 
 				innerErr := retry.OnError(backoff.Backoff(backoff.ENIRelease), func(err error) bool {
 					return true

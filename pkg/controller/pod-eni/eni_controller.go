@@ -20,8 +20,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -228,7 +231,7 @@ func (m *ReconcilePodENI) gc(ctx context.Context) {
 
 func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName client.ObjectKey, podENI *v1beta1.PodENI) (result reconcile.Result, err error) {
 	l := log.FromContext(ctx)
-	l.Info("podENI created")
+	l.Info("podENI", "status", podENI.Status.Phase)
 
 	ctx = m.injectNodeStatus(ctx, podENI.Namespace, podENI.Name)
 
@@ -325,29 +328,47 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 			return reconcile.Result{}, fmt.Errorf("found previous podENI, but pod is not using fixed ip")
 		}
 
-		podENICopy := podENI.DeepCopy()
-		podENICopy.Status.InstanceID = nodeInfo.InstanceID
-		podENICopy.Status.TrunkENIID = nodeInfo.TrunkENIID
-		if podENICopy.Status.ENIInfos == nil {
-			podENICopy.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
+		before := podENI.DeepCopy()
+		podENI.Status.InstanceID = nodeInfo.InstanceID
+		podENI.Status.TrunkENIID = nodeInfo.TrunkENIID
+		if podENI.Status.ENIInfos == nil {
+			podENI.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
 		}
 
-		ll := l.WithValues("eni", podENICopy.Spec.Allocations[0].ENI.ID, "trunk", podENICopy.Status.TrunkENIID, "instance", podENICopy.Status.InstanceID)
+		ll := l.WithValues("eni", podENI.Spec.Allocations[0].ENI.ID, "trunk", podENI.Status.TrunkENIID, "instance", podENI.Status.InstanceID)
 
-		err = m.attachENI(ctx, podENICopy, nodeInfo.NodeName)
+		err = m.attachENI(ctx, podENI, nodeInfo.NodeName)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("attach eni failed, %w", err)
 		}
+
+		// lets update spec first
+		if !reflect.DeepEqual(before.Spec, podENI.Spec) {
+			after := podENI.Status.DeepCopy()
+
+			err = m.client.Update(ctx, podENI)
+			if err != nil {
+				return reconcile.Result{}, fmt.Errorf("update podENI failed, %w", err)
+			}
+			err = common.WaitRVChanged(ctx, m.client, podENI, podENI.Namespace, podENI.Name, before.ResourceVersion)
+			if err != nil {
+				return reconcile.Result{}, nil
+			}
+
+			// the only part update in attach
+			podENI.Status.ENIInfos = after.ENIInfos
+		}
+
 		ll.Info("attached")
 
-		podENICopy.Status.Phase = v1beta1.ENIPhaseBind
-		if podENICopy.Spec.HaveFixedIP() {
-			podENICopy.Status.PodLastSeen = metav1.Now()
+		podENI.Status.Phase = v1beta1.ENIPhaseBind
+		if podENI.Spec.HaveFixedIP() {
+			podENI.Status.PodLastSeen = metav1.Now()
 		}
 
 		// if attach succeed and update status failed , we can not store instance id
 		// so in later detach , we are unable to detach the eni
-		err = m.client.Status().Update(ctx, podENICopy)
+		err = m.client.Status().Update(ctx, podENI)
 		if err != nil {
 			ll.Error(err, "update podENI")
 			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventUpdatePodENIFailed, "%s", err.Error())
@@ -663,16 +684,9 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 		}
 	}()
 
-	ch := make(chan *v1beta1.ENIInfo)
-	done := make(chan struct{})
-	go func() {
-		// override the config
-		podENI.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
-		for info := range ch {
-			podENI.Status.ENIInfos[info.ID] = *info
-		}
-		done <- struct{}{}
-	}()
+	// override the config
+	podENI.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
+	lock := sync.Mutex{}
 
 	g, _ := errgroup.WithContext(context.Background())
 	for i := range podENI.Spec.Allocations {
@@ -697,6 +711,7 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 				return err
 			}
 
+			// TODO: watch the eni change
 			eni, err := common.WaitStatus(ctx, m.client, &common.DescribeOption{
 				NetworkInterfaceID: alloc.ENI.ID,
 				BackOff:            backoff.Backoff(backoff.WaitENIStatus),
@@ -707,20 +722,36 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 				return err
 			}
 
-			ch <- &v1beta1.ENIInfo{
+			lock.Lock()
+			alloc.ENI.VPCID = eni.Spec.ENI.VPCID
+			alloc.ENI.MAC = eni.Spec.ENI.MAC
+			alloc.ENI.Zone = eni.Spec.ENI.Zone
+			alloc.ENI.VSwitchID = eni.Spec.ENI.VSwitchID
+			alloc.ENI.ResourceGroupID = eni.Spec.ENI.ResourceGroupID
+			alloc.ENI.SecurityGroupIDs = eni.Spec.ENI.SecurityGroupIDs
+			alloc.IPv4 = eni.Spec.IPv4
+			alloc.IPv6 = eni.Spec.IPv6
+
+			podENI.Spec.Allocations[ii] = alloc
+			podENI.Status.ENIInfos[alloc.ENI.ID] = v1beta1.ENIInfo{
 				ID:               eni.Name,
 				Type:             eni.Status.ENIInfo.Type,
 				Vid:              eni.Status.ENIInfo.Vid,
 				Status:           v1beta1.ENIStatusBind,
 				NetworkCardIndex: cardIndex,
+				VfID:             eni.Status.ENIInfo.VfID,
 			}
+			lock.Unlock()
 
 			return nil
 		})
 	}
 	err = g.Wait()
-	close(ch)
-	<-done
+
+	sort.Slice(podENI.Spec.Allocations, func(i, j int) bool {
+		return podENI.Spec.Allocations[i].Interface < podENI.Spec.Allocations[j].Interface
+	})
+
 	return err
 }
 
@@ -750,7 +781,7 @@ func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.P
 			BackOff:            backoff.Backoff(backoff.WaitENIStatus),
 			IgnoreNotExist:     true,
 			NetworkInterfaceID: alloc.ENI.ID,
-			ExpectPhase:        ptr.To(v1beta1.Phase(v1beta1.ENIPhaseBind)),
+			ExpectPhase:        ptr.To(v1beta1.Phase(v1beta1.ENIPhaseUnbind)),
 		})
 
 		if err != nil {

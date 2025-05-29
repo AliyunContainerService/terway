@@ -23,7 +23,7 @@ func (a *OpenAPI) DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*v
 	ctx, span := a.Tracer.Start(ctx, APIDescribeVSwitches)
 	defer span.End()
 
-	err := a.RateLimiter.Wait(ctx, APIDescribeInstanceTypes)
+	err := a.RateLimiter.Wait(ctx, APIDescribeVSwitches)
 	if err != nil {
 		return nil, err
 	}

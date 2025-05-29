@@ -66,18 +66,20 @@ func (l *RemoteIPResource) ToRPC() []*rpc.NetConf {
 		eniInfo := &rpc.ENIInfo{
 			MAC: alloc.ENI.MAC,
 		}
+		info, ok := l.podENI.Status.ENIInfos[alloc.ENI.ID]
+		if !ok {
+			return nil
+		}
 		if l.trunkENI.ID != "" {
 			eniInfo.Trunk = true
 			eniInfo.MAC = l.trunkENI.MAC
 			eniInfo.GatewayIP = l.trunkENI.GatewayIP.ToRPC()
 
-			info, ok := l.podENI.Status.ENIInfos[alloc.ENI.ID]
-			if !ok {
-				return nil
-			}
 			vid := uint32(info.Vid)
 			eniInfo.Vid = vid
 		}
+
+		eniInfo.VfId = info.VfID
 
 		netConf = append(netConf, &rpc.NetConf{
 			BasicInfo: &rpc.BasicInfo{

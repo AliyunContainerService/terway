@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/alibabacloud-go/tea/tea"
 	apiErr "github.com/aliyun/alibaba-cloud-sdk-go/sdk/errors"
 	"github.com/stretchr/testify/assert"
 )
@@ -138,4 +139,13 @@ func TestEflo(t *testing.T) {
 	assert.True(t, IsEfloCode(err, 403))
 	assert.True(t, IsEfloCode(fmt.Errorf("warp %w", err), 403))
 	assert.False(t, IsEfloCode(fmt.Errorf("warp %w", err), 00))
+}
+
+func TestE2(T *testing.T) {
+	err := &tea.SDKError{
+		Code: tea.String("err"),
+	}
+	err2 := WarpError2(err)
+
+	assert.True(T, errors.Is(err2, err))
 }

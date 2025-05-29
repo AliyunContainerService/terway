@@ -1,6 +1,7 @@
 package client
 
 import (
+	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
@@ -480,6 +481,92 @@ func (o *AttachNetworkInterfaceOptions) ECS() (*ecs.AttachNetworkInterfaceReques
 	}
 
 	if req.InstanceId == "" || req.NetworkInterfaceId == "" {
+		return nil, ErrInvalidArgs
+	}
+
+	return req, nil
+}
+
+func (o *AttachNetworkInterfaceOptions) EFLO() (*eflo20220530.AttachElasticNetworkInterfaceRequest, error) {
+	req := &eflo20220530.AttachElasticNetworkInterfaceRequest{}
+	req.ElasticNetworkInterfaceId = o.NetworkInterfaceID
+	req.NodeId = o.InstanceID
+
+	if o.NetworkInterfaceID == nil || o.InstanceID == nil {
+		return nil, ErrInvalidArgs
+	}
+
+	if o.Backoff == nil {
+		o.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	return req, nil
+}
+
+type DetachNetworkInterfaceOption interface {
+	ApplyTo(*DetachNetworkInterfaceOptions)
+}
+
+type DetachNetworkInterfaceOptions struct {
+	NetworkInterfaceID *string
+	InstanceID         *string
+	TrunkID            *string
+	Backoff            *wait.Backoff
+}
+
+func (o *DetachNetworkInterfaceOptions) ApplyTo(in *DetachNetworkInterfaceOptions) {
+	if o.NetworkInterfaceID != nil {
+		in.NetworkInterfaceID = o.NetworkInterfaceID
+	}
+	if o.InstanceID != nil {
+		in.InstanceID = o.InstanceID
+	}
+	if o.TrunkID != nil {
+		in.TrunkID = o.TrunkID
+	}
+	if o.Backoff != nil {
+		in.Backoff = o.Backoff
+	}
+}
+
+func (o *DetachNetworkInterfaceOptions) ECS() (*ecs.DetachNetworkInterfaceRequest, error) {
+	req := ecs.CreateDetachNetworkInterfaceRequest()
+	if o.NetworkInterfaceID != nil {
+		req.NetworkInterfaceId = *o.NetworkInterfaceID
+	}
+	if o.InstanceID != nil {
+		req.InstanceId = *o.InstanceID
+	}
+	if o.TrunkID != nil {
+		req.TrunkNetworkInstanceId = *o.TrunkID
+	}
+	if o.Backoff == nil {
+		o.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	if req.InstanceId == "" || req.NetworkInterfaceId == "" {
+		return nil, ErrInvalidArgs
+	}
+
+	return req, nil
+}
+
+func (o *DetachNetworkInterfaceOptions) EFLO() (*eflo20220530.DetachElasticNetworkInterfaceRequest, error) {
+	req := &eflo20220530.DetachElasticNetworkInterfaceRequest{}
+	req.ElasticNetworkInterfaceId = o.NetworkInterfaceID
+	req.NodeId = o.InstanceID
+
+	if o.Backoff == nil {
+		o.Backoff = &wait.Backoff{
+			Steps: 1,
+		}
+	}
+
+	if req.NodeId == nil || req.ElasticNetworkInterfaceId == nil {
 		return nil, ErrInvalidArgs
 	}
 

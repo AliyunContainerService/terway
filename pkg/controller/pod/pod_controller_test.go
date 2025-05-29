@@ -871,4 +871,191 @@ var _ = Describe("Pod controller", func() {
 			Expect(err).To(HaveOccurred())
 		})
 	})
+
+	Context("delete pod with non-fixed ip", func() {
+		ctx := context.Background()
+		name := "delete-non-fixed-ip-pod"
+		ns := "default"
+		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+		vsw, _ := vswitch.NewSwitchPool(100, "10m")
+		request := reconcile.Request{
+			NamespacedName: key,
+		}
+
+		podENI := &networkv1beta1.PodENI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: ns,
+			},
+			Spec: networkv1beta1.PodENISpec{
+				Allocations: []networkv1beta1.Allocation{
+					{
+						AllocationType: networkv1beta1.AllocationType{
+							Type: networkv1beta1.IPAllocTypeElastic,
+						},
+					},
+				},
+			},
+			Status: networkv1beta1.PodENIStatus{
+				Phase: networkv1beta1.ENIPhaseBind,
+			},
+		}
+
+		It("should mark podENI phase as Deleting", func() {
+			Expect(k8sClient.Create(ctx, podENI)).Should(Succeed())
+			Expect(k8sClient.Status().Update(ctx, podENI)).Should(Succeed())
+
+			r := &ReconcilePod{
+				client:    k8sClient,
+				scheme:    scheme.Scheme,
+				aliyun:    openAPI,
+				swPool:    vsw,
+				record:    record.NewFakeRecorder(1000),
+				trunkMode: false,
+				crdMode:   false,
+			}
+
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &networkv1beta1.PodENI{}
+			Expect(k8sClient.Get(ctx, key, updated)).Should(Succeed())
+			Expect(updated.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseDeleting)))
+		})
+	})
+
+	Context("delete pod with fixed ip", func() {
+		ctx := context.Background()
+		name := "delete-fixed-ip-pod"
+		ns := "default"
+		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+		vsw, _ := vswitch.NewSwitchPool(100, "10m")
+		request := reconcile.Request{
+			NamespacedName: key,
+		}
+
+		podENI := &networkv1beta1.PodENI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: ns,
+			},
+			Spec: networkv1beta1.PodENISpec{
+				Allocations: []networkv1beta1.Allocation{
+					{
+						AllocationType: networkv1beta1.AllocationType{
+							Type: networkv1beta1.IPAllocTypeFixed,
+						},
+					},
+				},
+			},
+			Status: networkv1beta1.PodENIStatus{
+				Phase: networkv1beta1.ENIPhaseBind,
+			},
+		}
+
+		It("should mark podENI phase as Detaching", func() {
+			Expect(k8sClient.Create(ctx, podENI)).Should(Succeed())
+
+			r := &ReconcilePod{
+				client:    k8sClient,
+				scheme:    scheme.Scheme,
+				aliyun:    openAPI,
+				swPool:    vsw,
+				record:    record.NewFakeRecorder(1000),
+				trunkMode: false,
+				crdMode:   false,
+			}
+
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &networkv1beta1.PodENI{}
+			Expect(k8sClient.Get(ctx, key, updated)).Should(Succeed())
+			Expect(updated.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseDetaching)))
+		})
+	})
+
+	Context("delete pod when podENI is already deleting", func() {
+		ctx := context.Background()
+		name := "delete-already-deleting"
+		ns := "default"
+		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+		vsw, _ := vswitch.NewSwitchPool(100, "10m")
+		request := reconcile.Request{
+			NamespacedName: key,
+		}
+
+		podENI := &networkv1beta1.PodENI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: ns,
+			},
+			Status: networkv1beta1.PodENIStatus{
+				Phase: networkv1beta1.ENIPhaseDeleting,
+			},
+		}
+
+		It("should do nothing", func() {
+			Expect(k8sClient.Create(ctx, podENI)).Should(Succeed())
+
+			r := &ReconcilePod{
+				client:    k8sClient,
+				scheme:    scheme.Scheme,
+				aliyun:    openAPI,
+				swPool:    vsw,
+				record:    record.NewFakeRecorder(1000),
+				trunkMode: false,
+				crdMode:   false}
+
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &networkv1beta1.PodENI{}
+			Expect(k8sClient.Get(ctx, key, updated)).Should(Succeed())
+			Expect(updated.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseDeleting)))
+		})
+	})
+
+	Context("delete pod when podENI is already detaching", func() {
+		ctx := context.Background()
+		name := "delete-already-detaching"
+		ns := "default"
+		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+		vsw, _ := vswitch.NewSwitchPool(100, "10m")
+		request := reconcile.Request{
+			NamespacedName: key,
+		}
+
+		podENI := &networkv1beta1.PodENI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: ns,
+			},
+			Status: networkv1beta1.PodENIStatus{
+				Phase: networkv1beta1.ENIPhaseDetaching,
+			},
+		}
+
+		It("should do nothing", func() {
+			Expect(k8sClient.Create(ctx, podENI)).Should(Succeed())
+			Expect(k8sClient.Status().Update(ctx, podENI)).Should(Succeed())
+
+			r := &ReconcilePod{
+				client:    k8sClient,
+				scheme:    scheme.Scheme,
+				aliyun:    openAPI,
+				swPool:    vsw,
+				record:    record.NewFakeRecorder(1000),
+				trunkMode: false,
+				crdMode:   false,
+			}
+
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &networkv1beta1.PodENI{}
+			Expect(k8sClient.Get(ctx, key, updated)).Should(Succeed())
+			Expect(updated.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseDeleting)))
+		})
+	})
 })

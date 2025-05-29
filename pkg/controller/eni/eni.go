@@ -3,10 +3,11 @@ package eni
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
+	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/go-logr/logr"
-	"github.com/samber/lo"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -136,11 +137,16 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 
 	if networkInterface.Status.InstanceID != "" {
 		var resp []*aliyunClient.NetworkInterface
-		if strings.HasPrefix(networkInterface.Name, "leni-") {
-			ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
+		if strings.HasPrefix(networkInterface.Name, "leni-") || strings.HasPrefix(networkInterface.Name, "hdeni-") {
+			// nb(l1b0k): for now len and hdeni share nearly same status
+			if strings.HasPrefix(networkInterface.Name, "leni-") {
+				ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
+			} else {
+				ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLOHDENI)
+			}
 
 			resp, err = r.aliyun.DescribeNetworkInterfaceV2(ctx, &aliyunClient.DescribeNetworkInterfaceOptions{
-				NetworkInterfaceIDs: &[]string{networkInterface.Spec.ENI.ID},
+				NetworkInterfaceIDs: &[]string{networkInterface.Name},
 				RawStatus:           ptr.To(true),
 			})
 			if err != nil {
@@ -154,18 +160,18 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 			case aliyunClient.LENIStatusAvailable:
 			case aliyunClient.LENIStatusUnattached, aliyunClient.LENIStatusAttachFailed:
 				//	"Code": "1017",  Attaching Available 不允许操作
-				err = r.aliyun.AttachNetworkInterface(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
-					NetworkInterfaceID:     ptr.To(networkInterface.Name),
-					InstanceID:             ptr.To(networkInterface.Status.InstanceID),
-					TrunkNetworkInstanceID: ptr.To(networkInterface.Status.TrunkENIID),
+				err = r.aliyun.AttachNetworkInterfaceV2(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
+					NetworkInterfaceID:     toPtr(networkInterface.Name),
+					InstanceID:             toPtr(networkInterface.Status.InstanceID),
+					TrunkNetworkInstanceID: toPtr(networkInterface.Status.TrunkENIID),
 					NetworkCardIndex:       networkInterface.Status.CardIndex,
 				})
 				if err != nil {
 					return reconcile.Result{}, err
 				}
 				fallthrough
-			case aliyunClient.LENIStatusExecuting:
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitPodENIStatus))
+			case aliyunClient.LENIStatusExecuting, aliyunClient.LENIStatusAttaching, aliyunClient.LENIStatusDetaching:
+				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitLENIStatus))
 				if err != nil {
 					return reconcile.Result{}, err
 				}
@@ -173,45 +179,17 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 			case aliyunClient.LENIStatusCreateFailed:
 				// release this eni, this status should be on first create
 				return reconcile.Result{}, r.rollBackPodENI(ctx, networkInterface)
-
 			case aliyunClient.LENIStatusDetachFailed, aliyunClient.LENIStatusDeleteFailed, aliyunClient.LENIStatusDeleting:
 				return reconcile.Result{}, fmt.Errorf("unsupported status on attach %s", resp[0].Status)
+			default:
+				return reconcile.Result{}, fmt.Errorf("unknown status %s", resp[0].Status)
 			}
 
-		} else if strings.HasPrefix(networkInterface.Name, "hdeni-") {
-			ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLOHDENI)
-
-			err = r.aliyun.AttachNetworkInterface(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
-				NetworkInterfaceID:     ptr.To(networkInterface.Name),
-				InstanceID:             ptr.To(networkInterface.Status.InstanceID),
-				TrunkNetworkInstanceID: ptr.To(networkInterface.Status.TrunkENIID),
-				NetworkCardIndex:       networkInterface.Status.CardIndex,
-			})
-			if err != nil {
-				return reconcile.Result{}, err
-			}
-
-			resp, err = r.aliyun.DescribeNetworkInterfaceV2(ctx, &aliyunClient.DescribeNetworkInterfaceOptions{
-				NetworkInterfaceIDs: &[]string{networkInterface.Spec.ENI.ID},
-				RawStatus:           nil,
-			})
-			if err != nil {
-				return reconcile.Result{}, err
-			}
-
-			if !(len(resp) == 1 && resp[0].Status == aliyunClient.ENIStatusInUse) {
-				// wait next time
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitPodENIStatus))
-				if err != nil {
-					return reconcile.Result{}, err
-				}
-				return reconcile.Result{RequeueAfter: du}, nil
-			}
 		} else {
-			err = r.aliyun.AttachNetworkInterface(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
-				NetworkInterfaceID:     ptr.To(networkInterface.Name),
-				InstanceID:             ptr.To(networkInterface.Status.InstanceID),
-				TrunkNetworkInstanceID: ptr.To(networkInterface.Status.TrunkENIID),
+			err = r.aliyun.AttachNetworkInterfaceV2(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
+				NetworkInterfaceID:     toPtr(networkInterface.Name),
+				InstanceID:             toPtr(networkInterface.Status.InstanceID),
+				TrunkNetworkInstanceID: toPtr(networkInterface.Status.TrunkENIID),
 				NetworkCardIndex:       networkInterface.Status.CardIndex,
 			})
 			if err != nil {
@@ -219,8 +197,8 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 			}
 
 			resp, err = r.aliyun.DescribeNetworkInterfaceV2(ctx, &aliyunClient.DescribeNetworkInterfaceOptions{
-				NetworkInterfaceIDs: &[]string{networkInterface.Spec.ENI.ID},
-				RawStatus:           nil,
+				NetworkInterfaceIDs: &[]string{networkInterface.Name},
+				RawStatus:           ptr.To(true),
 			})
 			if err != nil {
 				return reconcile.Result{}, err
@@ -228,7 +206,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 
 			if !(len(resp) == 1 && resp[0].Status == aliyunClient.ENIStatusInUse) {
 				// wait next time
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitPodENIStatus))
+				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus))
 				if err != nil {
 					return reconcile.Result{}, err
 				}
@@ -240,12 +218,43 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 
 		remote := resp[0]
 
+		oldSpec := networkInterface.Spec.DeepCopy()
+
+		networkInterface.Spec.ENI = v1beta1.ENI{
+			ID:               remote.NetworkInterfaceID,
+			VPCID:            remote.VPCID,
+			MAC:              remote.MacAddress,
+			Zone:             remote.ZoneID,
+			VSwitchID:        remote.VSwitchID,
+			ResourceGroupID:  remote.ResourceGroupID,
+			SecurityGroupIDs: remote.SecurityGroupIDs,
+		}
+		networkInterface.Spec.IPv4 = remote.PrivateIPAddress
+		if len(remote.IPv6Set) > 0 {
+			networkInterface.Spec.IPv6 = remote.IPv6Set[0].IPAddress
+		}
+
+		if !reflect.DeepEqual(oldSpec, networkInterface.Spec) {
+			oldRv := networkInterface.GetResourceVersion()
+			err = r.client.Update(ctx, networkInterface)
+			if err != nil {
+				return reconcile.Result{}, nil
+			}
+
+			// networkInterface should be updated
+			err = common.WaitRVChanged(ctx, r.client, networkInterface, networkInterface.Namespace, networkInterface.Name, oldRv)
+			if err != nil {
+				return reconcile.Result{}, nil
+			}
+		}
+
 		networkInterface.Status.ENIInfo = v1beta1.ENIInfo{
 			ID:               remote.NetworkInterfaceID,
 			Type:             v1beta1.ENIType(remote.Type),
 			Vid:              remote.DeviceIndex,
 			NetworkCardIndex: ptr.To(remote.NetworkCardIndex),
 			Status:           v1beta1.ENIStatusBind,
+			VfID:             remote.VfID,
 		}
 		networkInterface.Status.Phase = v1beta1.ENIPhaseBind
 
@@ -276,10 +285,14 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 	var err error
 
 	if networkInterface.Status.InstanceID != "" {
-		if strings.HasPrefix(networkInterface.Name, "leni-") {
-			ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
+		if strings.HasPrefix(networkInterface.Name, "leni-") || strings.HasPrefix(networkInterface.Name, "hdeni-") {
+			if strings.HasPrefix(networkInterface.Name, "leni-") {
+				ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
+			} else {
+				ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLOHDENI)
+			}
 			resp, err := r.aliyun.DescribeNetworkInterfaceV2(ctx, &aliyunClient.DescribeNetworkInterfaceOptions{
-				NetworkInterfaceIDs: &[]string{networkInterface.Spec.ENI.ID},
+				NetworkInterfaceIDs: &[]string{networkInterface.Name},
 				RawStatus:           ptr.To(true),
 			})
 			if err != nil {
@@ -288,35 +301,41 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 			if len(resp) > 0 {
 				switch resp[0].Status {
 				case aliyunClient.LENIStatusAvailable, aliyunClient.LENIStatusDetachFailed:
-					err = r.aliyun.DetachNetworkInterface(ctx, networkInterface.Spec.ENI.ID, networkInterface.Status.InstanceID, networkInterface.Status.TrunkENIID)
+					// networkInterface.Spec.ENI.ID, networkInterface.Status.InstanceID, networkInterface.Status.TrunkENIID
+					err = r.aliyun.DetachNetworkInterfaceV2(ctx, &aliyunClient.DetachNetworkInterfaceOptions{
+						NetworkInterfaceID: toPtr(networkInterface.Name),
+						InstanceID:         toPtr(networkInterface.Status.InstanceID),
+					})
 					if err != nil {
 						return reconcile.Result{}, err
 					}
 					fallthrough
-				case aliyunClient.LENIStatusExecuting:
-					du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitPodENIStatus))
+				case aliyunClient.LENIStatusExecuting, aliyunClient.LENIStatusDetaching:
+					du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitLENIStatus))
 					if err != nil {
 						return reconcile.Result{}, err
 					}
 					return reconcile.Result{RequeueAfter: du}, nil
-				case aliyunClient.LENIStatusUnattached, aliyunClient.LENIStatusCreateFailed, aliyunClient.LENIStatusDeleting, aliyunClient.LENIStatusDeleteFailed:
-					// ignore this status. can delete directly
-
-				case aliyunClient.LENIStatusAttachFailed: // ？can we deletedirectly
-					return reconcile.Result{}, fmt.Errorf("unsupported status on attach %s", resp[0].Status)
+				case aliyunClient.LENIStatusUnattached, aliyunClient.LENIStatusCreateFailed, aliyunClient.LENIStatusDeleting, aliyunClient.LENIStatusDeleteFailed, aliyunClient.LENIStatusAttachFailed:
+					// ignore this status. detach assume succeed.
+				default:
+					return reconcile.Result{}, fmt.Errorf("unknown status %s", resp[0].Status)
 				}
 			}
 
-		} else if strings.HasPrefix(networkInterface.Name, "hdeni-") {
-			ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLOHDENI)
 		} else {
-			err = r.aliyun.DetachNetworkInterface(ctx, networkInterface.Spec.ENI.ID, networkInterface.Status.InstanceID, networkInterface.Status.TrunkENIID)
+			err = r.aliyun.DetachNetworkInterfaceV2(ctx, &aliyunClient.DetachNetworkInterfaceOptions{
+				NetworkInterfaceID: toPtr(networkInterface.Name),
+				InstanceID:         toPtr(networkInterface.Status.InstanceID),
+				TrunkID:            toPtr(networkInterface.Status.TrunkENIID),
+			})
 			if err != nil {
 				return reconcile.Result{}, err
 			}
 
 			enis, err := r.aliyun.DescribeNetworkInterfaceV2(ctx, &aliyunClient.DescribeNetworkInterfaceOptions{
-				NetworkInterfaceIDs: &[]string{networkInterface.Spec.ENI.ID},
+				NetworkInterfaceIDs: &[]string{networkInterface.Name},
+				RawStatus:           ptr.To(true),
 			})
 			if err != nil {
 				return reconcile.Result{}, err
@@ -324,7 +343,7 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 
 			if len(enis) > 0 && enis[0].Status != aliyunClient.ENIStatusAvailable {
 				// wait next time
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitPodENIStatus))
+				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus))
 				if err != nil {
 					return reconcile.Result{}, err
 				}
@@ -337,6 +356,7 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 
 		networkInterface.Status.ENIInfo.Status = v1beta1.ENIPhaseUnbind
 		networkInterface.Status.ENIInfo.Vid = 0
+		networkInterface.Status.ENIInfo.VfID = nil
 		networkInterface.Status.ENIInfo.NetworkCardIndex = nil
 
 		networkInterface.Status.InstanceID = ""
@@ -365,7 +385,16 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 
 // put a stand alone detach flow
 func (r *ReconcileNetworkInterface) delete(ctx context.Context, networkInterface *v1beta1.NetworkInterface) error {
-	err := r.aliyun.DeleteNetworkInterfaceV2(ctx, networkInterface.Spec.ENI.ID)
+
+	if strings.HasPrefix(networkInterface.Name, "leni-") {
+		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
+	} else if strings.HasPrefix(networkInterface.Name, "hdeni-") {
+		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLOHDENI)
+	} else {
+		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIECS)
+	}
+
+	err := r.aliyun.DeleteNetworkInterfaceV2(ctx, networkInterface.Name)
 	if err != nil {
 		return err
 	}
@@ -381,9 +410,11 @@ func (r *ReconcileNetworkInterface) delete(ctx context.Context, networkInterface
 }
 
 func (r *ReconcileNetworkInterface) rollBackPodENI(ctx context.Context, networkInterface *v1beta1.NetworkInterface) error {
-	if networkInterface.Spec.PodENIRef == nil {
+	if networkInterface.Spec.PodENIRef == nil || networkInterface.Spec.PodENIRef.Name == "" {
 		return nil
 	}
+
+	l := logr.FromContextOrDiscard(ctx)
 
 	podENI := &v1beta1.PodENI{
 		ObjectMeta: metav1.ObjectMeta{
@@ -394,29 +425,22 @@ func (r *ReconcileNetworkInterface) rollBackPodENI(ctx context.Context, networkI
 
 	err := r.client.Get(ctx, client.ObjectKeyFromObject(podENI), podENI)
 	if err != nil {
+		if k8sErr.IsNotFound(err) {
+			return nil
+		}
 		return err
 	}
 
-	changed := false
-	//podENI.Spec.Allocations
-	podENI.Spec.Allocations = lo.Filter(podENI.Spec.Allocations, func(item v1beta1.Allocation, index int) bool {
-		// true to keep
-		if item.ENI.ID != networkInterface.Spec.ENI.ID {
-			return true
-		}
-		changed = true
-		return false
-	})
-	if changed {
-		err = r.client.Update(ctx, podENI)
-		if err != nil {
-			return err
-		}
+	if podENI.DeletionTimestamp.IsZero() {
+		l.Info("eni create failed, delete podENI")
+		return r.client.Delete(ctx, podENI)
 	}
-	// after we make sure the podENI no longer use this , we can move on to release the eni
-	if networkInterface.DeletionTimestamp.IsZero() {
-		return r.delete(ctx, networkInterface)
-	}
-
 	return nil
+}
+
+func toPtr(in string) *string {
+	if in == "" {
+		return nil
+	}
+	return &in
 }

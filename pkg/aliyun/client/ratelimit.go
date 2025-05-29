@@ -30,6 +30,19 @@ var defaultLimit = map[string]int{
 	"UnassignIpv6Addresses":      400,
 	"DescribeInstanceTypes":      400,
 	"DescribeVSwitches":          300,
+	// eflo
+	"AssignLeniPrivateIpAddress":               300,
+	"AttachElasticNetworkInterface":            300,
+	"DetachElasticNetworkInterface":            300,
+	"ListElasticNetworkInterfaces":             100 * 60,
+	"CreateElasticNetworkInterface":            20 * 60,
+	"DeleteElasticNetworkInterface":            20 * 60,
+	"CreateHighDensityElasticNetworkInterface": 15 * 60,
+	"DeleteHighDensityElasticNetworkInterface": 300,
+	"AttachHighDensityElasticNetworkInterface": 300,
+	"DetachHighDensityElasticNetworkInterface": 300,
+	"ListHighDensityElasticNetworkInterfaces":  100 * 60,
+	"GetNodeInfoForPod":                        100 * 60,
 }
 
 const (

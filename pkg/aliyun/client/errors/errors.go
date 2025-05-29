@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 
+	"github.com/alibabacloud-go/tea/tea"
 	apiErr "github.com/aliyun/alibaba-cloud-sdk-go/sdk/errors"
 )
 
@@ -170,4 +172,34 @@ func IsEfloCode(err error, code int) bool {
 		return efloErr.Code == code
 	}
 	return false
+}
+
+type E2 struct {
+	e     *tea.SDKError
+	extra []string
+}
+
+func (e *E2) Error() string {
+	if e.e == nil {
+		return ""
+	}
+
+	return fmt.Sprintf("errCode: %s, msg: %s, %s", tea.StringValue(e.e.Code), tea.StringValue(e.e.Message), strings.Join(e.extra, ","))
+}
+
+func (e *E2) Unwrap() error {
+	return e.e
+}
+
+func WarpError2(err error, extra ...string) error {
+	if err == nil {
+		return nil
+	}
+	var respErr *tea.SDKError
+	ok := errors.As(err, &respErr)
+	if !ok {
+		return err
+	}
+
+	return &E2{e: respErr, extra: extra}
 }

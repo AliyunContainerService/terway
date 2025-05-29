@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"time"
 
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
+	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
-
-	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
-	"github.com/AliyunContainerService/terway/pkg/metric"
 )
 
 const (
 	APICreateElasticNetworkInterface = "CreateElasticNetworkInterface"
 	APIAssignLeniPrivateIPAddress    = "AssignLeniPrivateIpAddress"
+	APIAttachElasticNetworkInterface = "AttachElasticNetworkInterface"
+	APIDetachElasticNetworkInterface = "DetachElasticNetworkInterface"
 	APIDeleteElasticNetworkInterface = "DeleteElasticNetworkInterface"
 	APIUnassignLeniPrivateIPAddress  = "UnassignLeniPrivateIpAddress"
 	APIListLeniPrivateIPAddresses    = "ListLeniPrivateIpAddresses"
@@ -49,7 +50,7 @@ func (a *OpenAPI) CreateElasticNetworkInterfaceV2(ctx context.Context, opts ...C
 
 	start := time.Now()
 	resp, err := a.ClientSet.EFLO().CreateElasticNetworkInterface(req)
-	metric.OpenAPILatency.WithLabelValues("CreateElasticNetworkInterface", fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	metric.OpenAPILatency.WithLabelValues(APICreateElasticNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +102,7 @@ func (a *OpenAPI) DescribeLeniNetworkInterface(ctx context.Context, opts ...Desc
 	enis := make([]*NetworkInterface, 0)
 	for _, data := range resp.Content.Data {
 
-		l.Info("ListElasticNetworkInterfaces", "data", data)
+		l.WithValues(LogFieldRequestID, resp.RequestId).Info("ListElasticNetworkInterfaces", "data", data)
 
 		if data.Type != "CUSTOM" { // CUSTOM for our own card
 			continue
@@ -315,4 +316,92 @@ func (a *OpenAPI) WaitForLeniNetworkInterface(ctx context.Context, eniID string,
 		return nil, fmt.Errorf("error wait for eni %v to status %s, %w", eniID, status, err)
 	}
 	return eniInfo, nil
+}
+
+func (a *OpenAPI) AttachLeni(ctx context.Context, opts ...AttachNetworkInterfaceOption) error {
+	ctx, span := a.Tracer.Start(ctx, APIAttachElasticNetworkInterface)
+	defer span.End()
+
+	option := &AttachNetworkInterfaceOptions{}
+	for _, opt := range opts {
+		opt.ApplyTo(option)
+	}
+
+	req, err := option.EFLO()
+	if err != nil {
+		return err
+	}
+	l := LogFields(logr.FromContextOrDiscard(ctx), req)
+	err = a.RateLimiter.Wait(ctx, APIAttachElasticNetworkInterface)
+	if err != nil {
+		return err
+	}
+
+	start := time.Now()
+	resp, err := a.ClientSet.EFLOV2().AttachElasticNetworkInterface(req)
+	metric.OpenAPILatency.WithLabelValues(APIAttachElasticNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	if err != nil {
+		return apiErr.WarpError2(err, APIAttachElasticNetworkInterface)
+	}
+	if resp.Body == nil {
+		return fmt.Errorf("empty response body")
+	}
+
+	if resp.Body.Code != nil && *resp.Body.Code != 0 {
+		err = &apiErr.EFLOCode{
+			Code:      int(FromPtr(resp.Body.Code)),
+			Message:   FromPtr(resp.Body.Message),
+			RequestID: FromPtr(resp.Body.RequestId),
+		}
+		return err
+	}
+
+	l.WithValues(LogFieldRequestID, FromPtr(resp.Body.RequestId)).Info("attach eni")
+	return nil
+}
+
+func (a *OpenAPI) DetachLeni(ctx context.Context, opts ...DetachNetworkInterfaceOption) error {
+	ctx, span := a.Tracer.Start(ctx, APIDetachElasticNetworkInterface)
+	defer span.End()
+
+	option := &DetachNetworkInterfaceOptions{}
+	for _, opt := range opts {
+		opt.ApplyTo(option)
+	}
+
+	req, err := option.EFLO()
+	if err != nil {
+		return err
+	}
+	l := LogFields(logr.FromContextOrDiscard(ctx), req)
+
+	err = a.RateLimiter.Wait(ctx, APIDetachElasticNetworkInterface)
+	if err != nil {
+		return err
+	}
+
+	start := time.Now()
+	// 1017 Detaching
+	// 1011 detached or not found
+	resp, err := a.ClientSet.EFLOV2().DetachElasticNetworkInterface(req)
+	metric.OpenAPILatency.WithLabelValues(APIDetachElasticNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	if err != nil {
+		return apiErr.WarpError2(err, APIDetachElasticNetworkInterface)
+	}
+
+	if resp.Body == nil {
+		return fmt.Errorf("empty response body")
+	}
+
+	if resp.Body.Code != nil && *resp.Body.Code != 0 {
+		err = &apiErr.EFLOCode{
+			Code:      int(FromPtr(resp.Body.Code)),
+			Message:   FromPtr(resp.Body.Message),
+			RequestID: FromPtr(resp.Body.RequestId),
+		}
+		return err
+	}
+
+	l.WithValues(LogFieldRequestID, FromPtr(resp.Body.RequestId)).Info("detach leni success")
+	return nil
 }

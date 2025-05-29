@@ -38,21 +38,21 @@ func (a *OpenAPI) AttachNetworkInterfaceV2(ctx context.Context, opts ...AttachNe
 	case BackendAPIECS:
 		return a.AttachNetworkInterface(ctx, opts...)
 	case BackendAPIEFLO:
-		return nil
+		return a.AttachLeni(ctx, opts...)
 	case BackendAPIEFLOHDENI:
-		return nil
+		return a.AttachHDENI(ctx, opts...)
 	}
 	return ErrNotImplemented
 }
 
-func (a *OpenAPI) DetachNetworkInterfaceV2(ctx context.Context, eniID, instanceID, trunkENIID string) error {
+func (a *OpenAPI) DetachNetworkInterfaceV2(ctx context.Context, opts ...DetachNetworkInterfaceOption) error {
 	switch GetBackendAPI(ctx) {
 	case BackendAPIECS:
-		return a.DetachNetworkInterface(ctx, eniID, instanceID, trunkENIID)
+		return a.DetachNetworkInterface2(ctx, opts...)
 	case BackendAPIEFLO:
-		return nil
+		return a.DetachLeni(ctx, opts...)
 	case BackendAPIEFLOHDENI:
-		return nil
+		return a.DetachHDENI(ctx, opts...)
 	}
 	return ErrNotImplemented
 }
@@ -115,8 +115,6 @@ func (a *OpenAPI) WaitForNetworkInterfaceV2(ctx context.Context, eniID string, s
 		return a.WaitForNetworkInterface(ctx, eniID, status, backoff, ignoreNotExist)
 	case BackendAPIEFLO:
 		return a.WaitForLeniNetworkInterface(ctx, eniID, status, backoff, ignoreNotExist)
-	case BackendAPIEFLOHDENI:
-		return a.WaitForHDENI(ctx, eniID, status, backoff, ignoreNotExist)
 	}
 	return nil, ErrNotImplemented
 }

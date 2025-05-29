@@ -266,3 +266,39 @@ func (a *OpenAPI) UnAssignIpv6Addresses2(ctx context.Context, eniID string, ips 
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
 	return nil
 }
+
+// DetachNetworkInterface2 detaches an ENI using the new option-based interface.
+func (a *OpenAPI) DetachNetworkInterface2(ctx context.Context, opts ...DetachNetworkInterfaceOption) error {
+	ctx, span := a.Tracer.Start(ctx, APIDetachNetworkInterface)
+	defer span.End()
+
+	option := &DetachNetworkInterfaceOptions{}
+	for _, opt := range opts {
+		opt.ApplyTo(option)
+	}
+
+	req, err := option.ECS()
+	if err != nil {
+		return err
+	}
+	l := LogFields(logf.FromContext(ctx), req)
+
+	err = a.RateLimiter.Wait(ctx, APIDetachNetworkInterface)
+	if err != nil {
+		return err
+	}
+
+	start := time.Now()
+	resp, err := a.ClientSet.ECS().DetachNetworkInterface(req)
+	metric.OpenAPILatency.WithLabelValues(APIDetachNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	if err != nil {
+		err = apiErr.WarpError(err)
+		if apiErr.ErrorCodeIs(err, apiErr.ErrInvalidENINotFound, apiErr.ErrInvalidEcsIDNotFound) {
+			return nil
+		}
+		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "detach eni failed")
+		return err
+	}
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("detach eni success")
+	return nil
+}

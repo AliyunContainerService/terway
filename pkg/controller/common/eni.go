@@ -124,9 +124,17 @@ type AttachOption struct {
 }
 
 func Attach(ctx context.Context, c client.Client, option *AttachOption) error {
-	if option.InstanceID == "" || option.NetworkInterfaceID == "" || option.NodeName == "" {
-		return fmt.Errorf("invalid attach option")
+
+	if option.InstanceID == "" {
+		return fmt.Errorf("instance id is empty")
 	}
+	if option.NetworkInterfaceID == "" {
+		return fmt.Errorf("network interface id is empty")
+	}
+	if option.NodeName == "" {
+		return fmt.Errorf("node name is empty")
+	}
+
 	networkInterface := &v1beta1.NetworkInterface{
 		ObjectMeta: metav1.ObjectMeta{},
 	}
@@ -314,4 +322,18 @@ func WaitCreated[T client.Object](ctx context.Context, c client.Client, obj T, n
 		}
 		return true, nil
 	})
+}
+
+func WaitRVChanged[T client.Object](ctx context.Context, c client.Client, obj T, namespace, name string, currentRV string) error {
+	err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+		err := c.Get(ctx, k8stypes.NamespacedName{
+			Namespace: namespace,
+			Name:      name,
+		}, obj)
+		if err != nil {
+			return false, nil
+		}
+		return obj.GetResourceVersion() != currentRV, nil
+	})
+	return err
 }

@@ -406,9 +406,9 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		node.Spec.NodeCap.IPv4PerAdapter = resp.LeniSipQuota
 
 		// fallback to hdeni if leni not available
-		if node.Spec.NodeCap.Adapters <= 1 &&
+		if (node.Spec.NodeCap.Adapters <= 1 &&
 			resp.HdeniQuota > 0 &&
-			types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly ||
+			types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly) ||
 			k8sNode.Annotations[types.ENOApi] == "hdeni" { // check k8s config
 			node.Spec.NodeCap.Adapters = resp.HdeniQuota
 			node.Spec.NodeCap.TotalAdapters = resp.HdeniQuota

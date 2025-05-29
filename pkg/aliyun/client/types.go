@@ -16,15 +16,7 @@ var ErrInvalidArgs = errors.New("invalid args")
 const (
 	LogFieldAPI              = "api"
 	LogFieldRequestID        = "requestID"
-	LogFieldInstanceID       = "instanceID"
-	LogFieldSecondaryIPCount = "secondaryIPCount"
 	LogFieldENIID            = "eni"
-	LogFieldIPs              = "ips"
-	LogFieldEIPID            = "eip"
-	LogFieldPrivateIP        = "privateIP"
-	LogFieldVSwitchID        = "vSwitchID"
-	LogFieldSgID             = "securityGroupID"
-	LogFieldResourceGroupID  = "resourceGroupID"
 )
 
 const (
@@ -45,6 +37,8 @@ const (
 	LENIStatusAvailable    string = "Available"
 	LENIStatusUnattached   string = "Unattached"
 	LENIStatusExecuting    string = "Executing"
+	LENIStatusAttaching    string = "Attaching"
+	LENIStatusDetaching    string = "Detaching"
 	LENIStatusCreateFailed string = "Create Failed"
 	LENIStatusAttachFailed string = "Attach Failed"
 	LENIStatusDeleteFailed string = "Delete Failed"
@@ -91,6 +85,8 @@ type NetworkInterface struct {
 	DeviceIndex                 int    `json:"device_index,omitempty"`
 	CreationTime                string `json:"creation_time,omitempty"`
 	NetworkCardIndex            int    `json:"network_card_index,omitempty"`
+
+	VfID *uint32 `json:"vf_id,omitempty"`
 }
 
 type IPSet struct {
@@ -205,4 +201,12 @@ func LogFields(l logr.Logger, obj any) logr.Logger {
 		r = r.WithValues(field.Name, fieldValue.Interface())
 	}
 	return r
+}
+
+func FromPtr[V any, T ~*V](ptr T) V {
+	if ptr == nil {
+		var zero V
+		return zero
+	}
+	return *ptr
 }

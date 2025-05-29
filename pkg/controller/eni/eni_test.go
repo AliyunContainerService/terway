@@ -113,9 +113,14 @@ var _ = Describe("Eni controller", func() {
 
 			ctx := context.Background()
 
-			aliyun.On("DetachNetworkInterface", mock.Anything, eniID, instacneID, trunkID).Return(nil).Once()
+			aliyun.On("DetachNetworkInterfaceV2", mock.Anything, &aliyunClient.DetachNetworkInterfaceOptions{
+				NetworkInterfaceID: &eniID,
+				InstanceID:         &instacneID,
+				TrunkID:            &trunkID,
+			}).Return(nil).Once()
 			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
 				NetworkInterfaceIDs: &[]string{eniID},
+				RawStatus:           ptr.To(true),
 			}).Return(
 				nil, nil).Once()
 			aliyun.On("DeleteNetworkInterfaceV2", mock.Anything, eniID).Return(nil).Once()
@@ -189,9 +194,14 @@ var _ = Describe("Eni controller", func() {
 		It("should detach only", func() {
 			aliyun := mocks.NewInterface(GinkgoT())
 
-			aliyun.On("DetachNetworkInterface", mock.Anything, eniID, instacneID, trunkID).Return(nil).Once()
+			aliyun.On("DetachNetworkInterfaceV2", mock.Anything, &aliyunClient.DetachNetworkInterfaceOptions{
+				NetworkInterfaceID: &eniID,
+				InstanceID:         &instacneID,
+				TrunkID:            &trunkID,
+			}).Return(nil).Once()
 			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
 				NetworkInterfaceIDs: &[]string{eniID},
+				RawStatus:           ptr.To(true),
 			}).Return(
 				nil, nil).Once()
 
@@ -291,21 +301,36 @@ var _ = Describe("Eni controller", func() {
 		It("should attach eni successfully", func() {
 			aliyun := mocks.NewInterface(GinkgoT())
 
-			aliyun.On("AttachNetworkInterface", mock.Anything, &aliyunClient.AttachNetworkInterfaceOptions{
+			aliyun.On("AttachNetworkInterfaceV2", mock.Anything, &aliyunClient.AttachNetworkInterfaceOptions{
 				NetworkInterfaceID:     ptr.To(eniID),
 				InstanceID:             ptr.To(instanceID),
 				TrunkNetworkInstanceID: ptr.To(trunkID),
 			}).Return(nil).Once()
 			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
 				NetworkInterfaceIDs: &[]string{eniID},
+				RawStatus:           ptr.To(true),
 			}).Return(
 				[]*aliyunClient.NetworkInterface{
 					{
-						NetworkInterfaceID: eniID,
-						Type:               "Secondary",
-						DeviceIndex:        1,
-						NetworkCardIndex:   0,
-						Status:             "InUse",
+						Status:                      "InUse",
+						MacAddress:                  "mac",
+						NetworkInterfaceID:          eniID,
+						VPCID:                       "vpcID",
+						VSwitchID:                   "vswID",
+						PrivateIPAddress:            "privateIPAddress",
+						PrivateIPSets:               nil,
+						ZoneID:                      "zoneID",
+						SecurityGroupIDs:            []string{"sg-0"},
+						ResourceGroupID:             "rg-0",
+						IPv6Set:                     nil,
+						Tags:                        nil,
+						Type:                        "Secondary",
+						InstanceID:                  "i-xx",
+						TrunkNetworkInterfaceID:     "i-xx",
+						NetworkInterfaceTrafficMode: "Standard",
+						DeviceIndex:                 1,
+						CreationTime:                "",
+						NetworkCardIndex:            0,
 					}}, nil).Once()
 
 			r := &ReconcileNetworkInterface{
@@ -330,6 +355,24 @@ var _ = Describe("Eni controller", func() {
 				return eni.Status.Phase == networkv1beta1.ENIPhaseBind &&
 					eni.Status.ENIInfo.Status == networkv1beta1.ENIStatusBind && eni.Labels["k8s.aliyun.com/node"] == "node-1"
 			}, 5*time.Second, 500*time.Millisecond).Should(BeTrue())
+
+			Expect(eni.Spec.ENI).To(Equal(networkv1beta1.ENI{
+				ID:               eniID,
+				MAC:              "mac",
+				VPCID:            "vpcID",
+				Zone:             "zoneID",
+				VSwitchID:        "vswID",
+				ResourceGroupID:  "rg-0",
+				SecurityGroupIDs: []string{"sg-0"},
+			}), "expect update spec succeed")
+
+			Expect(eni.Status.ENIInfo).To(Equal(networkv1beta1.ENIInfo{
+				ID:               eniID,
+				Type:             "Secondary",
+				Vid:              1,
+				Status:           networkv1beta1.ENIStatusBind,
+				NetworkCardIndex: ptr.To(0),
+			}))
 		})
 	})
 
@@ -388,13 +431,14 @@ var _ = Describe("Eni controller", func() {
 		It("should attach eni successfully", func() {
 			aliyun := mocks.NewInterface(GinkgoT())
 
-			aliyun.On("AttachNetworkInterface", mock.Anything, &aliyunClient.AttachNetworkInterfaceOptions{
+			aliyun.On("AttachNetworkInterfaceV2", mock.Anything, &aliyunClient.AttachNetworkInterfaceOptions{
 				NetworkInterfaceID:     ptr.To(eniID),
 				InstanceID:             ptr.To(instanceID),
 				TrunkNetworkInstanceID: ptr.To(trunkID),
 			}).Return(nil).Once()
 			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
 				NetworkInterfaceIDs: &[]string{eniID},
+				RawStatus:           ptr.To(true),
 			}).Return(
 				[]*aliyunClient.NetworkInterface{
 					{
@@ -497,9 +541,14 @@ var _ = Describe("Eni controller", func() {
 		It("should delete eni successfully", func() {
 			aliyun := mocks.NewInterface(GinkgoT())
 
-			aliyun.On("DetachNetworkInterface", mock.Anything, eniID, instanceID, trunkID).Return(nil).Once()
+			aliyun.On("DetachNetworkInterfaceV2", mock.Anything, &aliyunClient.DetachNetworkInterfaceOptions{
+				NetworkInterfaceID: &eniID,
+				InstanceID:         &instanceID,
+				TrunkID:            &trunkID,
+			}).Return(nil).Once()
 			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
 				NetworkInterfaceIDs: &[]string{eniID},
+				RawStatus:           ptr.To(true),
 			}).Return(
 				nil, nil).Once()
 			aliyun.On("DeleteNetworkInterfaceV2", mock.Anything, eniID).Return(nil).Once()

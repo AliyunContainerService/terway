@@ -173,7 +173,7 @@ func main() {
 		provider.NewECSMetadataProvider(provider.ECSMetadataProviderOptions{}),
 	)
 
-	clientSet, err := credential.NewClientMgr(cfg.RegionID, prov)
+	clientSet, err := credential.InitializeClientMgr(cfg.RegionID, prov)
 	if err != nil {
 		panic(err)
 	}
