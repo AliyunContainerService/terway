@@ -92,7 +92,7 @@ type ReconcileNode struct {
 	client client.Client
 	scheme *runtime.Scheme
 
-	aliyun register.Interface
+	aliyun aliyunClient.OpenAPI
 	record record.EventRecorder
 
 	supportEFLO   bool
@@ -397,7 +397,7 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		node.Spec.NodeMetadata.ZoneID = nodeInfo.ZoneID
 		node.Spec.NodeMetadata.RegionID = nodeInfo.RegionID
 
-		resp, err := r.aliyun.GetNodeInfoForPod(ctx, node.Spec.NodeMetadata.InstanceID)
+		resp, err := r.aliyun.GetEFLO().GetNodeInfoForPod(ctx, node.Spec.NodeMetadata.InstanceID)
 		if err != nil {
 			return reconcile.Result{}, err
 		}

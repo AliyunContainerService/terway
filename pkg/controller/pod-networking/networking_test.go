@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -19,6 +20,23 @@ import (
 )
 
 var _ = Describe("Networking controller", func() {
+	var (
+		openAPI    *mocks.OpenAPI
+		vpcClient  *mocks.VPC
+		switchPool *vswpool.SwitchPool
+	)
+
+	BeforeEach(func() {
+		openAPI = mocks.NewOpenAPI(GinkgoT())
+		vpcClient = mocks.NewVPC(GinkgoT())
+
+		openAPI.On("GetVPC").Return(vpcClient).Maybe()
+
+		var err error
+		switchPool, err = vswpool.NewSwitchPool(100, "10m")
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	Context("Create normal", func() {
 		name := "normal-podnetworking"
 		typeNamespacedName := types.NamespacedName{
@@ -41,18 +59,13 @@ var _ = Describe("Networking controller", func() {
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
-		})
 
-		switchPool, err := vswpool.NewSwitchPool(100, "10m")
-		Expect(err).NotTo(HaveOccurred())
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+				AvailableIpAddressCount: 100,
+				VSwitchId:               "vsw-1",
+				ZoneId:                  "cn-hangzhou-k",
+			}, nil)
 
-		openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
-			AvailableIpAddressCount: 100,
-			VSwitchId:               "vsw-1",
-			ZoneId:                  "cn-hangzhou-k",
-		}, nil)
-
-		It("should successfully reconcile the resource", func() {
 			controllerReconciler := &ReconcilePodNetworking{
 				client:       k8sClient,
 				aliyunClient: openAPI,
@@ -64,10 +77,10 @@ var _ = Describe("Networking controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-		})
 
-		It("Status Should Be Ready", func() {
-			created := &networkv1beta1.PodNetworking{}
+			By("Status Should Be Ready")
+
+			created = &networkv1beta1.PodNetworking{}
 			Eventually(func(g Gomega) {
 				err := k8sClient.Get(context.Background(), typeNamespacedName, created)
 				g.Expect(err).NotTo(HaveOccurred())
@@ -98,14 +111,11 @@ var _ = Describe("Networking controller", func() {
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
-		})
 
-		switchPool, err := vswpool.NewSwitchPool(100, "10m")
-		Expect(err).NotTo(HaveOccurred())
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-not-exist").Return(nil, fmt.Errorf("not found"))
 
-		openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-not-exist").Return(nil, fmt.Errorf("not found"))
+			By("should successfully reconcile the resource")
 
-		It("should successfully reconcile the resource", func() {
 			controllerReconciler := &ReconcilePodNetworking{
 				client:       k8sClient,
 				aliyunClient: openAPI,
@@ -117,10 +127,9 @@ var _ = Describe("Networking controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-		})
 
-		It("Status Should Be Fail", func() {
-			created := &networkv1beta1.PodNetworking{}
+			By("Status Should Be Fail")
+			created = &networkv1beta1.PodNetworking{}
 			Eventually(func(g Gomega) networkv1beta1.NetworkingStatus {
 				err := k8sClient.Get(context.Background(), typeNamespacedName, created)
 				g.Expect(err).NotTo(HaveOccurred())
@@ -151,28 +160,24 @@ var _ = Describe("Networking controller", func() {
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
-		})
 
-		switchPool, err := vswpool.NewSwitchPool(100, "10m")
-		Expect(err).NotTo(HaveOccurred())
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+				AvailableIpAddressCount: 100,
+				VSwitchId:               "vsw-1",
+				ZoneId:                  "cn-hangzhou-k",
+			}, nil)
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&vpc.VSwitch{
+				AvailableIpAddressCount: 100,
+				VSwitchId:               "vsw-2",
+				ZoneId:                  "cn-hangzhou-k",
+			}, nil)
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(&vpc.VSwitch{
+				AvailableIpAddressCount: 100,
+				VSwitchId:               "vsw-3",
+				ZoneId:                  "cn-hangzhou-k",
+			}, nil)
 
-		openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
-			AvailableIpAddressCount: 100,
-			VSwitchId:               "vsw-1",
-			ZoneId:                  "cn-hangzhou-k",
-		}, nil)
-		openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&vpc.VSwitch{
-			AvailableIpAddressCount: 100,
-			VSwitchId:               "vsw-2",
-			ZoneId:                  "cn-hangzhou-k",
-		}, nil)
-		openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(&vpc.VSwitch{
-			AvailableIpAddressCount: 100,
-			VSwitchId:               "vsw-3",
-			ZoneId:                  "cn-hangzhou-k",
-		}, nil)
-
-		It("should successfully reconcile the resource", func() {
+			By("should successfully reconcile the resource")
 			controllerReconciler := &ReconcilePodNetworking{
 				client:       k8sClient,
 				aliyunClient: openAPI,
@@ -184,41 +189,37 @@ var _ = Describe("Networking controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-		})
 
-		It("Status Should Be Ready", func() {
-			created := &networkv1beta1.PodNetworking{}
+			By("Status Should Be Ready")
+			created = &networkv1beta1.PodNetworking{}
 			Eventually(func(g Gomega) {
 				err := k8sClient.Get(context.Background(), typeNamespacedName, created)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(created.Status.Status).Should(Equal(networkv1beta1.NetworkingStatusReady))
 				g.Expect(len(created.Status.VSwitches)).Should(Equal(3))
 			}, 5*time.Second, 500*time.Millisecond).Should(Succeed())
-		})
 
-		It("Modify exist pn", func() {
+			By("Modify exist pn")
+
 			pn := &networkv1beta1.PodNetworking{}
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, pn)).Should(Succeed())
 			pn.Spec.VSwitchOptions = []string{"vsw-1", "vsw-3"}
 			Expect(k8sClient.Update(context.Background(), pn)).Should(Succeed())
-		})
 
-		It("should successfully reconcile the resource", func() {
-			controllerReconciler := &ReconcilePodNetworking{
+			controllerReconciler = &ReconcilePodNetworking{
 				client:       k8sClient,
 				aliyunClient: openAPI,
 				swPool:       switchPool,
 				record:       record.NewFakeRecorder(100),
 			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-		})
 
-		It("Status Should Be Ready", func() {
-			created := &networkv1beta1.PodNetworking{}
+			By("Status Should Be Ready")
+			created = &networkv1beta1.PodNetworking{}
 			Eventually(func(g Gomega) {
 				err := k8sClient.Get(context.Background(), typeNamespacedName, created)
 				g.Expect(err).NotTo(HaveOccurred())
@@ -252,28 +253,23 @@ var _ = Describe("Networking controller", func() {
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
-		})
 
-		switchPool, err := vswpool.NewSwitchPool(100, "10m")
-		Expect(err).NotTo(HaveOccurred())
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+				AvailableIpAddressCount: 100,
+				VSwitchId:               "vsw-1",
+				ZoneId:                  "cn-hangzhou-k",
+			}, nil)
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&vpc.VSwitch{
+				AvailableIpAddressCount: 100,
+				VSwitchId:               "vsw-2",
+				ZoneId:                  "cn-hangzhou-k",
+			}, nil)
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(&vpc.VSwitch{
+				AvailableIpAddressCount: 100,
+				VSwitchId:               "vsw-3",
+				ZoneId:                  "cn-hangzhou-k",
+			}, nil)
 
-		openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
-			AvailableIpAddressCount: 100,
-			VSwitchId:               "vsw-1",
-			ZoneId:                  "cn-hangzhou-k",
-		}, nil)
-		openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&vpc.VSwitch{
-			AvailableIpAddressCount: 100,
-			VSwitchId:               "vsw-2",
-			ZoneId:                  "cn-hangzhou-k",
-		}, nil)
-		openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(&vpc.VSwitch{
-			AvailableIpAddressCount: 100,
-			VSwitchId:               "vsw-3",
-			ZoneId:                  "cn-hangzhou-k",
-		}, nil)
-
-		It("should successfully reconcile the resource", func() {
 			controllerReconciler := &ReconcilePodNetworking{
 				client:       k8sClient,
 				aliyunClient: openAPI,

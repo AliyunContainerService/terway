@@ -4,9 +4,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/controller/status"
 	"github.com/AliyunContainerService/terway/types"
+
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -19,20 +21,32 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	"github.com/AliyunContainerService/terway/pkg/controller/mocks"
 )
 
 var ctx context.Context
-var openAPI *mocks.Interface
 
 var _ = Describe("Pod controller", func() {
 	nodeName := "node"
 
+	var (
+		openAPI    *mocks.OpenAPI
+		vpcClient  *mocks.VPC
+		ecsClient  *mocks.ECS
+		efloClient *mocks.EFLO
+	)
+
 	BeforeEach(func() {
 		ctx = context.Background()
 
-		openAPI = mocks.NewInterface(GinkgoT())
+		openAPI = mocks.NewOpenAPI(GinkgoT())
+		vpcClient = mocks.NewVPC(GinkgoT())
+		ecsClient = mocks.NewECS(GinkgoT())
+		efloClient = mocks.NewEFLO(GinkgoT())
+
+		openAPI.On("GetVPC").Return(vpcClient).Maybe()
+		openAPI.On("GetECS").Return(ecsClient).Maybe()
+		openAPI.On("GetEFLO").Return(efloClient).Maybe()
+
 		openAPI.On("DescribeInstanceTypes", mock.Anything, mock.Anything).Return([]ecs.InstanceType{
 			{
 				EniTotalQuantity:            5,

@@ -17,18 +17,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/controller/mocks"
 )
 
 var cfg *rest.Config
 var k8sClient client.Client
 var testEnv *envtest.Environment
-var openAPI *mocks.Interface
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
 
-	openAPI = mocks.NewInterface(t)
 	RunSpecs(t, "Controller Suite")
 }
 
@@ -51,6 +48,7 @@ var _ = BeforeSuite(func() {
 	Expect(cfg).NotTo(BeNil())
 
 	err = corev1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
 	err = networkv1beta1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 

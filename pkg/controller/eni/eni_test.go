@@ -18,7 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/controller/mocks"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 )
 
 var _ = Describe("Eni controller", func() {
@@ -74,7 +74,7 @@ var _ = Describe("Eni controller", func() {
 		})
 
 		It("set eni DeletionTimestamp", func() {
-			aliyun := mocks.NewInterface(GinkgoT())
+			aliyun := mocks.NewOpenAPI(GinkgoT())
 
 			r := &ReconcileNetworkInterface{
 				client:          k8sClient,
@@ -101,7 +101,7 @@ var _ = Describe("Eni controller", func() {
 		})
 
 		It("eni is not found", func() {
-			aliyun := mocks.NewInterface(GinkgoT())
+			aliyun := mocks.NewOpenAPI(GinkgoT())
 
 			r := &ReconcileNetworkInterface{
 				client:          k8sClient,
@@ -192,7 +192,7 @@ var _ = Describe("Eni controller", func() {
 		})
 
 		It("should detach only", func() {
-			aliyun := mocks.NewInterface(GinkgoT())
+			aliyun := mocks.NewOpenAPI(GinkgoT())
 
 			aliyun.On("DetachNetworkInterfaceV2", mock.Anything, &aliyunClient.DetachNetworkInterfaceOptions{
 				NetworkInterfaceID: &eniID,
@@ -299,7 +299,7 @@ var _ = Describe("Eni controller", func() {
 		})
 
 		It("should attach eni successfully", func() {
-			aliyun := mocks.NewInterface(GinkgoT())
+			aliyun := mocks.NewOpenAPI(GinkgoT())
 
 			aliyun.On("AttachNetworkInterfaceV2", mock.Anything, &aliyunClient.AttachNetworkInterfaceOptions{
 				NetworkInterfaceID:     ptr.To(eniID),
@@ -429,7 +429,7 @@ var _ = Describe("Eni controller", func() {
 		})
 
 		It("should attach eni successfully", func() {
-			aliyun := mocks.NewInterface(GinkgoT())
+			aliyun := mocks.NewOpenAPI(GinkgoT())
 
 			aliyun.On("AttachNetworkInterfaceV2", mock.Anything, &aliyunClient.AttachNetworkInterfaceOptions{
 				NetworkInterfaceID:     ptr.To(eniID),
@@ -520,7 +520,7 @@ var _ = Describe("Eni controller", func() {
 		})
 
 		It("trigger delete", func() {
-			aliyun := mocks.NewInterface(GinkgoT())
+			aliyun := mocks.NewOpenAPI(GinkgoT())
 
 			r := &ReconcileNetworkInterface{
 				client:          k8sClient,
@@ -539,7 +539,7 @@ var _ = Describe("Eni controller", func() {
 		})
 
 		It("should delete eni successfully", func() {
-			aliyun := mocks.NewInterface(GinkgoT())
+			aliyun := mocks.NewOpenAPI(GinkgoT())
 
 			aliyun.On("DetachNetworkInterfaceV2", mock.Anything, &aliyunClient.DetachNetworkInterfaceOptions{
 				NetworkInterfaceID: &eniID,

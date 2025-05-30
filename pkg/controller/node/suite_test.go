@@ -19,13 +19,9 @@ package node
 import (
 	"os"
 	"path/filepath"
-	"testing"
 
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/stretchr/testify/mock"
-
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,11 +29,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	clientmocks "github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	register "github.com/AliyunContainerService/terway/pkg/controller"
-	"github.com/AliyunContainerService/terway/pkg/controller/mocks"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -47,30 +39,6 @@ import (
 var cfg *rest.Config
 var k8sClient client.Client
 var testEnv *envtest.Environment
-var aliyun register.Interface
-
-func TestControllers(t *testing.T) {
-	ac := mocks.NewInterface(t)
-	ac.On("DescribeInstanceTypes", mock.Anything, []string{"xxx"}).Return([]ecs.InstanceType{
-		{
-			EriQuantity:                 1,
-			EniPrivateIpAddressQuantity: 10,
-			EniTotalQuantity:            6,
-			InstanceType:                "xxx",
-			EniQuantity:                 4,
-			EniTrunkSupported:           true,
-			InstanceTypeId:              "xxx",
-		},
-	}, nil).Maybe()
-	aliyun = ac
-
-	lp := clientmocks.NewLimitProvider(t)
-	lp.On("GetLimit", mock.Anything, "xx").Return(&aliyunClient.Limits{}, nil).Maybe()
-
-	RegisterFailHandler(Fail)
-
-	RunSpecs(t, "Controller Suite")
-}
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))

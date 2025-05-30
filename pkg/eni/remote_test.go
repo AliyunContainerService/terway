@@ -107,6 +107,16 @@ func TestAllocateReturnsNetworkResourcesWhenPodENIReady(t *testing.T) {
 			Status: networkv1beta1.PodENIStatus{
 				Phase:      networkv1beta1.ENIPhaseBind,
 				InstanceID: "i-123456",
+				ENIInfos: map[string]networkv1beta1.ENIInfo{
+					"eni-1": {
+						ID:               "eni-1",
+						Type:             "",
+						Vid:              0,
+						Status:           "",
+						NetworkCardIndex: nil,
+						VfID:             nil,
+					},
+				},
 			},
 		}).
 		Build()

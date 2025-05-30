@@ -45,7 +45,7 @@ func (m *ReconcilePod) ParsePodNetworksFromAnnotation(ctx context.Context, zoneI
 			vSwitchSelectPolicy = vswitch.VSwitchSelectionPolicyMost
 		}
 
-		sw, err := m.swPool.GetOne(ctx, m.aliyun, zoneID, c.VSwitchOptions,
+		sw, err := m.swPool.GetOne(ctx, m.aliyun.GetVPC(), zoneID, c.VSwitchOptions,
 			&vswitch.SelectOptions{
 				IgnoreZone:          false,
 				VSwitchSelectPolicy: vSwitchSelectPolicy,

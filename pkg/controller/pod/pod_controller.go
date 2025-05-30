@@ -82,7 +82,7 @@ var _ reconcile.Reconciler = &ReconcilePod{}
 type ReconcilePod struct {
 	client client.Client
 	scheme *runtime.Scheme
-	aliyun register.Interface
+	aliyun aliyunClient.OpenAPI
 
 	swPool *vswitch.SwitchPool
 
@@ -95,7 +95,7 @@ type ReconcilePod struct {
 }
 
 // NewReconcilePod watch pod lifecycle events and sync to podENI resource
-func NewReconcilePod(mgr manager.Manager, aliyunClient register.Interface, swPool *vswitch.SwitchPool, crdMode bool) *ReconcilePod {
+func NewReconcilePod(mgr manager.Manager, aliyunClient aliyunClient.OpenAPI, swPool *vswitch.SwitchPool, crdMode bool) *ReconcilePod {
 	r := &ReconcilePod{
 		client:    mgr.GetClient(),
 		scheme:    mgr.GetScheme(),
@@ -387,7 +387,7 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 					return nil, nil, err
 				}
 
-				vsw, err := m.swPool.GetOne(ctx, m.aliyun, nodeInfo.ZoneID, cfg.GetVSwitchIDs())
+				vsw, err := m.swPool.GetOne(ctx, m.aliyun.GetVPC(), nodeInfo.ZoneID, cfg.GetVSwitchIDs())
 				if err != nil {
 					return nil, nil, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.ZoneID, err)
 				}
@@ -416,7 +416,7 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 			return nil, nil, fmt.Errorf("error get podNetworking %s, %w", podNetwokingName, err)
 		}
 		var vsw *vswitch.Switch
-		vsw, err = m.swPool.GetOne(ctx, m.aliyun, nodeInfo.ZoneID, podNetworking.Spec.VSwitchOptions)
+		vsw, err = m.swPool.GetOne(ctx, m.aliyun.GetVPC(), nodeInfo.ZoneID, podNetworking.Spec.VSwitchOptions)
 		if err != nil {
 			return nil, nil, fmt.Errorf("can not found available vSwitch for zone %s, %w", nodeInfo.ZoneID, err)
 		}

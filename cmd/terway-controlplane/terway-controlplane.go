@@ -178,10 +178,7 @@ func main() {
 		panic(err)
 	}
 
-	aliyunClient, err := aliyun.New(clientSet, aliyun.FromMap(cfg.RateLimit))
-	if err != nil {
-		panic(err)
-	}
+	aliyunClient := aliyun.NewAPIFacade(clientSet, aliyun.FromMap(cfg.RateLimit))
 
 	mgr, err := ctrl.NewManager(restConfig, options)
 	if err != nil {

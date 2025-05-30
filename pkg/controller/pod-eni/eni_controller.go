@@ -117,7 +117,7 @@ var _ reconcile.Reconciler = &ReconcilePodENI{}
 type ReconcilePodENI struct {
 	client client.Client
 	scheme *runtime.Scheme
-	aliyun register.Interface
+	aliyun aliyunClient.OpenAPI
 
 	//record event recorder
 	record record.EventRecorder
@@ -409,7 +409,7 @@ func (m *ReconcilePodENI) podENIDelete(ctx context.Context, podENI *v1beta1.PodE
 
 func (m *ReconcilePodENI) gcSecondaryENI(ctx context.Context) {
 	// 1. list all available enis ( which type is secondary)
-	enis, err := m.aliyun.DescribeNetworkInterface(ctx, controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusAvailable, nil)
+	enis, err := m.aliyun.GetECS().DescribeNetworkInterface(ctx, controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusAvailable, nil)
 	if err != nil {
 		ctrlLog.Error(err, "error list all member enis")
 		return
@@ -436,7 +436,7 @@ func (m *ReconcilePodENI) gcSecondaryENI(ctx context.Context) {
 
 func (m *ReconcilePodENI) gcMemberENI(ctx context.Context) {
 	// 1. list all attached member eni
-	enis, err := m.aliyun.DescribeNetworkInterface(ctx, controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeMember, aliyunClient.ENIStatusInUse, nil)
+	enis, err := m.aliyun.GetECS().DescribeNetworkInterface(ctx, controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeMember, aliyunClient.ENIStatusInUse, nil)
 	if err != nil {
 		ctrlLog.Error(err, "error list all member enis")
 		return
@@ -514,7 +514,7 @@ func (m *ReconcilePodENI) gcENIs(ctx context.Context, enis []*aliyunClient.Netwo
 	for _, eni := range eniMap {
 		if eni.Type == aliyunClient.ENITypeMember && eni.Status == aliyunClient.ENIStatusInUse {
 			l.Info("detach eni", "eni", eni.NetworkInterfaceID, "trunk-eni", eni.TrunkNetworkInterfaceID)
-			err = m.aliyun.DetachNetworkInterface(ctx, eni.NetworkInterfaceID, eni.InstanceID, eni.TrunkNetworkInterfaceID) // still need delegate ? otherwise may break quota
+			err = m.aliyun.GetECS().DetachNetworkInterface(ctx, eni.NetworkInterfaceID, eni.InstanceID, eni.TrunkNetworkInterfaceID) // still need delegate ? otherwise may break quota
 			if err != nil {
 				l.Error(err, fmt.Sprintf("errot detach eni %s", eni.NetworkInterfaceID))
 			}
@@ -523,7 +523,7 @@ func (m *ReconcilePodENI) gcENIs(ctx context.Context, enis []*aliyunClient.Netwo
 		}
 		if eni.Status == aliyunClient.ENIStatusAvailable {
 			l.Info("delete eni", "eni", eni.NetworkInterfaceID)
-			err = m.aliyun.DeleteNetworkInterface(ctx, eni.NetworkInterfaceID)
+			err = m.aliyun.GetECS().DeleteNetworkInterface(ctx, eni.NetworkInterfaceID)
 			if err != nil {
 				l.Info(fmt.Sprintf("delete leaked eni %s, %s", eni.NetworkInterfaceID, err))
 			}

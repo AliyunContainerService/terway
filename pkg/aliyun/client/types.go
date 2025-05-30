@@ -14,9 +14,9 @@ var ErrInvalidArgs = errors.New("invalid args")
 
 // log fields
 const (
-	LogFieldAPI              = "api"
-	LogFieldRequestID        = "requestID"
-	LogFieldENIID            = "eni"
+	LogFieldAPI       = "api"
+	LogFieldRequestID = "requestID"
+	LogFieldENIID     = "eni"
 )
 
 const (

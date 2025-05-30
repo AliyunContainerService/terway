@@ -65,7 +65,7 @@ var _ reconcile.Reconciler = &ReconcilePodNetworking{}
 // ReconcilePodNetworking reconciles a AutoRepair object
 type ReconcilePodNetworking struct {
 	client       client.Client
-	aliyunClient aliyunClient.VPC
+	aliyunClient aliyunClient.OpenAPI
 	swPool       *vswitch.SwitchPool
 
 	//record event recorder
@@ -73,7 +73,7 @@ type ReconcilePodNetworking struct {
 }
 
 // NewReconcilePodNetworking watch pod lifecycle events and sync to podENI resource
-func NewReconcilePodNetworking(mgr manager.Manager, aliyunClient aliyunClient.VPC, swPool *vswitch.SwitchPool) *ReconcilePodNetworking {
+func NewReconcilePodNetworking(mgr manager.Manager, aliyunClient aliyunClient.OpenAPI, swPool *vswitch.SwitchPool) *ReconcilePodNetworking {
 	r := &ReconcilePodNetworking{
 		client:       mgr.GetClient(),
 		record:       mgr.GetEventRecorderFor("PodNetworking"),
@@ -108,7 +108,7 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 	var statusVSW []v1beta1.VSwitch
 	err = func() error {
 		for _, id := range old.Spec.VSwitchOptions {
-			sw, innerErr := m.swPool.GetByID(ctx, m.aliyunClient, id)
+			sw, innerErr := m.swPool.GetByID(ctx, m.aliyunClient.GetVPC(), id)
 			if innerErr != nil {
 				return innerErr
 			}

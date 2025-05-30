@@ -6,12 +6,18 @@ import (
 	"time"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	"go.opentelemetry.io/otel/trace"
 )
+
+var _ EFLO = &EFLOService{}
 
 const (
 	APICreateElasticNetworkInterface = "CreateElasticNetworkInterface"
@@ -25,7 +31,23 @@ const (
 	APIGetNodeInfoForPod             = "GetNodeInfoForPod"
 )
 
-func (a *OpenAPI) CreateElasticNetworkInterfaceV2(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error) {
+type EFLOService struct {
+	ClientSet        credential.Client
+	IdempotentKeyGen IdempotentKeyGen
+	RateLimiter      *RateLimiter
+	Tracer           trace.Tracer
+}
+
+func NewEFLOService(clientSet credential.Client, rateLimiter *RateLimiter, tracer trace.Tracer) *EFLOService {
+	return &EFLOService{
+		ClientSet:        clientSet,
+		IdempotentKeyGen: NewIdempotentKeyGenerator(),
+		RateLimiter:      rateLimiter,
+		Tracer:           tracer,
+	}
+}
+
+func (a *EFLOService) CreateElasticNetworkInterfaceV2(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error) {
 	options := &CreateNetworkInterfaceOptions{}
 	for _, opt := range opts {
 		opt.ApplyCreateNetworkInterface(options)
@@ -75,7 +97,7 @@ func (a *OpenAPI) CreateElasticNetworkInterfaceV2(ctx context.Context, opts ...C
 	}, err
 }
 
-func (a *OpenAPI) DescribeLeniNetworkInterface(ctx context.Context, opts ...DescribeNetworkInterfaceOption) ([]*NetworkInterface, error) {
+func (a *EFLOService) DescribeLeniNetworkInterface(ctx context.Context, opts ...DescribeNetworkInterfaceOption) ([]*NetworkInterface, error) {
 	options := &DescribeNetworkInterfaceOptions{}
 	for _, opt := range opts {
 		opt.ApplyTo(options)
@@ -102,7 +124,7 @@ func (a *OpenAPI) DescribeLeniNetworkInterface(ctx context.Context, opts ...Desc
 	enis := make([]*NetworkInterface, 0)
 	for _, data := range resp.Content.Data {
 
-		l.WithValues(LogFieldRequestID, resp.RequestId).Info("ListElasticNetworkInterfaces", "data", data)
+		l.WithValues(LogFieldRequestID, resp.RequestId).Info(APIListElasticNetworkInterfaces, "data", data)
 
 		if data.Type != "CUSTOM" { // CUSTOM for our own card
 			continue
@@ -166,7 +188,7 @@ func (a *OpenAPI) DescribeLeniNetworkInterface(ctx context.Context, opts ...Desc
 	return enis, nil
 }
 
-func (a *OpenAPI) AssignLeniPrivateIPAddress2(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]IPSet, error) {
+func (a *EFLOService) AssignLeniPrivateIPAddress2(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]IPSet, error) {
 	ctx, span := a.Tracer.Start(ctx, APIAssignLeniPrivateIPAddress)
 	defer span.End()
 
@@ -267,7 +289,7 @@ func (a *OpenAPI) AssignLeniPrivateIPAddress2(ctx context.Context, opts ...Assig
 	return re, err
 }
 
-func (a *OpenAPI) UnAssignLeniPrivateIPAddresses2(ctx context.Context, eniID string, ips []IPSet) error {
+func (a *EFLOService) UnAssignLeniPrivateIPAddresses2(ctx context.Context, eniID string, ips []IPSet) error {
 	for _, ip := range ips {
 		if ip.IPName == "" {
 			continue
@@ -281,7 +303,7 @@ func (a *OpenAPI) UnAssignLeniPrivateIPAddresses2(ctx context.Context, eniID str
 }
 
 // WaitForLeniNetworkInterface wait status of eni
-func (a *OpenAPI) WaitForLeniNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error) {
+func (a *EFLOService) WaitForLeniNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error) {
 	ctx, span := a.Tracer.Start(ctx, "WaitForNetworkInterface")
 	defer span.End()
 
@@ -318,7 +340,7 @@ func (a *OpenAPI) WaitForLeniNetworkInterface(ctx context.Context, eniID string,
 	return eniInfo, nil
 }
 
-func (a *OpenAPI) AttachLeni(ctx context.Context, opts ...AttachNetworkInterfaceOption) error {
+func (a *EFLOService) AttachLeni(ctx context.Context, opts ...AttachNetworkInterfaceOption) error {
 	ctx, span := a.Tracer.Start(ctx, APIAttachElasticNetworkInterface)
 	defer span.End()
 
@@ -360,7 +382,7 @@ func (a *OpenAPI) AttachLeni(ctx context.Context, opts ...AttachNetworkInterface
 	return nil
 }
 
-func (a *OpenAPI) DetachLeni(ctx context.Context, opts ...DetachNetworkInterfaceOption) error {
+func (a *EFLOService) DetachLeni(ctx context.Context, opts ...DetachNetworkInterfaceOption) error {
 	ctx, span := a.Tracer.Start(ctx, APIDetachElasticNetworkInterface)
 	defer span.End()
 
@@ -404,4 +426,147 @@ func (a *OpenAPI) DetachLeni(ctx context.Context, opts ...DetachNetworkInterface
 
 	l.WithValues(LogFieldRequestID, FromPtr(resp.Body.RequestId)).Info("detach leni success")
 	return nil
+}
+
+func (a *EFLOService) DeleteElasticNetworkInterface(ctx context.Context, eniID string) error {
+	req := eflo.CreateDeleteElasticNetworkInterfaceRequest()
+	req.ElasticNetworkInterfaceId = eniID
+	l := LogFields(logf.FromContext(ctx), req)
+
+	err := a.RateLimiter.Wait(ctx, APIDeleteElasticNetworkInterface)
+	if err != nil {
+		return err
+	}
+
+	start := time.Now()
+	resp, err := a.ClientSet.EFLO().DeleteElasticNetworkInterface(req)
+	metric.OpenAPILatency.WithLabelValues(APIDeleteElasticNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	if err != nil {
+		err = apiErr.WarpError(err)
+		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
+		return err
+	}
+
+	if resp.Code != 0 {
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
+		// 1011 IpName/leni not exist
+		if !apiErr.IsEfloCode(err, apiErr.ErrEfloResourceNotFound) {
+			l.Error(err, "failed")
+			return err
+		}
+	}
+
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("succeed")
+	return nil
+}
+
+func (a *EFLOService) UnassignLeniPrivateIPAddress(ctx context.Context, eniID, ipName string) error {
+	err := a.RateLimiter.Wait(ctx, APIUnassignLeniPrivateIPAddress)
+	if err != nil {
+		return err
+	}
+
+	req := eflo.CreateUnassignLeniPrivateIpAddressRequest()
+	req.ElasticNetworkInterfaceId = eniID
+	req.IpName = ipName
+
+	l := LogFields(logf.FromContext(ctx), req)
+
+	start := time.Now()
+	resp, err := a.ClientSet.EFLO().UnassignLeniPrivateIpAddress(req)
+	metric.OpenAPILatency.WithLabelValues(APIUnassignLeniPrivateIPAddress, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	if err != nil {
+		err = apiErr.WarpError(err)
+		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
+		return err
+	}
+
+	if resp.Code != 0 {
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
+		// 1011 IpName/leni not exist
+		if !apiErr.IsEfloCode(err, apiErr.ErrEfloResourceNotFound) {
+			l.Error(err, "failed")
+			return err
+		}
+	}
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
+
+	return nil
+}
+
+func (a *EFLOService) ListLeniPrivateIPAddresses(ctx context.Context, eniID, ipName, ipAddress string) (*eflo.Content, error) {
+	req := eflo.CreateListLeniPrivateIpAddressesRequest()
+	req.ElasticNetworkInterfaceId = eniID
+	req.IpName = ipName
+	req.PrivateIpAddress = ipAddress
+
+	l := LogFields(logf.FromContext(ctx), req)
+
+	start := time.Now()
+	resp, err := a.ClientSet.EFLO().ListLeniPrivateIpAddresses(req)
+	metric.OpenAPILatency.WithLabelValues(APIListLeniPrivateIPAddresses, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	if err != nil {
+		err = apiErr.WarpError(err)
+		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
+
+		return nil, err
+	}
+
+	if resp.Code != 0 {
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
+		l.Error(err, "failed")
+		return nil, err
+	}
+
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
+
+	return &resp.Content, nil
+}
+
+func (a *EFLOService) GetNodeInfoForPod(ctx context.Context, nodeID string) (*eflo.Content, error) {
+	req := eflo.CreateGetNodeInfoForPodRequest()
+	req.NodeId = nodeID
+
+	l := LogFields(logf.FromContext(ctx), req)
+
+	start := time.Now()
+	resp, err := a.ClientSet.EFLO().GetNodeInfoForPod(req)
+	metric.OpenAPILatency.WithLabelValues(APIGetNodeInfoForPod, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	if err != nil {
+		return nil, err
+	}
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success",
+		"HdeniQuota",
+		resp.Content.HdeniQuota,
+		"LeniQuota",
+		resp.Content.LeniQuota,
+	)
+
+	if resp.Code != 0 {
+		err = &apiErr.EFLOCode{
+			Code:      resp.Code,
+			Message:   resp.Message,
+			RequestID: resp.RequestId,
+			Content:   resp.Content,
+		}
+		l.Error(err, "failed")
+		return nil, err
+	}
+
+	return &resp.Content, nil
 }

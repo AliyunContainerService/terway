@@ -53,15 +53,12 @@ func main() {
 		provider.NewECSMetadataProvider(provider.ECSMetadataProviderOptions{}),
 	)
 
-	c, err := credential.NewClientMgr(regionID, prov)
+	c, err := credential.InitializeClientMgr(regionID, prov)
 	if err != nil {
 		panic(err)
 	}
 
-	api, err := client.New(c, nil)
-	if err != nil {
-		panic(err)
-	}
+	api := client.NewAPIFacade(c, nil)
 
 	if mode == "terway-eniip" {
 		limit, err := client.LimitProviders["ecs"].GetLimit(api, instanceType)

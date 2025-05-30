@@ -34,7 +34,7 @@ import (
 type ReconcileNetworkInterface struct {
 	client client.Client
 	scheme *runtime.Scheme
-	aliyun register.Interface
+	aliyun aliyunClient.OpenAPI
 
 	//record event recorder
 	record record.EventRecorder

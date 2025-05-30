@@ -34,11 +34,29 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/controller/mocks"
 )
 
 var _ = Describe("Node Controller", func() {
+	var (
+		openAPI    *mocks.OpenAPI
+		vpcClient  *mocks.VPC
+		ecsClient  *mocks.ECS
+		efloClient *mocks.EFLO
+	)
+
+	BeforeEach(func() {
+		openAPI = mocks.NewOpenAPI(GinkgoT())
+		vpcClient = mocks.NewVPC(GinkgoT())
+		ecsClient = mocks.NewECS(GinkgoT())
+		efloClient = mocks.NewEFLO(GinkgoT())
+
+		openAPI.On("GetVPC").Return(vpcClient).Maybe()
+		openAPI.On("GetECS").Return(ecsClient).Maybe()
+		openAPI.On("GetEFLO").Return(efloClient).Maybe()
+	})
+
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
 
@@ -111,7 +129,7 @@ var _ = Describe("Node Controller", func() {
 			controllerReconciler := &ReconcileNode{
 				client: k8sClient,
 				scheme: k8sClient.Scheme(),
-				aliyun: aliyun,
+				aliyun: openAPI,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -194,7 +212,7 @@ var _ = Describe("Node Controller", func() {
 			controllerReconciler := &ReconcileNode{
 				client: k8sClient,
 				scheme: k8sClient.Scheme(),
-				aliyun: aliyun,
+				aliyun: openAPI,
 			}
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -282,7 +300,7 @@ var _ = Describe("Node Controller", func() {
 			controllerReconciler := &ReconcileNode{
 				client: k8sClient,
 				scheme: k8sClient.Scheme(),
-				aliyun: aliyun,
+				aliyun: openAPI,
 			}
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -370,7 +388,7 @@ var _ = Describe("Node Controller", func() {
 		It("new eflo node", func() {
 			By("Reconciling the created resource")
 
-			ac := mocks.NewInterface(GinkgoT())
+			ac := mocks.NewOpenAPI(GinkgoT())
 			ac.On("GetNodeInfoForPod", mock.Anything, "instanceID").Return(&eflo.Content{
 				LeniQuota:   20,
 				LniSipQuota: 10,
@@ -399,9 +417,7 @@ var _ = Describe("Node Controller", func() {
 			Expect(resource.Spec.NodeCap.IPv4PerAdapter, 10)
 		})
 	})
-})
 
-var _ = Describe("Node Exclusive eni node", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
 
@@ -475,7 +491,7 @@ var _ = Describe("Node Exclusive eni node", func() {
 			controllerReconciler := &ReconcileNode{
 				client: k8sClient,
 				scheme: k8sClient.Scheme(),
-				aliyun: aliyun,
+				aliyun: openAPI,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -558,7 +574,7 @@ var _ = Describe("Node Exclusive eni node", func() {
 			controllerReconciler := &ReconcileNode{
 				client: k8sClient,
 				scheme: k8sClient.Scheme(),
-				aliyun: aliyun,
+				aliyun: openAPI,
 			}
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{

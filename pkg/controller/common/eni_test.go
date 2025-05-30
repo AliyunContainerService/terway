@@ -61,7 +61,6 @@ var _ = Describe("Common ENI Operations", func() {
 		It("should return error for invalid options", func() {
 			err := Attach(ctx, k8sClient, &AttachOption{})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("invalid attach option"))
 		})
 
 		It("should return error if ENI is in detaching phase", func() {

@@ -36,7 +36,7 @@ type NetworkServiceBuilder struct {
 	namespace      string
 	daemonMode     string
 	service        *networkService
-	aliyunClient   *client.OpenAPI
+	aliyunClient   *client.APIFacade
 
 	limit *client.Limits
 
@@ -173,15 +173,12 @@ func (b *NetworkServiceBuilder) setupAliyunClient() error {
 		provider.NewECSMetadataProvider(provider.ECSMetadataProviderOptions{}),
 	)
 
-	clientSet, err := credential.NewClientMgr(regionID, prov)
+	clientSet, err := credential.InitializeClientMgr(regionID, prov)
 	if err != nil {
 		return err
 	}
 
-	aliyunClient, err := client.New(clientSet, client.FromMap(b.config.RateLimit))
-	if err != nil {
-		return err
-	}
+	aliyunClient := client.NewAPIFacade(clientSet, client.FromMap(b.config.RateLimit))
 	b.aliyunClient = aliyunClient
 
 	return nil
@@ -281,7 +278,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 
 	// fall back to use primary eni's sg
 	if len(eniConfig.SecurityGroupIDs) == 0 {
-		enis, err := b.aliyunClient.DescribeNetworkInterface(b.ctx, "", nil, eniConfig.InstanceID, "Primary", "", nil)
+		enis, err := b.aliyunClient.GetECS().DescribeNetworkInterface(b.ctx, "", nil, eniConfig.InstanceID, "Primary", "", nil)
 		if err != nil {
 			return err
 		}

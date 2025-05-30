@@ -15,16 +15,33 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aliyun "github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/controller/mocks"
 	"github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned/scheme"
-	"github.com/AliyunContainerService/terway/pkg/vswitch"
+	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 )
 
 var _ = Describe("Pod controller", func() {
 	nodeName := "node"
+
+	var (
+		openAPI    *mocks.OpenAPI
+		vpcClient  *mocks.VPC
+		switchPool *vswpool.SwitchPool
+	)
+
+	BeforeEach(func() {
+		openAPI = mocks.NewOpenAPI(GinkgoT())
+		vpcClient = mocks.NewVPC(GinkgoT())
+
+		openAPI.On("GetVPC").Return(vpcClient).Maybe()
+
+		var err error
+		switchPool, err = vswpool.NewSwitchPool(100, "10m")
+		Expect(err).NotTo(HaveOccurred())
+	})
 
 	AfterEach(func() {
 		ctx := context.Background()
@@ -45,8 +62,6 @@ var _ = Describe("Pod controller", func() {
 		request := reconcile.Request{
 			NamespacedName: key,
 		}
-
-		vsw, _ := vswitch.NewSwitchPool(100, "10m")
 
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -85,7 +100,7 @@ var _ = Describe("Pod controller", func() {
 		It("Create podENI should succeed", func() {
 			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
-			openAPI = mocks.NewInterface(GinkgoT())
+
 			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
@@ -109,7 +124,7 @@ var _ = Describe("Pod controller", func() {
 				CreationTime:                "",
 			}, nil).Once()
 
-			openAPI.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
 				VpcId:                   "vpc-0",
 				Status:                  "",
 				AvailableIpAddressCount: 10,
@@ -126,7 +141,7 @@ var _ = Describe("Pod controller", func() {
 				client:    k8sClient,
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
-				swPool:    vsw,
+				swPool:    switchPool,
 				record:    record.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
@@ -192,8 +207,6 @@ var _ = Describe("Pod controller", func() {
 			NamespacedName: key,
 		}
 
-		vsw, _ := vswitch.NewSwitchPool(100, "10m")
-
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      key.Name,
@@ -231,7 +244,7 @@ var _ = Describe("Pod controller", func() {
 		It("Create podENI should succeed", func() {
 			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
-			openAPI = mocks.NewInterface(GinkgoT())
+
 			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
@@ -255,7 +268,7 @@ var _ = Describe("Pod controller", func() {
 				CreationTime:                "",
 			}, nil).Once()
 
-			openAPI.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
 				VpcId:                   "vpc-0",
 				Status:                  "",
 				AvailableIpAddressCount: 10,
@@ -272,7 +285,7 @@ var _ = Describe("Pod controller", func() {
 				client:    k8sClient,
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
-				swPool:    vsw,
+				swPool:    switchPool,
 				record:    record.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
@@ -323,8 +336,6 @@ var _ = Describe("Pod controller", func() {
 		request := reconcile.Request{
 			NamespacedName: key,
 		}
-
-		vsw, _ := vswitch.NewSwitchPool(100, "10m")
 
 		pn := &networkv1beta1.PodNetworking{
 			ObjectMeta: metav1.ObjectMeta{
@@ -385,7 +396,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, pn)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
-			openAPI = mocks.NewInterface(GinkgoT())
+
 			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
@@ -409,7 +420,7 @@ var _ = Describe("Pod controller", func() {
 				CreationTime:                "",
 			}, nil).Once()
 
-			openAPI.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
 				VpcId:                   "vpc-0",
 				Status:                  "",
 				AvailableIpAddressCount: 10,
@@ -426,7 +437,7 @@ var _ = Describe("Pod controller", func() {
 				client:    k8sClient,
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
-				swPool:    vsw,
+				swPool:    switchPool,
 				record:    record.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
@@ -477,8 +488,6 @@ var _ = Describe("Pod controller", func() {
 		request := reconcile.Request{
 			NamespacedName: key,
 		}
-
-		vsw, _ := vswitch.NewSwitchPool(100, "10m")
 
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -542,7 +551,6 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
-			openAPI = mocks.NewInterface(GinkgoT())
 			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
@@ -566,7 +574,7 @@ var _ = Describe("Pod controller", func() {
 				CreationTime:                "",
 			}, nil).Once()
 
-			openAPI.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
 				VpcId:                   "vpc-0",
 				Status:                  "",
 				AvailableIpAddressCount: 10,
@@ -583,7 +591,7 @@ var _ = Describe("Pod controller", func() {
 				client:    k8sClient,
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
-				swPool:    vsw,
+				swPool:    switchPool,
 				record:    record.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
@@ -634,8 +642,6 @@ var _ = Describe("Pod controller", func() {
 		request := reconcile.Request{
 			NamespacedName: key,
 		}
-
-		vsw, _ := vswitch.NewSwitchPool(100, "10m")
 
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -734,15 +740,13 @@ var _ = Describe("Pod controller", func() {
 
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
-			openAPI = mocks.NewInterface(GinkgoT())
-
 			controlplane.SetConfig(&controlplane.Config{})
 
 			r := &ReconcilePod{
 				client:    k8sClient,
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
-				swPool:    vsw,
+				swPool:    switchPool,
 				record:    record.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
@@ -767,8 +771,6 @@ var _ = Describe("Pod controller", func() {
 		request := reconcile.Request{
 			NamespacedName: key,
 		}
-
-		vsw, _ := vswitch.NewSwitchPool(100, "10m")
 
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -815,7 +817,6 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, eni)).Should(Succeed())
 
-			openAPI = mocks.NewInterface(GinkgoT())
 			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
@@ -839,7 +840,7 @@ var _ = Describe("Pod controller", func() {
 				CreationTime:                "",
 			}, nil).Once()
 
-			openAPI.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
 				VpcId:                   "vpc-0",
 				Status:                  "",
 				AvailableIpAddressCount: 10,
@@ -858,7 +859,7 @@ var _ = Describe("Pod controller", func() {
 				client:    k8sClient,
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
-				swPool:    vsw,
+				swPool:    switchPool,
 				record:    record.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
@@ -877,7 +878,6 @@ var _ = Describe("Pod controller", func() {
 		name := "delete-non-fixed-ip-pod"
 		ns := "default"
 		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
-		vsw, _ := vswitch.NewSwitchPool(100, "10m")
 		request := reconcile.Request{
 			NamespacedName: key,
 		}
@@ -909,7 +909,7 @@ var _ = Describe("Pod controller", func() {
 				client:    k8sClient,
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
-				swPool:    vsw,
+				swPool:    switchPool,
 				record:    record.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
@@ -929,7 +929,6 @@ var _ = Describe("Pod controller", func() {
 		name := "delete-fixed-ip-pod"
 		ns := "default"
 		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
-		vsw, _ := vswitch.NewSwitchPool(100, "10m")
 		request := reconcile.Request{
 			NamespacedName: key,
 		}
@@ -960,7 +959,7 @@ var _ = Describe("Pod controller", func() {
 				client:    k8sClient,
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
-				swPool:    vsw,
+				swPool:    switchPool,
 				record:    record.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
@@ -980,7 +979,6 @@ var _ = Describe("Pod controller", func() {
 		name := "delete-already-deleting"
 		ns := "default"
 		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
-		vsw, _ := vswitch.NewSwitchPool(100, "10m")
 		request := reconcile.Request{
 			NamespacedName: key,
 		}
@@ -1002,7 +1000,7 @@ var _ = Describe("Pod controller", func() {
 				client:    k8sClient,
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
-				swPool:    vsw,
+				swPool:    switchPool,
 				record:    record.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false}
@@ -1021,7 +1019,6 @@ var _ = Describe("Pod controller", func() {
 		name := "delete-already-detaching"
 		ns := "default"
 		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
-		vsw, _ := vswitch.NewSwitchPool(100, "10m")
 		request := reconcile.Request{
 			NamespacedName: key,
 		}
@@ -1044,7 +1041,7 @@ var _ = Describe("Pod controller", func() {
 				client:    k8sClient,
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
-				swPool:    vsw,
+				swPool:    switchPool,
 				record:    record.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
