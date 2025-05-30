@@ -255,11 +255,20 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 
 	if node.Spec.NodeCap.Adapters > 0 {
 		node.Spec.Flavor = nil
-		node.Spec.Flavor = append(node.Spec.Flavor, networkv1beta1.Flavor{
-			NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
-			NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-			Count:                       node.Spec.NodeCap.Adapters - 1,
-		})
+
+		if node.Annotations[types.ENOApi] == "hdeni" {
+			node.Spec.Flavor = append(node.Spec.Flavor, networkv1beta1.Flavor{
+				NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+				NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+				Count:                       node.Spec.NodeCap.Adapters,
+			})
+		} else {
+			node.Spec.Flavor = append(node.Spec.Flavor, networkv1beta1.Flavor{
+				NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+				NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+				Count:                       node.Spec.NodeCap.Adapters - 1,
+			})
+		}
 	}
 
 	node.Spec.Pool = &networkv1beta1.PoolSpec{

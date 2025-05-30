@@ -36,7 +36,7 @@ type NetworkServiceBuilder struct {
 	namespace      string
 	daemonMode     string
 	service        *networkService
-	aliyunClient   *client.OpenAPI
+	aliyunClient   *client.APIFacade
 
 	limit *client.Limits
 
@@ -126,7 +126,6 @@ func (b *NetworkServiceBuilder) InitK8S() *NetworkServiceBuilder {
 
 	if utils.ISLinJunNode(b.service.k8s.Node().Labels) {
 		b.eflo = true
-		instance.Init(&instance.EFLO{})
 	}
 	return b
 }
@@ -174,15 +173,12 @@ func (b *NetworkServiceBuilder) setupAliyunClient() error {
 		provider.NewECSMetadataProvider(provider.ECSMetadataProviderOptions{}),
 	)
 
-	clientSet, err := credential.NewClientMgr(regionID, prov)
+	clientSet, err := credential.InitializeClientMgr(regionID, prov)
 	if err != nil {
 		return err
 	}
 
-	aliyunClient, err := client.New(clientSet, client.FromMap(b.config.RateLimit))
-	if err != nil {
-		return err
-	}
+	aliyunClient := client.NewAPIFacade(clientSet, client.FromMap(b.config.RateLimit))
 	b.aliyunClient = aliyunClient
 
 	return nil
@@ -282,7 +278,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 
 	// fall back to use primary eni's sg
 	if len(eniConfig.SecurityGroupIDs) == 0 {
-		enis, err := b.aliyunClient.DescribeNetworkInterface(b.ctx, "", nil, eniConfig.InstanceID, "Primary", "", nil)
+		enis, err := b.aliyunClient.GetECS().DescribeNetworkInterface(b.ctx, "", nil, eniConfig.InstanceID, "Primary", "", nil)
 		if err != nil {
 			return err
 		}
@@ -309,7 +305,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 	}
 	var factory factory.Factory
 	if b.eflo {
-		factory = aliyun.NewEflo(b.ctx, b.aliyunClient, vswPool, eniConfig)
+		return fmt.Errorf("eflo unsupported")
 	} else {
 		factory = aliyun.NewAliyun(b.ctx, b.aliyunClient, eni2.NewENIMetadata(enableIPv4, enableIPv6), vswPool, eniConfig)
 	}

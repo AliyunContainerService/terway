@@ -38,11 +38,8 @@ type Aliyun struct {
 	instanceID string
 	zoneID     string
 
-	openAPI interface {
-		client.ECS
-		client.VPC
-	}
-	getter eni.ENIInfoGetter
+	openAPI client.OpenAPI
+	getter  eni.ENIInfoGetter
 
 	vsw             *vswpool.SwitchPool
 	selectionPolicy vswpool.SelectionPolicy
@@ -57,7 +54,7 @@ type Aliyun struct {
 	eniTagFilter map[string]string
 }
 
-func NewAliyun(ctx context.Context, openAPI *client.OpenAPI, getter eni.ENIInfoGetter, vsw *vswpool.SwitchPool, cfg *daemon.ENIConfig) *Aliyun {
+func NewAliyun(ctx context.Context, openAPI client.OpenAPI, getter eni.ENIInfoGetter, vsw *vswpool.SwitchPool, cfg *daemon.ENIConfig) *Aliyun {
 
 	return &Aliyun{
 		ctx:              ctx,
@@ -96,7 +93,7 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		erdma = true
 	}
 	err := wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENICreate), func(ctx context.Context) (bool, error) {
-		vsw, innerErr := a.vsw.GetOne(ctx, a.openAPI, a.zoneID, a.vSwitchOptions, &vswpool.SelectOptions{
+		vsw, innerErr := a.vsw.GetOne(ctx, a.openAPI.GetVPC(), a.zoneID, a.vSwitchOptions, &vswpool.SelectOptions{
 			VSwitchSelectPolicy: a.selectionPolicy,
 		})
 		if innerErr != nil {
@@ -121,7 +118,7 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 			Backoff: &bo,
 		}
 
-		eni, innerErr = a.openAPI.CreateNetworkInterface(ctx, option)
+		eni, innerErr = a.openAPI.GetECS().CreateNetworkInterface(ctx, option)
 		if innerErr != nil {
 			if apiErr.ErrorCodeIs(innerErr, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
 				a.vsw.Block(vswID)
@@ -177,7 +174,7 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 	}
 
 	// 2. attach eni
-	err = a.openAPI.AttachNetworkInterface(ctx, &client.AttachNetworkInterfaceOptions{
+	err = a.openAPI.GetECS().AttachNetworkInterface(ctx, &client.AttachNetworkInterfaceOptions{
 		NetworkInterfaceID:     &eni.NetworkInterfaceID,
 		InstanceID:             &a.instanceID,
 		TrunkNetworkInstanceID: nil,
@@ -259,7 +256,7 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 	// we check openAPI at last to ensure the eni is at InUse status
 	err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIOps), func(ctx context.Context) (done bool, err error) {
 		var eniSet []*client.NetworkInterface
-		eniSet, innerErr = a.openAPI.DescribeNetworkInterface(ctx, "", []string{r.ID}, "", "", "", nil)
+		eniSet, innerErr = a.openAPI.GetECS().DescribeNetworkInterface(ctx, "", []string{r.ID}, "", "", "", nil)
 		if innerErr != nil {
 			return false, nil
 		}
@@ -296,7 +293,7 @@ func (a *Aliyun) AssignNIPv4(eniID string, count int, mac string) ([]netip.Addr,
 			IPCount:            count,
 		}}
 
-	ips, err = a.openAPI.AssignPrivateIPAddress(a.ctx, option)
+	ips, err = a.openAPI.GetECS().AssignPrivateIPAddress(a.ctx, option)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +324,7 @@ func (a *Aliyun) AssignNIPv6(eniID string, count int, mac string) ([]netip.Addr,
 			IPv6Count:          count,
 		}}
 
-	ips, err = a.openAPI.AssignIpv6Addresses(a.ctx, option)
+	ips, err = a.openAPI.GetECS().AssignIpv6Addresses(a.ctx, option)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +346,7 @@ func (a *Aliyun) UnAssignNIPv4(eniID string, ips []netip.Addr, mac string) error
 	var err, innerErr error
 
 	err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
-		innerErr = a.openAPI.UnAssignPrivateIPAddresses(ctx, eniID, ips)
+		innerErr = a.openAPI.GetECS().UnAssignPrivateIPAddresses(ctx, eniID, ips)
 		if innerErr != nil {
 			if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
 				return true, innerErr
@@ -383,7 +380,7 @@ func (a *Aliyun) UnAssignNIPv6(eniID string, ips []netip.Addr, mac string) error
 	var err, innerErr error
 
 	err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
-		innerErr = a.openAPI.UnAssignIpv6Addresses(ctx, eniID, ips)
+		innerErr = a.openAPI.GetECS().UnAssignIpv6Addresses(ctx, eniID, ips)
 		if innerErr != nil {
 			if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
 				return true, innerErr
@@ -417,12 +414,12 @@ func (a *Aliyun) DeleteNetworkInterface(eniID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
-	err := a.openAPI.DetachNetworkInterface(ctx, eniID, a.instanceID, "")
+	err := a.openAPI.GetECS().DetachNetworkInterface(ctx, eniID, a.instanceID, "")
 	if err != nil {
 		return err
 	}
 	time.Sleep(time.Second * 5)
-	err = a.openAPI.DeleteNetworkInterface(ctx, eniID)
+	err = a.openAPI.GetECS().DeleteNetworkInterface(ctx, eniID)
 	return err
 }
 
@@ -473,7 +470,7 @@ func (a *Aliyun) GetAttachedNetworkInterface(trunkENIID string) ([]*daemon.ENI, 
 		var innerErr error
 		var eniSet []*client.NetworkInterface
 		err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
-			eniSet, innerErr = a.openAPI.DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", a.eniTagFilter)
+			eniSet, innerErr = a.openAPI.GetECS().DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", a.eniTagFilter)
 			if innerErr == nil {
 				return true, nil
 			}

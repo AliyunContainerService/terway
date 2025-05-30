@@ -8,19 +8,13 @@ import (
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/util/wait"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
-	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 )
-
-var _ VPC = &OpenAPI{}
-var _ ECS = &OpenAPI{}
 
 const (
 	APICreateNetworkInterface     = "CreateNetworkInterface"
@@ -35,25 +29,7 @@ const (
 	APIDescribeInstanceTypes      = "DescribeInstanceTypes"
 )
 
-type OpenAPI struct {
-	ClientSet        credential.Client
-	IdempotentKeyGen IdempotentKeyGen
-
-	RateLimiter *RateLimiter
-
-	Tracer trace.Tracer
-}
-
-func New(c credential.Client, cfg LimitConfig) (*OpenAPI, error) {
-	return &OpenAPI{
-		ClientSet:        c,
-		IdempotentKeyGen: NewIdempotentKeyGenerator(),
-		RateLimiter:      NewRateLimiter(cfg),
-		Tracer:           otel.Tracer("openAPI"),
-	}, nil
-}
-
-func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error) {
+func (a *ECSService) CreateNetworkInterface(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error) {
 	ctx, span := a.Tracer.Start(ctx, APICreateNetworkInterface)
 	defer span.End()
 
@@ -104,7 +80,7 @@ func (a *OpenAPI) CreateNetworkInterface(ctx context.Context, opts ...CreateNetw
 }
 
 // DescribeNetworkInterface list eni
-func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error) {
+func (a *ECSService) DescribeNetworkInterface(ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error) {
 	ctx, span := a.Tracer.Start(ctx, APIDescribeNetworkInterfaces)
 	defer span.End()
 
@@ -166,7 +142,7 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 }
 
 // AttachNetworkInterface attach eni
-func (a *OpenAPI) AttachNetworkInterface(ctx context.Context, opts ...AttachNetworkInterfaceOption) error {
+func (a *ECSService) AttachNetworkInterface(ctx context.Context, opts ...AttachNetworkInterfaceOption) error {
 	ctx, span := a.Tracer.Start(ctx, APIAttachNetworkInterface)
 	defer span.End()
 
@@ -199,7 +175,7 @@ func (a *OpenAPI) AttachNetworkInterface(ctx context.Context, opts ...AttachNetw
 }
 
 // DetachNetworkInterface detach eni
-func (a *OpenAPI) DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error {
+func (a *ECSService) DetachNetworkInterface(ctx context.Context, eniID, instanceID, trunkENIID string) error {
 	ctx, span := a.Tracer.Start(ctx, APIDetachNetworkInterface)
 	defer span.End()
 
@@ -230,7 +206,7 @@ func (a *OpenAPI) DetachNetworkInterface(ctx context.Context, eniID, instanceID,
 }
 
 // DeleteNetworkInterface del eni by id
-func (a *OpenAPI) DeleteNetworkInterface(ctx context.Context, eniID string) error {
+func (a *ECSService) DeleteNetworkInterface(ctx context.Context, eniID string) error {
 	ctx, span := a.Tracer.Start(ctx, APIDeleteNetworkInterface)
 	defer span.End()
 
@@ -256,7 +232,7 @@ func (a *OpenAPI) DeleteNetworkInterface(ctx context.Context, eniID string) erro
 }
 
 // WaitForNetworkInterface wait status of eni
-func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error) {
+func (a *ECSService) WaitForNetworkInterface(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*NetworkInterface, error) {
 	ctx, span := a.Tracer.Start(ctx, "WaitForNetworkInterface")
 	defer span.End()
 
@@ -291,7 +267,7 @@ func (a *OpenAPI) WaitForNetworkInterface(ctx context.Context, eniID string, sta
 	return eniInfo, nil
 }
 
-func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]netip.Addr, error) {
+func (a *ECSService) AssignPrivateIPAddress(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]netip.Addr, error) {
 	ctx, span := a.Tracer.Start(ctx, APIAssignPrivateIPAddress)
 	defer span.End()
 
@@ -346,7 +322,7 @@ func (a *OpenAPI) AssignPrivateIPAddress(ctx context.Context, opts ...AssignPriv
 // UnAssignPrivateIPAddresses remove ip from eni
 // return ok if 1. eni is released 2. ip is already released 3. release success
 // for primaryIP err is InvalidIp.IpUnassigned
-func (a *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []netip.Addr) error {
+func (a *ECSService) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, ips []netip.Addr) error {
 	if len(ips) == 0 {
 		return nil
 	}
@@ -385,7 +361,7 @@ func (a *OpenAPI) UnAssignPrivateIPAddresses(ctx context.Context, eniID string, 
 }
 
 // AssignIpv6Addresses assign ipv6 address
-func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6AddressesOption) ([]netip.Addr, error) {
+func (a *ECSService) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6AddressesOption) ([]netip.Addr, error) {
 	ctx, span := a.Tracer.Start(ctx, APIAssignIPv6Addresses)
 	defer span.End()
 
@@ -440,7 +416,7 @@ func (a *OpenAPI) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6Add
 
 // UnAssignIpv6Addresses remove ip from eni
 // return ok if 1. eni is released 2. ip is already released 3. release success
-func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []netip.Addr) error {
+func (a *ECSService) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []netip.Addr) error {
 	ctx, span := a.Tracer.Start(ctx, APIUnAssignIpv6Addresses)
 	defer span.End()
 
@@ -478,7 +454,7 @@ func (a *OpenAPI) UnAssignIpv6Addresses(ctx context.Context, eniID string, ips [
 	return nil
 }
 
-func (a *OpenAPI) DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error) {
+func (a *ECSService) DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error) {
 	ctx, span := a.Tracer.Start(ctx, APIDescribeInstanceTypes)
 	defer span.End()
 

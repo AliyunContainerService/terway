@@ -48,6 +48,7 @@ type Config struct {
 	PodENIMaxConcurrent int `json:"podENIMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
 	NodeController
 	MultiIPController
+	ENIController
 
 	Controllers []string `json:"controllers"`
 
@@ -99,4 +100,8 @@ type MultiIPController struct {
 type NodeController struct {
 	NodeMaxConcurrent  int               `json:"nodeMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=10"`
 	NodeLabelWhiteList map[string]string `json:"nodeLabelWhiteList"`
+}
+
+type ENIController struct {
+	ENIMaxConcurrent int `json:"eniMaxConcurrent" validate:"gt=0,lte=10000" mod:"default=300"`
 }

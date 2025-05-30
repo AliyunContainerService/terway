@@ -143,7 +143,7 @@ type ReconcileNode struct {
 	scheme *runtime.Scheme
 	record record.EventRecorder
 
-	aliyun  register.Interface
+	aliyun  aliyunClient.OpenAPI
 	vswpool *vswitch.SwitchPool
 
 	cache sync.Map
@@ -374,7 +374,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 				node.Status.NetworkInterfaces = make(map[string]*networkv1beta1.Nic)
 			}
 			// we need cidr info
-			vsw, err := n.vswpool.GetByID(ctx, n.aliyun, remote.VSwitchID)
+			vsw, err := n.vswpool.GetByID(ctx, n.aliyun.GetVPC(), remote.VSwitchID)
 			if err != nil {
 				return err
 			}
@@ -902,7 +902,7 @@ func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eni
 			return false
 		}
 
-		vsw, err := n.vswpool.GetByID(ctx, n.aliyun, option.eniRef.VSwitchID)
+		vsw, err := n.vswpool.GetByID(ctx, n.aliyun.GetVPC(), option.eniRef.VSwitchID)
 		if err != nil {
 			logf.FromContext(ctx).Error(err, "failed to get vsw")
 			return false
@@ -1077,7 +1077,7 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 		switch eni.Status {
 		case aliyunClient.ENIStatusDeleting, aliyunClient.ENIStatusDetaching:
 			if !isEFLO(ctx) {
-				err := n.aliyun.DetachNetworkInterface(ctx, eni.ID, node.Spec.NodeMetadata.InstanceID, "")
+				err := n.aliyun.GetECS().DetachNetworkInterface(ctx, eni.ID, node.Spec.NodeMetadata.InstanceID, "")
 				if err != nil {
 					log.Error(err, "run gc failed")
 					continue
@@ -1223,7 +1223,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	vsw, err := n.vswpool.GetOne(ctx, n.aliyun, node.Spec.NodeMetadata.ZoneID, node.Spec.ENISpec.VSwitchOptions, &vswitch.SelectOptions{
+	vsw, err := n.vswpool.GetOne(ctx, n.aliyun.GetVPC(), node.Spec.NodeMetadata.ZoneID, node.Spec.ENISpec.VSwitchOptions, &vswitch.SelectOptions{
 		VSwitchSelectPolicy: vswitch.SelectionPolicy(node.Spec.ENISpec.VSwitchSelectPolicy),
 	})
 	if err != nil {
@@ -1298,7 +1298,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 	}()
 
 	if !isEFLO(ctx) {
-		err = n.aliyun.AttachNetworkInterface(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
+		err = n.aliyun.GetECS().AttachNetworkInterface(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
 			NetworkInterfaceID:     &result.NetworkInterfaceID,
 			InstanceID:             &node.Spec.NodeMetadata.InstanceID,
 			TrunkNetworkInstanceID: nil,

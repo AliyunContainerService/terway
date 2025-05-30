@@ -18,7 +18,7 @@ import (
 )
 
 // DescribeNetworkInterface2 list eni
-func (a *OpenAPI) DescribeNetworkInterface2(ctx context.Context, opts ...DescribeNetworkInterfaceOption) ([]*NetworkInterface, error) {
+func (a *ECSService) DescribeNetworkInterface2(ctx context.Context, opts ...DescribeNetworkInterfaceOption) ([]*NetworkInterface, error) {
 	ctx, span := a.Tracer.Start(ctx, APIDescribeNetworkInterfaces)
 	defer span.End()
 
@@ -66,7 +66,7 @@ func (a *OpenAPI) DescribeNetworkInterface2(ctx context.Context, opts ...Describ
 	return result, nil
 }
 
-func (a *OpenAPI) AssignPrivateIPAddress2(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]IPSet, error) {
+func (a *ECSService) AssignPrivateIPAddress2(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]IPSet, error) {
 	ctx, span := a.Tracer.Start(ctx, APIAssignPrivateIPAddress)
 	defer span.End()
 
@@ -124,7 +124,7 @@ func (a *OpenAPI) AssignPrivateIPAddress2(ctx context.Context, opts ...AssignPri
 	}), err
 }
 
-func (a *OpenAPI) UnAssignPrivateIPAddresses2(ctx context.Context, eniID string, ips []IPSet) error {
+func (a *ECSService) UnAssignPrivateIPAddresses2(ctx context.Context, eniID string, ips []IPSet) error {
 	if len(ips) == 0 {
 		return nil
 	}
@@ -166,7 +166,7 @@ func (a *OpenAPI) UnAssignPrivateIPAddresses2(ctx context.Context, eniID string,
 }
 
 // AssignIpv6Addresses2 assign ipv6 address
-func (a *OpenAPI) AssignIpv6Addresses2(ctx context.Context, opts ...AssignIPv6AddressesOption) ([]IPSet, error) {
+func (a *ECSService) AssignIpv6Addresses2(ctx context.Context, opts ...AssignIPv6AddressesOption) ([]IPSet, error) {
 	ctx, span := a.Tracer.Start(ctx, APIAssignIPv6Addresses)
 	defer span.End()
 
@@ -227,7 +227,7 @@ func (a *OpenAPI) AssignIpv6Addresses2(ctx context.Context, opts ...AssignIPv6Ad
 
 // UnAssignIpv6Addresses2 remove ip from eni
 // return ok if 1. eni is released 2. ip is already released 3. release success
-func (a *OpenAPI) UnAssignIpv6Addresses2(ctx context.Context, eniID string, ips []IPSet) error {
+func (a *ECSService) UnAssignIpv6Addresses2(ctx context.Context, eniID string, ips []IPSet) error {
 	ctx, span := a.Tracer.Start(ctx, APIUnAssignIpv6Addresses)
 	defer span.End()
 
@@ -264,5 +264,41 @@ func (a *OpenAPI) UnAssignIpv6Addresses2(ctx context.Context, eniID string, ips 
 		return err
 	}
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("success")
+	return nil
+}
+
+// DetachNetworkInterface2 detaches an ENI using the new option-based interface.
+func (a *ECSService) DetachNetworkInterface2(ctx context.Context, opts ...DetachNetworkInterfaceOption) error {
+	ctx, span := a.Tracer.Start(ctx, APIDetachNetworkInterface)
+	defer span.End()
+
+	option := &DetachNetworkInterfaceOptions{}
+	for _, opt := range opts {
+		opt.ApplyTo(option)
+	}
+
+	req, err := option.ECS()
+	if err != nil {
+		return err
+	}
+	l := LogFields(logf.FromContext(ctx), req)
+
+	err = a.RateLimiter.Wait(ctx, APIDetachNetworkInterface)
+	if err != nil {
+		return err
+	}
+
+	start := time.Now()
+	resp, err := a.ClientSet.ECS().DetachNetworkInterface(req)
+	metric.OpenAPILatency.WithLabelValues(APIDetachNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
+	if err != nil {
+		err = apiErr.WarpError(err)
+		if apiErr.ErrorCodeIs(err, apiErr.ErrInvalidENINotFound, apiErr.ErrInvalidEcsIDNotFound) {
+			return nil
+		}
+		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "detach eni failed")
+		return err
+	}
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("detach eni success")
 	return nil
 }

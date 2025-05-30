@@ -19,10 +19,12 @@ package podeni
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -35,6 +37,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -47,7 +50,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
@@ -115,7 +117,7 @@ var _ reconcile.Reconciler = &ReconcilePodENI{}
 type ReconcilePodENI struct {
 	client client.Client
 	scheme *runtime.Scheme
-	aliyun register.Interface
+	aliyun aliyunClient.OpenAPI
 
 	//record event recorder
 	record record.EventRecorder
@@ -168,7 +170,8 @@ func (m *ReconcilePodENI) Reconcile(ctx context.Context, request reconcile.Reque
 	}
 
 	if !podENI.DeletionTimestamp.IsZero() {
-		if !controllerutil.ContainsFinalizer(podENI, types.FinalizerPodENI) {
+		if !controllerutil.ContainsFinalizer(podENI, types.FinalizerPodENI) &&
+			!controllerutil.ContainsFinalizer(podENI, types.FinalizerPodENIV2) {
 			return reconcile.Result{}, nil
 		}
 		result, err := m.podENIDelete(ctx, podENI)
@@ -228,7 +231,7 @@ func (m *ReconcilePodENI) gc(ctx context.Context) {
 
 func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName client.ObjectKey, podENI *v1beta1.PodENI) (result reconcile.Result, err error) {
 	l := log.FromContext(ctx)
-	l.Info("podENI created")
+	l.Info("podENI", "status", podENI.Status.Phase)
 
 	ctx = m.injectNodeStatus(ctx, podENI.Namespace, podENI.Name)
 
@@ -325,29 +328,47 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 			return reconcile.Result{}, fmt.Errorf("found previous podENI, but pod is not using fixed ip")
 		}
 
-		podENICopy := podENI.DeepCopy()
-		podENICopy.Status.InstanceID = nodeInfo.InstanceID
-		podENICopy.Status.TrunkENIID = nodeInfo.TrunkENIID
-		if podENICopy.Status.ENIInfos == nil {
-			podENICopy.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
+		before := podENI.DeepCopy()
+		podENI.Status.InstanceID = nodeInfo.InstanceID
+		podENI.Status.TrunkENIID = nodeInfo.TrunkENIID
+		if podENI.Status.ENIInfos == nil {
+			podENI.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
 		}
 
-		ll := l.WithValues("eni", podENICopy.Spec.Allocations[0].ENI.ID, "trunk", podENICopy.Status.TrunkENIID, "instance", podENICopy.Status.InstanceID)
+		ll := l.WithValues("eni", podENI.Spec.Allocations[0].ENI.ID, "trunk", podENI.Status.TrunkENIID, "instance", podENI.Status.InstanceID)
 
-		err = m.attachENI(ctx, podENICopy)
+		err = m.attachENI(ctx, podENI, nodeInfo.NodeName)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("attach eni failed, %w", err)
 		}
+
+		// lets update spec first
+		if !reflect.DeepEqual(before.Spec, podENI.Spec) {
+			after := podENI.Status.DeepCopy()
+
+			err = m.client.Update(ctx, podENI)
+			if err != nil {
+				return reconcile.Result{}, fmt.Errorf("update podENI failed, %w", err)
+			}
+			err = common.WaitRVChanged(ctx, m.client, podENI, podENI.Namespace, podENI.Name, before.ResourceVersion)
+			if err != nil {
+				return reconcile.Result{}, nil
+			}
+
+			// the only part update in attach
+			podENI.Status.ENIInfos = after.ENIInfos
+		}
+
 		ll.Info("attached")
 
-		podENICopy.Status.Phase = v1beta1.ENIPhaseBind
-		if podENICopy.Spec.HaveFixedIP() {
-			podENICopy.Status.PodLastSeen = metav1.Now()
+		podENI.Status.Phase = v1beta1.ENIPhaseBind
+		if podENI.Spec.HaveFixedIP() {
+			podENI.Status.PodLastSeen = metav1.Now()
 		}
 
 		// if attach succeed and update status failed , we can not store instance id
 		// so in later detach , we are unable to detach the eni
-		err = m.client.Status().Update(ctx, podENICopy)
+		err = m.client.Status().Update(ctx, podENI)
 		if err != nil {
 			ll.Error(err, "update podENI")
 			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventUpdatePodENIFailed, "%s", err.Error())
@@ -366,20 +387,20 @@ func (m *ReconcilePodENI) podENIDelete(ctx context.Context, podENI *v1beta1.PodE
 
 	ctx = m.injectNodeStatus(ctx, podENI.Namespace, podENI.Name)
 
-	podENICopy := podENI.DeepCopy()
+	for _, e := range podENI.Spec.Allocations {
+		err := common.Delete(ctx, m.client, &common.DeleteOption{
+			NetworkInterfaceID: e.ENI.ID,
+			IgnoreCache:        false,
+		})
 
-	// detach eni
-	err := m.detachMemberENI(ctx, podENICopy)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("error detachMemberENI podENI status to %s", v1beta1.ENIPhaseUnbind)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
 	}
-	// delete eni
-	err = m.deleteMemberENI(ctx, podENICopy)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("error delete eni, %w", err)
-	}
-	controllerutil.RemoveFinalizer(podENICopy, types.FinalizerPodENI)
-	err = m.client.Update(ctx, podENICopy)
+
+	controllerutil.RemoveFinalizer(podENI, types.FinalizerPodENI)
+	controllerutil.RemoveFinalizer(podENI, types.FinalizerPodENIV2)
+	err := m.client.Update(ctx, podENI)
 	if k8sErr.IsNotFound(err) {
 		return reconcile.Result{}, nil
 	}
@@ -388,7 +409,7 @@ func (m *ReconcilePodENI) podENIDelete(ctx context.Context, podENI *v1beta1.PodE
 
 func (m *ReconcilePodENI) gcSecondaryENI(ctx context.Context) {
 	// 1. list all available enis ( which type is secondary)
-	enis, err := m.aliyun.DescribeNetworkInterface(ctx, controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusAvailable, nil)
+	enis, err := m.aliyun.GetECS().DescribeNetworkInterface(ctx, controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusAvailable, nil)
 	if err != nil {
 		ctrlLog.Error(err, "error list all member enis")
 		return
@@ -415,7 +436,7 @@ func (m *ReconcilePodENI) gcSecondaryENI(ctx context.Context) {
 
 func (m *ReconcilePodENI) gcMemberENI(ctx context.Context) {
 	// 1. list all attached member eni
-	enis, err := m.aliyun.DescribeNetworkInterface(ctx, controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeMember, aliyunClient.ENIStatusInUse, nil)
+	enis, err := m.aliyun.GetECS().DescribeNetworkInterface(ctx, controlplane.GetConfig().VPCID, nil, "", aliyunClient.ENITypeMember, aliyunClient.ENIStatusInUse, nil)
 	if err != nil {
 		ctrlLog.Error(err, "error list all member enis")
 		return
@@ -493,7 +514,7 @@ func (m *ReconcilePodENI) gcENIs(ctx context.Context, enis []*aliyunClient.Netwo
 	for _, eni := range eniMap {
 		if eni.Type == aliyunClient.ENITypeMember && eni.Status == aliyunClient.ENIStatusInUse {
 			l.Info("detach eni", "eni", eni.NetworkInterfaceID, "trunk-eni", eni.TrunkNetworkInterfaceID)
-			err = m.aliyun.DetachNetworkInterface(ctx, eni.NetworkInterfaceID, eni.InstanceID, eni.TrunkNetworkInterfaceID) // still need delegate ? otherwise may break quota
+			err = m.aliyun.GetECS().DetachNetworkInterface(ctx, eni.NetworkInterfaceID, eni.InstanceID, eni.TrunkNetworkInterfaceID) // still need delegate ? otherwise may break quota
 			if err != nil {
 				l.Error(err, fmt.Sprintf("errot detach eni %s", eni.NetworkInterfaceID))
 			}
@@ -502,7 +523,7 @@ func (m *ReconcilePodENI) gcENIs(ctx context.Context, enis []*aliyunClient.Netwo
 		}
 		if eni.Status == aliyunClient.ENIStatusAvailable {
 			l.Info("delete eni", "eni", eni.NetworkInterfaceID)
-			err = m.aliyun.DeleteNetworkInterface(ctx, eni.NetworkInterfaceID)
+			err = m.aliyun.GetECS().DeleteNetworkInterface(ctx, eni.NetworkInterfaceID)
 			if err != nil {
 				l.Info(fmt.Sprintf("delete leaked eni %s, %s", eni.NetworkInterfaceID, err))
 			}
@@ -647,7 +668,7 @@ func (m *ReconcilePodENI) detach(ctx context.Context, podENI *v1beta1.PodENI) (r
 	return reconcile.Result{}, err
 }
 
-func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI) error {
+func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI, nodeName string) error {
 	var err error
 	if podENI.Status.InstanceID == "" {
 		return fmt.Errorf("instanceID missing")
@@ -663,16 +684,9 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI)
 		}
 	}()
 
-	ch := make(chan *v1beta1.ENIInfo)
-	done := make(chan struct{})
-	go func() {
-		// override the config
-		podENI.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
-		for info := range ch {
-			podENI.Status.ENIInfos[info.ID] = *info
-		}
-		done <- struct{}{}
-	}()
+	// override the config
+	podENI.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
+	lock := sync.Mutex{}
 
 	g, _ := errgroup.WithContext(context.Background())
 	for i := range podENI.Spec.Allocations {
@@ -685,35 +699,59 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI)
 			if podENI.Status.TrunkENIID == "" {
 				cardIndex = m.getENIIndex(ctx, podENI.Namespace, podENI.Name, alloc.ENI.ID)
 			}
-			err := m.aliyun.AttachNetworkInterface(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
-				NetworkInterfaceID:     &alloc.ENI.ID,
-				InstanceID:             &podENI.Status.InstanceID,
-				TrunkNetworkInstanceID: &podENI.Status.TrunkENIID,
-				NetworkCardIndex:       cardIndex,
-				Backoff:                nil,
+
+			err = common.Attach(ctx, m.client, &common.AttachOption{
+				InstanceID:         podENI.Status.InstanceID,
+				NetworkInterfaceID: alloc.ENI.ID,
+				TrunkENIID:         podENI.Status.TrunkENIID,
+				NetworkCardIndex:   cardIndex,
+				NodeName:           nodeName,
 			})
 			if err != nil {
 				return err
 			}
 
-			eni, err := m.aliyun.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyunClient.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
+			// TODO: watch the eni change
+			eni, err := common.WaitStatus(ctx, m.client, &common.DescribeOption{
+				NetworkInterfaceID: alloc.ENI.ID,
+				BackOff:            backoff.Backoff(backoff.WaitENIStatus),
+				ExpectPhase:        (*v1beta1.Phase)(ptr.To(v1beta1.ENIPhaseBind)),
+				IgnoreNotExist:     false,
+			})
 			if err != nil {
 				return err
 			}
 
-			ch <- &v1beta1.ENIInfo{
-				ID:               eni.NetworkInterfaceID,
-				Type:             v1beta1.ENIType(eni.Type),
-				Vid:              eni.DeviceIndex,
+			lock.Lock()
+			alloc.ENI.VPCID = eni.Spec.ENI.VPCID
+			alloc.ENI.MAC = eni.Spec.ENI.MAC
+			alloc.ENI.Zone = eni.Spec.ENI.Zone
+			alloc.ENI.VSwitchID = eni.Spec.ENI.VSwitchID
+			alloc.ENI.ResourceGroupID = eni.Spec.ENI.ResourceGroupID
+			alloc.ENI.SecurityGroupIDs = eni.Spec.ENI.SecurityGroupIDs
+			alloc.IPv4 = eni.Spec.IPv4
+			alloc.IPv6 = eni.Spec.IPv6
+
+			podENI.Spec.Allocations[ii] = alloc
+			podENI.Status.ENIInfos[alloc.ENI.ID] = v1beta1.ENIInfo{
+				ID:               eni.Name,
+				Type:             eni.Status.ENIInfo.Type,
+				Vid:              eni.Status.ENIInfo.Vid,
 				Status:           v1beta1.ENIStatusBind,
 				NetworkCardIndex: cardIndex,
+				VfID:             eni.Status.ENIInfo.VfID,
 			}
+			lock.Unlock()
+
 			return nil
 		})
 	}
 	err = g.Wait()
-	close(ch)
-	<-done
+
+	sort.Slice(podENI.Spec.Allocations, func(i, j int) bool {
+		return podENI.Spec.Allocations[i].Interface < podENI.Spec.Allocations[j].Interface
+	})
+
 	return err
 }
 
@@ -731,59 +769,28 @@ func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.P
 		}
 	}()
 	for _, alloc := range podENI.Spec.Allocations {
-		ctx := common.WithCtx(ctx, &alloc)
-		instanceID := podENI.Status.InstanceID
-		trunkENIID := podENI.Status.TrunkENIID
-		if podENI.Status.InstanceID == "" {
-			enis, err := m.aliyun.DescribeNetworkInterface(ctx, "", []string{alloc.ENI.ID}, "", "", "", nil)
-			if err != nil {
-				return err
-			}
-			if len(enis) == 0 {
-				continue
-			}
-			if enis[0].InstanceID == "" {
-				continue
-			}
-			instanceID = enis[0].InstanceID
-			trunkENIID = enis[0].TrunkNetworkInterfaceID
-		}
-
-		err = m.aliyun.DetachNetworkInterface(ctx, alloc.ENI.ID, instanceID, trunkENIID)
+		err = common.Detach(ctx, m.client, &common.DetachOption{
+			NetworkInterfaceID: alloc.ENI.ID,
+			IgnoreCache:        false,
+		})
 		if err != nil {
 			return err
 		}
 
-		_, err = m.aliyun.WaitForNetworkInterface(ctx, alloc.ENI.ID, aliyunClient.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
-		if err == nil || errors.Is(err, apiErr.ErrNotFound) {
-			nodeSatus, ok := status.MetaCtx[status.NodeStatus](ctx)
-			if ok {
-				nodeSatus.DetachNetworkIndex(alloc.ENI.ID)
-			}
-			continue
-		}
-		return err
-	}
+		_, err = common.WaitStatus(ctx, m.client, &common.DescribeOption{
+			BackOff:            backoff.Backoff(backoff.WaitENIStatus),
+			IgnoreNotExist:     true,
+			NetworkInterfaceID: alloc.ENI.ID,
+			ExpectPhase:        ptr.To(v1beta1.Phase(v1beta1.ENIPhaseUnbind)),
+		})
 
-	return nil
-}
-
-func (m *ReconcilePodENI) deleteMemberENI(ctx context.Context, podENI *v1beta1.PodENI) (err error) {
-	defer func() {
-		if err != nil {
-			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventDeleteENIFailed, err.Error())
-		} else {
-			m.record.Eventf(podENI, corev1.EventTypeNormal, types.EventDeleteENISucceed, fmt.Sprintf("delete eni %s", strings.Join(allocIDs(podENI), ",")))
-		}
-	}()
-
-	for _, alloc := range podENI.Spec.Allocations {
-		if alloc.ENI.ID == "" {
-			continue
-		}
-		err = m.aliyun.DeleteNetworkInterface(common.WithCtx(ctx, &alloc), alloc.ENI.ID)
 		if err != nil {
 			return err
+		}
+
+		nodeSatus, ok := status.MetaCtx[status.NodeStatus](ctx)
+		if ok {
+			nodeSatus.DetachNetworkIndex(alloc.ENI.ID)
 		}
 	}
 
@@ -999,41 +1006,46 @@ func (m *ReconcilePodENI) injectNodeStatus(ctx context.Context, namespace, name 
 			return ctx
 		}
 
-		limits, err := aliyunClient.LimitProviders["ecs"].GetLimit(m.aliyun, instanceType)
-		if err != nil {
-			l.Error(err, "failed to get instance type limit")
-			return ctx
-		}
-
-		nodeStatus = status.NewNodeStatus(len(limits.NetworkCards))
-
-		if len(limits.NetworkCards) >= 2 {
-			// a new node ,we need to build the eni index from cache.
-			podENIs := &v1beta1.PodENIList{}
-			err = m.client.List(ctx, podENIs, &client.ListOptions{
-				LabelSelector: labels.SelectorFromSet(map[string]string{
-					"name": node.Name,
-				}),
-			})
+		// TODO: after we enable node controller by default , we can modify this
+		if !utils.ISLinJunNode(node.Labels) {
+			limits, err := aliyunClient.LimitProviders["ecs"].GetLimit(m.aliyun, instanceType)
 			if err != nil {
-				l.Error(err, "failed to list podeni")
+				l.Error(err, "failed to get instance type limit")
 				return ctx
 			}
 
-			lo.ForEach(podENIs.Items, func(item v1beta1.PodENI, index int) {
-				// for existing podENI
-				if item.Status.Phase != v1beta1.ENIPhaseBind {
-					return
+			nodeStatus = status.NewNodeStatus(len(limits.NetworkCards))
+
+			if len(limits.NetworkCards) >= 2 {
+				// a new node ,we need to build the eni index from cache.
+				podENIs := &v1beta1.PodENIList{}
+				err = m.client.List(ctx, podENIs, &client.ListOptions{
+					LabelSelector: labels.SelectorFromSet(map[string]string{
+						"name": node.Name,
+					}),
+				})
+				if err != nil {
+					l.Error(err, "failed to list podeni")
+					return ctx
 				}
-				// possible pod has multi eni
-				for _, eni := range item.Status.ENIInfos {
-					eniIndex := 0
-					if eni.NetworkCardIndex != nil {
-						eniIndex = *eni.NetworkCardIndex
+
+				lo.ForEach(podENIs.Items, func(item v1beta1.PodENI, index int) {
+					// for existing podENI
+					if item.Status.Phase != v1beta1.ENIPhaseBind {
+						return
 					}
-					nodeStatus.RequestNetworkIndex(eni.ID, &eniIndex, nil)
-				}
-			})
+					// possible pod has multi eni
+					for _, eni := range item.Status.ENIInfos {
+						eniIndex := 0
+						if eni.NetworkCardIndex != nil {
+							eniIndex = *eni.NetworkCardIndex
+						}
+						nodeStatus.RequestNetworkIndex(eni.ID, &eniIndex, nil)
+					}
+				})
+			}
+		} else {
+			nodeStatus = status.NewNodeStatus(1)
 		}
 
 		nodeStatus, _ = m.nodeStatusCache.LoadOrStore(node.Name, nodeStatus)

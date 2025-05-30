@@ -141,7 +141,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	lo.ForEach([]string{crds.CRDPodENI, crds.CRDPodNetworking, crds.CRDNode, crds.CRDNodeRuntime}, func(item string, index int) {
+	lo.ForEach([]string{crds.CRDPodENI, crds.CRDPodNetworking, crds.CRDNode, crds.CRDNodeRuntime, crds.CRDNetworkInterface}, func(item string, index int) {
 		err = crds.CreateOrUpdateCRD(ctx, directClient, item)
 		if err != nil {
 			log.Error(err, "unable sync crd")
@@ -173,15 +173,12 @@ func main() {
 		provider.NewECSMetadataProvider(provider.ECSMetadataProviderOptions{}),
 	)
 
-	clientSet, err := credential.NewClientMgr(cfg.RegionID, prov)
+	clientSet, err := credential.InitializeClientMgr(cfg.RegionID, prov)
 	if err != nil {
 		panic(err)
 	}
 
-	aliyunClient, err := aliyun.New(clientSet, aliyun.FromMap(cfg.RateLimit))
-	if err != nil {
-		panic(err)
-	}
+	aliyunClient := aliyun.NewAPIFacade(clientSet, aliyun.FromMap(cfg.RateLimit))
 
 	mgr, err := ctrl.NewManager(restConfig, options)
 	if err != nil {

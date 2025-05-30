@@ -33,20 +33,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
-// Interface aliyun client for terway-controlplane
-type Interface interface {
-	aliyunClient.VPC
-	aliyunClient.ECS
-	aliyunClient.ENI
-	aliyunClient.EFLO
-}
-
 type ControllerCtx struct {
 	context.Context
 
 	Config       *controlplane.Config
 	VSwitchPool  *vswitch.SwitchPool
-	AliyunClient Interface
+	AliyunClient aliyunClient.OpenAPI
 
 	Wg *wait.Group
 

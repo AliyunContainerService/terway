@@ -291,7 +291,7 @@ func parseSetupConf(ctx context.Context, args *skel.CmdArgs, alloc *rpc.NetConf,
 		mac := alloc.GetENIInfo().GetMAC()
 		vfID = alloc.GetENIInfo().VfId
 		if vfID != nil {
-			// when do setup , this link must present
+			// when do setup, this link must present
 			deviceID, err = prepareVF(ctx, int(*vfID), mac)
 			if err != nil {
 				return nil, err
@@ -356,6 +356,11 @@ func parseSetupConf(ctx context.Context, args *skel.CmdArgs, alloc *rpc.NetConf,
 		if err != nil {
 			return nil, fmt.Errorf("error parse extra routes, %w", err)
 		}
+
+		if gatewayIP == nil {
+			return nil, fmt.Errorf("error extra routes, gatewayIP is nil")
+		}
+
 		route := cniTypes.Route{Dst: *n}
 		if ip.To4() != nil {
 			route.GW = gatewayIP.IPv4

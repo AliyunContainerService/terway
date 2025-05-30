@@ -3,8 +3,6 @@
 package credential
 
 import (
-	"context"
-	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,28 +11,55 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
-	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth/credentials"
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
-	ctrl "sigs.k8s.io/controller-runtime"
-
+	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
+	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk"
+	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth"
+	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth/credentials"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
+	credential "github.com/aliyun/credentials-go/credentials"
+	"golang.org/x/net/context"
+	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 )
 
 type Client interface {
 	ECS() *ecs.Client
 	VPC() *vpc.Client
-
 	EFLO() *eflo.Client
+	EFLOV2() *eflo20220530.Client
 }
 
 var (
-	mgrLog                     = ctrl.Log.WithName("clientMgr")
 	kubernetesAlicloudIdentity = "Kubernetes.Alicloud"
-
-	tokenReSyncPeriod = 5 * time.Minute
 )
+
+var _ credentials.CredentialsProvider = &V1Warp{}
+
+type V1Warp struct {
+	providers provider.CredentialsProvider
+}
+
+func (a *V1Warp) GetCredentials() (*credentials.Credentials, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cr, err := a.providers.Credentials(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cre := &credentials.Credentials{
+		AccessKeyId:     cr.AccessKeyId,
+		AccessKeySecret: cr.AccessKeySecret,
+		SecurityToken:   cr.SecurityToken,
+	}
+
+	return cre, nil
+}
+func (a *V1Warp) GetProviderName() string {
+	return "chaining"
+}
 
 type headerTransport struct {
 	headers map[string]string
@@ -47,190 +72,73 @@ func (m *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-func clientCfg() *sdk.Config {
-	scheme := "HTTPS"
-	if os.Getenv("ALICLOUD_CLIENT_SCHEME") == "HTTP" {
-		scheme = "HTTP"
-	}
-	s := &sdk.Config{
+func provideSDKConfig(config ClientConfig) *sdk.Config {
+	sdkConfig := &sdk.Config{
 		Timeout:   20 * time.Second,
 		Transport: http.DefaultTransport,
 		UserAgent: kubernetesAlicloudIdentity,
-		Scheme:    scheme,
+		Scheme:    config.Scheme,
 	}
 	if os.Getenv("X-ACSPROXY-ASCM-CONTEXT") != "" {
-		s.Transport = &headerTransport{
+		sdkConfig.Transport = &headerTransport{
 			headers: map[string]string{
 				"x-acsproxy-ascm-context": os.Getenv("X-ACSPROXY-ASCM-CONTEXT"),
 			},
 		}
 	}
 
-	return s
+	return sdkConfig
+}
+
+func provideSDKV2Config(config ClientConfig, credential credential.Credential) *openapi.Config {
+	klog.Infof("provideSDKV2Config %#v", config)
+	return &openapi.Config{
+		UserAgent:    ptr.To(kubernetesAlicloudIdentity),
+		Protocol:     ptr.To(config.Scheme),
+		RegionId:     ptr.To(config.RegionID),
+		Network:      ptr.To(config.NetworkType),
+		Credential:   credential,
+		EndpointType: ptr.To(config.EndpointType),
+	}
+}
+
+func ProviderV1(providers provider.CredentialsProvider) auth.Credential {
+	return &V1Warp{providers: providers}
+}
+
+func ProviderV2(providers provider.CredentialsProvider) credential.Credential {
+	return provider.NewCredentialForV2SDK(providers, provider.CredentialForV2SDKOptions{
+		CredentialRetrievalTimeout: 10 * time.Minute,
+	})
 }
 
 // ClientMgr manager of aliyun openapi clientset
 type ClientMgr struct {
-	regionID string
-
 	provider provider.CredentialsProvider
 
-	// protect things below
+	ecsClient    ECSClient
+	vpcClient    VPCClient
+	efloClient   EFLOClient
+	efloV2Client EFLOV2Client
+
 	sync.RWMutex
-
-	expireAt time.Time
-	updateAt time.Time
-
-	ecs  *ecs.Client
-	vpc  *vpc.Client
-	eflo *eflo.Client
-
-	ecsDomainOverride  string
-	vpcDomainOverride  string
-	efloDomainOverride string
-
-	efloRegionOverride string
-
-	endpointType string
-}
-
-// NewClientMgr return new aliyun client manager
-func NewClientMgr(regionID string, providers provider.CredentialsProvider) (*ClientMgr, error) {
-	mgr := &ClientMgr{
-		regionID: regionID,
-		provider: providers,
-	}
-
-	var err error
-	mgr.ecsDomainOverride, err = parseURL(os.Getenv("ECS_ENDPOINT"))
-	if err != nil {
-		return nil, err
-	}
-	mgr.vpcDomainOverride, err = parseURL(os.Getenv("VPC_ENDPOINT"))
-	if err != nil {
-		return nil, err
-	}
-	mgr.efloDomainOverride, err = parseURL(os.Getenv("EFLO_ENDPOINT"))
-	if err != nil {
-		return nil, err
-	}
-
-	mgr.efloRegionOverride = os.Getenv("EFLO_REGION_ID")
-	if mgr.efloRegionOverride == "" {
-		mgr.efloRegionOverride = regionID
-	}
-
-	mgr.endpointType = "vpc"
-	if os.Getenv("ALICLOUD_ENDPOINT_TYPE") != "" {
-		mgr.endpointType = os.Getenv("ALICLOUD_ENDPOINT_TYPE")
-	}
-
-	_, err = providers.Credentials(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get credentials: %w", err)
-	}
-
-	return mgr, nil
-}
-
-func (c *ClientMgr) VPC() *vpc.Client {
-	c.Lock()
-	defer c.Unlock()
-	ok, err := c.refreshToken()
-	if err != nil {
-		mgrLog.Error(err, "refresh token error")
-	}
-	if ok {
-		mgrLog.WithValues("updateAt", c.updateAt, "expireAt", c.expireAt).Info("credential update")
-	}
-	return c.vpc
 }
 
 func (c *ClientMgr) ECS() *ecs.Client {
-	c.Lock()
-	defer c.Unlock()
-	ok, err := c.refreshToken()
-	if err != nil {
-		mgrLog.Error(err, "refresh token error")
-	}
-	if ok {
-		mgrLog.WithValues("updateAt", c.updateAt, "expireAt", c.expireAt).Info("credential update")
-	}
-	return c.ecs
+	return c.ecsClient.GetClient()
 }
-
+func (c *ClientMgr) VPC() *vpc.Client {
+	return c.vpcClient.GetClient()
+}
 func (c *ClientMgr) EFLO() *eflo.Client {
-	c.Lock()
-	defer c.Unlock()
-	ok, err := c.refreshToken()
-	if err != nil {
-		mgrLog.Error(err, "refresh token error")
-	}
-	if ok {
-		mgrLog.WithValues("updateAt", c.updateAt, "expireAt", c.expireAt).Info("credential update")
-	}
-	return c.eflo
+	return c.efloClient.GetClient()
+}
+func (c *ClientMgr) EFLOV2() *eflo20220530.Client {
+	return c.efloV2Client.GetClient()
 }
 
-func (c *ClientMgr) refreshToken() (bool, error) {
-	if c.updateAt.IsZero() || c.expireAt.Before(time.Now()) || time.Since(c.updateAt) > tokenReSyncPeriod {
-		var err error
-		defer func() {
-			if err == nil {
-				c.updateAt = time.Now()
-			}
-		}()
-
-		cc, err := c.provider.Credentials(context.Background())
-		if err != nil {
-			return false, err
-		}
-
-		cre := &credentials.StsTokenCredential{
-			AccessKeyId:       cc.AccessKeyId,
-			AccessKeySecret:   cc.AccessKeySecret,
-			AccessKeyStsToken: cc.SecurityToken,
-		}
-
-		c.ecs, err = ecs.NewClientWithOptions(c.regionID, clientCfg(), cre)
-		if err != nil {
-			return false, err
-		}
-		c.ecs.SetEndpointRules(c.ecs.EndpointMap, "regional", c.endpointType)
-
-		if c.ecsDomainOverride != "" {
-			c.ecs.Domain = c.ecsDomainOverride
-		}
-
-		c.vpc, err = vpc.NewClientWithOptions(c.regionID, clientCfg(), cre)
-		if err != nil {
-			return false, err
-		}
-		c.vpc.SetEndpointRules(c.vpc.EndpointMap, "regional", c.endpointType)
-
-		if c.vpcDomainOverride != "" {
-			c.vpc.Domain = c.vpcDomainOverride
-		}
-
-		c.eflo, err = eflo.NewClientWithOptions(c.efloRegionOverride, clientCfg(), cre)
-		if err != nil {
-			return false, err
-		}
-		c.eflo.SetEndpointRules(c.eflo.EndpointMap, "regional", c.endpointType)
-
-		if c.efloDomainOverride != "" {
-			c.eflo.Domain = c.efloDomainOverride
-		}
-
-		if cc.Expiration.IsZero() {
-			c.expireAt = time.Now().Add(5 * time.Minute)
-		}
-		c.expireAt = cc.Expiration
-		return true, nil
-	}
-
-	return false, nil
-}
+type ClientScheme string
+type NetworkType string
 
 func parseURL(str string) (string, error) {
 	if str == "" {
