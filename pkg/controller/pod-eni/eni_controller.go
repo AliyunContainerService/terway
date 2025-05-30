@@ -346,6 +346,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		if !reflect.DeepEqual(before.Spec, podENI.Spec) {
 			after := podENI.Status.DeepCopy()
 
+			ll.Info("update podENI spec", "rv", podENI.ResourceVersion)
 			err = m.client.Update(ctx, podENI)
 			if err != nil {
 				return reconcile.Result{}, fmt.Errorf("update podENI failed, %w", err)
@@ -359,22 +360,23 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 			podENI.Status.ENIInfos = after.ENIInfos
 		}
 
-		ll.Info("attached")
-
 		podENI.Status.Phase = v1beta1.ENIPhaseBind
 		if podENI.Spec.HaveFixedIP() {
 			podENI.Status.PodLastSeen = metav1.Now()
 		}
 
+		oldRV := podENI.ResourceVersion
 		// if attach succeed and update status failed , we can not store instance id
 		// so in later detach , we are unable to detach the eni
 		err = m.client.Status().Update(ctx, podENI)
 		if err != nil {
-			ll.Error(err, "update podENI")
+			ll.Error(err, "update podENI", "rv", podENI.ResourceVersion)
 			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventUpdatePodENIFailed, "%s", err.Error())
-		} else {
-			ll.Info("update podENI")
 		}
+		ll.Info("attached")
+		// wait status change
+		_ = common.WaitRVChanged(ctx, m.client, &v1beta1.PodENI{}, podENI.Namespace, podENI.Name, oldRV)
+
 		return reconcile.Result{}, err
 	}
 

@@ -324,6 +324,21 @@ func WaitCreated[T client.Object](ctx context.Context, c client.Client, obj T, n
 	})
 }
 
+func WaitDeleted[T client.Object](ctx context.Context, c client.Client, obj T, namespace, name string) {
+	_ = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+		err := c.Get(ctx, k8stypes.NamespacedName{
+			Namespace: namespace,
+			Name:      name,
+		}, obj)
+		if err != nil {
+			if k8sErr.IsNotFound(err) {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
 func WaitRVChanged[T client.Object](ctx context.Context, c client.Client, obj T, namespace, name string, currentRV string) error {
 	err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
 		err := c.Get(ctx, k8stypes.NamespacedName{
