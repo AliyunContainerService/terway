@@ -8,6 +8,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -178,6 +179,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 				return reconcile.Result{RequeueAfter: du}, nil
 			case aliyunClient.LENIStatusCreateFailed:
 				// release this eni, this status should be on first create
+				r.record.Eventf(networkInterface, corev1.EventTypeWarning, types.EventCreateENIFailed, "backend create failed, will delete")
 				return reconcile.Result{}, r.rollBackPodENI(ctx, networkInterface)
 			case aliyunClient.LENIStatusDetachFailed, aliyunClient.LENIStatusDeleteFailed, aliyunClient.LENIStatusDeleting:
 				return reconcile.Result{}, fmt.Errorf("unsupported status on attach %s", resp[0].Status)
@@ -404,8 +406,13 @@ func (r *ReconcileNetworkInterface) delete(ctx context.Context, networkInterface
 	controllerutil.RemoveFinalizer(update, types.FinalizerENI)
 	err = r.client.Patch(ctx, update, client.MergeFrom(networkInterface))
 	if err != nil {
+		if k8sErr.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("remove finalizer failed, %w", err)
 	}
+	// wait gone
+	common.WaitDeleted(ctx, r.client, &v1beta1.NetworkInterface{}, networkInterface.Namespace, networkInterface.Name)
 	return nil
 }
 
