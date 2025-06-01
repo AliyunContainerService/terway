@@ -69,6 +69,11 @@ func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &v1beta1.PodENI{})
 
+		err := migrate(ctrlCtx.Context, ctrlCtx.DirectClient)
+		if err != nil {
+			return err
+		}
+
 		r := &ReconcilePodENI{
 			client:          mgr.GetClient(),
 			scheme:          mgr.GetScheme(),
@@ -1056,4 +1061,112 @@ func (m *ReconcilePodENI) injectNodeStatus(ctx context.Context, namespace, name 
 	l.V(4).Info("inject node status", "node", node.Name, "nodeStatus", nodeStatus)
 
 	return status.WithMeta(ctx, nodeStatus)
+}
+
+// migrate create podENI, related networkInterface cr
+func migrate(ctx context.Context, c client.Client) error {
+	podENIs := &v1beta1.PodENIList{}
+	err := c.List(ctx, podENIs)
+	if err != nil {
+		return err
+	}
+
+	var toCreate []*v1beta1.NetworkInterface
+
+	for _, podENI := range podENIs.Items {
+		for _, alloc := range podENI.Spec.Allocations {
+			networkInterfaceCR := &v1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: alloc.ENI.ID,
+				},
+			}
+			err = c.Get(ctx, client.ObjectKeyFromObject(networkInterfaceCR), networkInterfaceCR)
+			if err == nil {
+				continue
+			}
+			if !k8sErr.IsNotFound(err) {
+				return err
+			}
+			// not found, create it
+			networkInterfaceCR.Name = alloc.ENI.ID
+			controllerutil.AddFinalizer(networkInterfaceCR, types.FinalizerENI)
+			networkInterfaceCR.Spec.ENI = alloc.ENI
+			networkInterfaceCR.Spec.IPv4 = alloc.IPv4
+			networkInterfaceCR.Spec.IPv6 = alloc.IPv6
+			networkInterfaceCR.Spec.ExtraConfig = alloc.ExtraConfig
+			networkInterfaceCR.Spec.PodENIRef = &corev1.ObjectReference{
+				Kind:      "pod",
+				Name:      podENI.Name,
+				Namespace: podENI.Namespace,
+			}
+
+			networkInterfaceCR.Status.NodeName = podENI.Labels[types.ENIRelatedNodeName]
+			networkInterfaceCR.Status.InstanceID = podENI.Status.InstanceID
+			networkInterfaceCR.Status.TrunkENIID = podENI.Status.TrunkENIID
+			networkInterfaceCR.Status.Phase = podENI.Status.Phase
+			networkInterfaceCR.Status.ENIInfo = podENI.Status.ENIInfos[alloc.ENI.ID]
+			networkInterfaceCR.Status.CardIndex = networkInterfaceCR.Status.ENIInfo.NetworkCardIndex
+
+			toCreate = append(toCreate, networkInterfaceCR)
+		}
+	}
+
+	group, ctx := errgroup.WithContext(ctx)
+	group.SetLimit(100)
+
+	for _, networkInterfaceCR := range toCreate {
+		networkInterfaceCR := networkInterfaceCR
+		group.Go(func() error {
+			return syncNetworkInterfaceCR(ctx, c, networkInterfaceCR)
+		})
+	}
+	err = group.Wait()
+	return err
+}
+
+func syncNetworkInterfaceCR(ctx context.Context, c client.Client, expect *v1beta1.NetworkInterface) error {
+	exist := &v1beta1.NetworkInterface{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: expect.Name,
+		},
+	}
+	err := c.Get(ctx, client.ObjectKeyFromObject(exist), exist)
+	if err != nil {
+		if !k8sErr.IsNotFound(err) {
+			return err
+		}
+
+		status := expect.Status.DeepCopy()
+		// create expect
+		err = c.Create(ctx, expect)
+		if err != nil {
+			return err
+		}
+
+		// wait cr created
+		//common.WaitCreated(ctx, c, exist, exist.Namespace, exist.Name)
+		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 2*time.Second, false, func(ctx context.Context) (bool, error) {
+			err = c.Get(ctx, client.ObjectKeyFromObject(exist), exist)
+			if err != nil {
+				if k8sErr.IsNotFound(err) {
+					return false, nil
+				}
+				return false, err
+			}
+			return true, nil
+		})
+		if err != nil {
+			return err
+		}
+		expect.Status = *status
+	}
+
+	// want to use the actual status from api
+	// expect.Status is fully updated, the phase is come from
+	// podENI.Status.Phase
+	// openAPI eni statue converted to Phase
+	exist.Status = expect.Status
+	err = c.Status().Update(ctx, exist)
+
+	return err
 }

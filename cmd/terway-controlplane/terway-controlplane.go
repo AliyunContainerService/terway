@@ -229,6 +229,7 @@ func main() {
 		Wg:              wg,
 		TracerProvider:  tp,
 		NodeStatusCache: status.NewCache[status.NodeStatus](),
+		DirectClient:    directClient,
 	}
 
 	for name := range register.Controllers {

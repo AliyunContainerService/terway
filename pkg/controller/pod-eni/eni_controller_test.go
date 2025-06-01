@@ -614,4 +614,356 @@ var _ = Describe("Pod controller", func() {
 			Expect(updated.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseDeleting)))
 		})
 	})
+
+	Context("migrate function tests", func() {
+
+		It("should migrate PodENI with ENIPhaseInitial", func() {
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-migrate-initial",
+					Namespace: "default",
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							ENI: networkv1beta1.ENI{
+								ID: "eni-migrate-initial",
+								AttachmentOptions: networkv1beta1.AttachmentOptions{
+									Trunk: ptr.To(true),
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, podENI)).Should(Succeed())
+			podENI.Status = networkv1beta1.PodENIStatus{
+				Phase: networkv1beta1.ENIPhaseInitial,
+			}
+			Expect(k8sClient.Status().Update(ctx, podENI))
+
+			// 执行 migrate 操作
+			err := migrate(ctx, k8sClient)
+			Expect(err).NotTo(HaveOccurred())
+
+			// 检查是否创建了对应的 NetworkInterface
+			eni := &networkv1beta1.NetworkInterface{}
+			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-migrate-initial"}, eni)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(eni.Spec.ENI.ID).To(Equal("eni-migrate-initial"))
+			Expect(eni.Spec.PodENIRef).NotTo(BeNil())
+			Expect(eni.Spec.PodENIRef.Name).To(Equal("test-migrate-initial"))
+			Expect(eni.Spec.PodENIRef.Namespace).To(Equal("default"))
+
+			// 验证 reconcile 处理后的状态
+			r := &ReconcilePodENI{
+				client:          k8sClient,
+				aliyun:          openAPI,
+				record:          record.NewFakeRecorder(100),
+				trunkMode:       false,
+				crdMode:         false,
+				nodeStatusCache: status.NewCache[status.NodeStatus](),
+			}
+
+			// 创建对应的 Pod
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-migrate-initial",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					NodeName: nodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "pause",
+							Image: "pause",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+
+			// 模拟 NetworkInterface 状态变化
+			go func() {
+				time.Sleep(1 * time.Second)
+				for i := 0; i < 5; i++ {
+					eni := &networkv1beta1.NetworkInterface{}
+					err := k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-migrate-initial"}, eni)
+					if err != nil {
+						continue
+					}
+					if eni.Status.Phase == networkv1beta1.ENIPhaseBinding {
+						eni.Status.Phase = networkv1beta1.ENIPhaseBind
+						_ = k8sClient.Status().Update(ctx, eni)
+						return
+					}
+					time.Sleep(1 * time.Second)
+				}
+			}()
+
+			_, err = r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: k8stypes.NamespacedName{Name: "test-migrate-initial", Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// 检查最终状态
+			updatedPodENI := &networkv1beta1.PodENI{}
+			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "test-migrate-initial", Namespace: "default"}, updatedPodENI)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedPodENI.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)))
+		})
+
+		It("should migrate PodENI with ENIPhaseBinding", func() {
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-migrate-binding",
+					Namespace: "default",
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							ENI: networkv1beta1.ENI{
+								ID: "eni-migrate-binding",
+								AttachmentOptions: networkv1beta1.AttachmentOptions{
+									Trunk: ptr.To(false),
+								},
+							},
+							AllocationType: networkv1beta1.AllocationType{Type: networkv1beta1.IPAllocTypeFixed},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, podENI)).Should(Succeed())
+			podENI.Status = networkv1beta1.PodENIStatus{
+				Phase:      networkv1beta1.ENIPhaseBinding,
+				InstanceID: "i-instance1",
+				TrunkENIID: "",
+				ENIInfos: map[string]networkv1beta1.ENIInfo{
+					"eni-migrate-binding": {
+						ID: "eni-migrate-binding",
+					},
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, podENI))
+
+			// 执行 migrate 操作
+			err := migrate(ctx, k8sClient)
+			Expect(err).NotTo(HaveOccurred())
+
+			// 检查是否创建了对应的 NetworkInterface
+			eni := &networkv1beta1.NetworkInterface{}
+			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-migrate-binding"}, eni)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(eni.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseBinding)))
+
+			// 创建对应的 Pod
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-migrate-binding",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					NodeName: nodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "pause",
+							Image: "pause",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+
+			go func() {
+				time.Sleep(1 * time.Second)
+				eni := &networkv1beta1.NetworkInterface{}
+				err := k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-migrate-binding"}, eni)
+				if err == nil {
+					eni.Status.Phase = networkv1beta1.ENIPhaseBind
+					_ = k8sClient.Status().Update(ctx, eni)
+				}
+			}()
+
+			r := &ReconcilePodENI{
+				client:          k8sClient,
+				aliyun:          openAPI,
+				record:          record.NewFakeRecorder(100),
+				trunkMode:       false,
+				crdMode:         false,
+				nodeStatusCache: status.NewCache[status.NodeStatus](),
+			}
+
+			_, err = r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: k8stypes.NamespacedName{Name: "test-migrate-binding", Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should migrate PodENI with ENIPhaseBind", func() {
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-migrate-bind",
+					Namespace: "default",
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							ENI: networkv1beta1.ENI{
+								ID: "eni-migrate-bind",
+								AttachmentOptions: networkv1beta1.AttachmentOptions{
+									Trunk: ptr.To(true),
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, podENI)).Should(Succeed())
+			podENI.Status = networkv1beta1.PodENIStatus{
+				Phase:      networkv1beta1.ENIPhaseBind,
+				InstanceID: "i-instance1",
+				TrunkENIID: "trunk-eni-1",
+				ENIInfos: map[string]networkv1beta1.ENIInfo{
+					"eni-migrate-bind": {
+						ID:     "eni-migrate-bind",
+						Status: networkv1beta1.ENIStatusBind,
+					},
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, podENI))
+
+			// 执行 migrate 操作
+			err := migrate(ctx, k8sClient)
+			Expect(err).NotTo(HaveOccurred())
+
+			// 检查是否创建了对应的 NetworkInterface
+			eni := &networkv1beta1.NetworkInterface{}
+			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-migrate-bind"}, eni)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(eni.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)))
+
+			// 创建对应的 Pod
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-migrate-bind",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					NodeName: nodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "pause",
+							Image: "pause",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+
+			r := &ReconcilePodENI{
+				client:          k8sClient,
+				aliyun:          openAPI,
+				record:          record.NewFakeRecorder(100),
+				trunkMode:       true,
+				crdMode:         false,
+				nodeStatusCache: status.NewCache[status.NodeStatus](),
+			}
+
+			result, err := r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: k8stypes.NamespacedName{Name: "test-migrate-bind", Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// 检查状态保持不变
+			updatedPodENI := &networkv1beta1.PodENI{}
+			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "test-migrate-bind", Namespace: "default"}, updatedPodENI)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedPodENI.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)))
+		})
+
+		It("should migrate PodENI with ENIPhaseDetaching", func() {
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-migrate-detaching",
+					Namespace:  "default",
+					Finalizers: []string{types.FinalizerPodENIV2},
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							ENI: networkv1beta1.ENI{
+								ID: "eni-migrate-detaching",
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, podENI)).Should(Succeed())
+			podENI.Status = networkv1beta1.PodENIStatus{
+				Phase: networkv1beta1.ENIPhaseDetaching,
+				ENIInfos: map[string]networkv1beta1.ENIInfo{
+					"eni-migrate-detaching": {
+						ID:     "eni-migrate-detaching",
+						Status: networkv1beta1.ENIPhaseBind,
+					},
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, podENI))
+
+			// 执行 migrate 操作
+			err := migrate(ctx, k8sClient)
+			Expect(err).NotTo(HaveOccurred())
+
+			// 检查是否创建了对应的 NetworkInterface
+			eni := &networkv1beta1.NetworkInterface{}
+			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-migrate-detaching"}, eni)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(eni.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseDetaching)))
+
+			// 创建对应的 Pod
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-migrate-detaching",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					NodeName: nodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "pause",
+							Image: "pause",
+						},
+					},
+					TerminationGracePeriodSeconds: ptr.To(int64(0)),
+				},
+			}
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+
+			r := &ReconcilePodENI{
+				client:          k8sClient,
+				aliyun:          openAPI,
+				record:          record.NewFakeRecorder(100),
+				trunkMode:       false,
+				crdMode:         false,
+				nodeStatusCache: status.NewCache[status.NodeStatus](),
+			}
+
+			// 模拟 detach 完成
+			go func() {
+				time.Sleep(1 * time.Second)
+				eni := &networkv1beta1.NetworkInterface{}
+				err := k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-migrate-detaching"}, eni)
+				if err == nil {
+					eni.Status.Phase = networkv1beta1.ENIPhaseUnbind
+					_ = k8sClient.Status().Update(ctx, eni)
+				}
+			}()
+
+			_, err = r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: k8stypes.NamespacedName{Name: "test-migrate-detaching", Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
 })
