@@ -1144,17 +1144,7 @@ func syncNetworkInterfaceCR(ctx context.Context, c client.Client, expect *v1beta
 		}
 
 		// wait cr created
-		//common.WaitCreated(ctx, c, exist, exist.Namespace, exist.Name)
-		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 2*time.Second, false, func(ctx context.Context) (bool, error) {
-			err = c.Get(ctx, client.ObjectKeyFromObject(exist), exist)
-			if err != nil {
-				if k8sErr.IsNotFound(err) {
-					return false, nil
-				}
-				return false, err
-			}
-			return true, nil
-		})
+		err = common.WaitCreated(ctx, c, exist, exist.Namespace, exist.Name)
 		if err != nil {
 			return err
 		}
