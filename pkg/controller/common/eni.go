@@ -311,8 +311,8 @@ func Delete(ctx context.Context, c client.Client, option *DeleteOption) error {
 	return nil
 }
 
-func WaitCreated[T client.Object](ctx context.Context, c client.Client, obj T, namespace, name string) {
-	_ = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+func WaitCreated[T client.Object](ctx context.Context, c client.Client, obj T, namespace, name string) error {
+	return wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
 		err := c.Get(ctx, k8stypes.NamespacedName{
 			Namespace: namespace,
 			Name:      name,

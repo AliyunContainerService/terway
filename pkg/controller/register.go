@@ -47,6 +47,8 @@ type ControllerCtx struct {
 	RegisterResource []client.Object
 
 	NodeStatusCache *status.Cache[status.NodeStatus]
+
+	DirectClient client.Client
 }
 
 type Creator func(mgr manager.Manager, ctrlCtx *ControllerCtx) error

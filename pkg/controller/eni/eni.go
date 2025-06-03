@@ -3,11 +3,12 @@ package eni
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/go-logr/logr"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -236,18 +237,20 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 			networkInterface.Spec.IPv6 = remote.IPv6Set[0].IPAddress
 		}
 
-		if !reflect.DeepEqual(oldSpec, networkInterface.Spec) {
+		if !cmp.Equal(*oldSpec, networkInterface.Spec, cmpopts.EquateEmpty()) {
+
+			logr.FromContextOrDiscard(ctx).Info("spec not equal", "old", oldSpec, "new", networkInterface.Spec, "diff",
+				cmp.Diff(*oldSpec, networkInterface.Spec, cmpopts.EquateEmpty()),
+			)
+
 			oldRv := networkInterface.GetResourceVersion()
 			err = r.client.Update(ctx, networkInterface)
 			if err != nil {
-				return reconcile.Result{}, nil
+				return reconcile.Result{}, fmt.Errorf("update eni failed, %w", err)
 			}
 
 			// networkInterface should be updated
-			err = common.WaitRVChanged(ctx, r.client, networkInterface, networkInterface.Namespace, networkInterface.Name, oldRv)
-			if err != nil {
-				return reconcile.Result{}, nil
-			}
+			_ = common.WaitRVChanged(ctx, r.client, networkInterface, networkInterface.Namespace, networkInterface.Name, oldRv)
 		}
 
 		networkInterface.Status.ENIInfo = v1beta1.ENIInfo{

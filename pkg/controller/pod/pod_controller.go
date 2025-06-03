@@ -269,7 +269,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 	}
 
 	// 2.4 wait cr created
-	common.WaitCreated(ctx, m.client, &v1beta1.PodENI{}, pod.Namespace, pod.Name)
+	_ = common.WaitCreated(ctx, m.client, &v1beta1.PodENI{}, pod.Namespace, pod.Name)
 
 	return reconcile.Result{}, nil
 }
@@ -610,7 +610,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 				return fmt.Errorf("create eni cr err,rollbackErr %s %w", innerErr, err)
 			}
 
-			common.WaitCreated(ctx, m.client, &v1beta1.NetworkInterface{}, cr.Namespace, cr.Name)
+			_ = common.WaitCreated(ctx, m.client, &v1beta1.NetworkInterface{}, cr.Namespace, cr.Name)
 
 			v6 := ""
 			if len(eni.IPv6Set) > 0 {

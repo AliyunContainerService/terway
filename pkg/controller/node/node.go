@@ -185,7 +185,7 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 			RegionID:     nodeInfo.RegionID,
 		}
 
-		limit, err := aliyunClient.LimitProviders["ecs"].GetLimit(r.aliyun, nodeInfo.InstanceType)
+		limit, err := aliyunClient.GetLimitProvider().GetLimit(r.aliyun.GetECS(), nodeInfo.InstanceType)
 		if err != nil {
 			return err
 		}

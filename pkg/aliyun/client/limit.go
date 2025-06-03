@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
@@ -95,97 +96,85 @@ type LimitProvider interface {
 	GetLimitFromAnno(anno map[string]string) (*Limits, error)
 }
 
-type EfloLimitProvider struct{}
-
-func NewEfloLimitProvider() *EfloLimitProvider {
-	return &EfloLimitProvider{}
-}
-
-func (e *EfloLimitProvider) GetLimit(client interface{}, instanceType string) (*Limits, error) {
-	a, ok := client.(EFLO)
-	if !ok {
-		return nil, fmt.Errorf("unsupported client")
-	}
-	resp, err := a.GetNodeInfoForPod(context.Background(), instanceType)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Limits{
-		Adapters:       resp.LeniQuota,
-		TotalAdapters:  resp.LeniQuota,
-		IPv4PerAdapter: resp.LniSipQuota,
-	}, nil
-}
-
-func (e *EfloLimitProvider) GetLimitFromAnno(anno map[string]string) (*Limits, error) {
-	return nil, nil
-}
-
-type ECSLimitProvider struct {
+type Provider struct {
 	cache cache.LRUExpireCache
 	ttl   time.Duration
 
 	g singleflight.Group
 }
 
-func NewECSLimitProvider() *ECSLimitProvider {
-	return &ECSLimitProvider{
+func NewProvider() *Provider {
+	return &Provider{
 		cache: *cache.NewLRUExpireCache(10 * 1000),
 		ttl:   15 * 24 * time.Hour,
 	}
 }
 
-func (d *ECSLimitProvider) GetLimit(client interface{}, instanceType string) (*Limits, error) {
-	a, ok := client.(ECS)
-	if !ok {
-		return nil, fmt.Errorf("unsupported client")
-	}
-	v, ok := d.cache.Get(instanceType)
-	if ok {
-		return v.(*Limits), nil
-	}
+func (d *Provider) GetLimit(client interface{}, instanceType string) (*Limits, error) {
+	switch cc := client.(type) {
+	case ECS:
 
-	var req []string
-	if instanceType != "" {
-		req = append(req, instanceType)
-	}
+		v, ok := d.cache.Get(instanceType)
+		if ok {
+			return v.(*Limits), nil
+		}
 
-	v, err, _ := d.g.Do(instanceType, func() (interface{}, error) {
-		ins, err := a.DescribeInstanceTypes(context.Background(), req)
+		var req []string
+		if instanceType != "" {
+			req = append(req, instanceType)
+		}
+
+		v, err, _ := d.g.Do(instanceType, func() (interface{}, error) {
+			ins, err := cc.DescribeInstanceTypes(context.Background(), req)
+			if err != nil {
+				return nil, err
+			}
+			return ins, nil
+		})
 		if err != nil {
 			return nil, err
 		}
-		return ins, nil
-	})
-	if err != nil {
-		return nil, err
+
+		ins := v.([]ecs.InstanceType)
+
+		for _, instanceTypeInfo := range ins {
+			instanceTypeID := instanceTypeInfo.InstanceTypeId
+
+			limit := getInstanceType(&instanceTypeInfo)
+
+			d.cache.Add(instanceTypeID, limit, d.ttl)
+			logf.Log.Info("instance limit", instanceTypeID, limit)
+		}
+		if instanceType == "" {
+			return nil, nil
+		}
+		v, ok = d.cache.Get(instanceType)
+		if !ok {
+			return nil, fmt.Errorf("unexpected error")
+		}
+
+		return v.(*Limits), nil
+	case EFLO:
+		resp, err := cc.GetNodeInfoForPod(context.Background(), instanceType)
+		if err != nil {
+			return nil, err
+		}
+
+		return &Limits{
+			Adapters:       resp.LeniQuota,
+			TotalAdapters:  resp.LeniQuota,
+			IPv4PerAdapter: resp.LniSipQuota,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported client")
 	}
 
-	ins := v.([]ecs.InstanceType)
-
-	for _, instanceTypeInfo := range ins {
-		instanceTypeID := instanceTypeInfo.InstanceTypeId
-
-		limit := getInstanceType(&instanceTypeInfo)
-
-		d.cache.Add(instanceTypeID, limit, d.ttl)
-		logf.Log.Info("instance limit", instanceTypeID, limit)
-	}
-	if instanceType == "" {
-		return nil, nil
-	}
-	v, ok = d.cache.Get(instanceType)
-	if !ok {
-		return nil, fmt.Errorf("unexpected error")
-	}
-
-	return v.(*Limits), nil
 }
 
-func (d *ECSLimitProvider) GetLimitFromAnno(anno map[string]string) (*Limits, error) {
+func (d *Provider) GetLimitFromAnno(anno map[string]string) (*Limits, error) {
 	v, ok := anno["alibabacloud.com/instance-type-info"]
 	if !ok {
+		// nb(l1b0k): eflo instance type info is not supported
 		return nil, nil
 	}
 
@@ -234,17 +223,12 @@ func getInstanceType(instanceTypeInfo *ecs.InstanceType) *Limits {
 	}
 }
 
-var ecsProvider LimitProvider
-var efloProvider LimitProvider
+var defaultLimitProvider LimitProvider
+var once sync.Once
 
-var LimitProviders = map[string]LimitProvider{}
-
-func init() {
-	ecsProvider = NewECSLimitProvider()
-	efloProvider = NewEfloLimitProvider()
-
-	LimitProviders = map[string]LimitProvider{
-		"ecs":  ecsProvider,
-		"eflo": efloProvider,
-	}
+func GetLimitProvider() LimitProvider {
+	once.Do(func() {
+		defaultLimitProvider = NewProvider()
+	})
+	return defaultLimitProvider
 }

@@ -20,13 +20,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
@@ -68,6 +69,11 @@ const layout = "2006-01-02T15:04:05Z"
 func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &v1beta1.PodENI{})
+
+		err := migrate(ctrlCtx.Context, ctrlCtx.DirectClient)
+		if err != nil {
+			return err
+		}
 
 		r := &ReconcilePodENI{
 			client:          mgr.GetClient(),
@@ -343,7 +349,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		}
 
 		// lets update spec first
-		if !reflect.DeepEqual(before.Spec, podENI.Spec) {
+		if !cmp.Equal(before.Spec, podENI.Spec, cmpopts.EquateEmpty()) {
 			after := podENI.Status.DeepCopy()
 
 			ll.Info("update podENI spec", "rv", podENI.ResourceVersion)
@@ -351,10 +357,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 			if err != nil {
 				return reconcile.Result{}, fmt.Errorf("update podENI failed, %w", err)
 			}
-			err = common.WaitRVChanged(ctx, m.client, podENI, podENI.Namespace, podENI.Name, before.ResourceVersion)
-			if err != nil {
-				return reconcile.Result{}, nil
-			}
+			_ = common.WaitRVChanged(ctx, m.client, podENI, podENI.Namespace, podENI.Name, before.ResourceVersion)
 
 			// the only part update in attach
 			podENI.Status.ENIInfos = after.ENIInfos
@@ -1010,7 +1013,7 @@ func (m *ReconcilePodENI) injectNodeStatus(ctx context.Context, namespace, name 
 
 		// TODO: after we enable node controller by default , we can modify this
 		if !utils.ISLinJunNode(node.Labels) {
-			limits, err := aliyunClient.LimitProviders["ecs"].GetLimit(m.aliyun, instanceType)
+			limits, err := aliyunClient.GetLimitProvider().GetLimit(m.aliyun.GetECS(), instanceType)
 			if err != nil {
 				l.Error(err, "failed to get instance type limit")
 				return ctx
@@ -1056,4 +1059,102 @@ func (m *ReconcilePodENI) injectNodeStatus(ctx context.Context, namespace, name 
 	l.V(4).Info("inject node status", "node", node.Name, "nodeStatus", nodeStatus)
 
 	return status.WithMeta(ctx, nodeStatus)
+}
+
+// migrate create podENI, related networkInterface cr
+func migrate(ctx context.Context, c client.Client) error {
+	podENIs := &v1beta1.PodENIList{}
+	err := c.List(ctx, podENIs)
+	if err != nil {
+		return err
+	}
+
+	var toCreateOrUpdate []*v1beta1.NetworkInterface
+
+	for _, podENI := range podENIs.Items {
+		for _, alloc := range podENI.Spec.Allocations {
+			networkInterfaceCR := &v1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: alloc.ENI.ID,
+				},
+			}
+			err = c.Get(ctx, client.ObjectKeyFromObject(networkInterfaceCR), networkInterfaceCR)
+			if err == nil {
+				if networkInterfaceCR.Status.Phase == v1beta1.ENIPhaseInitial {
+					goto statusChange
+				}
+				continue
+			}
+			if !k8sErr.IsNotFound(err) {
+				return err
+			}
+			// not found, create it
+			networkInterfaceCR.Name = alloc.ENI.ID
+			controllerutil.AddFinalizer(networkInterfaceCR, types.FinalizerENI)
+			networkInterfaceCR.Spec.ENI = alloc.ENI
+			networkInterfaceCR.Spec.IPv4 = alloc.IPv4
+			networkInterfaceCR.Spec.IPv6 = alloc.IPv6
+			networkInterfaceCR.Spec.ExtraConfig = alloc.ExtraConfig
+			networkInterfaceCR.Spec.PodENIRef = &corev1.ObjectReference{
+				Kind:      "pod",
+				Name:      podENI.Name,
+				Namespace: podENI.Namespace,
+			}
+
+		statusChange:
+			networkInterfaceCR.Status.NodeName = podENI.Labels[types.ENIRelatedNodeName]
+			networkInterfaceCR.Status.InstanceID = podENI.Status.InstanceID
+			networkInterfaceCR.Status.TrunkENIID = podENI.Status.TrunkENIID
+			networkInterfaceCR.Status.Phase = podENI.Status.Phase
+			networkInterfaceCR.Status.ENIInfo = podENI.Status.ENIInfos[alloc.ENI.ID]
+			networkInterfaceCR.Status.CardIndex = networkInterfaceCR.Status.ENIInfo.NetworkCardIndex
+
+			toCreateOrUpdate = append(toCreateOrUpdate, networkInterfaceCR)
+		}
+	}
+
+	group, ctx := errgroup.WithContext(ctx)
+	group.SetLimit(100)
+
+	for _, networkInterfaceCR := range toCreateOrUpdate {
+		networkInterfaceCR := networkInterfaceCR
+		group.Go(func() error {
+			return syncNetworkInterfaceCR(ctx, c, networkInterfaceCR)
+		})
+	}
+	err = group.Wait()
+	return err
+}
+
+func syncNetworkInterfaceCR(ctx context.Context, c client.Client, expect *v1beta1.NetworkInterface) error {
+	exist := &v1beta1.NetworkInterface{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: expect.Name,
+		},
+	}
+	err := c.Get(ctx, client.ObjectKeyFromObject(exist), exist)
+	if err != nil {
+		if !k8sErr.IsNotFound(err) {
+			return err
+		}
+
+		status := expect.Status.DeepCopy()
+		// create expect
+		err = c.Create(ctx, expect)
+		if err != nil {
+			return err
+		}
+
+		// wait cr created
+		err = common.WaitCreated(ctx, c, exist, exist.Namespace, exist.Name)
+		if err != nil {
+			return err
+		}
+		expect.Status = *status
+	}
+
+	exist.Status = expect.Status
+	err = c.Status().Update(ctx, exist)
+
+	return err
 }
