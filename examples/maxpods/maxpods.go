@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"time"
 
+	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/util/flowcontrol"
 
@@ -36,15 +38,17 @@ func main() {
 	flag.Parse()
 	log.SetOutput(io.Discard)
 	logrus.SetOutput(io.Discard)
-	ins := instance.GetInstanceMeta()
 
-	providers := []credential.Interface{
-		credential.NewAKPairProvider(accessKeyID, accessKeySecret),
-		credential.NewEncryptedCredentialProvider(credentialPath, "", ""),
-		credential.NewMetadataProvider(),
-	}
+	prov := provider.NewChainProvider(
+		provider.NewAccessKeyProvider(string(accessKeyID), string(accessKeySecret)),
+		provider.NewEncryptedFileProvider(provider.EncryptedFileProviderOptions{
+			FilePath:      credentialPath,
+			RefreshPeriod: 30 * time.Minute,
+		}),
+		provider.NewECSMetadataProvider(provider.ECSMetadataProviderOptions{}),
+	)
 
-	c, err := credential.NewClientMgr(ins.RegionID, providers...)
+	c, err := credential.NewClientMgr(region, prov)
 	if err != nil {
 		panic(err)
 	}
