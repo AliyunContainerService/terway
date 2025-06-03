@@ -243,7 +243,7 @@ func TestECSLimitProvider_GetLimitFromAnno(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := &ECSLimitProvider{}
+			d := &Provider{}
 			got, err := d.GetLimitFromAnno(tt.args.anno)
 			if !tt.wantErr(t, err, fmt.Sprintf("GetLimitFromAnno(%v)", tt.args.anno)) {
 				return

@@ -189,52 +189,33 @@ func (b *NetworkServiceBuilder) initInstanceLimit() error {
 	if node == nil {
 		return fmt.Errorf("k8s node not found")
 	}
-	provider := client.LimitProviders["ecs"]
-	if b.eflo {
-		provider = client.LimitProviders["eflo"]
-		limit, err := provider.GetLimitFromAnno(node.Annotations)
-		if err != nil {
-			serviceLog.Error(err, "unable to get instance limit from annotation")
-		}
-		if limit == nil {
-			instanceID, err := instance.GetInstanceMeta().GetInstanceID()
-			if err != nil {
-				return err
-			}
-			limit, err = provider.GetLimit(b.aliyunClient.GetEFLO(), instanceID)
-			if err != nil {
-				return fmt.Errorf("upable get instance limit, %w", err)
-			}
-		}
-		b.limit = limit
-	} else {
-		limit, err := provider.GetLimitFromAnno(node.Annotations)
-		if err != nil {
-			serviceLog.Error(err, "unable to get instance limit from annotation")
-		}
-
-		if limit != nil {
-			instanceType, err := instance.GetInstanceMeta().GetInstanceType()
-			if err != nil {
-				return err
-			}
-			if limit.InstanceTypeID != instanceType {
-				limit = nil
-			}
-		}
-
-		if limit == nil {
-			instanceType, err := instance.GetInstanceMeta().GetInstanceType()
-			if err != nil {
-				return err
-			}
-			limit, err = provider.GetLimit(b.aliyunClient.GetECS(), instanceType)
-			if err != nil {
-				return fmt.Errorf("upable get instance limit, %w", err)
-			}
-		}
-		b.limit = limit
+	provider := client.GetLimitProvider()
+	limit, err := provider.GetLimitFromAnno(node.Annotations)
+	if err != nil {
+		serviceLog.Error(err, "unable to get instance limit from annotation")
 	}
+
+	if limit != nil {
+		instanceType, err := instance.GetInstanceMeta().GetInstanceType()
+		if err != nil {
+			return err
+		}
+		if limit.InstanceTypeID != instanceType {
+			limit = nil
+		}
+	}
+
+	if limit == nil {
+		instanceType, err := instance.GetInstanceMeta().GetInstanceType()
+		if err != nil {
+			return err
+		}
+		limit, err = provider.GetLimit(b.aliyunClient.GetECS(), instanceType)
+		if err != nil {
+			return fmt.Errorf("upable get instance limit, %w", err)
+		}
+	}
+	b.limit = limit
 
 	b.service.enableIPv4, b.service.enableIPv6 = checkInstance(b.limit, b.daemonMode, b.config)
 	return nil
