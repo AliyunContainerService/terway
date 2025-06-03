@@ -201,7 +201,7 @@ func (b *NetworkServiceBuilder) initInstanceLimit() error {
 			if err != nil {
 				return err
 			}
-			limit, err = provider.GetLimit(b.aliyunClient, instanceID)
+			limit, err = provider.GetLimit(b.aliyunClient.GetEFLO(), instanceID)
 			if err != nil {
 				return fmt.Errorf("upable get instance limit, %w", err)
 			}
@@ -228,7 +228,7 @@ func (b *NetworkServiceBuilder) initInstanceLimit() error {
 			if err != nil {
 				return err
 			}
-			limit, err = provider.GetLimit(b.aliyunClient, instanceType)
+			limit, err = provider.GetLimit(b.aliyunClient.GetECS(), instanceType)
 			if err != nil {
 				return fmt.Errorf("upable get instance limit, %w", err)
 			}

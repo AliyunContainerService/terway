@@ -1015,7 +1015,7 @@ func (m *ReconcilePodENI) injectNodeStatus(ctx context.Context, namespace, name 
 
 		// TODO: after we enable node controller by default , we can modify this
 		if !utils.ISLinJunNode(node.Labels) {
-			limits, err := aliyunClient.LimitProviders["ecs"].GetLimit(m.aliyun, instanceType)
+			limits, err := aliyunClient.LimitProviders["ecs"].GetLimit(m.aliyun.GetECS(), instanceType)
 			if err != nil {
 				l.Error(err, "failed to get instance type limit")
 				return ctx
