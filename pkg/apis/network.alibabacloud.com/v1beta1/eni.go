@@ -69,6 +69,6 @@ type NetworkInterfaceStatus struct {
 	// TrunkENIID is the trunk eni id
 	TrunkENIID string `json:"trunkENIID,omitempty"`
 
-	CardIndex *int   `json:"cardIndex,omitempty"`
-	NodeName  string `json:"nodeName,omitempty"`
+	NetworkCardIndex *int   `json:"networkCardIndex,omitempty"`
+	NodeName         string `json:"nodeName,omitempty"`
 }

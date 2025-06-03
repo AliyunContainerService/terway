@@ -166,7 +166,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 					NetworkInterfaceID:     toPtr(networkInterface.Name),
 					InstanceID:             toPtr(networkInterface.Status.InstanceID),
 					TrunkNetworkInstanceID: toPtr(networkInterface.Status.TrunkENIID),
-					NetworkCardIndex:       networkInterface.Status.CardIndex,
+					NetworkCardIndex:       networkInterface.Status.NetworkCardIndex,
 				})
 				if err != nil {
 					return reconcile.Result{}, err
@@ -193,7 +193,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 				NetworkInterfaceID:     toPtr(networkInterface.Name),
 				InstanceID:             toPtr(networkInterface.Status.InstanceID),
 				TrunkNetworkInstanceID: toPtr(networkInterface.Status.TrunkENIID),
-				NetworkCardIndex:       networkInterface.Status.CardIndex,
+				NetworkCardIndex:       networkInterface.Status.NetworkCardIndex,
 			})
 			if err != nil {
 				return reconcile.Result{}, err
@@ -367,7 +367,7 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 		networkInterface.Status.InstanceID = ""
 		networkInterface.Status.TrunkENIID = ""
 		networkInterface.Status.NodeName = ""
-		networkInterface.Status.CardIndex = nil
+		networkInterface.Status.NetworkCardIndex = nil
 		networkInterface.Status.Phase = v1beta1.ENIPhaseUnbind
 		err = r.client.Status().Update(ctx, networkInterface)
 
