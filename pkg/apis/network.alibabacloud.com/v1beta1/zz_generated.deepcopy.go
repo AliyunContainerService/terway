@@ -389,8 +389,8 @@ func (in *NetworkInterfaceSpec) DeepCopy() *NetworkInterfaceSpec {
 func (in *NetworkInterfaceStatus) DeepCopyInto(out *NetworkInterfaceStatus) {
 	*out = *in
 	in.ENIInfo.DeepCopyInto(&out.ENIInfo)
-	if in.CardIndex != nil {
-		in, out := &in.CardIndex, &out.CardIndex
+	if in.NetworkCardIndex != nil {
+		in, out := &in.NetworkCardIndex, &out.NetworkCardIndex
 		*out = new(int)
 		**out = **in
 	}

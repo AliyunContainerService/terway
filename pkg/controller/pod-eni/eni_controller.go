@@ -1107,7 +1107,7 @@ func migrate(ctx context.Context, c client.Client) error {
 			networkInterfaceCR.Status.TrunkENIID = podENI.Status.TrunkENIID
 			networkInterfaceCR.Status.Phase = podENI.Status.Phase
 			networkInterfaceCR.Status.ENIInfo = podENI.Status.ENIInfos[alloc.ENI.ID]
-			networkInterfaceCR.Status.CardIndex = networkInterfaceCR.Status.ENIInfo.NetworkCardIndex
+			networkInterfaceCR.Status.NetworkCardIndex = networkInterfaceCR.Status.ENIInfo.NetworkCardIndex
 
 			toCreateOrUpdate = append(toCreateOrUpdate, networkInterfaceCR)
 		}

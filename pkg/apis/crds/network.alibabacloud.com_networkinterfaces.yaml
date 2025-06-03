@@ -151,8 +151,6 @@ spec:
             type: object
           status:
             properties:
-              cardIndex:
-                type: integer
               eniInfo:
                 properties:
                   id:
@@ -180,6 +178,8 @@ spec:
               instanceID:
                 description: InstanceID for ecs
                 type: string
+              networkCardIndex:
+                type: integer
               nodeName:
                 type: string
               phase:

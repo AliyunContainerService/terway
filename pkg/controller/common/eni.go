@@ -79,7 +79,7 @@ func FromPodENI(podENI *v1beta1.PodENI) []*v1beta1.NetworkInterface {
 		networkInterface.Status.InstanceID = podENI.Status.InstanceID
 		networkInterface.Status.TrunkENIID = podENI.Status.TrunkENIID
 		networkInterface.Status.ENIInfo = podENI.Status.ENIInfos[eniID]
-		// CardIndex is not stored
+		// NetworkCardIndex is not stored
 	}
 	return result
 }
@@ -158,7 +158,7 @@ func Attach(ctx context.Context, c client.Client, option *AttachOption) error {
 	networkInterface.Status.InstanceID = option.InstanceID
 	networkInterface.Status.TrunkENIID = option.TrunkENIID
 	networkInterface.Status.NodeName = option.NodeName
-	networkInterface.Status.CardIndex = option.NetworkCardIndex
+	networkInterface.Status.NetworkCardIndex = option.NetworkCardIndex
 
 	err = c.Status().Update(ctx, networkInterface)
 	if err != nil {
