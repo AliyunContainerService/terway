@@ -47,7 +47,7 @@ var _ = Describe("Pod controller", func() {
 		openAPI.On("GetECS").Return(ecsClient).Maybe()
 		openAPI.On("GetEFLO").Return(efloClient).Maybe()
 
-		openAPI.On("DescribeInstanceTypes", mock.Anything, mock.Anything).Return([]ecs.InstanceType{
+		ecsClient.On("DescribeInstanceTypes", mock.Anything, mock.Anything).Return([]ecs.InstanceType{
 			{
 				EniTotalQuantity:            5,
 				EniQuantity:                 4,
@@ -330,7 +330,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(reconcile.Result{}))
 
-			// 检查状态没有改变
+			// Check that the status has not changed
 			updated := &networkv1beta1.PodENI{}
 			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "test-phase-pod", Namespace: "default"}, updated)
 			Expect(err).NotTo(HaveOccurred())
@@ -375,7 +375,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(reconcile.Result{}))
 
-			// 检查状态没有改变
+			// Check that the status has not changed
 			updated := &networkv1beta1.PodENI{}
 			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "test-phase-pod", Namespace: "default"}, updated)
 			Expect(err).NotTo(HaveOccurred())
@@ -513,7 +513,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(reconcile.Result{}))
 
-			// 应该已经被删除
+			// The PodENI should have been deleted
 			updated := &networkv1beta1.PodENI{}
 			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "test-phase-pod", Namespace: "default"}, updated)
 			Expect(k8sErr.IsNotFound(err)).To(BeTrue())
@@ -564,7 +564,7 @@ var _ = Describe("Pod controller", func() {
 		})
 
 		It("should handle gcCRPodENIs correctly for orphaned PodENIs", func() {
-			// 创建一个没有对应 Pod 的 PodENI
+			// Create an orphaned PodENI without corresponding Pod
 			orphanedPodENI := &networkv1beta1.PodENI{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "orphaned-podeni",
@@ -576,7 +576,7 @@ var _ = Describe("Pod controller", func() {
 							AllocationType: networkv1beta1.AllocationType{
 								Type:            networkv1beta1.IPAllocTypeFixed,
 								ReleaseStrategy: networkv1beta1.ReleaseStrategyTTL,
-								ReleaseAfter:    "1m", // 设置一个很短的 TTL
+								ReleaseAfter:    "1m", // Set a very short TTL
 							},
 							ENI: networkv1beta1.ENI{
 								ID: "eni-orphaned",
@@ -588,7 +588,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, orphanedPodENI)).Should(Succeed())
 			orphanedPodENI.Status = networkv1beta1.PodENIStatus{
 				Phase:       networkv1beta1.ENIPhaseBind,
-				PodLastSeen: metav1.NewTime(time.Now().Add(-10 * time.Minute)), // PodLastSeen 已过期
+				PodLastSeen: metav1.NewTime(time.Now().Add(-10 * time.Minute)), // PodLastSeen expired
 			}
 			Expect(k8sClient.Status().Update(ctx, orphanedPodENI))
 
@@ -601,13 +601,13 @@ var _ = Describe("Pod controller", func() {
 				nodeStatusCache: status.NewCache[status.NodeStatus](),
 			}
 
-			// 执行 GC 过程
+			// Execute GC process
 			go r.gcCRPodENIs(ctx)
 
-			// 等待一段时间让 GC 执行
+			// Wait for GC to execute
 			time.Sleep(1 * time.Second)
 
-			// 检查 PodENI 是否被标记为删除状态
+			// Check if PodENI is marked as deleting status
 			updated := &networkv1beta1.PodENI{}
 			err := k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "orphaned-podeni", Namespace: "default"}, updated)
 			Expect(err).NotTo(HaveOccurred())
@@ -642,11 +642,11 @@ var _ = Describe("Pod controller", func() {
 			}
 			Expect(k8sClient.Status().Update(ctx, podENI))
 
-			// 执行 migrate 操作
+			// Execute migrate operation
 			err := migrate(ctx, k8sClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			// 检查是否创建了对应的 NetworkInterface
+			// Check if corresponding NetworkInterface was created
 			eni := &networkv1beta1.NetworkInterface{}
 			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-migrate-initial"}, eni)
 			Expect(err).NotTo(HaveOccurred())
@@ -655,7 +655,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(eni.Spec.PodENIRef.Name).To(Equal("test-migrate-initial"))
 			Expect(eni.Spec.PodENIRef.Namespace).To(Equal("default"))
 
-			// 验证 reconcile 处理后的状态
+			// Verify reconcile processed status
 			r := &ReconcilePodENI{
 				client:          k8sClient,
 				aliyun:          openAPI,
@@ -665,7 +665,7 @@ var _ = Describe("Pod controller", func() {
 				nodeStatusCache: status.NewCache[status.NodeStatus](),
 			}
 
-			// 创建对应的 Pod
+			// Create corresponding Pod
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-migrate-initial",
@@ -683,7 +683,7 @@ var _ = Describe("Pod controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
-			// 模拟 NetworkInterface 状态变化
+			// Simulate NetworkInterface status change
 			go func() {
 				time.Sleep(1 * time.Second)
 				for i := 0; i < 5; i++ {
@@ -706,7 +706,7 @@ var _ = Describe("Pod controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			// 检查最终状态
+			// Check final status
 			updatedPodENI := &networkv1beta1.PodENI{}
 			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "test-migrate-initial", Namespace: "default"}, updatedPodENI)
 			Expect(err).NotTo(HaveOccurred())
@@ -746,17 +746,17 @@ var _ = Describe("Pod controller", func() {
 			}
 			Expect(k8sClient.Status().Update(ctx, podENI))
 
-			// 执行 migrate 操作
+			// Execute migrate operation
 			err := migrate(ctx, k8sClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			// 检查是否创建了对应的 NetworkInterface
+			// Check if corresponding NetworkInterface was created
 			eni := &networkv1beta1.NetworkInterface{}
 			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-migrate-binding"}, eni)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(eni.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseBinding)))
 
-			// 创建对应的 Pod
+			// Create corresponding Pod
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-migrate-binding",
@@ -832,17 +832,17 @@ var _ = Describe("Pod controller", func() {
 			}
 			Expect(k8sClient.Status().Update(ctx, podENI))
 
-			// 执行 migrate 操作
+			// Execute migrate operation
 			err := migrate(ctx, k8sClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			// 检查是否创建了对应的 NetworkInterface
+			// Check if corresponding NetworkInterface was created
 			eni := &networkv1beta1.NetworkInterface{}
 			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-migrate-bind"}, eni)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(eni.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)))
 
-			// 创建对应的 Pod
+			// Create corresponding Pod
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-migrate-bind",
@@ -875,7 +875,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(reconcile.Result{}))
 
-			// 检查状态保持不变
+			// Verify the final state
 			updatedPodENI := &networkv1beta1.PodENI{}
 			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "test-migrate-bind", Namespace: "default"}, updatedPodENI)
 			Expect(err).NotTo(HaveOccurred())
@@ -911,17 +911,17 @@ var _ = Describe("Pod controller", func() {
 			}
 			Expect(k8sClient.Status().Update(ctx, podENI))
 
-			// 执行 migrate 操作
+			// Execute migrate operation
 			err := migrate(ctx, k8sClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			// 检查是否创建了对应的 NetworkInterface
+			// Check if corresponding NetworkInterface was created
 			eni := &networkv1beta1.NetworkInterface{}
 			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-migrate-detaching"}, eni)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(eni.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseDetaching)))
 
-			// 创建对应的 Pod
+			// Create corresponding Pod
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-migrate-detaching",
@@ -949,7 +949,7 @@ var _ = Describe("Pod controller", func() {
 				nodeStatusCache: status.NewCache[status.NodeStatus](),
 			}
 
-			// 模拟 detach 完成
+			// Simulate detach completion
 			go func() {
 				time.Sleep(1 * time.Second)
 				eni := &networkv1beta1.NetworkInterface{}
@@ -964,6 +964,87 @@ var _ = Describe("Pod controller", func() {
 				NamespacedName: k8stypes.NamespacedName{Name: "test-migrate-detaching", Namespace: "default"},
 			})
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should update NetworkInterface status when it exists but status is not set", func() {
+			// Create a test PodENI resource with status set to ENIPhaseBind
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-migrate",
+					Namespace: "default",
+					Labels: map[string]string{
+						types.ENIRelatedNodeName: nodeName,
+					},
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							ENI: networkv1beta1.ENI{
+								ID: "eni-test-migrate",
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, podENI)).Should(Succeed())
+
+			podENI.Status = networkv1beta1.PodENIStatus{
+				Phase:      networkv1beta1.ENIPhaseBind,
+				InstanceID: "i-test",
+				TrunkENIID: "eni-trunk",
+				ENIInfos: map[string]networkv1beta1.ENIInfo{
+					"eni-test-migrate": {
+						ID:     "eni-test-migrate",
+						Status: networkv1beta1.ENIStatusBind,
+						VfID:   ptr.To(uint32(10)),
+					},
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, podENI))
+
+			// Create a corresponding NetworkInterface, but don't set status
+			netInterface := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "eni-test-migrate",
+				},
+				Spec: networkv1beta1.NetworkInterfaceSpec{
+					ENI: networkv1beta1.ENI{
+						ID: "eni-test-migrate",
+					},
+					PodENIRef: &corev1.ObjectReference{
+						Kind:      "pod",
+						Name:      "test-migrate",
+						Namespace: "default",
+					},
+				},
+				// Status is empty, not set
+			}
+			Expect(k8sClient.Create(ctx, netInterface)).Should(Succeed())
+
+			// Execute migrate operation
+			err := migrate(ctx, k8sClient)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Check if NetworkInterface status has been correctly updated
+			updatedNetInterface := &networkv1beta1.NetworkInterface{}
+			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "eni-test-migrate"}, updatedNetInterface)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify that the status has been synchronized with the PodENI status
+			Expect(updatedNetInterface.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)))
+			Expect(updatedNetInterface.Status.InstanceID).To(Equal("i-test"))
+			Expect(updatedNetInterface.Status.TrunkENIID).To(Equal("eni-trunk"))
+			Expect(updatedNetInterface.Status.NodeName).To(Equal(nodeName))
+
+			// Verify that the ENIInfo has been correctly set
+			Expect(updatedNetInterface.Status.ENIInfo).NotTo(BeNil())
+			Expect(updatedNetInterface.Status.ENIInfo.ID).To(Equal("eni-test-migrate"))
+			Expect(updatedNetInterface.Status.ENIInfo.Status).To(Equal(networkv1beta1.ENIStatusBind))
+			Expect(updatedNetInterface.Status.ENIInfo.VfID).To(Equal(ptr.To(uint32(10))))
+
+			// Clean up resources
+			Expect(k8sClient.Delete(ctx, podENI)).Should(Succeed())
+			Expect(k8sClient.Delete(ctx, netInterface)).Should(Succeed())
 		})
 	})
 })

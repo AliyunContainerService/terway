@@ -20,13 +20,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
@@ -348,7 +349,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		}
 
 		// lets update spec first
-		if !reflect.DeepEqual(before.Spec, podENI.Spec) {
+		if !cmp.Equal(before.Spec, podENI.Spec, cmpopts.EquateEmpty()) {
 			after := podENI.Status.DeepCopy()
 
 			ll.Info("update podENI spec", "rv", podENI.ResourceVersion)
@@ -356,10 +357,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 			if err != nil {
 				return reconcile.Result{}, fmt.Errorf("update podENI failed, %w", err)
 			}
-			err = common.WaitRVChanged(ctx, m.client, podENI, podENI.Namespace, podENI.Name, before.ResourceVersion)
-			if err != nil {
-				return reconcile.Result{}, nil
-			}
+			_ = common.WaitRVChanged(ctx, m.client, podENI, podENI.Namespace, podENI.Name, before.ResourceVersion)
 
 			// the only part update in attach
 			podENI.Status.ENIInfos = after.ENIInfos
@@ -1071,7 +1069,7 @@ func migrate(ctx context.Context, c client.Client) error {
 		return err
 	}
 
-	var toCreate []*v1beta1.NetworkInterface
+	var toCreateOrUpdate []*v1beta1.NetworkInterface
 
 	for _, podENI := range podENIs.Items {
 		for _, alloc := range podENI.Spec.Allocations {
@@ -1082,6 +1080,9 @@ func migrate(ctx context.Context, c client.Client) error {
 			}
 			err = c.Get(ctx, client.ObjectKeyFromObject(networkInterfaceCR), networkInterfaceCR)
 			if err == nil {
+				if networkInterfaceCR.Status.Phase == v1beta1.ENIPhaseInitial {
+					goto statusChange
+				}
 				continue
 			}
 			if !k8sErr.IsNotFound(err) {
@@ -1100,6 +1101,7 @@ func migrate(ctx context.Context, c client.Client) error {
 				Namespace: podENI.Namespace,
 			}
 
+		statusChange:
 			networkInterfaceCR.Status.NodeName = podENI.Labels[types.ENIRelatedNodeName]
 			networkInterfaceCR.Status.InstanceID = podENI.Status.InstanceID
 			networkInterfaceCR.Status.TrunkENIID = podENI.Status.TrunkENIID
@@ -1107,14 +1109,14 @@ func migrate(ctx context.Context, c client.Client) error {
 			networkInterfaceCR.Status.ENIInfo = podENI.Status.ENIInfos[alloc.ENI.ID]
 			networkInterfaceCR.Status.CardIndex = networkInterfaceCR.Status.ENIInfo.NetworkCardIndex
 
-			toCreate = append(toCreate, networkInterfaceCR)
+			toCreateOrUpdate = append(toCreateOrUpdate, networkInterfaceCR)
 		}
 	}
 
 	group, ctx := errgroup.WithContext(ctx)
 	group.SetLimit(100)
 
-	for _, networkInterfaceCR := range toCreate {
+	for _, networkInterfaceCR := range toCreateOrUpdate {
 		networkInterfaceCR := networkInterfaceCR
 		group.Go(func() error {
 			return syncNetworkInterfaceCR(ctx, c, networkInterfaceCR)
@@ -1151,10 +1153,6 @@ func syncNetworkInterfaceCR(ctx context.Context, c client.Client, expect *v1beta
 		expect.Status = *status
 	}
 
-	// want to use the actual status from api
-	// expect.Status is fully updated, the phase is come from
-	// podENI.Status.Phase
-	// openAPI eni statue converted to Phase
 	exist.Status = expect.Status
 	err = c.Status().Update(ctx, exist)
 
