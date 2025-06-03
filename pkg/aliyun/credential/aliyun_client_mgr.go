@@ -3,7 +3,8 @@
 package credential
 
 import (
-	"errors"
+	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
+	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth/credentials"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -70,7 +73,7 @@ func clientCfg() *sdk.Config {
 type ClientMgr struct {
 	regionID string
 
-	auth Interface
+	provider provider.CredentialsProvider
 
 	// protect things below
 	sync.RWMutex
@@ -85,12 +88,17 @@ type ClientMgr struct {
 	ecsDomainOverride  string
 	vpcDomainOverride  string
 	efloDomainOverride string
+
+	efloRegionOverride string
+
+	endpointType string
 }
 
 // NewClientMgr return new aliyun client manager
-func NewClientMgr(regionID string, providers ...Interface) (*ClientMgr, error) {
+func NewClientMgr(regionID string, providers provider.CredentialsProvider) (*ClientMgr, error) {
 	mgr := &ClientMgr{
 		regionID: regionID,
+		provider: providers,
 	}
 
 	var err error
@@ -106,19 +114,20 @@ func NewClientMgr(regionID string, providers ...Interface) (*ClientMgr, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range providers {
-		c, err := p.Resolve()
-		if err != nil {
-			return nil, err
-		}
-		if c == nil {
-			continue
-		}
-		mgr.auth = p
-		break
+
+	mgr.efloRegionOverride = os.Getenv("EFLO_REGION_ID")
+	if mgr.efloRegionOverride == "" {
+		mgr.efloRegionOverride = regionID
 	}
-	if mgr.auth == nil {
-		return nil, errors.New("unable to found a valid credential provider")
+
+	mgr.endpointType = "vpc"
+	if os.Getenv("ALICLOUD_ENDPOINT_TYPE") != "" {
+		mgr.endpointType = os.Getenv("ALICLOUD_ENDPOINT_TYPE")
+	}
+
+	_, err = providers.Credentials(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get credentials: %w", err)
 	}
 
 	return mgr, nil
@@ -172,41 +181,50 @@ func (c *ClientMgr) refreshToken() (bool, error) {
 			}
 		}()
 
-		cc, err := c.auth.Resolve()
+		cc, err := c.provider.Credentials(context.Background())
 		if err != nil {
 			return false, err
 		}
 
-		c.ecs, err = ecs.NewClientWithOptions(c.regionID, clientCfg(), cc.Credential)
+		cre := &credentials.StsTokenCredential{
+			AccessKeyId:       cc.AccessKeyId,
+			AccessKeySecret:   cc.AccessKeySecret,
+			AccessKeyStsToken: cc.SecurityToken,
+		}
+
+		c.ecs, err = ecs.NewClientWithOptions(c.regionID, clientCfg(), cre)
 		if err != nil {
 			return false, err
 		}
-		c.ecs.SetEndpointRules(c.ecs.EndpointMap, "regional", "vpc")
+		c.ecs.SetEndpointRules(c.ecs.EndpointMap, "regional", c.endpointType)
 
 		if c.ecsDomainOverride != "" {
 			c.ecs.Domain = c.ecsDomainOverride
 		}
 
-		c.vpc, err = vpc.NewClientWithOptions(c.regionID, clientCfg(), cc.Credential)
+		c.vpc, err = vpc.NewClientWithOptions(c.regionID, clientCfg(), cre)
 		if err != nil {
 			return false, err
 		}
-		c.vpc.SetEndpointRules(c.vpc.EndpointMap, "regional", "vpc")
+		c.vpc.SetEndpointRules(c.vpc.EndpointMap, "regional", c.endpointType)
 
 		if c.vpcDomainOverride != "" {
 			c.vpc.Domain = c.vpcDomainOverride
 		}
 
-		c.eflo, err = eflo.NewClientWithOptions(c.regionID, clientCfg(), cc.Credential)
+		c.eflo, err = eflo.NewClientWithOptions(c.efloRegionOverride, clientCfg(), cre)
 		if err != nil {
 			return false, err
 		}
-		c.eflo.SetEndpointRules(c.eflo.EndpointMap, "regional", "vpc")
+		c.eflo.SetEndpointRules(c.eflo.EndpointMap, "regional", c.endpointType)
 
 		if c.efloDomainOverride != "" {
 			c.eflo.Domain = c.efloDomainOverride
 		}
 
+		if cc.Expiration.IsZero() {
+			c.expireAt = time.Now().Add(5 * time.Minute)
+		}
 		c.expireAt = cc.Expiration
 		return true, nil
 	}

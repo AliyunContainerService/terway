@@ -24,6 +24,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
@@ -180,14 +181,16 @@ func main() {
 		}
 	}
 
-	var providers []credential.Interface
-	if string(cfg.Credential.AccessKey) != "" && string(cfg.Credential.AccessSecret) != "" {
-		providers = append(providers, credential.NewAKPairProvider(string(cfg.Credential.AccessKey), string(cfg.Credential.AccessSecret)))
-	}
-	providers = append(providers, credential.NewEncryptedCredentialProvider(cfg.CredentialPath, cfg.SecretNamespace, cfg.SecretName))
-	providers = append(providers, credential.NewMetadataProvider())
+	prov := provider.NewChainProvider(
+		provider.NewAccessKeyProvider(string(cfg.Credential.AccessKey), string(cfg.Credential.AccessSecret)),
+		provider.NewEncryptedFileProvider(provider.EncryptedFileProviderOptions{
+			FilePath:      cfg.CredentialPath,
+			RefreshPeriod: 30 * time.Minute,
+		}),
+		provider.NewECSMetadataProvider(provider.ECSMetadataProviderOptions{}),
+	)
 
-	clientSet, err := credential.NewClientMgr(cfg.RegionID, providers...)
+	clientSet, err := credential.NewClientMgr(cfg.RegionID, prov)
 	if err != nil {
 		panic(err)
 	}

@@ -3,6 +3,7 @@ module github.com/AliyunContainerService/terway
 go 1.21
 
 require (
+	github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider v0.18.1
 	github.com/Jeffail/gabs/v2 v2.7.0
 	github.com/Microsoft/go-winio v0.6.0
 	github.com/Microsoft/hcsshim v0.9.9
@@ -11,7 +12,6 @@ require (
 	github.com/boltdb/bolt v1.3.1
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.3.0
-	github.com/denverdino/aliyungo v0.0.0-20201215054313-f635de23c5e0
 	github.com/docker/docker v1.4.2-0.20190924003213-a8608b5b67c7
 	github.com/evanphx/json-patch v5.6.0+incompatible
 	github.com/go-logr/logr v1.3.0
@@ -63,6 +63,10 @@ require (
 	atomicgo.dev/cursor v0.1.1 // indirect
 	atomicgo.dev/keyboard v0.2.9 // indirect
 	atomicgo.dev/schedule v0.0.2 // indirect
+	github.com/AliyunContainerService/ack-ram-tool/pkg/ecsmetadata v0.0.7 // indirect
+	github.com/alibabacloud-go/debug v1.0.1 // indirect
+	github.com/alibabacloud-go/tea v1.2.2 // indirect
+	github.com/aliyun/credentials-go v1.4.5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.1.3 // indirect
