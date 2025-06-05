@@ -219,7 +219,11 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 						if err != nil {
 							return "", err
 						}
-						if allow {
+						can, err := canUseHostRouting()
+						if err != nil {
+							return "", err
+						}
+						if allow && can {
 							datapath = dataPathV2
 						}
 					}
@@ -237,6 +241,16 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 				case dataPathVeth:
 					requireEBPFChainer = false
 					edtSupport = false
+
+					// special case
+					ok, err := hasCilium()
+					if err != nil {
+						return "", err
+					}
+					if ok {
+						requireEBPFChainer = true
+					}
+
 					_, err = plugin.Set(dataPathVeth, "eniip_virtual_type")
 					if err != nil {
 						return "", err
