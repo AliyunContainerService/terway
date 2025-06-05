@@ -137,6 +137,18 @@ func (p *Pod) WithHealthCheck(port int32) *Pod {
 		SuccessThreshold:    1,
 		FailureThreshold:    3,
 	}
+	p.Spec.Containers[0].ReadinessProbe = &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Port: intstr.FromInt(int(port)),
+			},
+		},
+		InitialDelaySeconds: 1,
+		TimeoutSeconds:      2,
+		PeriodSeconds:       2,
+		SuccessThreshold:    1,
+		FailureThreshold:    3,
+	}
 
 	return p
 }
