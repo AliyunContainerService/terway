@@ -125,6 +125,7 @@ func (b *NetworkServiceBuilder) InitK8S() *NetworkServiceBuilder {
 	}
 
 	if utils.ISLinJunNode(b.service.k8s.Node().Labels) {
+		serviceLog.Info("linjun node detected")
 		b.eflo = true
 	}
 	return b
@@ -417,6 +418,28 @@ func (b *NetworkServiceBuilder) PostInitForLegacyMode() *NetworkServiceBuilder {
 	}
 	backoff.OverrideBackoff(b.config.BackoffOverride)
 	_ = b.service.k8s.SetCustomStatefulWorkloadKinds(b.config.CustomStatefulWorkloadKinds)
+
+	if b.eflo {
+		var eniList []eni.NetworkInterface
+		eniList = append(eniList, eni.NewRemote(b.service.k8s.GetClient(), nil))
+
+		objList, err := b.service.resourceDB.List()
+		if err != nil {
+			b.err = err
+			return b
+		}
+		podResources := getPodResources(objList)
+
+		eniManager := eni.NewManager(0, 0, 0, 30*time.Second, eniList, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), b.service.k8s)
+		b.service.eniMgr = eniManager
+		err = eniManager.Run(b.ctx, &b.service.wg, podResources)
+		if err != nil {
+			b.err = err
+			return b
+		}
+
+		return b
+	}
 
 	if err := b.setupAliyunClient(); err != nil {
 		b.err = err
