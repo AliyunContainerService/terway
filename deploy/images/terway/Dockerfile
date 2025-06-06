@@ -44,7 +44,11 @@ RUN --mount=type=bind,from=iptables-dist,source=/iptables,target=/iptables \
     dpkg -i /iptables/*\.deb
 
 COPY ../../../policy/policyinit.sh ./../../policy/uninstall_policy.sh ../../../hack/init.sh /bin/
-COPY --from=policy-dist --exclude=cilium-operator-generic --exclude=cilium-health* /tmp/install/ /
+COPY --from=policy-dist \
+    --exclude=usr/bin/cilium-operator-generic \
+    --exclude=usr/bin/cilium-dbg \
+    --exclude=usr/bin/cilium-health* \
+    /tmp/install/ /
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terwayd /go/src/github.com/AliyunContainerService/terway/terway /go/src/github.com/AliyunContainerService/terway/terway-cli /usr/bin/
 COPY ../../../hack/iptables-wrapper-installer.sh /iptables-wrapper-installer.sh
 RUN /iptables-wrapper-installer.sh --no-sanity-check
