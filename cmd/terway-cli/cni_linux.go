@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"syscall"
@@ -37,6 +38,18 @@ func switchDataPathV2() bool {
 // new node ( based on user require).
 // true -> false: keep cilium chain, but disable policy
 func allowEBPFNetworkPolicy(require bool) (bool, error) {
+	has, err := hasCilium()
+	if err != nil {
+		return false, err
+	}
+	if has {
+		return true, nil
+	}
+
+	return require, nil
+}
+
+func hasCilium() (bool, error) {
 	store := nodecap.NewFileNodeCapabilities(nodeCapabilitiesFile)
 	if err := store.Load(); err != nil {
 		return false, err
@@ -49,17 +62,27 @@ func allowEBPFNetworkPolicy(require bool) (bool, error) {
 		fmt.Printf("no prev cilium chainer\n")
 		return false, nil
 	}
-
 	_, err := netlink.LinkByName("cilium_net")
 	if err == nil {
-		fmt.Printf("link cilium_net exist\n")
 		return true, nil
 	}
 	if !errors.As(err, &netlink.LinkNotFoundError{}) {
 		return false, err
 	}
-
-	return require, nil
+	return false, nil
+}
+func canUseHostRouting() (bool, error) {
+	file, err := os.ReadFile("/var/run/cilium/state/globals/node_config.h")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	if strings.Contains(string(file), "ENABLE_HOST_ROUTING") {
+		return true, nil
+	}
+	return false, nil
 }
 
 func checkKernelVersion(iMajor, iMinor, iPatch int) bool {
