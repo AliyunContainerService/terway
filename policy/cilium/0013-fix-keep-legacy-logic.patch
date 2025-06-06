@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Fri, 6 Jun 2025 19:12:52 +0800
+Subject: fix: keep legacy logic
+
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ pkg/datapath/loader/loader.go | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
+index df3ad3fd0a..146c802483 100644
+--- a/pkg/datapath/loader/loader.go
++++ b/pkg/datapath/loader/loader.go
+@@ -493,8 +493,7 @@ func (l *loader) reloadDatapath(ep datapath.Endpoint, spec *ebpf.CollectionSpec)
+ 		}
+ 		defer coll.Close()
+ 
+-		switch option.Config.DatapathMode {
+-		case datapathOption.DatapathModeIPvlan:
++		if ep.GetENIIndex() == 0 {
+ 			log.Infof("ipvlan map path %s", ep.IPvlanMapPath())
+ 			progMap, err := ebpf.LoadPinnedMap(ep.IPvlanMapPath(), &ebpf.LoadPinOptions{})
+ 			if err != nil {
+@@ -515,8 +514,7 @@ func (l *loader) reloadDatapath(ep datapath.Endpoint, spec *ebpf.CollectionSpec)
+ 				return fmt.Errorf("committing bpf pins: %w", err)
+ 			}
+ 			log.Infof("ipvlan finished")
+-
+-		case datapathOption.DatapathModeVeth:
++		} else {
+ 			log.Infof("veth mode")
+ 
+ 			iface, err := safenetlink.LinkByName(device)
+@@ -544,9 +542,8 @@ func (l *loader) reloadDatapath(ep datapath.Endpoint, spec *ebpf.CollectionSpec)
+ 			if err := commit(); err != nil {
+ 				return fmt.Errorf("committing bpf pins: %w", err)
+ 			}
+-		default:
+-			return fmt.Errorf("unsupported datapath mode: %s", option.Config.DatapathMode)
+ 		}
++
+ 		if ep.RequireEndpointRoute() {
+ 			scopedLog := ep.Logger(subsystem).WithFields(logrus.Fields{
+ 				logfields.Interface: device,
+-- 
+2.39.5 (Apple Git-154)
+
