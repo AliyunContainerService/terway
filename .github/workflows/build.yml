@@ -8,10 +8,6 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  REGISTRY: ghcr.io
-  OWNER: AliyunContainerService
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.after }}
   cancel-in-progress: true
@@ -32,30 +28,25 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-
-    - name: Docker meta
-      id: meta
-      uses: docker/metadata-action@v4
       with:
-        images: ${{ env.REGISTRY }}/${{ env.OWNER }}/terway
-        tags: |
-          type=raw,value={{date 'YYYYMMDD'}}-{{sha}}
-          type=semver,pattern={{version}}
-          type=semver,pattern={{raw}}
+        buildkitd-config-inline: |
+          [[worker.oci.gcpolicy]]
+          minFreeSpace = "1GB"
+          [[worker.oci.gcpolicy]]
+          all = true
+          minFreeSpace = "1GB"
 
     - name: Login to DockerHub
       uses: docker/login-action@v2
       with:
-        registry: ${{ env.REGISTRY }}
+        registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
       if: ${{ github.event_name != 'pull_request' && github.event.action != 'unassigned' }}
 
+    - uses: crazy-max/ghaction-github-runtime@v3
     - name: Build
       run: |
-        make build
-
-    - name: Build and push
-      run: |
-        make REGISTRY=ghcr.io/aliyuncontainerservice build-push
-      if: ${{ github.event_name != 'pull_request' && github.event.action != 'unassigned' }}
+        make REGISTRY=ghcr.io/aliyuncontainerservice PUSH=$PUSH build
+      env:
+        PUSH: ${{ github.event_name != 'pull_request' && github.event.action != 'unassigned' }}
