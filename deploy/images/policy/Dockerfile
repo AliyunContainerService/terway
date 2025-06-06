@@ -11,7 +11,9 @@ RUN mkdir -p /go/src/github.com/projectcalico/ && cd /go/src/github.com/projectc
     cd calico && [ "`git rev-parse HEAD`" = "${GIT_COMMIT}" ]
 COPY ../../../policy/felix /terway_patch
 RUN cd /go/src/github.com/projectcalico/calico && git apply /terway_patch/*.patch
-RUN cd /go/src/github.com/projectcalico/calico && \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    cd /go/src/github.com/projectcalico/calico && \
     CGO_ENABLED=0 go build -o bin/calico-felix -ldflags \
     "-s -w -X github.com/projectcalico/calico/felix/buildinfo.GitVersion=${GIT_BRANCH} \
     -X github.com/projectcalico/calico/felix/buildinfo.BuildDate=$(date -u +'%FT%T%z') \
