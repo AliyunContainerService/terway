@@ -37,13 +37,12 @@ COPY --from=bpftool-dist /usr/local /usr/local
 COPY --from=iproute2-dist /usr/local /usr/local
 COPY --from=iproute2-dist /usr/lib/libbpf* /usr/lib/
 COPY --from=policy-dist /bin/calico-felix /bin/calico-felix
-COPY --from=iptables-dist /iptables /iptables
-RUN dpkg -i /iptables/*\.deb && rm -rf /iptables
+RUN --mount=type=bind,from=iptables-dist,source=/iptables,target=/iptables \
+    dpkg -i /iptables/*\.deb
 
 COPY ../../../policy/policyinit.sh ./../../policy/uninstall_policy.sh ../../../hack/init.sh /bin/
-COPY --from=policy-dist /tmp/install/ /
+COPY --from=policy-dist --exclude=cilium-operator-generic --exclude=cilium-health* /tmp/install/ /
 COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cmd/terway/terwayd /go/src/github.com/AliyunContainerService/terway/plugin/terway/terway /go/src/github.com/AliyunContainerService/terway/cmd/terway-cli/terway-cli /usr/bin/
 COPY ../../../hack/iptables-wrapper-installer.sh /iptables-wrapper-installer.sh
 RUN /iptables-wrapper-installer.sh --no-sanity-check
-RUN rm -f /usr/bin/cilium-operator-generic /usr/bin/cilium-health*
 ENTRYPOINT ["/usr/bin/terwayd"]
