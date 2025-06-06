@@ -19,14 +19,17 @@ ARG TARGETARCH
 ENV GOPROXY=$GOPROXY
 WORKDIR /go/src/github.com/AliyunContainerService/terway/
 COPY --parents go.mod go.sum .git cmd daemon deploy deviceplugin pkg plugin rpc tests types ./
-RUN cd cmd/terway && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags default_build \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    export CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH && \
+    go build -tags default_build \
     -ldflags \
     "-s -w -X \"github.com/AliyunContainerService/terway/pkg/version.gitCommit=`git rev-parse HEAD`\" \
     -X \"github.com/AliyunContainerService/terway/pkg/version.buildDate=`date -u +'%Y-%m-%dT%H:%M:%SZ'`\" \
     -X \"github.com/AliyunContainerService/terway/pkg/version.gitVersion=`git describe --tags --match='v*' --abbrev=14`\" \
-    -X \"github.com/AliyunContainerService/terway/pkg/aliyun/credential.kubernetesAlicloudIdentity=terwayd/`git rev-parse --short HEAD 2>/dev/null`\"" -o terwayd .
-RUN cd plugin/terway && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags default_build -ldflags "-s -w" -o terway .
-RUN cd cmd/terway-cli && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags default_build -ldflags "-s -w" -o terway-cli .
+    -X \"github.com/AliyunContainerService/terway/pkg/aliyun/credential.kubernetesAlicloudIdentity=terwayd/`git rev-parse --short HEAD 2>/dev/null`\"" -o terwayd ./cmd/terway && \
+    go build -tags default_build -ldflags "-s -w" -o terway ./plugin/terway && \
+    go build -tags default_build -ldflags "-s -w" -o terway-cli ./cmd/terway-cli
 
 FROM --platform=$TARGETPLATFORM ${UBUNTU_IMAGE}
 RUN apt-get update && apt-get install -y kmod libelf1 libmnl0 iptables nftables kmod curl ipset bash ethtool bridge-utils socat grep findutils jq conntrack iputils-ping && \
@@ -42,7 +45,7 @@ RUN --mount=type=bind,from=iptables-dist,source=/iptables,target=/iptables \
 
 COPY ../../../policy/policyinit.sh ./../../policy/uninstall_policy.sh ../../../hack/init.sh /bin/
 COPY --from=policy-dist --exclude=cilium-operator-generic --exclude=cilium-health* /tmp/install/ /
-COPY --from=builder /go/src/github.com/AliyunContainerService/terway/cmd/terway/terwayd /go/src/github.com/AliyunContainerService/terway/plugin/terway/terway /go/src/github.com/AliyunContainerService/terway/cmd/terway-cli/terway-cli /usr/bin/
+COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terwayd /go/src/github.com/AliyunContainerService/terway/terway /go/src/github.com/AliyunContainerService/terway/terway-cli /usr/bin/
 COPY ../../../hack/iptables-wrapper-installer.sh /iptables-wrapper-installer.sh
 RUN /iptables-wrapper-installer.sh --no-sanity-check
 ENTRYPOINT ["/usr/bin/terwayd"]
