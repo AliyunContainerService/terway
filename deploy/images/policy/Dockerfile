@@ -54,5 +54,5 @@ RUN cd /go/src/github.com/cilium/cilium/operator && make cilium-operator-generic
     && mv cilium-operator-generic /tmp/install/usr/bin/
 
 FROM scratch
-COPY --from=felix-builder /go/src/github.com/projectcalico/calico/bin/calico-felix /bin/calico-felix
-COPY --from=cilium-builder /tmp/install/ /tmp/install/
+COPY --link --from=felix-builder /go/src/github.com/projectcalico/calico/bin/calico-felix /bin/calico-felix
+COPY --link --from=cilium-builder /tmp/install/ /tmp/install/

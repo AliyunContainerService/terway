@@ -48,7 +48,7 @@ spec:
           securityContext:
             privileged: true
           command:
-            - /bin/init.sh
+            - /usr/bin/init.sh
           env:
             - name: K8S_NODE_NAME
               valueFrom:
@@ -136,7 +136,7 @@ spec:
         - name: policy
           image: "{{ .Values.terway.image.repository }}:{{ .Values.terway.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
-          command: [ "/bin/policyinit.sh" ]
+          command: [ "/usr/bin/policyinit.sh" ]
           env:
             - name: NODENAME
               valueFrom:

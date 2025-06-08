@@ -26,9 +26,9 @@ RUN apt-get -y install ca-certificates && update-ca-certificates
 
 FROM --platform=$TARGETPLATFORM scratch
 WORKDIR /
-COPY --from=cert /etc/ssl/certs /etc/ssl/certs
-COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terway-controlplane /usr/bin/terway-controlplane
-COPY --from=policy-dist /tmp/install/usr/bin/cilium-operator-generic /usr/bin/cilium-operator-generic
+COPY --link --from=cert /etc/ssl/certs /etc/ssl/certs
+COPY --link --from=builder /go/src/github.com/AliyunContainerService/terway/terway-controlplane /usr/bin/terway-controlplane
+COPY --link --from=policy-dist /tmp/install/usr/bin/cilium-operator-generic /usr/bin/cilium-operator-generic
 USER 1000:1000
 
 ENTRYPOINT  ["/usr/bin/terway-controlplane"]
