@@ -16,18 +16,24 @@ install_helm(){
   curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 }
 
+build_image(){
+  BUILD_ARGS=(buildx build --load)
+  if [ "$GITHUB_ACTIONS" ]; then
+    BUILD_ARGS+=(--cache-from "type=gha,scope=$1")
+  fi
+  shift
+  docker "${BUILD_ARGS[@]}" "$@" ../../
+}
+
 build_terway_images(){
-  docker build -t local/terway -f ../../deploy/images/terway/Dockerfile ../../
-  docker build -t local/terway-controlplane -f ../../deploy/images/terway-controlplane/Dockerfile ../../
-  docker tag local/terway local/terway:1
-  docker tag local/terway-controlplane local/terway-controlplane:1
+  build_image terway -t local/terway:1 -f ../../deploy/images/terway/Dockerfile
+  build_image controlplane -t local/terway-controlplane:1 -f ../../deploy/images/terway-controlplane/Dockerfile
 }
 
 prepare_kind(){
   kind delete cluster || true
   kind create cluster --config cluster.yml
-  kind load docker-image local/terway:1
-  kind load docker-image local/terway-controlplane:1
+  kind load docker-image local/terway:1 local/terway-controlplane:1
   kubectl cluster-info --context kind-kind
 }
 
