@@ -80,7 +80,7 @@ func Test_detectMultiIP(t *testing.T) {
 			wantErr: false,
 			checkFunc: func(t *testing.T, cfg *controlplane.Config) {
 				assert.False(t, lo.Contains(cfg.Controllers, "multi-ip-node"))
-				assert.False(t, lo.Contains(cfg.Controllers, "node"))
+				assert.True(t, lo.Contains(cfg.Controllers, "node"))
 				assert.False(t, lo.Contains(cfg.Controllers, "multi-ip-pod"))
 				assert.True(t, lo.Contains(cfg.Controllers, "foo"))
 			},
