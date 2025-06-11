@@ -113,14 +113,12 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 	err := r.client.Get(ctx, request.NamespacedName, k8sNode)
 	if err != nil {
 		if k8sErr.IsNotFound(err) {
-			r.nodeStatusCache.Delete(request.Name)
-			return reconcile.Result{}, nil
+			return r.delete(ctx, request)
 		}
 		return reconcile.Result{}, err
 	}
 	if r.nodePredicate != nil && !r.nodePredicate.predicateNode(k8sNode) {
-		r.nodeStatusCache.Delete(request.Name)
-		return reconcile.Result{}, nil
+		return r.delete(ctx, request)
 	}
 	if !k8sNode.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
@@ -140,7 +138,7 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		_ = controllerutil.AddFinalizer(node, finalizer)
 	}
 	if !node.DeletionTimestamp.IsZero() {
-		return reconcile.Result{}, nil
+		return r.delete(ctx, request)
 	}
 
 	if utils.ISLinJunNode(k8sNode.Labels) {
@@ -438,5 +436,32 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		update.Annotations = node.Annotations
 		return nil
 	})
+	return reconcile.Result{}, err
+}
+
+func (r *ReconcileNode) delete(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
+	l := logr.FromContextOrDiscard(ctx)
+	l.Info("begin delete node")
+
+	r.nodeStatusCache.Delete(request.Name)
+
+	if r.centralizedIPAM {
+		// nb(l1b0k): at centralizedIPAM , multi-ip controller will remove finalizer
+		return reconcile.Result{}, nil
+	}
+	node := &networkv1beta1.Node{}
+	err := r.client.Get(ctx, request.NamespacedName, node)
+	if err != nil {
+		if !k8sErr.IsNotFound(err) {
+			return reconcile.Result{}, err
+		}
+		return reconcile.Result{}, nil
+	}
+
+	update := node.DeepCopy()
+	controllerutil.RemoveFinalizer(update, finalizer)
+	err = r.client.Patch(ctx, update, client.MergeFrom(node))
+
+	l.Info("delete node finished")
 	return reconcile.Result{}, err
 }
