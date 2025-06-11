@@ -69,32 +69,42 @@ datapath-test: ## Run datapath tests using the Makefile in tests/kind directory.
 .PHONY: build
 build: manifests generate fmt vet build-terway build-terway-controlplane
 
+PUSH ?= false
+
+BUILD_ARGS = --push=$(PUSH) --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS)
+ifdef GITHUB_ACTIONS
+BUILD_ARGS += --cache-from type=gha,scope=$(GHA_SCOPE) --cache-to type=gha,scope=$(GHA_SCOPE)
+endif
+
 .PHONY: build-policy
+build-policy: GHA_SCOPE = policy
 build-policy:
-	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:policy-$(GIT_COMMIT_SHORT) -f deploy/images/policy/Dockerfile .
+	docker buildx build $(BUILD_ARGS) -t $(REGISTRY)/terway:policy-$(GIT_COMMIT_SHORT) -f deploy/images/policy/Dockerfile .
 
 .PHONY: build-terway
+build-terway: GHA_SCOPE = terway
 build-terway:
-	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:$(GIT_COMMIT_SHORT) -f deploy/images/terway/Dockerfile .
+	docker buildx build $(BUILD_ARGS) -t $(REGISTRY)/terway:$(GIT_COMMIT_SHORT) -f deploy/images/terway/Dockerfile .
 
 .PHONY: build-terway-controlplane
+build-terway-controlplane: GHA_SCOPE = controlplane
 build-terway-controlplane:
-	docker buildx build --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway-controlplane:$(GIT_COMMIT_SHORT) -f deploy/images/terway-controlplane/Dockerfile .
+	docker buildx build $(BUILD_ARGS) -t $(REGISTRY)/terway-controlplane:$(GIT_COMMIT_SHORT) -f deploy/images/terway-controlplane/Dockerfile .
 
 .PHONY: build-push
 build-push: build-push-terway build-push-terway-controlplane
 
 .PHONY: build-push-policy
-build-push-policy:
-	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:policy-$(GIT_COMMIT_SHORT) -f deploy/images/policy/Dockerfile .
+build-push-policy: PUSH = true
+build-push-policy: build-policy
 
 .PHONY: build-push-terway
-build-push-terway:
-	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway:$(GIT_COMMIT_SHORT) -f deploy/images/terway/Dockerfile .
+build-push-terway: PUSH = true
+build-push-terway: build-terway
 
 .PHONY: build-terway-controlplane
-build-push-terway-controlplane:
-	docker buildx build --push --build-arg GIT_VERSION=$(GIT_COMMIT_SHORT) --platform $(BUILD_PLATFORMS) -t $(REGISTRY)/terway-controlplane:$(GIT_COMMIT_SHORT) -f deploy/images/terway-controlplane/Dockerfile .
+build-push-terway-controlplane: PUSH = true
+build-push-terway-controlplane: build-terway-controlplane
 
 ##@ Dependencies
 .PHONY: go-generate

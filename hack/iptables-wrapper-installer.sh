@@ -227,6 +227,3 @@ case "${altstyle}" in
 	done
 	;;
 esac
-
-# Cleanup
-rm -f "$0"

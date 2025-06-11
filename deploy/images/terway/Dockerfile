@@ -35,21 +35,22 @@ FROM --platform=$TARGETPLATFORM ${UBUNTU_IMAGE}
 RUN apt-get update && apt-get install -y kmod libelf1 libmnl0 iptables nftables kmod curl ipset bash ethtool bridge-utils socat grep findutils jq conntrack iputils-ping && \
     apt-get purge --auto-remove && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY --from=llvm-dist /usr/local/bin/clang /usr/local/bin/llc /bin/
-COPY --from=bpftool-dist /usr/local /usr/local
-COPY --from=iproute2-dist /usr/local /usr/local
-COPY --from=iproute2-dist /usr/lib/libbpf* /usr/lib/
-COPY --from=policy-dist /bin/calico-felix /bin/calico-felix
 RUN --mount=type=bind,from=iptables-dist,source=/iptables,target=/iptables \
     dpkg -i /iptables/*\.deb
+RUN --mount=type=bind,source=/hack/iptables-wrapper-installer.sh,target=/iptables-wrapper-installer.sh \
+    /iptables-wrapper-installer.sh --no-sanity-check
 
-COPY ../../../policy/policyinit.sh ./../../policy/uninstall_policy.sh ../../../hack/init.sh /bin/
-COPY --from=policy-dist \
+COPY --link --from=llvm-dist /usr/local/bin/clang /usr/local/bin/llc /usr/bin/
+COPY --link --from=bpftool-dist /usr/local /usr/local
+COPY --link --from=iproute2-dist /usr/local /usr/local
+COPY --link --from=iproute2-dist /usr/lib/libbpf* /usr/lib/
+COPY --link --from=policy-dist /bin/calico-felix /usr/local/bin/calico-felix
+
+COPY --link ../../../policy/policyinit.sh ./../../policy/uninstall_policy.sh ../../../hack/init.sh /usr/bin/
+COPY --link --from=policy-dist \
     --exclude=usr/bin/cilium-operator-generic \
     --exclude=usr/bin/cilium-dbg \
     --exclude=usr/bin/cilium-health* \
     /tmp/install/ /
-COPY --from=builder /go/src/github.com/AliyunContainerService/terway/terwayd /go/src/github.com/AliyunContainerService/terway/terway /go/src/github.com/AliyunContainerService/terway/terway-cli /usr/bin/
-COPY ../../../hack/iptables-wrapper-installer.sh /iptables-wrapper-installer.sh
-RUN /iptables-wrapper-installer.sh --no-sanity-check
+COPY --link --from=builder /go/src/github.com/AliyunContainerService/terway/terwayd /go/src/github.com/AliyunContainerService/terway/terway /go/src/github.com/AliyunContainerService/terway/terway-cli /usr/bin/
 ENTRYPOINT ["/usr/bin/terwayd"]
