@@ -82,6 +82,7 @@ func init() {
 				supportEFLO:     utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
 				nodePredicate:   nodePredicate,
 				nodeStatusCache: ctrlCtx.NodeStatusCache,
+				centralizedIPAM: ctrlCtx.Config.CentralizedIPAM,
 			})
 	}, false)
 }
@@ -99,10 +100,14 @@ type ReconcileNode struct {
 	nodePredicate *predicateForNodeEvent
 
 	nodeStatusCache *status.Cache[status.NodeStatus]
+
+	centralizedIPAM bool
 }
 
 func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-	defer node.Notify(ctx, request.Name)
+	if r.centralizedIPAM {
+		defer node.Notify(ctx, request.Name)
+	}
 
 	k8sNode := &corev1.Node{}
 	err := r.client.Get(ctx, request.NamespacedName, k8sNode)
@@ -212,6 +217,10 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 	})
 	if err != nil {
 		return err
+	}
+
+	if !r.centralizedIPAM {
+		return nil
 	}
 
 	err = r.k8sAnno(ctx, k8sNode, node)

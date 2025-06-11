@@ -65,7 +65,6 @@ import (
 	_ "github.com/AliyunContainerService/terway/pkg/controller/all"
 	multiipnode "github.com/AliyunContainerService/terway/pkg/controller/multi-ip/node"
 	multiippod "github.com/AliyunContainerService/terway/pkg/controller/multi-ip/pod"
-	"github.com/AliyunContainerService/terway/pkg/controller/node"
 	"github.com/AliyunContainerService/terway/pkg/controller/preheating"
 	"github.com/AliyunContainerService/terway/pkg/controller/status"
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
@@ -406,7 +405,7 @@ func detectMultiIP(ctx context.Context, directClient client.Client, cfg *control
 
 	cfg.Controllers = lo.Reject(cfg.Controllers, func(item string, index int) bool {
 		switch item {
-		case node.ControllerName, multiipnode.ControllerName, multiippod.ControllerName:
+		case multiipnode.ControllerName, multiippod.ControllerName:
 			return true
 		}
 		return false
