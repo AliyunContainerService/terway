@@ -382,7 +382,7 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 				types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
 				// fall back policy , if webhook not enabled
 
-				cfg, err := daemon.ConfigFromConfigMap(ctx, m.client, "")
+				cfg, err := daemon.ConfigFromConfigMap(ctx, m.client, node.Name)
 				if err != nil {
 					return nil, nil, err
 				}
