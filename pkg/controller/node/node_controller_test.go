@@ -20,12 +20,12 @@ import (
 	"context"
 	"time"
 
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	cc "sigs.k8s.io/controller-runtime/pkg/client"
@@ -70,12 +70,12 @@ var _ = Describe("Node Controller", func() {
 			By("create a k8s node")
 			k8sNode := &corev1.Node{}
 			err := k8sClient.Get(ctx, typeNamespacedName, k8sNode)
-			if err != nil && errors.IsNotFound(err) {
+			if err != nil && k8sErr.IsNotFound(err) {
 				resource := &corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: resourceName,
 						Labels: map[string]string{
-							"node.kubernetes.io/instance-type": "xxx",
+							"node.kubernetes.io/instance-type": "instanceType",
 							"topology.kubernetes.io/zone":      "z1",
 							"topology.kubernetes.io/region":    "region",
 						},
@@ -86,6 +86,16 @@ var _ = Describe("Node Controller", func() {
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
+			ecsClient.On("DescribeInstanceTypes", mock.Anything, mock.Anything).Return([]ecs.InstanceType{
+				{
+					EniTotalQuantity:            5,
+					EniQuantity:                 4,
+					InstanceTypeId:              "instanceType",
+					EniTrunkSupported:           true,
+					EniPrivateIpAddressQuantity: 10,
+				},
+			}, nil).Maybe()
+
 		})
 
 		AfterEach(func() {
@@ -99,7 +109,7 @@ var _ = Describe("Node Controller", func() {
 			crNode := &networkv1beta1.Node{}
 
 			err = k8sClient.Get(ctx, typeNamespacedName, crNode)
-			if err != nil && errors.IsNotFound(err) {
+			if err != nil && k8sErr.IsNotFound(err) {
 				return
 			}
 			if err != nil {
@@ -127,9 +137,10 @@ var _ = Describe("Node Controller", func() {
 		It("should successfully create cr", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &ReconcileNode{
-				client: k8sClient,
-				scheme: k8sClient.Scheme(),
-				aliyun: openAPI,
+				client:          k8sClient,
+				scheme:          k8sClient.Scheme(),
+				aliyun:          openAPI,
+				centralizedIPAM: true,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -210,9 +221,10 @@ var _ = Describe("Node Controller", func() {
 
 			By("Reconciling the created resource")
 			controllerReconciler := &ReconcileNode{
-				client: k8sClient,
-				scheme: k8sClient.Scheme(),
-				aliyun: openAPI,
+				client:          k8sClient,
+				scheme:          k8sClient.Scheme(),
+				aliyun:          openAPI,
+				centralizedIPAM: true,
 			}
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -298,9 +310,10 @@ var _ = Describe("Node Controller", func() {
 
 			By("Reconciling the created resource")
 			controllerReconciler := &ReconcileNode{
-				client: k8sClient,
-				scheme: k8sClient.Scheme(),
-				aliyun: openAPI,
+				client:          k8sClient,
+				scheme:          k8sClient.Scheme(),
+				aliyun:          openAPI,
+				centralizedIPAM: true,
 			}
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -329,7 +342,7 @@ var _ = Describe("Node Controller", func() {
 			By("create a k8s node")
 			k8sNode := &corev1.Node{}
 			err := k8sClient.Get(ctx, typeNamespacedName, k8sNode)
-			if err != nil && errors.IsNotFound(err) {
+			if err != nil && k8sErr.IsNotFound(err) {
 				resource := &corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: resourceName,
@@ -360,7 +373,7 @@ var _ = Describe("Node Controller", func() {
 			crNode := &networkv1beta1.Node{}
 
 			err = k8sClient.Get(ctx, typeNamespacedName, crNode)
-			if err != nil && errors.IsNotFound(err) {
+			if err != nil && k8sErr.IsNotFound(err) {
 				return
 			}
 			if err != nil {
@@ -388,17 +401,17 @@ var _ = Describe("Node Controller", func() {
 		It("new eflo node", func() {
 			By("Reconciling the created resource")
 
-			ac := mocks.NewOpenAPI(GinkgoT())
-			ac.On("GetNodeInfoForPod", mock.Anything, "instanceID").Return(&eflo.Content{
+			efloClient.On("GetNodeInfoForPod", mock.Anything, "instanceID").Return(&eflo.Content{
 				LeniQuota:   20,
 				LniSipQuota: 10,
 			}, nil).Maybe()
 
 			controllerReconciler := &ReconcileNode{
-				client:      k8sClient,
-				scheme:      k8sClient.Scheme(),
-				aliyun:      ac,
-				supportEFLO: true,
+				client:          k8sClient,
+				scheme:          k8sClient.Scheme(),
+				aliyun:          openAPI,
+				supportEFLO:     true,
+				centralizedIPAM: true,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -431,12 +444,12 @@ var _ = Describe("Node Controller", func() {
 			By("create a k8s node")
 			k8sNode := &corev1.Node{}
 			err := k8sClient.Get(ctx, typeNamespacedName, k8sNode)
-			if err != nil && errors.IsNotFound(err) {
+			if err != nil && k8sErr.IsNotFound(err) {
 				resource := &corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: resourceName,
 						Labels: map[string]string{
-							"node.kubernetes.io/instance-type":       "xxx",
+							"node.kubernetes.io/instance-type":       "instanceType",
 							"topology.kubernetes.io/zone":            "z1",
 							"topology.kubernetes.io/region":          "region",
 							"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
@@ -461,7 +474,7 @@ var _ = Describe("Node Controller", func() {
 			crNode := &networkv1beta1.Node{}
 
 			err = k8sClient.Get(ctx, typeNamespacedName, crNode)
-			if err != nil && errors.IsNotFound(err) {
+			if err != nil && k8sErr.IsNotFound(err) {
 				return
 			}
 			if err != nil {
@@ -489,9 +502,10 @@ var _ = Describe("Node Controller", func() {
 		It("should successfully create cr", func() {
 			By("empty node")
 			controllerReconciler := &ReconcileNode{
-				client: k8sClient,
-				scheme: k8sClient.Scheme(),
-				aliyun: openAPI,
+				client:          k8sClient,
+				scheme:          k8sClient.Scheme(),
+				aliyun:          openAPI,
+				centralizedIPAM: true,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -572,9 +586,10 @@ var _ = Describe("Node Controller", func() {
 
 			By("Reconciling the created resource")
 			controllerReconciler := &ReconcileNode{
-				client: k8sClient,
-				scheme: k8sClient.Scheme(),
-				aliyun: openAPI,
+				client:          k8sClient,
+				scheme:          k8sClient.Scheme(),
+				aliyun:          openAPI,
+				centralizedIPAM: true,
 			}
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
