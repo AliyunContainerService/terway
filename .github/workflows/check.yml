@@ -62,9 +62,9 @@ jobs:
         go-version-file: 'go.mod'
         cache: false
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v8
       with:
-        version: v1.64.5
+        version: v2.1.6
         args: --config=.golangci.yml
 
   super-linter:
