@@ -60,13 +60,14 @@ func main() {
 
 	api := client.NewAPIFacade(c, nil)
 
-	if mode == "terway-eniip" {
+	switch mode {
+	case "terway-eniip":
 		limit, err := client.GetLimitProvider().GetLimit(api.GetECS(), instanceType)
 		if err != nil {
 			panic(err)
 		}
 		fmt.Println(limit.IPv4PerAdapter * (limit.Adapters - 1))
-	} else if mode == "terway-eni" {
+	case "terway-eni":
 		limit, err := client.GetLimitProvider().GetLimit(api.GetECS(), instanceType)
 		if err != nil {
 			panic(err)
