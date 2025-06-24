@@ -164,7 +164,7 @@ func main() {
 	}
 
 	prov := provider.NewChainProvider(
-		provider.NewAccessKeyProvider(string(cfg.Credential.AccessKey), string(cfg.Credential.AccessSecret)),
+		provider.NewAccessKeyProvider(string(cfg.AccessKey), string(cfg.AccessSecret)),
 		provider.NewEncryptedFileProvider(provider.EncryptedFileProviderOptions{
 			FilePath:      cfg.CredentialPath,
 			RefreshPeriod: 30 * time.Minute,

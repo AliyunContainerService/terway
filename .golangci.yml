@@ -1,28 +1,40 @@
+version: "2"
 run:
   concurrency: 4
-  timeout: 5m
-  tests: false
   build-tags:
-  - default_build
-  - privileged
-
-issues:
-  exclude-rules:
-  - path: _test\.go
-    linters:
-    - dupl
-    - goconst
+    - default_build
+    - privileged
+  tests: false
 linters:
   enable:
-  - goconst
-  - goimports
-  - govet
-  - errcheck
-  - ineffassign
-  - staticcheck
-  - goconst
-  - stylecheck
-  - misspell
-linters-settings:
-  errcheck:
-    check-blank: false
+    - goconst
+    - misspell
+    - staticcheck
+  settings:
+    errcheck:
+      check-blank: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dupl
+          - goconst
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

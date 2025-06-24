@@ -82,7 +82,7 @@ func (r *ReconcileNetworkInterface) Reconcile(ctx context.Context, request recon
 	err := r.client.Get(ctx, request.NamespacedName, eni)
 	if err != nil {
 		if k8sErr.IsNotFound(err) {
-			r.resourceBackoff.Del(request.NamespacedName.String())
+			r.resourceBackoff.Del(request.String())
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, err
@@ -207,7 +207,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 				return reconcile.Result{}, err
 			}
 
-			if !(len(resp) == 1 && resp[0].Status == aliyunClient.ENIStatusInUse) {
+			if len(resp) != 1 || resp[0].Status != aliyunClient.ENIStatusInUse {
 				// wait next time
 				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus))
 				if err != nil {
