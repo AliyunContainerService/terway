@@ -324,11 +324,13 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 	}
 
 	if b.config.EnableERDMA {
-		if b.daemonMode == daemon.ModeENIMultiIP {
+
+		switch b.daemonMode {
+		case daemon.ModeENIMultiIP:
 			nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity - realRdmaCount*b.limit.IPv4PerAdapter)
 			nodeAnnotations[string(types.ERDMAIPTypeIPs)] = strconv.Itoa(realRdmaCount * b.limit.IPv4PerAdapter)
 			poolConfig.ERdmaCapacity = realRdmaCount * b.limit.IPv4PerAdapter
-		} else if b.daemonMode == daemon.ModeENIOnly {
+		case daemon.ModeENIOnly:
 			nodeAnnotations[string(types.NormalIPTypeIPs)] = strconv.Itoa(poolConfig.Capacity - realRdmaCount)
 			nodeAnnotations[string(types.ERDMAIPTypeIPs)] = strconv.Itoa(realRdmaCount)
 			poolConfig.ERdmaCapacity = realRdmaCount

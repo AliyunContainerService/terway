@@ -105,7 +105,7 @@ func SyncCert(ctx context.Context, c client.Client, ns, name, domain, certDir st
 
 	// update webhook
 	mutatingWebhook := &admissionregistrationv1.MutatingWebhookConfiguration{}
-	err = c.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, mutatingWebhook)
+	err = c.Get(ctx, types.NamespacedName{Name: name}, mutatingWebhook)
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func SyncCert(ctx context.Context, c client.Client, ns, name, domain, certDir st
 	}
 
 	validateWebhook := &admissionregistrationv1.ValidatingWebhookConfiguration{}
-	err = c.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, validateWebhook)
+	err = c.Get(ctx, types.NamespacedName{Name: name}, validateWebhook)
 	if err != nil {
 		return err
 	}
