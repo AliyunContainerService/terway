@@ -6,13 +6,12 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	mockclient "github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/eni"
 	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/daemon"
 
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/jarcoal/httpmock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -66,21 +65,21 @@ func TestAliyun_CreateNetworkInterface(t *testing.T) {
 	openAPI.On("GetVPC").Return(vpcClient).Maybe()
 	openAPI.On("GetECS").Return(ecsClient).Maybe()
 
-	vpcClient.On("DescribeVSwitchByID", mock.Anything, vswID).Return(&vpc.VSwitch{
+	vpcClient.On("DescribeVSwitchByID", mock.Anything, vswID).Return(&aliyunClient.VSwitch{
 		VSwitchId:               vswID,
 		ZoneId:                  "zone-id",
 		AvailableIpAddressCount: 100,
 	}, nil).Maybe()
 
-	createResp := &client.NetworkInterface{
+	createResp := &aliyunClient.NetworkInterface{
 		NetworkInterfaceID: eniID,
 		MacAddress:         mac,
 		PrivateIPAddress:   primaryIP,
-		PrivateIPSets: []client.IPSet{
+		PrivateIPSets: []aliyunClient.IPSet{
 			{IPAddress: privateIP1},
 			{IPAddress: privateIP2},
 		},
-		IPv6Set: []client.IPSet{
+		IPv6Set: []aliyunClient.IPSet{
 			{IPAddress: ipv6Addr1},
 			{IPAddress: ipv6Addr2},
 		},
@@ -89,10 +88,10 @@ func TestAliyun_CreateNetworkInterface(t *testing.T) {
 	ecsClient.On("CreateNetworkInterface", mock.Anything, mock.Anything).Return(createResp, nil)
 	ecsClient.On("AttachNetworkInterface", mock.Anything, mock.Anything).Return(nil)
 
-	describeResp := []*client.NetworkInterface{
+	describeResp := []*aliyunClient.NetworkInterface{
 		{
 			NetworkInterfaceID: eniID,
-			Status:             client.ENIStatusInUse,
+			Status:             aliyunClient.ENIStatusInUse,
 		},
 	}
 	ecsClient.On("DescribeNetworkInterface", mock.Anything, mock.Anything, []string{eniID}, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(describeResp, nil)
@@ -284,11 +283,11 @@ func TestAliyun_GetAttachedNetworkInterface(t *testing.T) {
 	getter := &mockENIInfoGetter{mac: mac}
 
 	openAPI.On("GetECS").Return(ecs)
-	describeResp := []*client.NetworkInterface{
+	describeResp := []*aliyunClient.NetworkInterface{
 		{
 			NetworkInterfaceID:          eniID,
-			Type:                        client.ENITypeTrunk,
-			NetworkInterfaceTrafficMode: client.ENITrafficModeRDMA,
+			Type:                        aliyunClient.ENITypeTrunk,
+			NetworkInterfaceTrafficMode: aliyunClient.ENITrafficModeRDMA,
 		},
 	}
 	ecs.On("DescribeNetworkInterface", mock.Anything, "", []string{eniID}, "", "", "", mock.Anything).Return(describeResp, nil)

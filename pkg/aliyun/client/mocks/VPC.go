@@ -5,7 +5,8 @@ package mocks
 import (
 	context "context"
 
-	vpc "github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
+	client "github.com/AliyunContainerService/terway/pkg/aliyun/client"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -15,23 +16,23 @@ type VPC struct {
 }
 
 // DescribeVSwitchByID provides a mock function with given fields: ctx, vSwitchID
-func (_m *VPC) DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*vpc.VSwitch, error) {
+func (_m *VPC) DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*client.VSwitch, error) {
 	ret := _m.Called(ctx, vSwitchID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DescribeVSwitchByID")
 	}
 
-	var r0 *vpc.VSwitch
+	var r0 *client.VSwitch
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*vpc.VSwitch, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*client.VSwitch, error)); ok {
 		return rf(ctx, vSwitchID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *vpc.VSwitch); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) *client.VSwitch); ok {
 		r0 = rf(ctx, vSwitchID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*vpc.VSwitch)
+			r0 = ret.Get(0).(*client.VSwitch)
 		}
 	}
 

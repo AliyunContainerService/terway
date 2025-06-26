@@ -11,7 +11,6 @@ import (
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -59,7 +58,7 @@ type ENI interface {
 }
 
 type VPC interface {
-	DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*vpc.VSwitch, error)
+	DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*VSwitch, error)
 }
 
 type EFLO interface {

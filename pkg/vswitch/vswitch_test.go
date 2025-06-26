@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -31,23 +31,23 @@ import (
 
 func TestSwitchPool_GetOne(t *testing.T) {
 	openAPI := mocks.NewVPC(t)
-	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-0").Return(&vpc.VSwitch{
-		VSwitchId:               "vsw-0",
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-0").Return(&aliyunClient.VSwitch{
+		VSwitchId: "vsw-0",
 		ZoneId:                  "zone-0",
 		AvailableIpAddressCount: 0,
 	}, nil).Maybe()
-	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
-		VSwitchId:               "vsw-1",
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&aliyunClient.VSwitch{
+		VSwitchId: "vsw-1",
 		ZoneId:                  "zone-1",
 		AvailableIpAddressCount: 10,
 	}, nil).Maybe()
-	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&vpc.VSwitch{
-		VSwitchId:               "vsw-2",
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&aliyunClient.VSwitch{
+		VSwitchId: "vsw-2",
 		ZoneId:                  "zone-2",
 		AvailableIpAddressCount: 10,
 	}, nil).Maybe()
-	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(&vpc.VSwitch{
-		VSwitchId:               "vsw-3",
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(&aliyunClient.VSwitch{
+		VSwitchId: "vsw-3",
 		ZoneId:                  "zone-2",
 		AvailableIpAddressCount: 10,
 	}, nil).Maybe()
@@ -96,8 +96,8 @@ func TestSwitchPool_GetOne(t *testing.T) {
 func TestGetByID(t *testing.T) {
 	openAPI := mocks.NewVPC(t)
 
-	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&vpc.VSwitch{
-		VSwitchId:               "vsw-2",
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&aliyunClient.VSwitch{
+		VSwitchId: "vsw-2",
 		ZoneId:                  "zone-2",
 		AvailableIpAddressCount: 10,
 	}, nil).Maybe()

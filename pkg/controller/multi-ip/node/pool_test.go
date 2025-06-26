@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -1791,7 +1790,7 @@ var _ = Describe("Test ReconcileNode", func() {
 			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
 				InstanceID: &instanceID,
 			}).Return([]*aliyunClient.NetworkInterface{}, nil).Maybe()
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&aliyunClient.VSwitch{
 				VSwitchId:               "vsw-1",
 				ZoneId:                  "zone-1",
 				AvailableIpAddressCount: 10,
@@ -1927,7 +1926,7 @@ var _ = Describe("Test ReconcileNode", func() {
 					NetworkInterfaceTrafficMode: "Standard",
 				},
 			}, nil).Maybe()
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&aliyunClient.VSwitch{
 				VSwitchId:               "vsw-1",
 				ZoneId:                  "zone-1",
 				AvailableIpAddressCount: 10,
@@ -2088,7 +2087,7 @@ var _ = Describe("Test ReconcileNode", func() {
 			MetaCtx(ctx).NeedSyncOpenAPI.Store(true)
 
 			openAPI.On("GetVPC").Return(vpcClient).Maybe()
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&aliyunClient.VSwitch{
 				VSwitchId:               "vsw-1",
 				ZoneId:                  "zone-1",
 				AvailableIpAddressCount: 10,
@@ -2605,7 +2604,7 @@ var _ = Describe("Test ReconcileNode", func() {
 			openAPI := mocks.NewOpenAPI(GinkgoT())
 			vpcClient := mocks.NewVPC(GinkgoT())
 			openAPI.On("GetVPC").Return(vpcClient).Maybe()
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&aliyunClient.VSwitch{
 				VSwitchId:               "vsw-1",
 				ZoneId:                  "zone-1",
 				AvailableIpAddressCount: 10,
@@ -2666,7 +2665,7 @@ var _ = Describe("Test ReconcileNode", func() {
 			ctx := context.TODO()
 
 			openAPI.On("GetVPC").Return(vpcClient).Maybe()
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&aliyunClient.VSwitch{
 				VSwitchId:               "vsw-1",
 				ZoneId:                  "zone-1",
 				AvailableIpAddressCount: 0,

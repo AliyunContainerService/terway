@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
@@ -60,7 +60,7 @@ var _ = Describe("Networking controller", func() {
 			}
 			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
 
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&aliyunClient.VSwitch{
 				AvailableIpAddressCount: 100,
 				VSwitchId:               "vsw-1",
 				ZoneId:                  "cn-hangzhou-k",
@@ -161,17 +161,17 @@ var _ = Describe("Networking controller", func() {
 			}
 			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
 
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&aliyunClient.VSwitch{
 				AvailableIpAddressCount: 100,
 				VSwitchId:               "vsw-1",
 				ZoneId:                  "cn-hangzhou-k",
 			}, nil)
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&aliyunClient.VSwitch{
 				AvailableIpAddressCount: 100,
 				VSwitchId:               "vsw-2",
 				ZoneId:                  "cn-hangzhou-k",
 			}, nil)
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(&aliyunClient.VSwitch{
 				AvailableIpAddressCount: 100,
 				VSwitchId:               "vsw-3",
 				ZoneId:                  "cn-hangzhou-k",
@@ -254,17 +254,17 @@ var _ = Describe("Networking controller", func() {
 			}
 			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
 
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&aliyunClient.VSwitch{
 				AvailableIpAddressCount: 100,
 				VSwitchId:               "vsw-1",
 				ZoneId:                  "cn-hangzhou-k",
 			}, nil)
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&aliyunClient.VSwitch{
 				AvailableIpAddressCount: 100,
 				VSwitchId:               "vsw-2",
 				ZoneId:                  "cn-hangzhou-k",
 			}, nil)
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-3").Return(&aliyunClient.VSwitch{
 				AvailableIpAddressCount: 100,
 				VSwitchId:               "vsw-3",
 				ZoneId:                  "cn-hangzhou-k",

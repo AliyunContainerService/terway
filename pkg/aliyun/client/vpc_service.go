@@ -36,7 +36,7 @@ func NewVPCService(clientSet credential.Client, rateLimiter *RateLimiter, tracer
 }
 
 // DescribeVSwitchByID get vsw by id
-func (a *VPCService) DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*vpc.VSwitch, error) {
+func (a *VPCService) DescribeVSwitchByID(ctx context.Context, vSwitchID string) (*VSwitch, error) {
 	ctx, span := a.Tracer.Start(ctx, APIDescribeVSwitches)
 	defer span.End()
 
@@ -62,7 +62,39 @@ func (a *VPCService) DescribeVSwitchByID(ctx context.Context, vSwitchID string) 
 		return nil, apiErr.ErrNotFound
 	}
 	if len(resp.VSwitches.VSwitch) > 0 {
-		return &resp.VSwitches.VSwitch[0], nil
+		return &VSwitch{
+			VpcId:                   resp.VSwitches.VSwitch[0].VSwitchId,
+			Status:                  resp.VSwitches.VSwitch[0].Status,
+			AvailableIpAddressCount: resp.VSwitches.VSwitch[0].AvailableIpAddressCount,
+			NetworkAclId:            resp.VSwitches.VSwitch[0].NetworkAclId,
+			OwnerId:                 resp.VSwitches.VSwitch[0].OwnerId,
+			VSwitchId:               resp.VSwitches.VSwitch[0].VSwitchId,
+			CidrBlock:               resp.VSwitches.VSwitch[0].CidrBlock,
+			Description:             resp.VSwitches.VSwitch[0].Description,
+			ResourceGroupId:         resp.VSwitches.VSwitch[0].ResourceGroupId,
+			ZoneId:                  resp.VSwitches.VSwitch[0].ZoneId,
+			Ipv6CidrBlock:           resp.VSwitches.VSwitch[0].Ipv6CidrBlock,
+			VSwitchName:             resp.VSwitches.VSwitch[0].VSwitchName,
+			ShareType:               resp.VSwitches.VSwitch[0].ShareType,
+			EnabledIpv6:             resp.VSwitches.VSwitch[0].EnabledIpv6,
+		}, nil
 	}
 	return nil, err
+}
+
+type VSwitch struct {
+	VpcId                   string
+	Status                  string
+	AvailableIpAddressCount int64
+	NetworkAclId            string
+	OwnerId                 int64
+	VSwitchId               string
+	CidrBlock               string
+	Description             string
+	ResourceGroupId         string
+	ZoneId                  string
+	Ipv6CidrBlock           string
+	VSwitchName             string
+	ShareType               string
+	EnabledIpv6             bool
 }

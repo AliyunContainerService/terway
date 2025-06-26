@@ -3,7 +3,6 @@ package pod
 import (
 	"context"
 
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
@@ -14,7 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	aliyun "github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/generated/clientset/versioned/scheme"
@@ -101,7 +100,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
-			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
+			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
 				NetworkInterfaceID: eniID,
@@ -124,8 +123,8 @@ var _ = Describe("Pod controller", func() {
 				CreationTime:                "",
 			}, nil).Once()
 
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
-				VpcId:                   "vpc-0",
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&aliyunClient.VSwitch{
+				VpcId: "vpc-0",
 				Status:                  "",
 				AvailableIpAddressCount: 10,
 				VSwitchId:               "vsw-0",
@@ -245,7 +244,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
-			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
+			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
 				NetworkInterfaceID: eniID,
@@ -268,7 +267,7 @@ var _ = Describe("Pod controller", func() {
 				CreationTime:                "",
 			}, nil).Once()
 
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&aliyunClient.VSwitch{
 				VpcId:                   "vpc-0",
 				Status:                  "",
 				AvailableIpAddressCount: 10,
@@ -397,7 +396,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
-			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
+			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
 				NetworkInterfaceID: eniID,
@@ -420,8 +419,8 @@ var _ = Describe("Pod controller", func() {
 				CreationTime:                "",
 			}, nil).Once()
 
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
-				VpcId:                   "vpc-0",
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&aliyunClient.VSwitch{
+				VpcId: "vpc-0",
 				Status:                  "",
 				AvailableIpAddressCount: 10,
 				VSwitchId:               "vsw-0",
@@ -551,7 +550,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
-			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
+			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
 				NetworkInterfaceID: eniID,
@@ -574,8 +573,8 @@ var _ = Describe("Pod controller", func() {
 				CreationTime:                "",
 			}, nil).Once()
 
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
-				VpcId:                   "vpc-0",
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&aliyunClient.VSwitch{
+				VpcId: "vpc-0",
 				Status:                  "",
 				AvailableIpAddressCount: 10,
 				VSwitchId:               "vsw-0",
@@ -817,7 +816,7 @@ var _ = Describe("Pod controller", func() {
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 			Expect(k8sClient.Create(ctx, eni)).Should(Succeed())
 
-			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
+			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
 				Status:             "Available",
 				MacAddress:         "mac",
 				NetworkInterfaceID: eniID,
@@ -840,8 +839,8 @@ var _ = Describe("Pod controller", func() {
 				CreationTime:                "",
 			}, nil).Once()
 
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
-				VpcId:                   "vpc-0",
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&aliyunClient.VSwitch{
+				VpcId: "vpc-0",
 				Status:                  "",
 				AvailableIpAddressCount: 10,
 				VSwitchId:               "vsw-0",
