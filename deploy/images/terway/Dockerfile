@@ -49,7 +49,7 @@ COPY --link --from=policy-dist /bin/calico-felix /usr/local/bin/calico-felix
 COPY --link ../../../policy/policyinit.sh ./../../policy/uninstall_policy.sh ../../../hack/init.sh /usr/bin/
 COPY --link --from=policy-dist \
     --exclude=usr/bin/cilium-operator-generic \
-    --exclude=usr/bin/cilium-dbg \
+    --exclude=usr/bin/cilium-bugtool \
     --exclude=usr/bin/cilium-health* \
     /tmp/install/ /
 COPY --link --from=builder /go/src/github.com/AliyunContainerService/terway/terwayd /go/src/github.com/AliyunContainerService/terway/terway /go/src/github.com/AliyunContainerService/terway/terway-cli /usr/bin/
