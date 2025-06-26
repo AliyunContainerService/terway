@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	"github.com/AliyunContainerService/terway/pkg/eni"
 	factorymocks "github.com/AliyunContainerService/terway/pkg/factory/mocks"
 	k8smocks "github.com/AliyunContainerService/terway/pkg/k8s/mocks"
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
@@ -325,5 +326,234 @@ func TestGetPodIPs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFilterENINotFound(t *testing.T) {
+	tests := []struct {
+		name          string
+		podResources  []daemon.PodResources
+		attachedENIID map[string]*daemon.ENI
+		expect        []daemon.PodResources
+	}{
+		{
+			name: "ENI exists by ENIID",
+			podResources: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{Type: daemon.ResourceTypeENIIP, ENIID: "eni-1", ID: "eni-1.10.0.0.2"},
+					},
+				},
+			},
+			attachedENIID: map[string]*daemon.ENI{
+				"eni-1": {ID: "eni-1", MAC: "02:11:22:33:44:55"},
+			},
+			expect: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{Type: daemon.ResourceTypeENIIP, ENIID: "eni-1", ID: "eni-1.10.0.0.2"},
+					},
+				},
+			},
+		},
+		{
+			name: "ENI not exists by ENIID",
+			podResources: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{Type: daemon.ResourceTypeENIIP, ENIID: "eni-2", ID: "eni-2.10.0.0.3"},
+					},
+				},
+			},
+			attachedENIID: map[string]*daemon.ENI{
+				"eni-1": {ID: "eni-1", MAC: "02:11:22:33:44:55"},
+			},
+			expect: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{},
+				},
+			},
+		},
+		{
+			name: "ENI exists by MAC (ENIID empty)",
+			podResources: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{Type: daemon.ResourceTypeENIIP, ENIID: "", ID: "02:11:22:33:44:55.10.0.0.4"},
+					},
+				},
+			},
+			attachedENIID: map[string]*daemon.ENI{
+				"eni-3": {ID: "eni-3", MAC: "02:11:22:33:44:55"},
+			},
+			expect: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{Type: daemon.ResourceTypeENIIP, ENIID: "", ID: "02:11:22:33:44:55.10.0.0.4"},
+					},
+				},
+			},
+		},
+		{
+			name: "ENI not exists by MAC (ENIID empty)",
+			podResources: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{Type: daemon.ResourceTypeENIIP, ENIID: "", ID: "02:11:22:33:44:99.10.0.0.5"},
+					},
+				},
+			},
+			attachedENIID: map[string]*daemon.ENI{
+				"eni-4": {ID: "eni-4", MAC: "02:11:22:33:44:55"},
+			},
+			expect: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{},
+				},
+			},
+		},
+		{
+			name: "Resource type not ENIIP should not be filtered",
+			podResources: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{Type: "otherType", ENIID: "eni-1", ID: "eni-1.10.0.0.6"},
+					},
+				},
+			},
+			attachedENIID: map[string]*daemon.ENI{},
+			expect: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{Type: "otherType", ENIID: "eni-1", ID: "eni-1.10.0.0.6"},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterENINotFound(tt.podResources, tt.attachedENIID)
+			if len(got) != len(tt.expect) {
+				t.Errorf("length mismatch: got %v, want %v", got, tt.expect)
+				return
+			}
+			for i := range got {
+				if len(got[i].Resources) != len(tt.expect[i].Resources) {
+					t.Errorf("resources length mismatch: got %v, want %v", got[i].Resources, tt.expect[i].Resources)
+					continue
+				}
+				for j := range got[i].Resources {
+					if got[i].Resources[j] != tt.expect[i].Resources[j] {
+						t.Errorf("resource mismatch at [%d][%d]: got %+v, want %+v", i, j, got[i].Resources[j], tt.expect[i].Resources[j])
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestDefaultForNetConf(t *testing.T) {
+	t.Run("empty netConf", func(t *testing.T) {
+		err := defaultForNetConf([]*rpc.NetConf{})
+		if err != nil {
+			t.Errorf("expected nil, got %v", err)
+		}
+	})
+	t.Run("default interface not set", func(t *testing.T) {
+		netConfs := []*rpc.NetConf{{IfName: "eth1"}}
+		err := defaultForNetConf(netConfs)
+		if err == nil || err.Error() != "default interface is not set" {
+			t.Errorf("expected default interface is not set, got %v", err)
+		}
+	})
+	t.Run("duplicate default route", func(t *testing.T) {
+		netConfs := []*rpc.NetConf{{IfName: "eth0", DefaultRoute: true}, {IfName: "eth0", DefaultRoute: true}}
+		err := defaultForNetConf(netConfs)
+		if err == nil || err.Error() != "default route is dumplicated" {
+			t.Errorf("expected default route is dumplicated, got %v", err)
+		}
+	})
+	t.Run("set default route if not set", func(t *testing.T) {
+		netConfs := []*rpc.NetConf{{IfName: "eth0"}}
+		err := defaultForNetConf(netConfs)
+		if err != nil {
+			t.Errorf("expected nil, got %v", err)
+		}
+		if !netConfs[0].DefaultRoute {
+			t.Errorf("expected DefaultRoute to be true")
+		}
+	})
+}
+
+func TestToRPCMapping(t *testing.T) {
+	res := eni.Status{
+		NetworkInterfaceID:   "eni-1",
+		MAC:                  "02:11:22:33:44:55",
+		Type:                 "eni",
+		AllocInhibitExpireAt: "2024-01-01T00:00:00Z",
+		Status:               "InUse",
+		Usage:                [][]string{{"pod1", "10.0.0.1"}, {"pod2", "10.0.0.2"}},
+	}
+	mapping := toRPCMapping(res)
+	if mapping.NetworkInterfaceID != "eni-1" || mapping.MAC != "02:11:22:33:44:55" || mapping.Type != "eni" || mapping.AllocInhibitExpireAt != "2024-01-01T00:00:00Z" || mapping.Status != "InUse" {
+		t.Errorf("unexpected mapping fields: %+v", mapping)
+	}
+	if len(mapping.Info) != 2 || mapping.Info[0] != "pod1  10.0.0.1" || mapping.Info[1] != "pod2  10.0.0.2" {
+		t.Errorf("unexpected mapping.Info: %+v", mapping.Info)
+	}
+}
+
+func TestSetRequestAndExtractIPs(t *testing.T) {
+	item := daemon.ResourceItem{
+		ENIID: "eni-1",
+		IPv4:  "10.0.0.1",
+		IPv6:  "fe80::1",
+	}
+	req := eni.NewLocalIPRequest()
+	setRequest(req, item)
+	if req.NetworkInterfaceID != "eni-1" {
+		t.Errorf("expected NetworkInterfaceID=eni-1, got %s", req.NetworkInterfaceID)
+	}
+	if req.IPv4.String() != "10.0.0.1" {
+		t.Errorf("expected IPv4=10.0.0.1, got %s", req.IPv4.String())
+	}
+	if req.IPv6.String() != "fe80::1" {
+		t.Errorf("expected IPv6=fe80::1, got %s", req.IPv6.String())
+	}
+
+	v4, v6, eniID := extractIPs(item)
+	if v4.String() != "10.0.0.1" || v6.String() != "fe80::1" || eniID != "eni-1" {
+		t.Errorf("extractIPs got %s, %s, %s", v4.String(), v6.String(), eniID)
+	}
+}
+
+func TestParseNetworkResource(t *testing.T) {
+	item := daemon.ResourceItem{
+		Type:   daemon.ResourceTypeENIIP,
+		ENIID:  "eni-1",
+		ENIMAC: "02:11:22:33:44:55",
+		IPv4:   "10.0.0.1",
+		IPv6:   "fe80::1",
+	}
+	res := parseNetworkResource(item)
+	if res == nil {
+		t.Fatal("expected non-nil result")
+	}
+	local, ok := res.(*eni.LocalIPResource)
+	if !ok {
+		t.Fatalf("expected *eni.LocalIPResource, got %T", res)
+	}
+	if local.ENI.ID != "eni-1" || local.ENI.MAC != "02:11:22:33:44:55" {
+		t.Errorf("unexpected ENI: %+v", local.ENI)
+	}
+	if local.IP.IPv4.String() != "10.0.0.1" || local.IP.IPv6.String() != "fe80::1" {
+		t.Errorf("unexpected IP: %+v", local.IP)
+	}
+
+	item.Type = "otherType"
+	if parseNetworkResource(item) != nil {
+		t.Errorf("expected nil for non-ENIIP/ENI type")
 	}
 }
