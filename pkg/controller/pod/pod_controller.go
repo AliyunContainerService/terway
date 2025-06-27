@@ -567,7 +567,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 					VPCID:      vpcID,
 					InstanceID: nodeInfo.InstanceID,
 				},
-				Backoff: &bo,
+				Backoff: &bo.Backoff,
 			}
 			eni, err := m.aliyun.CreateNetworkInterfaceV2(ctx, option)
 			if err != nil {
@@ -593,7 +593,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 				// delete the eni, as we can not store the eni info
 				rollbackCtx := context.Background()
 
-				innerErr := retry.OnError(backoff.Backoff(backoff.ENIRelease), func(err error) bool {
+				innerErr := retry.OnError(backoff.Backoff(backoff.ENIRelease).Backoff, func(err error) bool {
 					return true
 				}, func() error {
 					innerErr := m.aliyun.DeleteNetworkInterfaceV2(rollbackCtx, eni.NetworkInterfaceID)

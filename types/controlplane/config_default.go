@@ -19,9 +19,8 @@ limitations under the License.
 package controlplane
 
 import (
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/types/secret"
-
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 type Config struct {
@@ -71,9 +70,9 @@ type Config struct {
 
 	CustomStatefulWorkloadKinds []string `json:"customStatefulWorkloadKinds"`
 
-	BackoffOverride map[string]wait.Backoff `json:"backoffOverride,omitempty"`
-	IPAMType        string                  `json:"ipamType"`
-	CentralizedIPAM bool                    `json:"centralizedIPAM,omitempty"`
+	BackoffOverride map[string]backoff.ExtendedBackoff `json:"backoffOverride,omitempty"`
+	IPAMType        string                             `json:"ipamType"`
+	CentralizedIPAM bool                               `json:"centralizedIPAM,omitempty"`
 
 	RateLimit map[string]int `json:"rateLimit"`
 

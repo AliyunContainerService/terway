@@ -5,16 +5,15 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/secret"
 
+	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/route"
 	jsonpatch "github.com/evanphx/json-patch"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
-
-	"github.com/AliyunContainerService/terway/types"
-	"github.com/AliyunContainerService/terway/types/route"
 )
 
 const (
@@ -27,39 +26,39 @@ var addonSecretRootPath = addonSecretPath
 
 // Config configuration of terway daemon
 type Config struct {
-	Version                     string                  `yaml:"version" json:"version"`
-	AccessID                    secret.Secret           `yaml:"access_key" json:"access_key"`
-	AccessSecret                secret.Secret           `yaml:"access_secret" json:"access_secret"`
-	RegionID                    string                  `yaml:"region_id" json:"region_id"`
-	CredentialPath              string                  `yaml:"credential_path" json:"credential_path"`
-	ServiceCIDR                 string                  `yaml:"service_cidr" json:"service_cidr"`
-	VSwitches                   map[string][]string     `yaml:"vswitches" json:"vswitches"`
-	ENITags                     map[string]string       `yaml:"eni_tags" json:"eni_tags"`
-	MaxPoolSize                 int                     `yaml:"max_pool_size" json:"max_pool_size"`
-	MinPoolSize                 int                     `yaml:"min_pool_size" json:"min_pool_size"`
-	MinENI                      int                     `yaml:"min_eni" json:"min_eni"`
-	MaxENI                      int                     `yaml:"max_eni" json:"max_eni"`
-	Prefix                      string                  `yaml:"prefix" json:"prefix"`
-	SecurityGroup               string                  `yaml:"security_group" json:"security_group"`
-	SecurityGroups              []string                `yaml:"security_groups" json:"security_groups"`
-	EniCapRatio                 float64                 `yaml:"eni_cap_ratio" json:"eni_cap_ratio" mod:"default=1"`
-	EniCapShift                 int                     `yaml:"eni_cap_shift" json:"eni_cap_shift"`
-	VSwitchSelectionPolicy      string                  `yaml:"vswitch_selection_policy" json:"vswitch_selection_policy" mod:"default=random"`
-	EniSelectionPolicy          string                  `yaml:"eni_selection_policy" json:"eni_selection_policy" mod:"default=most_ips"`
-	IPStack                     string                  `yaml:"ip_stack" json:"ip_stack" validate:"oneof=ipv4 ipv6 dual" mod:"default=ipv4"` // default ipv4 , support ipv4 dual
-	EnableENITrunking           bool                    `yaml:"enable_eni_trunking" json:"enable_eni_trunking"`
-	EnableERDMA                 bool                    `yaml:"enable_erdma" json:"enable_erdma"`
-	CustomStatefulWorkloadKinds []string                `yaml:"custom_stateful_workload_kinds" json:"custom_stateful_workload_kinds"`
-	IPAMType                    types.IPAMType          `yaml:"ipam_type" json:"ipam_type"` // crd or default
-	BackoffOverride             map[string]wait.Backoff `json:"backoff_override,omitempty"`
-	ExtraRoutes                 []route.Route           `json:"extra_routes,omitempty"`
-	DisableDevicePlugin         bool                    `json:"disable_device_plugin"`
-	ENITagFilter                map[string]string       `json:"eni_tag_filter"` // if set , only enis match filter, will be managed
-	KubeClientQPS               float32                 `json:"kube_client_qps"`
-	KubeClientBurst             int                     `json:"kube_client_burst"`
-	ResourceGroupID             string                  `json:"resource_group_id"`
-	RateLimit                   map[string]int          `json:"rate_limit"`
-	EnablePatchPodIPs           *bool                   `json:"enable_patch_pod_ips,omitempty"  mod:"default=true"`
+	Version                     string                             `yaml:"version" json:"version"`
+	AccessID                    secret.Secret                      `yaml:"access_key" json:"access_key"`
+	AccessSecret                secret.Secret                      `yaml:"access_secret" json:"access_secret"`
+	RegionID                    string                             `yaml:"region_id" json:"region_id"`
+	CredentialPath              string                             `yaml:"credential_path" json:"credential_path"`
+	ServiceCIDR                 string                             `yaml:"service_cidr" json:"service_cidr"`
+	VSwitches                   map[string][]string                `yaml:"vswitches" json:"vswitches"`
+	ENITags                     map[string]string                  `yaml:"eni_tags" json:"eni_tags"`
+	MaxPoolSize                 int                                `yaml:"max_pool_size" json:"max_pool_size"`
+	MinPoolSize                 int                                `yaml:"min_pool_size" json:"min_pool_size"`
+	MinENI                      int                                `yaml:"min_eni" json:"min_eni"`
+	MaxENI                      int                                `yaml:"max_eni" json:"max_eni"`
+	Prefix                      string                             `yaml:"prefix" json:"prefix"`
+	SecurityGroup               string                             `yaml:"security_group" json:"security_group"`
+	SecurityGroups              []string                           `yaml:"security_groups" json:"security_groups"`
+	EniCapRatio                 float64                            `yaml:"eni_cap_ratio" json:"eni_cap_ratio" mod:"default=1"`
+	EniCapShift                 int                                `yaml:"eni_cap_shift" json:"eni_cap_shift"`
+	VSwitchSelectionPolicy      string                             `yaml:"vswitch_selection_policy" json:"vswitch_selection_policy" mod:"default=random"`
+	EniSelectionPolicy          string                             `yaml:"eni_selection_policy" json:"eni_selection_policy" mod:"default=most_ips"`
+	IPStack                     string                             `yaml:"ip_stack" json:"ip_stack" validate:"oneof=ipv4 ipv6 dual" mod:"default=ipv4"` // default ipv4 , support ipv4 dual
+	EnableENITrunking           bool                               `yaml:"enable_eni_trunking" json:"enable_eni_trunking"`
+	EnableERDMA                 bool                               `yaml:"enable_erdma" json:"enable_erdma"`
+	CustomStatefulWorkloadKinds []string                           `yaml:"custom_stateful_workload_kinds" json:"custom_stateful_workload_kinds"`
+	IPAMType                    types.IPAMType                     `yaml:"ipam_type" json:"ipam_type"` // crd or default
+	BackoffOverride             map[string]backoff.ExtendedBackoff `json:"backoff_override,omitempty"`
+	ExtraRoutes                 []route.Route                      `json:"extra_routes,omitempty"`
+	DisableDevicePlugin         bool                               `json:"disable_device_plugin"`
+	ENITagFilter                map[string]string                  `json:"eni_tag_filter"` // if set , only enis match filter, will be managed
+	KubeClientQPS               float32                            `json:"kube_client_qps"`
+	KubeClientBurst             int                                `json:"kube_client_burst"`
+	ResourceGroupID             string                             `json:"resource_group_id"`
+	RateLimit                   map[string]int                     `json:"rate_limit"`
+	EnablePatchPodIPs           *bool                              `json:"enable_patch_pod_ips,omitempty"  mod:"default=true"`
 }
 
 func (c *Config) GetSecurityGroups() []string {

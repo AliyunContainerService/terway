@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/go-logr/logr"
@@ -173,7 +174,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 				}
 				fallthrough
 			case aliyunClient.LENIStatusExecuting, aliyunClient.LENIStatusAttaching, aliyunClient.LENIStatusDetaching:
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitLENIStatus))
+				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitLENIStatus).Backoff)
 				if err != nil {
 					return reconcile.Result{}, err
 				}
@@ -199,6 +200,12 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 				return reconcile.Result{}, err
 			}
 
+			if networkInterface.Status.TrunkENIID == "" {
+				time.Sleep(backoff.Backoff(backoff.WaitENIStatus).InitialDelay)
+			} else {
+				time.Sleep(backoff.Backoff(backoff.WaitMemberENIStatus).InitialDelay)
+			}
+
 			resp, err = r.aliyun.DescribeNetworkInterfaceV2(ctx, &aliyunClient.DescribeNetworkInterfaceOptions{
 				NetworkInterfaceIDs: &[]string{networkInterface.Name},
 				RawStatus:           ptr.To(true),
@@ -209,7 +216,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 
 			if len(resp) != 1 || resp[0].Status != aliyunClient.ENIStatusInUse {
 				// wait next time
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus))
+				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus).Backoff)
 				if err != nil {
 					return reconcile.Result{}, err
 				}
@@ -316,7 +323,7 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 					}
 					fallthrough
 				case aliyunClient.LENIStatusExecuting, aliyunClient.LENIStatusDetaching:
-					du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitLENIStatus))
+					du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitLENIStatus).Backoff)
 					if err != nil {
 						return reconcile.Result{}, err
 					}
@@ -338,6 +345,12 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 				return reconcile.Result{}, err
 			}
 
+			if networkInterface.Status.TrunkENIID == "" {
+				time.Sleep(backoff.Backoff(backoff.WaitENIStatus).InitialDelay)
+			} else {
+				time.Sleep(backoff.Backoff(backoff.WaitMemberENIStatus).InitialDelay)
+			}
+			
 			enis, err := r.aliyun.DescribeNetworkInterfaceV2(ctx, &aliyunClient.DescribeNetworkInterfaceOptions{
 				NetworkInterfaceIDs: &[]string{networkInterface.Name},
 				RawStatus:           ptr.To(true),
@@ -348,7 +361,7 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 
 			if len(enis) > 0 && enis[0].Status != aliyunClient.ENIStatusAvailable {
 				// wait next time
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus))
+				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus).Backoff)
 				if err != nil {
 					return reconcile.Result{}, err
 				}

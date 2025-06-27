@@ -233,7 +233,7 @@ func (r *CRDV2) multiIP(ctx context.Context, cni *daemon.CNI, request ResourceRe
 		allocResp := &AllocResp{}
 
 		var err error
-		err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.WaitPodENIStatus), func(ctx context.Context) (bool, error) {
+		err = backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.WaitPodENIStatus), func(ctx context.Context) (bool, error) {
 			err = r.client.Get(ctx, client.ObjectKey{Name: r.nodeName}, node)
 			if err != nil {
 				l.Error(err, "get node failed")
@@ -380,7 +380,7 @@ func (r *CRDV2) getTrunkENI(ctx context.Context) (*daemon.ENI, error) {
 	var trunkENI *daemon.ENI
 
 	var innerErr error
-	err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.WaitPodENIStatus), func(ctx context.Context) (bool, error) {
+	err := backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.WaitPodENIStatus), func(ctx context.Context) (bool, error) {
 		node = &networkv1beta1.Node{}
 		innerErr = r.client.Get(ctx, client.ObjectKey{Name: r.nodeName}, node)
 		if innerErr != nil {
