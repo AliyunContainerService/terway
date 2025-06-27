@@ -35,7 +35,7 @@ func TestNewECSClient(t *testing.T) {
 func TestNewVPCClient(t *testing.T) {
 	os.Setenv("VPC_ENDPOINT", "")
 	cfg := ClientConfig{RegionID: "cn-test"}
-	cred := ProviderV1(&fakeProvider{})
+	cred := ProviderV2(&fakeProvider{})
 	client, err := NewVPCClient(cfg, cred)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

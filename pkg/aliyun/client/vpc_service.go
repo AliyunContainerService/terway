@@ -8,7 +8,7 @@ import (
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	"github.com/AliyunContainerService/terway/pkg/metric"
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
+	vpc20160428 "github.com/alibabacloud-go/vpc-20160428/v6/client"
 	"go.opentelemetry.io/otel/trace"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -45,8 +45,8 @@ func (a *VPCService) DescribeVSwitchByID(ctx context.Context, vSwitchID string) 
 		return nil, err
 	}
 
-	req := vpc.CreateDescribeVSwitchesRequest()
-	req.VSwitchId = vSwitchID
+	req := &vpc20160428.DescribeVSwitchesRequest{}
+	req.VSwitchId = &vSwitchID
 
 	l := LogFields(logf.FromContext(ctx), req)
 
@@ -58,25 +58,30 @@ func (a *VPCService) DescribeVSwitchByID(ctx context.Context, vSwitchID string) 
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "DescribeVSwitches failed")
 		return nil, err
 	}
-	if len(resp.VSwitches.VSwitch) == 0 {
+
+	if resp.Body == nil || resp.Body.VSwitches == nil {
+		return nil, fmt.Errorf("empty response body")
+	}
+
+	if len(resp.Body.VSwitches.VSwitch) == 0 {
 		return nil, apiErr.ErrNotFound
 	}
-	if len(resp.VSwitches.VSwitch) > 0 {
+	if len(resp.Body.VSwitches.VSwitch) > 0 {
 		return &VSwitch{
-			VpcId:                   resp.VSwitches.VSwitch[0].VSwitchId,
-			Status:                  resp.VSwitches.VSwitch[0].Status,
-			AvailableIpAddressCount: resp.VSwitches.VSwitch[0].AvailableIpAddressCount,
-			NetworkAclId:            resp.VSwitches.VSwitch[0].NetworkAclId,
-			OwnerId:                 resp.VSwitches.VSwitch[0].OwnerId,
-			VSwitchId:               resp.VSwitches.VSwitch[0].VSwitchId,
-			CidrBlock:               resp.VSwitches.VSwitch[0].CidrBlock,
-			Description:             resp.VSwitches.VSwitch[0].Description,
-			ResourceGroupId:         resp.VSwitches.VSwitch[0].ResourceGroupId,
-			ZoneId:                  resp.VSwitches.VSwitch[0].ZoneId,
-			Ipv6CidrBlock:           resp.VSwitches.VSwitch[0].Ipv6CidrBlock,
-			VSwitchName:             resp.VSwitches.VSwitch[0].VSwitchName,
-			ShareType:               resp.VSwitches.VSwitch[0].ShareType,
-			EnabledIpv6:             resp.VSwitches.VSwitch[0].EnabledIpv6,
+			VpcId:                   FromPtr(resp.Body.VSwitches.VSwitch[0].VSwitchId),
+			Status:                  FromPtr(resp.Body.VSwitches.VSwitch[0].Status),
+			AvailableIpAddressCount: FromPtr(resp.Body.VSwitches.VSwitch[0].AvailableIpAddressCount),
+			NetworkAclId:            FromPtr(resp.Body.VSwitches.VSwitch[0].NetworkAclId),
+			OwnerId:                 FromPtr(resp.Body.VSwitches.VSwitch[0].OwnerId),
+			VSwitchId:               FromPtr(resp.Body.VSwitches.VSwitch[0].VSwitchId),
+			CidrBlock:               FromPtr(resp.Body.VSwitches.VSwitch[0].CidrBlock),
+			Description:             FromPtr(resp.Body.VSwitches.VSwitch[0].Description),
+			ResourceGroupId:         FromPtr(resp.Body.VSwitches.VSwitch[0].ResourceGroupId),
+			ZoneId:                  FromPtr(resp.Body.VSwitches.VSwitch[0].ZoneId),
+			Ipv6CidrBlock:           FromPtr(resp.Body.VSwitches.VSwitch[0].Ipv6CidrBlock),
+			VSwitchName:             FromPtr(resp.Body.VSwitches.VSwitch[0].VSwitchName),
+			ShareType:               FromPtr(resp.Body.VSwitches.VSwitch[0].ShareType),
+			EnabledIpv6:             FromPtr(resp.Body.VSwitches.VSwitch[0].EnabledIpv6),
 		}, nil
 	}
 	return nil, err

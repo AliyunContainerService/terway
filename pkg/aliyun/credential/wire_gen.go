@@ -23,7 +23,8 @@ func InitializeClientMgr(regionID string, credProvider provider.CredentialsProvi
 	if err != nil {
 		return nil, err
 	}
-	vpcClient, err := NewVPCClient(clientConfig, credential)
+	credentialsCredential := ProviderV2(credProvider)
+	vpcClient, err := NewVPCClient(clientConfig, credentialsCredential)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +32,6 @@ func InitializeClientMgr(regionID string, credProvider provider.CredentialsProvi
 	if err != nil {
 		return nil, err
 	}
-	credentialsCredential := ProviderV2(credProvider)
 	eflov2Client, err := NewEFLOV2Client(clientConfig, credentialsCredential)
 	if err != nil {
 		return nil, err

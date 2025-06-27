@@ -121,11 +121,15 @@ func WarpError(err error) error {
 	}
 	var respErr apiErr.Error
 	ok := errors.As(err, &respErr)
-	if !ok {
-		return err
+	if ok {
+		return &E{e: respErr}
+	}
+	var teaErr *tea.SDKError
+	if errors.As(err, &teaErr) {
+		return &E2{e: teaErr}
 	}
 
-	return &E{e: respErr}
+	return err
 }
 
 // IsURLError if there is conn problem

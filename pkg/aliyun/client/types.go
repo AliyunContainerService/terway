@@ -203,9 +203,9 @@ func LogFields(l logr.Logger, obj any) logr.Logger {
 	return r
 }
 
-func FromPtr[V any, T ~*V](ptr T) V {
+func FromPtr[T any](ptr *T) T {
 	if ptr == nil {
-		var zero V
+		var zero T
 		return zero
 	}
 	return *ptr

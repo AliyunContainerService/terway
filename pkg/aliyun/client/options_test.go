@@ -6,6 +6,7 @@ import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/utils/ptr"
 )
 
 // MockIdempotentKeyGen is a mock implementation of IdempotentKeyGen interface
@@ -133,8 +134,8 @@ func TestApplyTo(t *testing.T) {
 	t.Run("All fields are nil", func(t *testing.T) {
 		src := &AttachNetworkInterfaceOptions{}
 		dst := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("old-nic"),
-			InstanceID:         ptr("old-instance"),
+			NetworkInterfaceID: ptr.To("old-nic"),
+			InstanceID:         ptr.To("old-instance"),
 		}
 		src.ApplyTo(dst)
 		assert.Equal(t, "old-nic", *dst.NetworkInterfaceID)
@@ -143,11 +144,11 @@ func TestApplyTo(t *testing.T) {
 
 	t.Run("Some fields are non-nil", func(t *testing.T) {
 		src := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("new-nic"),
+			NetworkInterfaceID: ptr.To("new-nic"),
 		}
 		dst := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("old-nic"),
-			InstanceID:         ptr("old-instance"),
+			NetworkInterfaceID: ptr.To("old-nic"),
+			InstanceID:         ptr.To("old-instance"),
 		}
 		src.ApplyTo(dst)
 		assert.Equal(t, "new-nic", *dst.NetworkInterfaceID)
@@ -156,12 +157,12 @@ func TestApplyTo(t *testing.T) {
 
 	t.Run("All fields are non-nil", func(t *testing.T) {
 		src := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("new-nic"),
-			InstanceID:         ptr("new-instance"),
+			NetworkInterfaceID: ptr.To("new-nic"),
+			InstanceID:         ptr.To("new-instance"),
 		}
 		dst := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("old-nic"),
-			InstanceID:         ptr("old-instance"),
+			NetworkInterfaceID: ptr.To("old-nic"),
+			InstanceID:         ptr.To("old-instance"),
 		}
 		src.ApplyTo(dst)
 		assert.Equal(t, "new-nic", *dst.NetworkInterfaceID)
@@ -172,10 +173,10 @@ func TestApplyTo(t *testing.T) {
 func TestECS(t *testing.T) {
 	t.Run("All fields are non-nil", func(t *testing.T) {
 		opts := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID:     ptr("nic-123"),
-			InstanceID:             ptr("instance-456"),
-			TrunkNetworkInstanceID: ptr("trunk-789"),
-			NetworkCardIndex:       ptr(1),
+			NetworkInterfaceID:     ptr.To("nic-123"),
+			InstanceID:             ptr.To("instance-456"),
+			TrunkNetworkInstanceID: ptr.To("trunk-789"),
+			NetworkCardIndex:       ptr.To(1),
 			Backoff:                &wait.Backoff{Steps: 2},
 		}
 		req, err := opts.ECS()
@@ -190,7 +191,7 @@ func TestECS(t *testing.T) {
 
 	t.Run("Missing required fields", func(t *testing.T) {
 		opts := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("nic-123"),
+			NetworkInterfaceID: ptr.To("nic-123"),
 			InstanceID:         nil,
 		}
 		_, err := opts.ECS()
@@ -199,8 +200,8 @@ func TestECS(t *testing.T) {
 
 	t.Run("Backoff is nil", func(t *testing.T) {
 		opts := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("nic-123"),
-			InstanceID:         ptr("instance-456"),
+			NetworkInterfaceID: ptr.To("nic-123"),
+			InstanceID:         ptr.To("instance-456"),
 			Backoff:            nil,
 		}
 		_, err := opts.ECS()
@@ -210,8 +211,8 @@ func TestECS(t *testing.T) {
 
 	t.Run("Partial fields are nil", func(t *testing.T) {
 		opts := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID:     ptr("nic-123"),
-			InstanceID:             ptr("instance-456"),
+			NetworkInterfaceID:     ptr.To("nic-123"),
+			InstanceID:             ptr.To("instance-456"),
 			TrunkNetworkInstanceID: nil,
 			NetworkCardIndex:       nil,
 		}
@@ -222,9 +223,4 @@ func TestECS(t *testing.T) {
 		assert.Empty(t, req.TrunkNetworkInstanceId)
 		assert.Equal(t, requests.Integer(""), req.NetworkCardIndex)
 	})
-}
-
-// Helper function to create pointers for string and int values
-func ptr[T any](v T) *T {
-	return &v
 }

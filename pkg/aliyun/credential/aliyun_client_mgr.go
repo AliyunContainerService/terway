@@ -11,12 +11,12 @@ import (
 	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
+	vpc20160428 "github.com/alibabacloud-go/vpc-20160428/v6/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth/credentials"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
-	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	credential "github.com/aliyun/credentials-go/credentials"
 	"golang.org/x/net/context"
 	"k8s.io/klog/v2"
@@ -25,7 +25,7 @@ import (
 
 type Client interface {
 	ECS() *ecs.Client
-	VPC() *vpc.Client
+	VPC() *vpc20160428.Client
 	EFLO() *eflo.Client
 	EFLOV2() *eflo20220530.Client
 }
@@ -125,7 +125,7 @@ type ClientMgr struct {
 func (c *ClientMgr) ECS() *ecs.Client {
 	return c.ecsClient.GetClient()
 }
-func (c *ClientMgr) VPC() *vpc.Client {
+func (c *ClientMgr) VPC() *vpc20160428.Client {
 	return c.vpcClient.GetClient()
 }
 func (c *ClientMgr) EFLO() *eflo.Client {
