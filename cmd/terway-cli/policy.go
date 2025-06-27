@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Jeffail/gabs/v2"
 	"github.com/samber/lo"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/AliyunContainerService/terway/types"
+	ctrl "sigs.k8s.io/controller-runtime/pkg/manager/signals"
 )
 
 var readFunc func(name string) ([]byte, error)
@@ -360,17 +363,36 @@ func runSocat(cfg *PolicyConfig) error {
 	if port == "" {
 		port = "9099"
 	}
-	args := []string{
-		"socat",
-		fmt.Sprintf("TCP-LISTEN:%s,bind=127.0.0.1,fork,reuseaddr", port),
-		"system:'sleep 2;kill -9 $SOCAT_PID 2>/dev/null'",
-	}
-	env := os.Environ()
-	binary, err := exec.LookPath("socat")
+	addr := "127.0.0.1:" + port
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("socat is not installed %w", err)
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
-	return syscall.Exec(binary, args, env)
+	fmt.Printf("Health check TCP listener started on %s\n", addr)
+
+	ctx := ctrl.SetupSignalHandler()
+	done := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		_ = ln.Close()
+		close(done)
+	}()
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if opErr, ok := err.(*net.OpError); ok && !opErr.Temporary() {
+				<-done
+				return nil
+			}
+			fmt.Fprintf(os.Stderr, "accept error: %v\n", err)
+			continue
+		}
+		go func(c net.Conn) {
+			time.Sleep(2 * time.Second)
+			_ = c.Close()
+		}(conn)
+	}
 }
 
 func mutateCiliumArgs(in []string) ([]string, error) {
