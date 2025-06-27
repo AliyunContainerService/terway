@@ -7,7 +7,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -134,7 +133,7 @@ func (r *Remote) Allocate(ctx context.Context, cni *daemon.CNI, request Resource
 
 		var podENI *podENITypes.PodENI
 		var err, innerErr error
-		err = wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.WaitPodENIStatus), func(ctx context.Context) (bool, error) {
+		err = backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.WaitPodENIStatus), func(ctx context.Context) (bool, error) {
 			podENI, innerErr = getPodENI(ctx, r.client, cni.PodNamespace, cni.PodName)
 			if innerErr != nil {
 				innerErr = &types.Error{

@@ -1099,7 +1099,7 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 					log.Error(err, "run gc failed")
 					continue
 				}
-				_, err = n.aliyun.WaitForNetworkInterfaceV2(ctx, eni.ID, aliyunClient.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus), true)
+				_, err = n.aliyun.WaitForNetworkInterfaceV2(ctx, eni.ID, aliyunClient.ENIStatusAvailable, backoff.Backoff(backoff.WaitENIStatus).Backoff, true)
 				if err != nil {
 					if !errors.Is(err, apiErr.ErrNotFound) {
 						log.Error(err, "run gc failed")
@@ -1284,7 +1284,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			InstanceID:       node.Spec.NodeMetadata.InstanceID,
 		},
 
-		Backoff: &bo,
+		Backoff: &bo.Backoff,
 	}
 
 	result, err := n.aliyun.CreateNetworkInterfaceV2(ctx, typeOption, createOpts)
@@ -1345,7 +1345,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 		time.Sleep(3 * time.Second)
 	}
 
-	eni, err := n.aliyun.WaitForNetworkInterfaceV2(ctx, result.NetworkInterfaceID, aliyunClient.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus), false)
+	eni, err := n.aliyun.WaitForNetworkInterfaceV2(ctx, result.NetworkInterfaceID, aliyunClient.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus).Backoff, false)
 	if err != nil {
 		return err
 	}
@@ -1382,7 +1382,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 				NetworkInterfaceID: opt.eniRef.ID,
 				IPCount:            opt.addIPv4N,
 			},
-			Backoff: &bo,
+			Backoff: &bo.Backoff,
 		})
 
 		if err != nil {
@@ -1430,7 +1430,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
 				NetworkInterfaceID: opt.eniRef.ID,
 				IPv6Count:          opt.addIPv6N,
 			},
-			Backoff: &bo,
+			Backoff: &bo.Backoff,
 		})
 		if err != nil {
 			if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {

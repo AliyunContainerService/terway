@@ -5,6 +5,7 @@ import (
 	"time"
 
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
@@ -209,10 +210,12 @@ var _ = Describe("Common ENI Operations", func() {
 			result, err := WaitStatus(ctx, k8sClient, &DescribeOption{
 				NetworkInterfaceID: "eni-wait",
 				ExpectPhase:        ptr.To(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)),
-				BackOff: wait.Backoff{
-					Duration: 100 * time.Millisecond,
-					Factor:   1.0,
-					Steps:    5,
+				BackOff: backoff.ExtendedBackoff{
+					Backoff: wait.Backoff{
+						Duration: 100 * time.Millisecond,
+						Factor:   1.0,
+						Steps:    5,
+					},
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -223,10 +226,12 @@ var _ = Describe("Common ENI Operations", func() {
 			_, err := WaitStatus(ctx, k8sClient, &DescribeOption{
 				NetworkInterfaceID: "nonexistent-eni",
 				IgnoreNotExist:     false,
-				BackOff: wait.Backoff{
-					Duration: 100 * time.Millisecond,
-					Factor:   1.0,
-					Steps:    1,
+				BackOff: backoff.ExtendedBackoff{
+					Backoff: wait.Backoff{
+						Duration: 100 * time.Millisecond,
+						Factor:   1.0,
+						Steps:    1,
+					},
 				},
 			})
 			Expect(err).To(HaveOccurred())
@@ -237,10 +242,12 @@ var _ = Describe("Common ENI Operations", func() {
 			result, err := WaitStatus(ctx, k8sClient, &DescribeOption{
 				NetworkInterfaceID: "nonexistent-eni",
 				IgnoreNotExist:     true,
-				BackOff: wait.Backoff{
-					Duration: 100 * time.Millisecond,
-					Factor:   1.0,
-					Steps:    1,
+				BackOff: backoff.ExtendedBackoff{
+					Backoff: wait.Backoff{
+						Duration: 100 * time.Millisecond,
+						Factor:   1.0,
+						Steps:    1,
+					},
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -261,10 +268,12 @@ var _ = Describe("Common ENI Operations", func() {
 			_, err = WaitStatus(ctx, k8sClient, &DescribeOption{
 				NetworkInterfaceID: "eni-mismatch",
 				ExpectPhase:        ptr.To(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)),
-				BackOff: wait.Backoff{
-					Duration: 100 * time.Millisecond,
-					Factor:   1.0,
-					Steps:    1,
+				BackOff: backoff.ExtendedBackoff{
+					Backoff: wait.Backoff{
+						Duration: 100 * time.Millisecond,
+						Factor:   1.0,
+						Steps:    1,
+					},
 				},
 			})
 			Expect(err).To(HaveOccurred())
@@ -285,10 +294,12 @@ var _ = Describe("Common ENI Operations", func() {
 			_, err = WaitStatus(ctx, k8sClient, &DescribeOption{
 				NetworkInterfaceID: "eni-timeout",
 				ExpectPhase:        ptr.To(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)),
-				BackOff: wait.Backoff{
-					Duration: 100 * time.Millisecond,
-					Factor:   1.0,
-					Steps:    2,
+				BackOff: backoff.ExtendedBackoff{
+					Backoff: wait.Backoff{
+						Duration: 100 * time.Millisecond,
+						Factor:   1.0,
+						Steps:    2,
+					},
 				},
 			})
 			Expect(err).To(HaveOccurred())

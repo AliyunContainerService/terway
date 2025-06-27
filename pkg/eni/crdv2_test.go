@@ -20,13 +20,15 @@ import (
 
 func TestGetTrunkENIReturnsErrorWhenNodeNotInitialized(t *testing.T) {
 	backoff.Backoff(backoff.WaitPodENIStatus)
-	backoff.OverrideBackoff(map[string]wait.Backoff{
+	backoff.OverrideBackoff(map[string]backoff.ExtendedBackoff{
 		backoff.WaitPodENIStatus: {
-			Duration: 0,
-			Factor:   0,
-			Jitter:   0,
-			Steps:    1,
-			Cap:      0,
+			Backoff: wait.Backoff{
+				Duration: 0,
+				Factor:   0,
+				Jitter:   0,
+				Steps:    1,
+				Cap:      0,
+			},
 		},
 	})
 
@@ -49,13 +51,15 @@ func TestGetTrunkENIReturnsErrorWhenNodeNotInitialized(t *testing.T) {
 
 func TestGetTrunkENIReturnsErrorWhenTrunkNotEnabled(t *testing.T) {
 	backoff.Backoff(backoff.WaitPodENIStatus)
-	backoff.OverrideBackoff(map[string]wait.Backoff{
+	backoff.OverrideBackoff(map[string]backoff.ExtendedBackoff{
 		backoff.WaitPodENIStatus: {
-			Duration: 0,
-			Factor:   0,
-			Jitter:   0,
-			Steps:    1,
-			Cap:      0,
+			Backoff: wait.Backoff{
+				Duration: 0,
+				Factor:   0,
+				Jitter:   0,
+				Steps:    1,
+				Cap:      0,
+			},
 		},
 	})
 
@@ -77,13 +81,15 @@ func TestGetTrunkENIReturnsErrorWhenTrunkNotEnabled(t *testing.T) {
 
 func TestGetTrunkENIReturnsErrorWhenTrunkIDNotFound(t *testing.T) {
 	backoff.Backoff(backoff.WaitPodENIStatus)
-	backoff.OverrideBackoff(map[string]wait.Backoff{
+	backoff.OverrideBackoff(map[string]backoff.ExtendedBackoff{
 		backoff.WaitPodENIStatus: {
-			Duration: 0,
-			Factor:   0,
-			Jitter:   0,
-			Steps:    1,
-			Cap:      0,
+			Backoff: wait.Backoff{
+				Duration: 0,
+				Factor:   0,
+				Jitter:   0,
+				Steps:    1,
+				Cap:      0,
+			},
 		},
 	})
 
@@ -112,13 +118,15 @@ func TestGetTrunkENIReturnsErrorWhenTrunkIDNotFound(t *testing.T) {
 
 func TestGetTrunkENIReturnsValidENI(t *testing.T) {
 	backoff.Backoff(backoff.WaitPodENIStatus)
-	backoff.OverrideBackoff(map[string]wait.Backoff{
+	backoff.OverrideBackoff(map[string]backoff.ExtendedBackoff{
 		backoff.WaitPodENIStatus: {
-			Duration: 0,
-			Factor:   0,
-			Jitter:   0,
-			Steps:    1,
-			Cap:      0,
+			Backoff: wait.Backoff{
+				Duration: 0,
+				Factor:   0,
+				Jitter:   0,
+				Steps:    1,
+				Cap:      0,
+			},
 		},
 	})
 

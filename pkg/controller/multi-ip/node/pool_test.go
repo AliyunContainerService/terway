@@ -1999,7 +1999,7 @@ var _ = Describe("Test ReconcileNode", func() {
 					NetworkInterfaceID: "eni-1",
 					IPCount:            1,
 				},
-				Backoff: &bo1,
+				Backoff: &bo1.Backoff,
 			}).Return([]aliyunClient.IPSet{
 				{
 					Primary:   false,
@@ -2013,7 +2013,7 @@ var _ = Describe("Test ReconcileNode", func() {
 					NetworkInterfaceID: "eni-2",
 					IPCount:            1,
 				},
-				Backoff: &bo2,
+				Backoff: &bo2.Backoff,
 			}).Return([]aliyunClient.IPSet{
 				{
 					Primary:   false,

@@ -92,7 +92,7 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 	if strings.ToLower(eniType) == "erdma" {
 		erdma = true
 	}
-	err := wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENICreate), func(ctx context.Context) (bool, error) {
+	err := backoff.ExponentialBackoffWithInitialDelay(a.ctx, backoff.Backoff(backoff.ENICreate), func(ctx context.Context) (bool, error) {
 		vsw, innerErr := a.vsw.GetOne(ctx, a.openAPI.GetVPC(), a.zoneID, a.vSwitchOptions, &vswpool.SelectOptions{
 			VSwitchSelectPolicy: a.selectionPolicy,
 		})
@@ -115,7 +115,7 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 				ResourceGroupID:  a.resourceGroupID,
 				SourceDestCheck:  ptr.To(false),
 			},
-			Backoff: &bo,
+			Backoff: &bo.Backoff,
 		}
 
 		eni, innerErr = a.openAPI.GetECS().CreateNetworkInterface(ctx, option)
@@ -254,7 +254,7 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 
 	var innerErr error
 	// we check openAPI at last to ensure the eni is at InUse status
-	err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIOps), func(ctx context.Context) (done bool, err error) {
+	err = backoff.ExponentialBackoffWithInitialDelay(a.ctx, backoff.Backoff(backoff.ENIOps), func(ctx context.Context) (done bool, err error) {
 		var eniSet []*client.NetworkInterface
 		eniSet, innerErr = a.openAPI.GetECS().DescribeNetworkInterface(ctx, "", []string{r.ID}, "", "", "", nil)
 		if innerErr != nil {
@@ -287,7 +287,7 @@ func (a *Aliyun) AssignNIPv4(eniID string, count int, mac string) ([]netip.Addr,
 
 	bo := backoff.Backoff(backoff.ENIIPOps)
 	option := &client.AssignPrivateIPAddressOptions{
-		Backoff: &bo,
+		Backoff: &bo.Backoff,
 		NetworkInterfaceOptions: &client.NetworkInterfaceOptions{
 			NetworkInterfaceID: eniID,
 			IPCount:            count,
@@ -318,7 +318,7 @@ func (a *Aliyun) AssignNIPv6(eniID string, count int, mac string) ([]netip.Addr,
 
 	bo := backoff.Backoff(backoff.ENIIPOps)
 	option := &client.AssignIPv6AddressesOptions{
-		Backoff: &bo,
+		Backoff: &bo.Backoff,
 		NetworkInterfaceOptions: &client.NetworkInterfaceOptions{
 			NetworkInterfaceID: eniID,
 			IPv6Count:          count,
@@ -345,7 +345,7 @@ func (a *Aliyun) AssignNIPv6(eniID string, count int, mac string) ([]netip.Addr,
 func (a *Aliyun) UnAssignNIPv4(eniID string, ips []netip.Addr, mac string) error {
 	var err, innerErr error
 
-	err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
+	err = backoff.ExponentialBackoffWithInitialDelay(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
 		innerErr = a.openAPI.GetECS().UnAssignPrivateIPAddresses(ctx, eniID, ips)
 		if innerErr != nil {
 			if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
@@ -379,7 +379,7 @@ func (a *Aliyun) UnAssignNIPv4(eniID string, ips []netip.Addr, mac string) error
 func (a *Aliyun) UnAssignNIPv6(eniID string, ips []netip.Addr, mac string) error {
 	var err, innerErr error
 
-	err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
+	err = backoff.ExponentialBackoffWithInitialDelay(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
 		innerErr = a.openAPI.GetECS().UnAssignIpv6Addresses(ctx, eniID, ips)
 		if innerErr != nil {
 			if apiErr.ErrAssert(apiErr.ErrForbidden, innerErr) {
@@ -469,7 +469,7 @@ func (a *Aliyun) GetAttachedNetworkInterface(trunkENIID string) ([]*daemon.ENI, 
 	if feat > 0 || len(a.eniTags) > 0 {
 		var innerErr error
 		var eniSet []*client.NetworkInterface
-		err = wait.ExponentialBackoffWithContext(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
+		err = backoff.ExponentialBackoffWithInitialDelay(a.ctx, backoff.Backoff(backoff.ENIIPOps), func(ctx context.Context) (bool, error) {
 			eniSet, innerErr = a.openAPI.GetECS().DescribeNetworkInterface(ctx, "", eniIDs, "", "", "", a.eniTagFilter)
 			if innerErr == nil {
 				return true, nil

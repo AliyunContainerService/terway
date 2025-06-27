@@ -719,7 +719,7 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 			// TODO: watch the eni change
 			eni, err := common.WaitStatus(ctx, m.client, &common.DescribeOption{
 				NetworkInterfaceID: alloc.ENI.ID,
-				BackOff:            backoff.Backoff(backoff.WaitENIStatus),
+				BackOff:            backoff.Backoff(backoff.WaitNetworkInterfaceStatus),
 				ExpectPhase:        (*v1beta1.Phase)(ptr.To(v1beta1.ENIPhaseBind)),
 				IgnoreNotExist:     false,
 			})
@@ -783,7 +783,7 @@ func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.P
 		}
 
 		_, err = common.WaitStatus(ctx, m.client, &common.DescribeOption{
-			BackOff:            backoff.Backoff(backoff.WaitENIStatus),
+			BackOff:            backoff.Backoff(backoff.WaitNetworkInterfaceStatus),
 			IgnoreNotExist:     true,
 			NetworkInterfaceID: alloc.ENI.ID,
 			ExpectPhase:        ptr.To(v1beta1.Phase(v1beta1.ENIPhaseUnbind)),

@@ -7,6 +7,7 @@ import (
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/types"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
@@ -173,7 +174,7 @@ type DescribeOption struct {
 	IgnoreNotExist     bool
 
 	ExpectPhase *v1beta1.Phase
-	BackOff     wait.Backoff
+	BackOff     backoff.ExtendedBackoff
 }
 
 func WaitStatus(ctx context.Context, c client.Client, option *DescribeOption) (*v1beta1.NetworkInterface, error) {
@@ -187,7 +188,7 @@ func WaitStatus(ctx context.Context, c client.Client, option *DescribeOption) (*
 	}
 	var innerErr error
 	var notFound bool
-	err := wait.ExponentialBackoffWithContext(ctx, option.BackOff, func(ctx context.Context) (done bool, err error) {
+	err := backoff.ExponentialBackoffWithInitialDelay(ctx, option.BackOff, func(ctx context.Context) (done bool, err error) {
 		innerErr = c.Get(ctx, client.ObjectKeyFromObject(networkInterface), networkInterface)
 		if innerErr != nil {
 			if k8sErr.IsNotFound(innerErr) && option.IgnoreNotExist {
