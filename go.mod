@@ -18,7 +18,7 @@ require (
 	github.com/containernetworking/plugins v1.3.0
 	github.com/evanphx/json-patch v5.6.0+incompatible
 	github.com/go-logr/logr v1.4.2
-	github.com/go-playground/mold/v4 v4.2.0
+	github.com/go-playground/mold/v4 v4.5.1
 	github.com/go-playground/validator/v10 v10.11.1
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
@@ -105,6 +105,8 @@ require (
 	github.com/google/pprof v0.0.0-20241029153458-d1b30febd7db // indirect
 	github.com/gookit/color v1.5.3 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
+	github.com/gosimple/slug v1.15.0 // indirect
+	github.com/gosimple/unidecode v1.0.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.20.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
