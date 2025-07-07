@@ -314,9 +314,11 @@ func (m *ReconcilePod) podDelete(ctx context.Context, namespacedName client.Obje
 	}
 	if haveFixedIP {
 		// for fixed ip , update podENI status to v1beta1.ENIPhaseDetaching
-		if prePodENI.Status.Phase == v1beta1.ENIPhaseDetaching {
+		switch prePodENI.Status.Phase {
+		case v1beta1.ENIPhaseDetaching, v1beta1.ENIPhaseUnbind:
 			return reconcile.Result{}, nil
 		}
+
 		prePodENICopy := prePodENI.DeepCopy()
 		prePodENICopy.Status.Phase = v1beta1.ENIPhaseDetaching
 		err = m.client.Status().Update(ctx, prePodENICopy)
