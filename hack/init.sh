@@ -46,6 +46,13 @@ cat $node_capabilities
 sysctl -w net.ipv4.conf.eth0.rp_filter=0
 modprobe sch_htb || true
 
+if grep -qE '\bkube_proxy_replacement\s*=\s*true\b' "$node_capabilities"; then
+  mkdir -p 0755 /host/var/run/cilium/cgroupv2
+  cp -f /bin/cilium-mount /host/opt/cni/bin/cilium-mount
+  nsenter --cgroup=/host/proc/1/ns/cgroup --mount=/host/proc/1/ns/mnt /opt/cni/bin/cilium-mount /var/run/cilium/cgroupv2;
+  rm -f /host/opt/cni/bin/cilium-mount
+fi
+
 set +o errexit
 
 chroot /host systemctl disable eni.service
