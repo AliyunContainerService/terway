@@ -39,7 +39,6 @@ const eniOnlyCNI = `{
 
 const cniFilePath = "/etc/cni/net.d/10-terway.conflist"
 const nodeCapabilitiesFile = "/var/run/eni/node_capabilities"
-const kubeProxyCapabilitiesFile = "/var/run/kube-proxy/node_capabilities"
 
 type Task struct {
 	Name string
@@ -204,18 +203,7 @@ func enableKPR(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	kubeProxy := nodecap.NewFileNodeCapabilities(kubeProxyCapabilitiesFile)
-	err = kubeProxy.Load()
-	if err != nil {
-		return err
-	}
-
-	// depends on kube-proxy
-	if kubeProxy.Get(nodecap.NodeCapabilityKubeProxyReplacement) == True {
-		store.Set(nodecap.NodeCapabilityKubeProxyReplacement, True)
-	} else {
-		store.Set(nodecap.NodeCapabilityKubeProxyReplacement, False)
-	}
+	store.Set(nodecap.NodeCapabilityKubeProxyReplacement, True)
 
 	return store.Save()
 }

@@ -225,6 +225,8 @@ func runCilium(cfg *PolicyConfig) error {
 
 		if cfg.EnableKPR {
 			args = append(args, "--kube-proxy-replacement=true")
+			args = append(args, "--bpf-lb-sock=true")
+			args = append(args, "--bpf-lb-sock-hostns-only=true")
 			args = append(args, "--enable-node-port=true")
 			args = append(args, "--enable-host-port=true")
 			args = append(args, "--enable-external-ips=true")
