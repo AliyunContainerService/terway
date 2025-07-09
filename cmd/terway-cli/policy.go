@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Jeffail/gabs/v2"
 	"github.com/samber/lo"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/AliyunContainerService/terway/types"
+	ctrl "sigs.k8s.io/controller-runtime/pkg/manager/signals"
 )
 
 var readFunc func(name string) ([]byte, error)
@@ -113,10 +117,10 @@ func initPolicy(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return err
 			}
-			return runSocat(cfg)
+			return runHealthCheckServer(ctrl.SetupSignalHandler(), cfg)
 		}
 		if !cfg.HasCiliumChainer {
-			return runSocat(cfg)
+			return runHealthCheckServer(ctrl.SetupSignalHandler(), cfg)
 		}
 		fmt.Printf("enable ebpf provider, run cilium")
 		fallthrough
@@ -139,7 +143,7 @@ func runExclusiveENI(cfg *PolicyConfig) error {
 		}
 	}
 
-	return runSocat(cfg)
+	return runHealthCheckServer(ctrl.SetupSignalHandler(), cfg)
 }
 
 func runCalico(cfg *PolicyConfig) error {
@@ -357,22 +361,79 @@ func cleanUPFelix() error {
 	return nil
 }
 
-func runSocat(cfg *PolicyConfig) error {
+func runHealthCheckServer(ctx context.Context, cfg *PolicyConfig) error {
 	port := cfg.HealthCheckPort
 	if port == "" {
 		port = "9099"
 	}
-	args := []string{
-		"socat",
-		fmt.Sprintf("TCP-LISTEN:%s,bind=127.0.0.1,fork,reuseaddr", port),
-		"system:'sleep 2;kill -9 $SOCAT_PID 2>/dev/null'",
-	}
-	env := os.Environ()
-	binary, err := exec.LookPath("socat")
+	addr := "127.0.0.1:" + port
+
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("socat is not installed %w", err)
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
-	return syscall.Exec(binary, args, env)
+	defer ln.Close()
+
+	fmt.Printf("Health check TCP server started on %s\n", addr)
+
+	// Channel to signal server shutdown
+	shutdownCh := make(chan struct{})
+
+	// Graceful shutdown handler
+	go func() {
+		<-ctx.Done()
+		fmt.Printf("Shutting down health check server...\n")
+		ln.Close()
+		close(shutdownCh)
+	}()
+
+	// Semaphore to limit concurrent connections
+	const maxConcurrentConns = 100
+	connSem := make(chan struct{}, maxConcurrentConns)
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			// Check if we're shutting down
+			select {
+			case <-shutdownCh:
+				fmt.Printf("Health check server stopped\n")
+				return nil
+			default:
+			}
+
+			// Handle network errors
+			if ne, ok := err.(net.Error); ok {
+				if ne.Timeout() {
+					fmt.Fprintf(os.Stderr, "accept timeout: %v\n", err)
+					continue
+				}
+			}
+
+			// For other persistent errors, log and continue
+			_, _ = fmt.Fprintf(os.Stderr, "accept error: %v, continuing...\n", err)
+			time.Sleep(100 * time.Millisecond) // Brief pause to avoid busy loop
+			continue
+		}
+
+		// Handle connection in goroutine with concurrency control
+		go func(c net.Conn) {
+			// Acquire semaphore
+			connSem <- struct{}{}
+			defer func() {
+				<-connSem // Release semaphore
+				c.Close()
+			}()
+
+			// Set connection timeout
+			_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+
+			// For health checks, we typically just need to accept the connection
+			// and close it immediately to indicate the service is healthy
+
+			_, _ = c.Write([]byte("OK\n"))
+		}(conn)
+	}
 }
 
 func mutateCiliumArgs(in []string) ([]string, error) {

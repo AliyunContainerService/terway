@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"net"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/Jeffail/gabs/v2"
 	"github.com/stretchr/testify/assert"
@@ -254,4 +258,44 @@ func Test_mutateCiliumArgs(t *testing.T) {
 			assert.Equalf(t, tt.want, got, "shouldAppend()")
 		})
 	}
+}
+
+func Test_runHealthCheckServer(t *testing.T) {
+	cfg := &PolicyConfig{
+		HealthCheckPort: "18080", // Avoid conflicts by choosing a test port
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start the server
+	go func() {
+		err := runHealthCheckServer(ctx, cfg)
+		if err != nil {
+			t.Errorf("runHealthCheckServer error: %v", err)
+		}
+	}()
+
+	// Wait for the server to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Connect to the server
+	conn, err := net.Dial("tcp", "127.0.0.1:"+cfg.HealthCheckPort)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	// Read the response content
+	resp, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("failed to read: %v", err)
+	}
+	if resp != "OK\n" {
+		t.Errorf("unexpected response: %q", resp)
+	}
+
+	// Stop the server
+	cancel()
+	time.Sleep(100 * time.Millisecond)
 }
