@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/Jeffail/gabs/v2"
 	"github.com/docker/docker/pkg/parsers/kernel"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	cliflag "k8s.io/component-base/cli/flag"
 
@@ -296,20 +298,46 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 	return g.StringIndent("", "  "), nil
 }
 
-const moundCmd = `nsenter -t 1 -m -- bash -c '
-		mount | grep "/sys/fs/bpf type bpf" || {
-		# Mount the filesystem until next reboot
-		echo "Mounting BPF filesystem..."
-		mount bpffs /sys/fs/bpf -t bpf
-
-		echo "Node initialization complete"
-	}'`
-
 func mountHostBpf() error {
-	out, err := exec.Command("/bin/sh", "-c", moundCmd).CombinedOutput()
+	target := "/sys/fs/bpf"
+
+	// 确保目标目录存在
+	err := os.MkdirAll(target, 0755)
 	if err != nil {
-		return fmt.Errorf("mount bpf failed: %v, %s", err, out)
+		return fmt.Errorf("failed to create mount point: %v", err)
 	}
-	_, _ = fmt.Fprint(os.Stdout, string(out))
+
+	// 检查是否已挂载
+	mounted, err := isMounted(target)
+	if err != nil {
+		return fmt.Errorf("failed to check mount status: %v", err)
+	}
+	if mounted {
+		return nil
+	}
+
+	// 执行 mount bpffs /sys/fs/bpf -t bpf
+	err = unix.Mount("bpffs", target, "bpf", 0, "")
+	if err != nil {
+		return fmt.Errorf("mount failed: %v", err)
+	}
+
 	return nil
+}
+
+func isMounted(path string) (bool, error) {
+	f, err := os.Open("/proc/mounts")
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), " ")
+		if len(fields) >= 2 && fields[1] == path {
+			return true, nil
+		}
+	}
+	return false, nil
 }
