@@ -215,8 +215,8 @@ func FindIPRule(rule *netlink.Rule) ([]netlink.Rule, error) {
 	var filterMask uint64
 	family := netlink.FAMILY_V4
 
-	if rule.Src == nil && rule.Dst == nil && rule.OifName == "" {
-		return nil, errors.New("both src and dst is nil")
+	if rule.Src == nil && rule.Dst == nil && rule.OifName == "" && rule.Mask == 0 && rule.Mark == 0 {
+		return nil, errors.New("rule is empty")
 	}
 
 	if rule.Src != nil {
@@ -234,6 +234,14 @@ func FindIPRule(rule *netlink.Rule) ([]netlink.Rule, error) {
 
 	if rule.Priority >= 0 {
 		filterMask = filterMask | netlink.RT_FILTER_PRIORITY
+	}
+
+	if rule.Mask >= 0 {
+		filterMask = filterMask | netlink.RT_FILTER_MASK
+	}
+
+	if rule.Mark >= 0 {
+		filterMask = filterMask | netlink.RT_FILTER_MARK
 	}
 	return netlink.RuleListFiltered(family, rule, filterMask)
 }
