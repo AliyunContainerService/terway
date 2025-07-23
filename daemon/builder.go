@@ -400,7 +400,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 		}
 	}
 
-	eniManager := eni.NewManager(poolConfig.MinPoolSize, poolConfig.MaxPoolSize, poolConfig.Capacity, 30*time.Second, eniList, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), b.service.k8s)
+	eniManager := eni.NewManager(poolConfig.MinPoolSize, poolConfig.MaxPoolSize, poolConfig.Capacity, b.config.GetIPPoolSYncPeriod(), eniList, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), b.service.k8s)
 	b.service.eniMgr = eniManager
 	err = eniManager.Run(b.ctx, &b.service.wg, podResources)
 	if err != nil {

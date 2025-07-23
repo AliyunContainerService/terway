@@ -356,10 +356,6 @@ func (m *Manager) syncPool(ctx context.Context) {
 }
 
 func NewManager(minIdles, maxIdles, total int, syncPeriod time.Duration, networkInterfaces []NetworkInterface, selectionPolicy daemon.EniSelectionPolicy, k8s k8s.Kubernetes) *Manager {
-	if syncPeriod < 2*time.Minute && syncPeriod > 0 {
-		syncPeriod = 2 * time.Minute
-	}
-
 	var handler NodeConditionHandler
 	if k8s != nil {
 		handler = k8s.PatchNodeIPResCondition

@@ -1165,7 +1165,19 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 }
 
 func (n *ReconcileNode) adjustPool(ctx context.Context, node *networkv1beta1.Node) error {
-	if MetaCtx(ctx).LastGCTime.Add(n.gcPeriod).After(time.Now()) {
+	l := logf.FromContext(ctx).WithName("adjustPool")
+
+	gcPeriod := n.gcPeriod
+	if node.Spec.Pool.PoolSyncPeriod != "" {
+		period, err := time.ParseDuration(node.Spec.Pool.PoolSyncPeriod)
+		if err != nil {
+			l.Error(err, "parse pool sync period failed, use default config")
+		} else {
+			gcPeriod = period
+		}
+	}
+
+	if MetaCtx(ctx).LastGCTime.Add(gcPeriod).After(time.Now()) {
 		return nil
 	}
 
@@ -1175,8 +1187,6 @@ func (n *ReconcileNode) adjustPool(ctx context.Context, node *networkv1beta1.Nod
 	ResourcePoolTotal.WithLabelValues(node.Name).Inc()
 
 	MetaCtx(ctx).LastGCTime = time.Now()
-
-	l := logf.FromContext(ctx).WithName("adjustPool")
 
 	keepN := node.Spec.Pool.MaxPoolSize
 

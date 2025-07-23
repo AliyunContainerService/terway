@@ -93,6 +93,8 @@ type PoolSpec struct {
 	MaxPoolSize int `json:"maxPoolSize,omitempty"`
 	// +kubebuilder:validation:Minimum=0
 	MinPoolSize int `json:"minPoolSize,omitempty"`
+
+	PoolSyncPeriod string `json:"poolSyncPeriod,omitempty"`
 }
 
 type Flavor struct {

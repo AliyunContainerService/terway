@@ -1532,6 +1532,62 @@ func TestReconcileNode_adjustPool(t *testing.T) {
 				assert.Equal(t, networkv1beta1.IPStatusValid, node.Status.NetworkInterfaces["eni-2"].IPv6["fd00::1"].Status)
 			},
 		},
+		{
+			name: "ignore if time not meet",
+			args: args{
+				ctx: func() context.Context {
+					ctx := MetaIntoCtx(context.TODO())
+					MetaCtx(ctx).LastGCTime = time.Now()
+					return ctx
+				}(),
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{EnableIPv4: true, EnableIPv6: true},
+						Pool: &networkv1beta1.PoolSpec{
+							MaxPoolSize:    0,
+							PoolSyncPeriod: "10s",
+						},
+					},
+					Status: networkv1beta1.NodeStatus{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-2": {
+								ID:                          "eni-2",
+								Status:                      "InUse",
+								NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+								NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+								IPv4: map[string]*networkv1beta1.IP{
+									"127.0.1.1": {
+										IP:      "127.0.1.1",
+										Status:  networkv1beta1.IPStatusValid,
+										Primary: true,
+										PodID:   "",
+									},
+									"127.0.1.2": {
+										IP:     "127.0.1.2",
+										Status: networkv1beta1.IPStatusValid,
+										PodID:  "",
+									},
+								},
+								IPv6: map[string]*networkv1beta1.IP{
+									"fd00::1": {
+										IP:     "fd00::1",
+										Status: networkv1beta1.IPStatusValid,
+										PodID:  "",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: assert.NoError,
+			checkFunc: func(t *testing.T, node *networkv1beta1.Node) {
+				assert.Equal(t, 1, len(node.Status.NetworkInterfaces))
+				assert.Equal(t, "InUse", node.Status.NetworkInterfaces["eni-2"].Status)
+				assert.Equal(t, networkv1beta1.IPStatusValid, node.Status.NetworkInterfaces["eni-2"].IPv4["127.0.1.2"].Status)
+				assert.Equal(t, networkv1beta1.IPStatusValid, node.Status.NetworkInterfaces["eni-2"].IPv6["fd00::1"].Status)
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

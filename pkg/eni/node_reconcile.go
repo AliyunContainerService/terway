@@ -185,8 +185,9 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 	})
 
 	node.Spec.Pool = &networkv1beta1.PoolSpec{
-		MaxPoolSize: eniConfig.MaxPoolSize,
-		MinPoolSize: eniConfig.MinPoolSize,
+		MaxPoolSize:    eniConfig.MaxPoolSize,
+		MinPoolSize:    eniConfig.MinPoolSize,
+		PoolSyncPeriod: eniConfig.IPPoolSyncPeriod,
 	}
 
 	afterStatus, err := runtime.DefaultUnstructuredConverter.ToUnstructured(node.DeepCopy())
@@ -272,8 +273,9 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	}
 
 	node.Spec.Pool = &networkv1beta1.PoolSpec{
-		MaxPoolSize: eniConfig.MaxPoolSize,
-		MinPoolSize: eniConfig.MinPoolSize,
+		MaxPoolSize:    eniConfig.MaxPoolSize,
+		MinPoolSize:    eniConfig.MinPoolSize,
+		PoolSyncPeriod: eniConfig.IPPoolSyncPeriod,
 	}
 
 	afterStatus, err := runtime.DefaultUnstructuredConverter.ToUnstructured(node.DeepCopy())

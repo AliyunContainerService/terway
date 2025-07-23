@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/secret"
@@ -60,6 +61,7 @@ type Config struct {
 	ResourceGroupID             string                  `json:"resource_group_id"`
 	RateLimit                   map[string]int          `json:"rate_limit"`
 	EnablePatchPodIPs           *bool                   `json:"enable_patch_pod_ips,omitempty"  mod:"default=true"`
+	IPPoolSyncPeriod            string                  `json:"ip_pool_sync_period"`
 }
 
 func (c *Config) GetSecurityGroups() []string {
@@ -85,6 +87,14 @@ func (c *Config) GetExtraRoutes() []string {
 		vsws = append(vsws, ids...)
 	}
 	return vsws
+}
+
+func (c *Config) GetIPPoolSYncPeriod() time.Duration {
+	du, err := time.ParseDuration(c.IPPoolSyncPeriod)
+	if err != nil {
+		return 120 * time.Second
+	}
+	return du
 }
 
 func (c *Config) Populate() {
