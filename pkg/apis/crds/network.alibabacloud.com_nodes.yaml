@@ -152,6 +152,8 @@ spec:
                   minPoolSize:
                     minimum: 0
                     type: integer
+                  poolSyncPeriod:
+                    type: string
                 type: object
             type: object
           status:
