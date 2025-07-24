@@ -139,27 +139,28 @@ func TestDataPathPolicyRoute(t *testing.T) {
 	assert.Equal(t, 1, len(routes))
 
 	// 512 from all to 169.10.0.10 look up main
-	rules, err := netlink.RuleListFiltered(netlink.FAMILY_V4, &netlink.Rule{
-		Priority: toContainerPriority,
-		Table:    unix.RT_TABLE_MAIN,
-		Dst: &net.IPNet{
-			IP:   cfg.ContainerIPNet.IPv4.IP,
-			Mask: net.CIDRMask(32, 32),
-		},
-	}, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_DST|netlink.RT_FILTER_PRIORITY)
+	rule := netlink.NewRule()
+	rule.Priority = toContainerPriority
+	rule.Table = unix.RT_TABLE_MAIN
+	rule.Dst = &net.IPNet{
+		IP:   cfg.ContainerIPNet.IPv4.IP,
+		Mask: net.CIDRMask(32, 32),
+	}
+
+	rules, err := netlink.RuleListFiltered(netlink.FAMILY_V4, rule, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_DST|netlink.RT_FILTER_PRIORITY)
 	assert.NoError(t, err)
 	assert.Equal(t, len(rules), 1)
 	assert.Nil(t, rules[0].Src)
 
 	// 2048 from 169.10.0.10 lookup table
-	rules, err = netlink.RuleListFiltered(netlink.FAMILY_V4, &netlink.Rule{
-		Priority: fromContainerPriority,
-		Table:    utils.GetRouteTableID(eni.Attrs().Index),
-		Src: &net.IPNet{
-			IP:   cfg.ContainerIPNet.IPv4.IP,
-			Mask: net.CIDRMask(32, 32),
-		},
-	}, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_SRC|netlink.RT_FILTER_PRIORITY|netlink.RT_FILTER_IIF)
+	rule = netlink.NewRule()
+	rule.Priority = fromContainerPriority
+	rule.Table = utils.GetRouteTableID(eni.Attrs().Index)
+	rule.Src = &net.IPNet{
+		IP:   cfg.ContainerIPNet.IPv4.IP,
+		Mask: net.CIDRMask(32, 32),
+	}
+	rules, err = netlink.RuleListFiltered(netlink.FAMILY_V4, rule, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_SRC|netlink.RT_FILTER_PRIORITY|netlink.RT_FILTER_IIF)
 	assert.NoError(t, err)
 	assert.Equal(t, len(rules), 1)
 

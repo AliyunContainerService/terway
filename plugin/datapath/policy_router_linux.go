@@ -456,21 +456,33 @@ func (d *PolicyRoute) Teardown(ctx context.Context, cfg *types.TeardownCfg, netN
 		return nil
 	}
 	if extender.IPv4 != nil {
-		err := exec(&netlink.Rule{Priority: fromContainerPriority, Src: extender.IPv4})
+		rule := netlink.NewRule()
+		rule.Priority = fromContainerPriority
+		rule.Src = extender.IPv4
+		err := exec(rule)
 		if err != nil {
 			return err
 		}
-		err = exec(&netlink.Rule{Priority: toContainerPriority, Dst: extender.IPv4})
+		rule = netlink.NewRule()
+		rule.Priority = toContainerPriority
+		rule.Dst = extender.IPv4
+		err = exec(rule)
 		if err != nil {
 			return err
 		}
 	}
 	if extender.IPv6 != nil {
-		err := exec(&netlink.Rule{Priority: fromContainerPriority, Src: extender.IPv6})
+		rule := netlink.NewRule()
+		rule.Priority = fromContainerPriority
+		rule.Src = extender.IPv6
+		err := exec(rule)
 		if err != nil {
 			return err
 		}
-		err = exec(&netlink.Rule{Priority: toContainerPriority, Dst: extender.IPv6})
+		rule = netlink.NewRule()
+		rule.Priority = toContainerPriority
+		rule.Dst = extender.IPv6
+		err = exec(rule)
 		if err != nil {
 			return err
 		}

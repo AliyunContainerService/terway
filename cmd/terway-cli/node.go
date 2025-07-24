@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Jeffail/gabs/v2"
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,6 +62,10 @@ var tasks = []Task{
 	{
 		Name: "kpr",
 		Func: enableKPR,
+	},
+	{
+		Name: "hostport",
+		Func: setupHostPort,
 	},
 }
 
@@ -206,4 +211,74 @@ func enableKPR(cmd *cobra.Command, args []string) error {
 	store.Set(nodecap.NodeCapabilityKubeProxyReplacement, True)
 
 	return store.Save()
+}
+
+func setupHostPort(cmd *cobra.Command, args []string) error {
+	cni, err := os.ReadFile(cniFilePath)
+	if err != nil {
+		return err
+	}
+	cniJSON, err := gabs.ParseJSON(cni)
+	if err != nil {
+		return err
+	}
+
+	// has portmap plugin ?
+	plugins := cniJSON.Path("plugins").Children()
+
+	foundPortmap := false
+	for _, plugin := range plugins {
+		if plugin.Exists("type") && plugin.S("type").String() == `"portmap"` {
+			foundPortmap = true
+			break
+		}
+	}
+
+	if !foundPortmap {
+		return nil
+	}
+	fmt.Printf("found portMap plugin\n")
+
+	enableSymmetricRouting := false
+	for _, plugin := range plugins {
+		if plugin.Exists("type") && plugin.S("type").String() == `"terway"` {
+			if plugin.Exists("symmetric_routing") {
+				if v, ok := plugin.S("symmetric_routing").Data().(bool); ok && v {
+					enableSymmetricRouting = true
+				}
+			}
+			break
+		}
+	}
+	if !enableSymmetricRouting {
+		fmt.Printf("symmetric routing disabled, ignore setup for portMap plugin\n")
+		return nil
+	}
+
+	// ignores if ipv6 only
+	if eniCfg.IPStack == "ipv6" {
+		fmt.Printf("ipv6 only, ignore setup for portMap plugin\n")
+		return nil
+	}
+
+	// ignore if KPR enabled
+	store := nodecap.NewFileNodeCapabilities(nodeCapabilitiesFile)
+
+	err = store.Load()
+	if err != nil {
+		return err
+	}
+
+	prev := store.Get(nodecap.NodeCapabilityKubeProxyReplacement)
+	if prev == True {
+		return nil
+	}
+
+	// setup ip rule ( will not clean up ,if disabled )
+	err = configureNetworkRules()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
