@@ -105,7 +105,6 @@ func generateContCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, mac net
 		if len(cfg.ExtraRoutes) > 0 {
 			routes = append(routes, &netlink.Route{
 				LinkIndex: link.Attrs().Index,
-				Scope:     netlink.SCOPE_LINK,
 				Dst:       LinkIPNetv6,
 			})
 		}
@@ -216,7 +215,6 @@ func GenerateHostPeerCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, tab
 
 		routes = append(routes, &netlink.Route{
 			LinkIndex: link.Attrs().Index,
-			Scope:     netlink.SCOPE_LINK,
 			Dst:       utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv6),
 		})
 
@@ -275,7 +273,6 @@ func GenerateENICfgForPolicy(cfg *types.SetupConfig, link netlink.Link, table in
 		}
 		routes = append(routes, &netlink.Route{
 			LinkIndex: link.Attrs().Index,
-			Scope:     netlink.SCOPE_LINK,
 			Dst: &net.IPNet{
 				IP:   gw,
 				Mask: net.CIDRMask(128, 128),
