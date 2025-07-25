@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -2280,6 +2281,71 @@ var _ = Describe("Test ReconcileNode", func() {
 			Expect(node.Status.NetworkInterfaces["eni-2"].IPv4CIDR).To(Equal("192.168.0.0/16"))
 			Expect(node.Status.NetworkInterfaces["eni-3"].IPv4).To(HaveLen(2))
 			Expect(node.Status.NetworkInterfaces["eni-4"]).To(BeNil())
+		})
+
+		It("Should not sync openAPI if degradation", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
+			MetaCtx(ctx).NeedSyncOpenAPI.Store(true)
+
+			openAPI.On("GetVPC").Return(vpcClient).Maybe()
+
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "foo",
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						InstanceID: "test-instance",
+					},
+					ENISpec: &networkv1beta1.ENISpec{},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
+						"eni-3": {
+							ID: "eni-3",
+							IPv4: map[string]*networkv1beta1.IP{
+								"192.168.0.1": {
+									IP:      "192.168.0.1",
+									Primary: true,
+								},
+							},
+							IPv6: map[string]*networkv1beta1.IP{
+								"fd00::1": {
+									IP: "fd00::1",
+								},
+							},
+						},
+						"eni-4": {
+							ID: "eni-4",
+							IPv4: map[string]*networkv1beta1.IP{
+								"192.168.0.1": {
+									IP:      "192.168.0.1",
+									Primary: true,
+								},
+							},
+							IPv6: map[string]*networkv1beta1.IP{
+								"fd00::1": {
+									IP: "fd00::1",
+								},
+							},
+						},
+					},
+				},
+			}
+			v := viper.New()
+			v.Set("degradation", "l1")
+			reconciler := &ReconcileNode{
+				aliyun:             openAPI,
+				vswpool:            switchPool,
+				fullSyncNodePeriod: time.Hour,
+				tracer:             noop.NewTracerProvider().Tracer(""),
+				v:                  v,
+			}
+
+			By("Syncing network interfaces with API")
+			err := reconciler.syncWithAPI(ctx, node)
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 

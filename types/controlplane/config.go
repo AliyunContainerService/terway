@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/go-playground/mold/v4/modifiers"
 	"github.com/go-playground/validator/v10"
+	"github.com/spf13/viper"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/utils/ptr"
 
@@ -31,7 +33,8 @@ import (
 )
 
 var (
-	cfg *Config
+	cfg         *Config
+	viperConfig *viper.Viper
 )
 
 func GetConfig() *Config {
@@ -40,6 +43,10 @@ func GetConfig() *Config {
 
 func SetConfig(c *Config) {
 	cfg = c
+}
+
+func GetViper() *viper.Viper {
+	return viperConfig
 }
 
 func ParseAndValidateCredential(file string) (*Credential, error) {
@@ -105,6 +112,25 @@ func ParseAndValidate(configFilePath, credentialFilePath string) (*Config, error
 	cfg = &c
 
 	return &c, nil
+}
+
+// InitViper initial viper
+// only partial config is loaded
+func InitViper(configFilePath string, onConfigChange func(e fsnotify.Event)) error {
+	viperConfig = viper.New()
+	viperConfig.SetConfigFile(configFilePath)
+	viperConfig.SetConfigType("yaml")
+	viperConfig.WatchConfig()
+	viperConfig.OnConfigChange(onConfigChange)
+
+	if err := viperConfig.ReadInConfig(); err != nil {
+		return err
+	}
+	var c Config
+	if err := viperConfig.Unmarshal(&c); err != nil {
+		return err
+	}
+	return nil
 }
 
 // IsControllerEnabled check if a specified controller enabled or not.
