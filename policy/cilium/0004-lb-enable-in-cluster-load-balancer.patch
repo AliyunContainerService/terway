@@ -12,7 +12,7 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  4 files changed, 13 insertions(+), 3 deletions(-)
 
 diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
-index 0701bddf5e..c35ed9dc60 100644
+index f7b44be648..f592d55336 100644
 --- a/bpf/bpf_lxc.c
 +++ b/bpf/bpf_lxc.c
 @@ -98,7 +98,7 @@ static __always_inline int __per_packet_lb_svc_xlate_4(void *ctx, struct iphdr *
@@ -61,7 +61,7 @@ index 486d4669c6..9e453da546 100644
  		k8sLoadBalancerIPs = parseIPs(loadBalancerIPs)
  	} else if option.Config.BGPAnnounceLBIP {
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 2e9be9f766..4abd5c38ff 100644
+index e38fd79cdb..854fd4abc5 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -245,6 +245,9 @@ const (

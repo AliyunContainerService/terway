@@ -75,7 +75,7 @@ index 4916cc7668..abafd6b01e 100644
  add_type(struct egress_gw_policy_entry);
  add_type(struct vtep_key);
 diff --git a/bpf/lib/common.h b/bpf/lib/common.h
-index 3e93b47cc2..7b32f32756 100644
+index b5647166db..e16e3f52cf 100644
 --- a/bpf/lib/common.h
 +++ b/bpf/lib/common.h
 @@ -352,6 +352,17 @@ struct edt_info {

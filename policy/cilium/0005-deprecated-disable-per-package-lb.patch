@@ -11,7 +11,7 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  3 files changed, 14 insertions(+), 2 deletions(-)
 
 diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
-index c35ed9dc60..b6c5359ddb 100644
+index f592d55336..dab62a1026 100644
 --- a/bpf/bpf_lxc.c
 +++ b/bpf/bpf_lxc.c
 @@ -62,11 +62,12 @@
@@ -53,7 +53,7 @@ index 0db9f8a1fa..28ff4c121f 100644
  	cDefinesMap["HOST_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameHost))
  	cDefinesMap["WORLD_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameWorld))
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 4abd5c38ff..87f4fe20dd 100644
+index 854fd4abc5..33d18ab335 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -1233,6 +1233,8 @@ const (
