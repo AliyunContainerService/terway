@@ -18,12 +18,59 @@ package controlplane
 
 import (
 	"os"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/utils/ptr"
 )
+
+func TestInitViper(t *testing.T) {
+	content := `
+leaseLockName: test-lock
+leaseLockNamespace: test-namespace
+healthzBindAddress: 0.0.0.0:8080
+metricsBindAddress: 0.0.0.0:8081
+regionID: cn-hangzhou
+clusterID: test-cluster
+vpcID: vpc-12345
+`
+	tmpfile, err := os.CreateTemp("", "config-test")
+	assert.NoError(t, err)
+	defer os.Remove(tmpfile.Name())
+
+	_, err = tmpfile.Write([]byte(content))
+	assert.NoError(t, err)
+	err = tmpfile.Close()
+	assert.NoError(t, err)
+
+	called := atomic.Bool{}
+	onConfigChange := func(e fsnotify.Event) {
+		called.Store(true)
+	}
+
+	err = InitViper(tmpfile.Name(), onConfigChange)
+	assert.NoError(t, err)
+	assert.NotNil(t, GetViper())
+
+	var config Config
+	err = GetViper().Unmarshal(&config)
+	assert.NoError(t, err)
+	assert.Equal(t, "test-lock", config.LeaseLockName)
+	assert.Equal(t, "test-namespace", config.LeaseLockNamespace)
+	assert.Equal(t, "0.0.0.0:8080", config.HealthzBindAddress)
+	assert.Equal(t, "0.0.0.0:8081", config.MetricsBindAddress)
+
+	err = os.WriteFile(tmpfile.Name(), []byte(content+"# modified\n"), 0644)
+	assert.NoError(t, err)
+
+	assert.Eventually(t, func() bool {
+		return called.Load()
+	}, 5*time.Second, 1*time.Second)
+}
 
 func TestParseAndValidateCredential(t *testing.T) {
 	tests := []struct {

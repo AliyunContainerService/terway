@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/samber/lo"
+	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -46,6 +47,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/controlplane"
 )
 
 const (
@@ -107,6 +109,7 @@ func init() {
 				gcPeriod:           gcPeriod,
 				tracer:             tracer,
 				eniBatchSize:       5, // operate eni on one reconcile
+				v:                  controlplane.GetViper(),
 			},
 			RateLimiter: workqueue.NewTypedMaxOfRateLimiter(
 				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](minSyncPeriod, maxSyncPeriod),
@@ -154,6 +157,8 @@ type ReconcileNode struct {
 	tracer trace.Tracer
 
 	eniBatchSize int
+
+	v *viper.Viper
 }
 
 type ctxMetaKey struct{}
@@ -324,10 +329,17 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 		return nil
 	}
 
+	l := logf.FromContext(ctx).WithName("syncWithAPI")
+
+	switch n.getDegradation() {
+	case controlplane.DegradationL0, controlplane.DegradationL1:
+		l.Info("degradationL0 or L1, skip syncWithAPI")
+		return nil
+	}
+
 	ctx, span := n.tracer.Start(ctx, "syncWithAPI")
 	defer span.End()
 
-	l := logf.FromContext(ctx).WithName("syncWithAPI")
 	SyncOpenAPITotal.WithLabelValues(node.Name).Inc()
 
 	var err error
@@ -719,6 +731,11 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*PodRequest, node *networkv1beta1.Node) error {
 	ctx, span := n.tracer.Start(ctx, "addIP")
 	defer span.End()
+
+	if n.getDegradation() == controlplane.DegradationL0 {
+		logr.FromContextOrDiscard(ctx).Info("degradation to L0, skip addIP")
+		return nil
+	}
 
 	normalPods := lo.PickBy(unSucceedPods, func(key string, value *PodRequest) bool {
 		return !value.RequireERDMA
@@ -1181,6 +1198,12 @@ func (n *ReconcileNode) adjustPool(ctx context.Context, node *networkv1beta1.Nod
 		return nil
 	}
 
+	switch n.getDegradation() {
+	case controlplane.DegradationL0, controlplane.DegradationL1:
+		l.Info("degradationL0 or L1, skip adjustPool")
+		return nil
+	}
+
 	ctx, span := n.tracer.Start(ctx, "adjustPool")
 	defer span.End()
 
@@ -1596,4 +1619,11 @@ func batchSize(ctx context.Context) int {
 		return efloBatchSize
 	}
 	return ecsBatchSize
+}
+
+func (n *ReconcileNode) getDegradation() controlplane.Degradation {
+	if n.v == nil {
+		return ""
+	}
+	return controlplane.Degradation(n.v.GetString("degradation"))
 }

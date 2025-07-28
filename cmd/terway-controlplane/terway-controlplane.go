@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
+	"github.com/fsnotify/fsnotify"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
@@ -127,6 +128,14 @@ func main() {
 	utils.SetStsKinds(cfg.CustomStatefulWorkloadKinds)
 
 	log.Info("using config", "config", cfg)
+
+	err = controlplane.InitViper(configFilePath, func(e fsnotify.Event) {
+		log.Info("config changed", "event", e)
+	})
+	if err != nil {
+		log.Error(err, "unable to init config")
+		os.Exit(1)
+	}
 
 	restConfig := ctrl.GetConfigOrDie()
 	restConfig.QPS = cfg.KubeClientQPS
