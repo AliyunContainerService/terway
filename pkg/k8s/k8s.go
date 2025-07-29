@@ -698,6 +698,10 @@ func parseBandwidth(s string) (uint64, error) {
 
 	i := strings.IndexFunc(s, unicode.IsLetter)
 
+	if i < 0 {
+		return 0, fmt.Errorf("invalid bandwidth %s", s)
+	}
+
 	bytesString, multiple := s[:i], s[i:]
 	bytes, err := strconv.ParseFloat(bytesString, 64)
 	if err != nil || bytes <= 0 {

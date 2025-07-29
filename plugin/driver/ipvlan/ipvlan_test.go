@@ -1,6 +1,6 @@
 //go:build privileged
 
-package vlan
+package ipvlan
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-func TestVlan(t *testing.T) {
+func TestIPVlanDataPath(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -44,11 +44,11 @@ func TestVlan(t *testing.T) {
 			LinkAttrs: netlink.LinkAttrs{Name: "eni"},
 		})
 
-		cfg := &Vlan{
-			Master: "eni",
-			IfName: "eth0",
-			Vid:    20,
-			MTU:    1500,
+		cfg := &IPVlan{
+			Parent:  "eni",
+			PreName: "tmp_eth0",
+			IfName:  "eth0",
+			MTU:     1500,
 		}
 
 		err = Setup(context.Background(), cfg, containerNS)
@@ -57,9 +57,9 @@ func TestVlan(t *testing.T) {
 	})
 
 	_ = containerNS.Do(func(netNS ns.NetNS) error {
-		vlan, err := netlink.LinkByName("eth0")
+		ipVlan, err := netlink.LinkByName("eth0")
 		assert.NoError(t, err)
-		assert.Equal(t, "vlan", vlan.Type())
+		assert.Equal(t, "ipvlan", ipVlan.Type())
 		return nil
 	})
 }
