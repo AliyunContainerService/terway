@@ -9,7 +9,7 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
-GO_BUILD_TAGS ?= default_build,privileged
+GO_BUILD_TAGS ?= privileged
 
 REGISTRY ?= registry.cn-hangzhou.aliyuncs.com/acs
 GIT_COMMIT_SHORT ?= $(shell git rev-parse --short=8 HEAD 2>/dev/null)

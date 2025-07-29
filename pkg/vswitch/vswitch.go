@@ -110,6 +110,7 @@ func (s *SwitchPool) GetOne(ctx context.Context, client client.VPC, zone string,
 		vsw, err := s.GetByID(ctx, client, id)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "get vSwitch", "id", id)
+			errs = append(errs, err)
 			continue
 		}
 

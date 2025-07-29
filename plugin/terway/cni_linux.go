@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/AliyunContainerService/terway/plugin/driver/vf"
-	"github.com/containernetworking/cni/pkg/skel"
-	cniTypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/go-logr/logr"
 	"github.com/vishvananda/netlink"
@@ -17,8 +14,11 @@ import (
 	"github.com/AliyunContainerService/terway/plugin/datapath"
 	"github.com/AliyunContainerService/terway/plugin/driver/types"
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
+	"github.com/AliyunContainerService/terway/plugin/driver/vf"
 	"github.com/AliyunContainerService/terway/rpc"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
+	"github.com/containernetworking/cni/pkg/skel"
+	cniTypes "github.com/containernetworking/cni/pkg/types"
 )
 
 func getCmdArgs(args *skel.CmdArgs) (*cniCmdArgs, error) {

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeProvider struct{}
@@ -71,4 +72,10 @@ func TestNewEFLOV2Client(t *testing.T) {
 	if client == nil && err == nil {
 		t.Fatal("expected non-nil client or error")
 	}
+}
+
+func TestInitializeClientMgr(t *testing.T) {
+	c, err := InitializeClientMgr("cn-test", &fakeProvider{})
+	require.NoError(t, err)
+	require.NotNil(t, c)
 }
