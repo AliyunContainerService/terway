@@ -82,9 +82,11 @@ func EnsureLinkMAC(ctx context.Context, link netlink.Link, mac string) error {
 func DelLinkByName(ctx context.Context, ifName string) error {
 	contLink, err := netlink.LinkByName(ifName)
 	if err != nil {
-		if _, ok := err.(netlink.LinkNotFoundError); ok { //nolint
+		var linkNotFoundError netlink.LinkNotFoundError
+		if errors.As(err, &linkNotFoundError) {
 			return nil
 		}
+		return err
 	}
 	return LinkDel(ctx, contLink)
 }
@@ -123,11 +125,11 @@ func EnsureAddr(ctx context.Context, link netlink.Link, expect *netlink.Addr) (b
 
 // FoundRoutes look up routes
 func FoundRoutes(expected *netlink.Route) ([]netlink.Route, error) {
-	family := NetlinkFamily(expected.Dst.IP)
-	routeFilter := netlink.RT_FILTER_DST
 	if expected.Dst == nil {
 		return nil, fmt.Errorf("dst in route expect not nil")
 	}
+	family := NetlinkFamily(expected.Dst.IP)
+	routeFilter := netlink.RT_FILTER_DST
 	find := *expected
 
 	if find.Dst.String() == "::/0" || find.Dst.String() == "0.0.0.0/0" {
