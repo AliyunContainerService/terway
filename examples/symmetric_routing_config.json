@@ -1,0 +1,13 @@
+{
+  "cniVersion": "0.4.0",
+  "name": "terway",
+  "type": "terway",
+  "symmetric_routing": true,
+  "symmetric_routing_config": {
+    "mark": 32,
+    "mask": 32,
+    "table_id": 200,
+    "rule_priority": 600,
+    "comment": "custom-terway-symmetric"
+  }
+} 

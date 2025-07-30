@@ -129,6 +129,20 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+func (c *Config) GetIPStack() (bool, bool) {
+	var ipv4, ipv6 bool
+	switch c.IPStack {
+	case "dual":
+		ipv4 = true
+		ipv6 = true
+	case "ipv4", "":
+		ipv4 = true
+	case "ipv6":
+		ipv6 = true
+	}
+	return ipv4, ipv6
+}
+
 // GetConfigFromFileWithMerge parse Config from file
 func GetConfigFromFileWithMerge(filePath string, cfg []byte) (*Config, error) {
 	data, err := os.ReadFile(filePath)

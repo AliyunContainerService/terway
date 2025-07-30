@@ -40,6 +40,25 @@ type CNIConf struct {
 
 	// Debug
 	Debug bool `json:"debug"`
+
+	// SymmetricRoutingConfig contains configuration for symmetric routing
+	SymmetricRoutingConfig *SymmetricRoutingConfig `json:"symmetric_routing_config,omitempty"`
+}
+
+// SymmetricRoutingConfig contains configuration for symmetric routing
+type SymmetricRoutingConfig struct {
+	// Interface is the interface name used for symmetric routing
+	Interface string `json:"interface,omitempty"`
+	// Mark is the fwmark value used for symmetric routing
+	Mark int `json:"mark,omitempty"`
+	// Mask is the fwmark mask value used for symmetric routing
+	Mask int `json:"mask,omitempty"`
+	// TableID is the routing table ID used for symmetric routing
+	TableID int `json:"table_id,omitempty"`
+	// RulePriority is the priority of the ip rule
+	RulePriority int `json:"rule_priority,omitempty"`
+	// Comment is the comment for iptables rules
+	Comment string `json:"comment,omitempty"`
 }
 
 func (n *CNIConf) IPVlan() bool {

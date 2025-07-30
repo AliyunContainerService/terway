@@ -18,6 +18,7 @@ import (
 	terwayfeature "github.com/AliyunContainerService/terway/pkg/feature"
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/AliyunContainerService/terway/pkg/version"
+	driverTypes "github.com/AliyunContainerService/terway/plugin/driver/types"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
@@ -64,8 +65,8 @@ var tasks = []Task{
 		Func: enableKPR,
 	},
 	{
-		Name: "hostport",
-		Func: setupHostPort,
+		Name: "symmetric routing",
+		Func: symmetricRouting,
 	},
 }
 
@@ -213,7 +214,7 @@ func enableKPR(cmd *cobra.Command, args []string) error {
 	return store.Save()
 }
 
-func setupHostPort(cmd *cobra.Command, args []string) error {
+func setSymmetricRouting(cniFilePath string) error {
 	cni, err := os.ReadFile(cniFilePath)
 	if err != nil {
 		return err
@@ -223,23 +224,10 @@ func setupHostPort(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// has portmap plugin ?
 	plugins := cniJSON.Path("plugins").Children()
 
-	foundPortmap := false
-	for _, plugin := range plugins {
-		if plugin.Exists("type") && plugin.S("type").String() == `"portmap"` {
-			foundPortmap = true
-			break
-		}
-	}
-
-	if !foundPortmap {
-		return nil
-	}
-	fmt.Printf("found portMap plugin\n")
-
 	enableSymmetricRouting := false
+	var symmetricRoutingConfig *driverTypes.SymmetricRoutingConfig
 	for _, plugin := range plugins {
 		if plugin.Exists("type") && plugin.S("type").String() == `"terway"` {
 			if plugin.Exists("symmetric_routing") {
@@ -247,38 +235,39 @@ func setupHostPort(cmd *cobra.Command, args []string) error {
 					enableSymmetricRouting = true
 				}
 			}
+			// Check for symmetric_routing_config
+			if plugin.Exists("symmetric_routing_config") {
+				configData := plugin.S("symmetric_routing_config").Bytes()
+				if len(configData) > 0 {
+					symmetricRoutingConfig = &driverTypes.SymmetricRoutingConfig{}
+					err = json.Unmarshal(configData, symmetricRoutingConfig)
+					if err != nil {
+						return fmt.Errorf("failed to parse symmetric_routing_config: %v", err)
+					}
+				}
+			}
 			break
 		}
 	}
 	if !enableSymmetricRouting {
-		fmt.Printf("symmetric routing disabled, ignore setup for portMap plugin\n")
+		fmt.Printf("symmetric routing disabled, ignore setup\n")
 		return nil
 	}
 
-	// ignores if ipv6 only
-	if eniCfg.IPStack == "ipv6" {
-		fmt.Printf("ipv6 only, ignore setup for portMap plugin\n")
-		return nil
+	if eniCfg == nil {
+		return fmt.Errorf("missing eni_config")
 	}
 
-	// ignore if KPR enabled
-	store := nodecap.NewFileNodeCapabilities(nodeCapabilitiesFile)
-
-	err = store.Load()
-	if err != nil {
-		return err
-	}
-
-	prev := store.Get(nodecap.NodeCapabilityKubeProxyReplacement)
-	if prev == True {
-		return nil
-	}
-
+	ipv4, ipv6 := eniCfg.GetIPStack()
 	// setup ip rule ( will not clean up ,if disabled )
-	err = configureNetworkRules()
+	err = configureNetworkRulesWithConfig(ipv4, ipv6, symmetricRoutingConfig)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func symmetricRouting(cmd *cobra.Command, args []string) error {
+	return setSymmetricRouting(cniFilePath)
 }

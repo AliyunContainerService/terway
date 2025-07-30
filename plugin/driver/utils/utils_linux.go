@@ -221,6 +221,9 @@ func FindIPRule(rule *netlink.Rule) ([]netlink.Rule, error) {
 		return nil, errors.New("rule is empty")
 	}
 
+	if rule.Family != 0 {
+		family = rule.Family
+	}
 	if rule.Src != nil {
 		filterMask = filterMask | netlink.RT_FILTER_SRC
 		family = NetlinkFamily(rule.Src.IP)
