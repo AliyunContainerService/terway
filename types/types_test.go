@@ -2,6 +2,7 @@ package types_test
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
 	"testing"
 
@@ -200,6 +201,269 @@ func TestIPSet2_GetIPv6(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			result := test.ipset2.GetIPv6()
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestIPSet_String(t *testing.T) {
+	tests := []struct {
+		name     string
+		ipset    types.IPSet
+		expected string
+	}{
+		{
+			name: "IPv4 and IPv6 valid",
+			ipset: types.IPSet{
+				IPv4: net.ParseIP("192.0.2.1"),
+				IPv6: net.ParseIP("2001:db8::1"),
+			},
+			expected: "192.0.2.1-2001:db8::1",
+		},
+		{
+			name: "Only IPv4 valid",
+			ipset: types.IPSet{
+				IPv4: net.ParseIP("192.0.2.1"),
+			},
+			expected: "192.0.2.1",
+		},
+		{
+			name: "Only IPv6 valid",
+			ipset: types.IPSet{
+				IPv6: net.ParseIP("2001:db8::1"),
+			},
+			expected: "2001:db8::1",
+		},
+		{
+			name:     "Both nil",
+			ipset:    types.IPSet{},
+			expected: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.ipset.String()
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestIPSet_ToRPC(t *testing.T) {
+	tests := []struct {
+		name     string
+		ipset    types.IPSet
+		expected *rpc.IPSet
+	}{
+		{
+			name: "IPv4 and IPv6 valid",
+			ipset: types.IPSet{
+				IPv4: net.ParseIP("192.0.2.1"),
+				IPv6: net.ParseIP("2001:db8::1"),
+			},
+			expected: &rpc.IPSet{
+				IPv4: "192.0.2.1",
+				IPv6: "2001:db8::1",
+			},
+		},
+		{
+			name: "Only IPv4 valid",
+			ipset: types.IPSet{
+				IPv4: net.ParseIP("192.0.2.1"),
+			},
+			expected: &rpc.IPSet{
+				IPv4: "192.0.2.1",
+				IPv6: "",
+			},
+		},
+		{
+			name: "Only IPv6 valid",
+			ipset: types.IPSet{
+				IPv6: net.ParseIP("2001:db8::1"),
+			},
+			expected: &rpc.IPSet{
+				IPv4: "",
+				IPv6: "2001:db8::1",
+			},
+		},
+		{
+			name:  "Both nil",
+			ipset: types.IPSet{},
+			expected: &rpc.IPSet{
+				IPv4: "",
+				IPv6: "",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.ipset.ToRPC()
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestIPSet_GetIPv4(t *testing.T) {
+	tests := []struct {
+		name     string
+		ipset    types.IPSet
+		expected string
+	}{
+		{
+			name: "IPv4 valid",
+			ipset: types.IPSet{
+				IPv4: net.ParseIP("192.0.2.1"),
+			},
+			expected: "192.0.2.1",
+		},
+		{
+			name:     "IPv4 nil",
+			ipset:    types.IPSet{},
+			expected: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.ipset.GetIPv4()
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestIPSet_GetIPv6(t *testing.T) {
+	tests := []struct {
+		name     string
+		ipset    types.IPSet
+		expected string
+	}{
+		{
+			name: "IPv6 valid",
+			ipset: types.IPSet{
+				IPv6: net.ParseIP("2001:db8::1"),
+			},
+			expected: "2001:db8::1",
+		},
+		{
+			name:     "IPv6 nil",
+			ipset:    types.IPSet{},
+			expected: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.ipset.GetIPv6()
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestIPNetSet_String(t *testing.T) {
+	_, ipv4Net, _ := net.ParseCIDR("192.0.2.0/24")
+	_, ipv6Net, _ := net.ParseCIDR("2001:db8::/64")
+
+	tests := []struct {
+		name     string
+		ipNetSet types.IPNetSet
+		expected string
+	}{
+		{
+			name: "IPv4 and IPv6 valid",
+			ipNetSet: types.IPNetSet{
+				IPv4: ipv4Net,
+				IPv6: ipv6Net,
+			},
+			expected: "192.0.2.0/24-2001:db8::/64",
+		},
+		{
+			name: "Only IPv4 valid",
+			ipNetSet: types.IPNetSet{
+				IPv4: ipv4Net,
+			},
+			expected: "192.0.2.0/24",
+		},
+		{
+			name: "Only IPv6 valid",
+			ipNetSet: types.IPNetSet{
+				IPv6: ipv6Net,
+			},
+			expected: "2001:db8::/64",
+		},
+		{
+			name:     "Both nil",
+			ipNetSet: types.IPNetSet{},
+			expected: "",
+		},
+		{
+			name:     "IPNetSet is nil",
+			ipNetSet: types.IPNetSet{},
+			expected: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.ipNetSet.String()
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestIPNetSet_ToRPC(t *testing.T) {
+	_, ipv4Net, _ := net.ParseCIDR("192.0.2.0/24")
+	_, ipv6Net, _ := net.ParseCIDR("2001:db8::/64")
+
+	tests := []struct {
+		name     string
+		ipNetSet types.IPNetSet
+		expected *rpc.IPSet
+	}{
+		{
+			name: "IPv4 and IPv6 valid",
+			ipNetSet: types.IPNetSet{
+				IPv4: ipv4Net,
+				IPv6: ipv6Net,
+			},
+			expected: &rpc.IPSet{
+				IPv4: "192.0.2.0/24",
+				IPv6: "2001:db8::/64",
+			},
+		},
+		{
+			name: "Only IPv4 valid",
+			ipNetSet: types.IPNetSet{
+				IPv4: ipv4Net,
+			},
+			expected: &rpc.IPSet{
+				IPv4: "192.0.2.0/24",
+				IPv6: "",
+			},
+		},
+		{
+			name: "Only IPv6 valid",
+			ipNetSet: types.IPNetSet{
+				IPv6: ipv6Net,
+			},
+			expected: &rpc.IPSet{
+				IPv4: "",
+				IPv6: "2001:db8::/64",
+			},
+		},
+		{
+			name:     "Both nil",
+			ipNetSet: types.IPNetSet{},
+			expected: &rpc.IPSet{
+				IPv4: "",
+				IPv6: "",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.ipNetSet.ToRPC()
 			assert.Equal(t, test.expected, result)
 		})
 	}

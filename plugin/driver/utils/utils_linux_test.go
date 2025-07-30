@@ -689,6 +689,391 @@ var _ = Describe("Utils", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})
+
+			It("should find routes with IPv4 destination", func() {
+				var err error
+
+				err = hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					link, err := netlink.LinkByName(nicName)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up first
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add IP address to the link, which will automatically create a route
+					addr := &netlink.Addr{
+						IPNet: &net.IPNet{
+							IP:   net.ParseIP("192.168.1.224"),
+							Mask: net.CIDRMask(24, 32),
+						},
+						Scope: int(netlink.SCOPE_UNIVERSE),
+					}
+					err = netlink.AddrAdd(link, addr)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Find the automatically created route
+					searchRoute := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("192.168.1.0"),
+							Mask: net.CIDRMask(24, 32),
+						},
+					}
+
+					routes, err := FoundRoutes(searchRoute)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(routes)).To(BeNumerically(">", 0))
+
+					// Verify found route matches the automatically created one
+					found := false
+					for _, route := range routes {
+						if route.Dst.String() == "192.168.1.0/24" &&
+							route.LinkIndex == link.Attrs().Index &&
+							route.Scope == netlink.SCOPE_LINK {
+							found = true
+							break
+						}
+					}
+					Expect(found).To(BeTrue())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should find routes with IPv6 destination", func() {
+				var err error
+
+				err = hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					link, err := netlink.LinkByName(nicName)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up first
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add IPv6 address to the link, which will automatically create a route
+					addr := &netlink.Addr{
+						IPNet: &net.IPNet{
+							IP:   net.ParseIP("fd00:100::224"),
+							Mask: net.CIDRMask(64, 128),
+						},
+						Scope: int(netlink.SCOPE_UNIVERSE),
+					}
+					err = netlink.AddrAdd(link, addr)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Find the automatically created route
+					searchRoute := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("fd00:100::"),
+							Mask: net.CIDRMask(64, 128),
+						},
+					}
+
+					routes, err := FoundRoutes(searchRoute)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(routes)).To(BeNumerically(">", 0))
+
+					// Verify found route matches the automatically created one
+					found := false
+					for _, route := range routes {
+						if route.Dst.String() == "fd00:100::/64" &&
+							route.LinkIndex == link.Attrs().Index &&
+							route.Scope == netlink.SCOPE_UNIVERSE {
+							found = true
+							break
+						}
+					}
+					Expect(found).To(BeTrue())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should find routes with default gateway (0.0.0.0/0)", func() {
+				var err error
+
+				err = hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					link, err := netlink.LinkByName(nicName)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up first
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add IP address to the link first
+					addr := &netlink.Addr{
+						IPNet: &net.IPNet{
+							IP:   net.ParseIP("192.168.1.224"),
+							Mask: net.CIDRMask(24, 32),
+						},
+						Scope: int(netlink.SCOPE_UNIVERSE),
+					}
+					err = netlink.AddrAdd(link, addr)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add a default route with Onlink flag to avoid gateway reachability check
+					testRoute := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("0.0.0.0"),
+							Mask: net.CIDRMask(0, 32),
+						},
+						Gw:        net.ParseIP("192.168.1.1"),
+						LinkIndex: link.Attrs().Index,
+						Flags:     int(netlink.FLAG_ONLINK),
+					}
+
+					err = netlink.RouteAdd(testRoute)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Find the route with 0.0.0.0/0
+					searchRoute := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("0.0.0.0"),
+							Mask: net.CIDRMask(0, 32),
+						},
+					}
+
+					routes, err := FoundRoutes(searchRoute)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(routes)).To(BeNumerically(">", 0))
+
+					// Verify found route matches
+					found := false
+					for _, route := range routes {
+						if route.Dst == nil &&
+							route.Gw.String() == testRoute.Gw.String() &&
+							route.LinkIndex == testRoute.LinkIndex {
+							found = true
+							break
+						}
+					}
+					Expect(found).To(BeTrue())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should find routes with default gateway (::/0)", func() {
+				var err error
+
+				err = hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					link, err := netlink.LinkByName(nicName)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up first
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add IPv6 address to the link first
+					addr := &netlink.Addr{
+						IPNet: &net.IPNet{
+							IP:   net.ParseIP("fd00:100::224"),
+							Mask: net.CIDRMask(64, 128),
+						},
+						Scope: int(netlink.SCOPE_UNIVERSE),
+					}
+					err = netlink.AddrAdd(link, addr)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add a default IPv6 route with Onlink flag to avoid gateway reachability check
+					testRoute := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("::"),
+							Mask: net.CIDRMask(0, 128),
+						},
+						Gw:        net.ParseIP("fd00::1"),
+						LinkIndex: link.Attrs().Index,
+						Flags:     int(netlink.FLAG_ONLINK),
+					}
+
+					err = netlink.RouteAdd(testRoute)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Find the route with ::/0
+					searchRoute := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("::"),
+							Mask: net.CIDRMask(0, 128),
+						},
+					}
+
+					routes, err := FoundRoutes(searchRoute)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(routes)).To(BeNumerically(">", 0))
+
+					// Verify found route matches
+					found := false
+					for _, route := range routes {
+						if route.Dst == nil &&
+							route.Gw.String() == testRoute.Gw.String() &&
+							route.LinkIndex == testRoute.LinkIndex {
+							found = true
+							break
+						}
+					}
+					Expect(found).To(BeTrue())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should find routes with link index filter", func() {
+				var err error
+
+				err = hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					link, err := netlink.LinkByName(nicName)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up first
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add IP address to the link, which will automatically create a route
+					addr := &netlink.Addr{
+						IPNet: &net.IPNet{
+							IP:   net.ParseIP("192.168.200.224"),
+							Mask: net.CIDRMask(24, 32),
+						},
+						Scope: int(netlink.SCOPE_UNIVERSE),
+					}
+					err = netlink.AddrAdd(link, addr)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Find the route with link index filter
+					searchRoute := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("192.168.200.0"),
+							Mask: net.CIDRMask(24, 32),
+						},
+						LinkIndex: link.Attrs().Index,
+					}
+
+					routes, err := FoundRoutes(searchRoute)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(routes)).To(BeNumerically(">", 0))
+
+					// Verify found route matches the automatically created one
+					found := false
+					for _, route := range routes {
+						if route.Dst.String() == "192.168.200.0/24" &&
+							route.LinkIndex == link.Attrs().Index &&
+							route.Scope == netlink.SCOPE_LINK {
+							found = true
+							break
+						}
+					}
+					Expect(found).To(BeTrue())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should find routes with gateway filter", func() {
+				var err error
+
+				err = hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					link, err := netlink.LinkByName(nicName)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up first
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add IP address to the link first
+					addr := &netlink.Addr{
+						IPNet: &net.IPNet{
+							IP:   net.ParseIP("192.168.0.2"),
+							Mask: net.CIDRMask(24, 32),
+						},
+						Scope: int(netlink.SCOPE_UNIVERSE),
+					}
+					err = netlink.AddrAdd(link, addr)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add a test route with specific gateway and Onlink flag to avoid gateway reachability check
+					testRoute := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("10.0.0.0"),
+							Mask: net.CIDRMask(8, 32),
+						},
+						Gw:        net.ParseIP("192.168.0.1"),
+						LinkIndex: link.Attrs().Index,
+						Flags:     int(netlink.FLAG_ONLINK),
+					}
+
+					err = netlink.RouteAdd(testRoute)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Find the route with gateway filter
+					searchRoute := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("10.0.0.0"),
+							Mask: net.CIDRMask(8, 32),
+						},
+						Gw: net.ParseIP("192.168.0.1"),
+					}
+
+					routes, err := FoundRoutes(searchRoute)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(routes)).To(BeNumerically(">", 0))
+
+					// Verify found route matches
+					found := false
+					for _, route := range routes {
+						if route.Dst.String() == testRoute.Dst.String() &&
+							route.Gw.String() == testRoute.Gw.String() &&
+							route.LinkIndex == testRoute.LinkIndex {
+							found = true
+							break
+						}
+					}
+					Expect(found).To(BeTrue())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should return empty result for non-existent route", func() {
+				var err error
+
+				err = hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					// Search for a non-existent route
+					searchRoute := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("192.168.999.0"),
+							Mask: net.CIDRMask(24, 32),
+						},
+					}
+
+					routes, err := FoundRoutes(searchRoute)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(routes)).To(Equal(0))
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
 		})
 	})
 
@@ -747,6 +1132,37 @@ var _ = Describe("Utils", func() {
 					rules, err := FindIPRule(rule)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(len(rules)).To(BeNumerically(">", 0))
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("not found test", func() {
+				var err error
+
+				err = hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					// Add a rule first
+					rule := netlink.NewRule()
+					rule.Src = &net.IPNet{
+						IP:   net.ParseIP("192.168.1.0"),
+						Mask: net.CIDRMask(24, 32),
+					}
+					rule.Table = 100
+					rule.Priority = 1000
+					rule.Family = netlink.FAMILY_V6
+					rule.Mark = 0
+					rule.Mask = 0
+
+					err = netlink.RuleAdd(rule)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Find the rule
+					rules, err := FindIPRule(rule)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(rules)).To(Equal(0))
 
 					return nil
 				})
@@ -1164,6 +1580,312 @@ var _ = Describe("Utils", func() {
 			hwaddr, err := parseERdmaLinkHwAddr("0d:d3:04:fe:ff:3e:16:02")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(hwaddr.String()).To(Equal("02:16:3e:04:d3:0d"))
+		})
+	})
+
+	Describe("Netlink operations", func() {
+		var hostNS ns.NetNS
+		const testLinkName = "test-link"
+
+		BeforeEach(func() {
+			var err error
+			hostNS, err = testutils.NewNS()
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			Expect(hostNS.Close()).To(Succeed())
+			Expect(testutils.UnmountNS(hostNS)).To(Succeed())
+		})
+
+		Describe("LinkAdd", func() {
+			It("should add link successfully", func() {
+				err := hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					link := &netlink.Dummy{
+						LinkAttrs: netlink.LinkAttrs{Name: testLinkName},
+					}
+
+					err := LinkAdd(context.Background(), link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Verify link was created
+					createdLink, err := netlink.LinkByName(testLinkName)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(createdLink.Attrs().Name).To(Equal(testLinkName))
+
+					// Clean up
+					err = netlink.LinkDel(createdLink)
+					Expect(err).NotTo(HaveOccurred())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should return error for invalid link", func() {
+				err := hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					// Create a link with invalid attributes
+					link := &netlink.Dummy{
+						LinkAttrs: netlink.LinkAttrs{Name: ""}, // Empty name should cause error
+					}
+
+					err := LinkAdd(context.Background(), link)
+					Expect(err).To(HaveOccurred())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Describe("LinkSetDown", func() {
+			It("should set link down successfully", func() {
+				err := hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					// Create a link first
+					link := &netlink.Dummy{
+						LinkAttrs: netlink.LinkAttrs{Name: testLinkName},
+					}
+					err := netlink.LinkAdd(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up first
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Verify link is up
+					createdLink, err := netlink.LinkByName(testLinkName)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(createdLink.Attrs().Flags & net.FlagUp).NotTo(Equal(0))
+
+					// Set link down
+					err = LinkSetDown(context.Background(), createdLink)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Verify link is down
+					downLink, err := netlink.LinkByName(testLinkName)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(downLink.Attrs().Flags & net.FlagUp).To(Equal(net.Flags(0)))
+
+					// Clean up
+					err = netlink.LinkDel(createdLink)
+					Expect(err).NotTo(HaveOccurred())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Describe("RouteReplace", func() {
+			It("should replace route successfully", func() {
+				err := hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					// Create a dummy link for the route
+					link := &netlink.Dummy{
+						LinkAttrs: netlink.LinkAttrs{Name: testLinkName},
+					}
+					err := netlink.LinkAdd(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add an IP address to the link
+					addr := &netlink.Addr{
+						IPNet: &net.IPNet{
+							IP:   net.ParseIP("192.168.1.1"),
+							Mask: net.CIDRMask(24, 32),
+						},
+					}
+					err = netlink.AddrAdd(link, addr)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Create a route
+					route := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("10.0.0.0"),
+							Mask: net.CIDRMask(8, 32),
+						},
+						Gw:        net.ParseIP("192.168.1.254"),
+						LinkIndex: link.Attrs().Index,
+					}
+
+					// Replace the route
+					err = RouteReplace(context.Background(), route)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Verify route exists
+					routes, err := netlink.RouteList(link, netlink.FAMILY_V4)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(routes)).To(BeNumerically(">", 0))
+
+					// Clean up
+					err = netlink.LinkDel(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Describe("RouteDel", func() {
+			It("should delete route successfully", func() {
+				err := hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					// Create a dummy link for the route
+					link := &netlink.Dummy{
+						LinkAttrs: netlink.LinkAttrs{Name: testLinkName},
+					}
+					err := netlink.LinkAdd(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add an IP address to the link
+					addr := &netlink.Addr{
+						IPNet: &net.IPNet{
+							IP:   net.ParseIP("192.168.1.1"),
+							Mask: net.CIDRMask(24, 32),
+						},
+					}
+					err = netlink.AddrAdd(link, addr)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Create and add a route
+					route := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("10.0.0.0"),
+							Mask: net.CIDRMask(8, 32),
+						},
+						Gw:        net.ParseIP("192.168.1.254"),
+						LinkIndex: link.Attrs().Index,
+					}
+					err = netlink.RouteAdd(route)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Verify route exists
+					routes, err := netlink.RouteList(link, netlink.FAMILY_V4)
+					Expect(err).NotTo(HaveOccurred())
+					initialRouteCount := len(routes)
+
+					// Delete the route
+					err = RouteDel(context.Background(), route)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Verify route was deleted
+					routes, err = netlink.RouteList(link, netlink.FAMILY_V4)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(routes)).To(BeNumerically("<", initialRouteCount))
+
+					// Clean up
+					err = netlink.LinkDel(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Describe("LinkSetNsFd", func() {
+			It("should move link to namespace successfully", func() {
+				err := hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					// Create a container namespace
+					containerNS, err := testutils.NewNS()
+					Expect(err).NotTo(HaveOccurred())
+					defer func() {
+						Expect(containerNS.Close()).To(Succeed())
+						Expect(testutils.UnmountNS(containerNS)).To(Succeed())
+					}()
+
+					// Create a dummy link
+					link := &netlink.Dummy{
+						LinkAttrs: netlink.LinkAttrs{Name: testLinkName},
+					}
+					err = netlink.LinkAdd(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Get the created link
+					createdLink, err := netlink.LinkByName(testLinkName)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Move link to container namespace
+					err = LinkSetNsFd(context.Background(), createdLink, containerNS)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Verify link no longer exists in current namespace
+					_, err = netlink.LinkByName(testLinkName)
+					Expect(err).To(HaveOccurred())
+
+					// Verify link exists in container namespace
+					err = containerNS.Do(func(ns ns.NetNS) error {
+						_, err := netlink.LinkByName(testLinkName)
+						Expect(err).NotTo(HaveOccurred())
+						return nil
+					})
+					Expect(err).NotTo(HaveOccurred())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Describe("QdiscDel", func() {
+			It("should delete qdisc successfully", func() {
+				err := hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					// Create a dummy link
+					link := &netlink.Dummy{
+						LinkAttrs: netlink.LinkAttrs{Name: testLinkName},
+					}
+					err := netlink.LinkAdd(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Create a qdisc
+					qdisc := &netlink.PfifoFast{
+						QdiscAttrs: netlink.QdiscAttrs{
+							LinkIndex: link.Attrs().Index,
+							Handle:    netlink.MakeHandle(1, 0),
+							Parent:    netlink.HANDLE_ROOT,
+						},
+					}
+
+					// Add the qdisc
+					err = netlink.QdiscAdd(qdisc)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Delete the qdisc
+					err = QdiscDel(context.Background(), qdisc)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Clean up
+					err = netlink.LinkDel(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
 		})
 	})
 })
