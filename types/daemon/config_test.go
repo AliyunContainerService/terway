@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/secret"
 )
 
 func Test_MergeConfigAndUnmarshal(t *testing.T) {
@@ -167,4 +169,257 @@ func TestPopulateDoesNotOverrideExistingValues(t *testing.T) {
 	assert.Equal(t, 0.5, cfg.EniCapRatio)
 	assert.Equal(t, "custom", cfg.VSwitchSelectionPolicy)
 	assert.Equal(t, string(types.IPStackDual), cfg.IPStack)
+}
+
+func TestGetIPPoolSYncPeriod(t *testing.T) {
+	tests := []struct {
+		name     string
+		period   string
+		expected time.Duration
+	}{
+		{
+			name:     "valid duration",
+			period:   "30s",
+			expected: 30 * time.Second,
+		},
+		{
+			name:     "valid duration minutes",
+			period:   "2m",
+			expected: 2 * time.Minute,
+		},
+		{
+			name:     "empty period",
+			period:   "",
+			expected: 120 * time.Second,
+		},
+		{
+			name:     "invalid period",
+			period:   "invalid",
+			expected: 120 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				IPPoolSyncPeriod: tt.period,
+			}
+			result := cfg.GetIPPoolSYncPeriod()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestEnableFeature(t *testing.T) {
+	var features Feat
+
+	// Test enabling single feature
+	EnableFeature(&features, FeatTrunk)
+	assert.True(t, IsFeatureEnabled(features, FeatTrunk))
+	assert.False(t, IsFeatureEnabled(features, FeatERDMA))
+
+	// Test enabling multiple features
+	EnableFeature(&features, FeatERDMA)
+	assert.True(t, IsFeatureEnabled(features, FeatTrunk))
+	assert.True(t, IsFeatureEnabled(features, FeatERDMA))
+
+	// Test enabling already enabled feature
+	EnableFeature(&features, FeatTrunk)
+	assert.True(t, IsFeatureEnabled(features, FeatTrunk))
+}
+
+func TestDisableFeature(t *testing.T) {
+	var features Feat
+
+	// Enable both features first
+	EnableFeature(&features, FeatTrunk)
+	EnableFeature(&features, FeatERDMA)
+	assert.True(t, IsFeatureEnabled(features, FeatTrunk))
+	assert.True(t, IsFeatureEnabled(features, FeatERDMA))
+
+	// Test disabling single feature
+	DisableFeature(&features, FeatTrunk)
+	assert.False(t, IsFeatureEnabled(features, FeatTrunk))
+	assert.True(t, IsFeatureEnabled(features, FeatERDMA))
+
+	// Test disabling already disabled feature
+	DisableFeature(&features, FeatTrunk)
+	assert.False(t, IsFeatureEnabled(features, FeatTrunk))
+	assert.True(t, IsFeatureEnabled(features, FeatERDMA))
+
+	// Test disabling the other feature
+	DisableFeature(&features, FeatERDMA)
+	assert.False(t, IsFeatureEnabled(features, FeatTrunk))
+	assert.False(t, IsFeatureEnabled(features, FeatERDMA))
+}
+
+func TestIsFeatureEnabled(t *testing.T) {
+	var features Feat
+
+	// Test with no features enabled
+	assert.False(t, IsFeatureEnabled(features, FeatTrunk))
+	assert.False(t, IsFeatureEnabled(features, FeatERDMA))
+
+	// Test with single feature enabled
+	EnableFeature(&features, FeatTrunk)
+	assert.True(t, IsFeatureEnabled(features, FeatTrunk))
+	assert.False(t, IsFeatureEnabled(features, FeatERDMA))
+
+	// Test with multiple features enabled
+	EnableFeature(&features, FeatERDMA)
+	assert.True(t, IsFeatureEnabled(features, FeatTrunk))
+	assert.True(t, IsFeatureEnabled(features, FeatERDMA))
+}
+
+func TestGetConfigFromFileWithMerge(t *testing.T) {
+	// Create temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "terway-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create test config file
+	configFile := filepath.Join(tempDir, "config.json")
+	baseConfig := `{
+		"version": "1.0",
+		"max_pool_size": 10,
+		"min_pool_size": 2,
+		"region_id": "cn-hangzhou",
+		"service_cidr": "172.16.0.0/16"
+	}`
+	err = os.WriteFile(configFile, []byte(baseConfig), 0644)
+	assert.NoError(t, err)
+
+	// Test case 1: Merge with additional config
+	mergeConfig := `{
+		"max_pool_size": 15,
+		"min_pool_size": 5,
+		"vswitches": {"cn-hangzhou-i": ["vsw-12345"]}
+	}`
+
+	cfg, err := GetConfigFromFileWithMerge(configFile, []byte(mergeConfig))
+	assert.NoError(t, err)
+	assert.Equal(t, "1.0", cfg.Version)
+	assert.Equal(t, 15, cfg.MaxPoolSize)
+	assert.Equal(t, 5, cfg.MinPoolSize)
+	assert.Equal(t, "cn-hangzhou", cfg.RegionID)
+	assert.Equal(t, "172.16.0.0/16", cfg.ServiceCIDR)
+	assert.Equal(t, 1, len(cfg.VSwitches))
+	assert.Equal(t, 1, len(cfg.VSwitches["cn-hangzhou-i"]))
+	assert.Equal(t, "vsw-12345", cfg.VSwitches["cn-hangzhou-i"][0])
+
+	// Test case 2: No merge config (empty)
+	cfg, err = GetConfigFromFileWithMerge(configFile, []byte{})
+	assert.NoError(t, err)
+	assert.Equal(t, "1.0", cfg.Version)
+	assert.Equal(t, 10, cfg.MaxPoolSize)
+	assert.Equal(t, 2, cfg.MinPoolSize)
+	assert.Equal(t, "cn-hangzhou", cfg.RegionID)
+	assert.Equal(t, "172.16.0.0/16", cfg.ServiceCIDR)
+
+	// Test case 3: File not found
+	_, err = GetConfigFromFileWithMerge("/nonexistent/file.json", []byte(mergeConfig))
+	assert.Error(t, err)
+
+	// Test case 4: Invalid JSON in file
+	invalidConfig := `{
+		"version": "1.0",
+		"max_pool_size": "invalid",
+		"min_pool_size": 2
+	}`
+	invalidFile := filepath.Join(tempDir, "invalid.json")
+	err = os.WriteFile(invalidFile, []byte(invalidConfig), 0644)
+	assert.NoError(t, err)
+
+	_, err = GetConfigFromFileWithMerge(invalidFile, []byte(mergeConfig))
+	assert.NoError(t, err) // JSON unmarshaling is lenient, so this might not error
+
+	// Test case 5: Invalid merge config
+	_, err = GetConfigFromFileWithMerge(configFile, []byte(`{"invalid": json`))
+	assert.Error(t, err)
+}
+
+func TestGetConfigFromFileWithMergeWithAddonSecret(t *testing.T) {
+	// Create temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "terway-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create test config file
+	configFile := filepath.Join(tempDir, "config.json")
+	baseConfig := `{
+		"version": "1.0",
+		"max_pool_size": 10,
+		"region_id": "cn-hangzhou"
+	}`
+	err = os.WriteFile(configFile, []byte(baseConfig), 0644)
+	assert.NoError(t, err)
+
+	// Create addon secret directory and files
+	secretDir := filepath.Join(tempDir, "secret")
+	err = os.MkdirAll(secretDir, 0755)
+	assert.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(secretDir, addonSecretKeyID), []byte("test-access-key"), 0644)
+	assert.NoError(t, err)
+	err = os.WriteFile(filepath.Join(secretDir, addonSecretKeySecret), []byte("test-secret-key"), 0644)
+	assert.NoError(t, err)
+
+	// Temporarily change the addon secret path
+	originalPath := addonSecretRootPath
+	addonSecretRootPath = secretDir
+	defer func() { addonSecretRootPath = originalPath }()
+
+	// Test merging with addon secret
+	mergeConfig := `{
+		"max_pool_size": 15
+	}`
+
+	cfg, err := GetConfigFromFileWithMerge(configFile, []byte(mergeConfig))
+	assert.NoError(t, err)
+	assert.Equal(t, "1.0", cfg.Version)
+	assert.Equal(t, 15, cfg.MaxPoolSize)
+	assert.Equal(t, "cn-hangzhou", cfg.RegionID)
+	assert.Equal(t, secret.Secret("test-access-key"), cfg.AccessID)
+	assert.Equal(t, secret.Secret("test-secret-key"), cfg.AccessSecret)
+}
+
+// TestConfig_GetIPStack
+func TestConfig_GetIPStack(t *testing.T) {
+	testCases := map[string]struct {
+		input    string
+		expected [2]bool
+	}{
+		"dual stack configuration": {
+			input:    "dual",
+			expected: [2]bool{true, true},
+		},
+		"ipv4 only configuration": {
+			input:    "ipv4",
+			expected: [2]bool{true, false},
+		},
+		"empty configuration defaults to ipv4": {
+			input:    "",
+			expected: [2]bool{true, false},
+		},
+		"ipv6 only configuration": {
+			input:    "ipv6",
+			expected: [2]bool{false, true},
+		},
+		"unknown configuration defaults to none": {
+			input:    "unknown",
+			expected: [2]bool{false, false},
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			config := &Config{IPStack: tc.input}
+			ipv4, ipv6 := config.GetIPStack()
+
+			if ipv4 != tc.expected[0] || ipv6 != tc.expected[1] {
+				t.Errorf("GetIPStack() = (%v, %v), want (%v, %v)",
+					ipv4, ipv6, tc.expected[0], tc.expected[1])
+			}
+		})
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -747,12 +748,251 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 	}
 }
 
+func TestNormal_HostPort(t *testing.T) {
+	var feats []features.Feature
+
+	type PodConfig struct {
+		name    string
+		podFunc func(pod *Pod) *Pod
+	}
+	mutateConfig := []PodConfig{}
+	if affinityLabel == "" {
+		mutateConfig = []PodConfig{
+			{
+				name: "normal config",
+				podFunc: func(pod *Pod) *Pod {
+					return pod
+				},
+			},
+		}
+		if testTrunk {
+			mutateConfig = append(mutateConfig, PodConfig{
+				name: "trunk pod",
+				podFunc: func(pod *Pod) *Pod {
+					return pod.WithLabels(map[string]string{"netplan": "default"})
+				},
+			})
+		}
+	} else {
+		labelArr := strings.Split(affinityLabel, ":")
+		if len(labelArr) != 2 {
+			t.Fatal("affinityLabel is not valid")
+		}
+		mutateConfig = []PodConfig{
+			{
+				name: fmt.Sprintf("normal_%s", labelArr[0]),
+				podFunc: func(pod *Pod) *Pod {
+					return pod.WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]})
+				},
+			},
+		}
+		if testTrunk {
+			mutateConfig = append(mutateConfig, PodConfig{
+				name: fmt.Sprintf("trunk_%s", labelArr[0]),
+				podFunc: func(pod *Pod) *Pod {
+					return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]})
+				},
+			})
+		}
+	}
+
+	for i := range mutateConfig {
+		name := mutateConfig[i].name
+		fn := mutateConfig[i].podFunc
+
+		// Case 1: Node access node IP + port
+		hostPortNodeIP := features.New(fmt.Sprintf("HostPort/NodeIP-%s", name)).
+			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+				var objs []client.Object
+
+				// Create server pod with hostPort
+				server := fn(NewPod("server-hostport", config.Namespace()).
+					WithLabels(map[string]string{"app": "server-hostport"}).
+					WithContainer("server", nginxImage, nil).
+					WithHostPort(80, 8080))
+
+				err := config.Client().Resources().Create(ctx, server.Pod)
+				if err != nil {
+					t.Error(err)
+					t.FailNow()
+				}
+
+				// Create client pod on different node
+				client := fn(NewPod("client-hostport", config.Namespace()).
+					WithLabels(map[string]string{"app": "client-hostport"}).
+					WithContainer("client", nginxImage, nil)).
+					WithPodAntiAffinity(map[string]string{"app": "server-hostport"})
+
+				err = config.Client().Resources().Create(ctx, client.Pod)
+				if err != nil {
+					t.Error(err)
+					t.FailNow()
+				}
+
+				objs = append(objs, server.Pod, client.Pod)
+				ctx = SaveResources(ctx, objs...)
+				return ctx
+			}).
+			Assess("Client can access server via node IP + hostPort", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-hostport", Namespace: config.Namespace()}}
+				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client-hostport", Namespace: config.Namespace()}}
+
+				// Wait for pods to be ready
+				err := waitPodsReady(config.Client(), server, client)
+				if err != nil {
+					t.Error(err)
+					t.FailNow()
+				}
+
+				// Get server pod to find its node
+				err = config.Client().Resources().Get(ctx, "server-hostport", config.Namespace(), server)
+				if err != nil {
+					t.Error(err)
+					t.FailNow()
+				}
+
+				// Get node to find its IPs
+				node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: server.Spec.NodeName}}
+				err = config.Client().Resources().Get(ctx, server.Spec.NodeName, "", node)
+				if err != nil {
+					t.Error(err)
+					t.FailNow()
+				}
+
+				// Test for each IP stack
+				for _, stack := range getStack() {
+					isIPv6 := stack == "ipv6"
+
+					internalIP, _ := getNodeIPs(node, isIPv6)
+					if internalIP == "" {
+						t.Logf("No internal %s address found, skipping %s test", stack, stack)
+						continue
+					}
+
+					// Test connectivity via node IP + hostPort using net.JoinHostPort
+					target := net.JoinHostPort(internalIP, "8080")
+					t.Logf("Testing %s connectivity to %s", stack, target)
+					err = pullWithIPv6(config.Client(), client.Namespace, client.Name, "client", target, isIPv6)
+					if err != nil {
+						t.Errorf("Failed to connect via %s: %v", stack, err)
+						t.FailNow()
+					}
+				}
+
+				return ctx
+			}).
+			Feature()
+
+		// Case 2: Node access node external IP + port
+		hostPortExternalIP := features.New(fmt.Sprintf("HostPort/ExternalIP-%s", name)).
+			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+				var objs []client.Object
+
+				// Create server pod with hostPort on different port
+				server := fn(NewPod("server-hostport-ext", config.Namespace()).
+					WithLabels(map[string]string{"app": "server-hostport-ext"}).
+					WithContainer("server", nginxImage, nil).
+					WithHostPort(80, 8081))
+
+				err := config.Client().Resources().Create(ctx, server.Pod)
+				if err != nil {
+					t.Error(err)
+					t.FailNow()
+				}
+
+				// Create client pod on different node
+				client := fn(NewPod("client-hostport-ext", config.Namespace()).
+					WithLabels(map[string]string{"app": "client-hostport-ext"}).
+					WithContainer("client", nginxImage, nil)).
+					WithPodAntiAffinity(map[string]string{"app": "server-hostport-ext"})
+
+				err = config.Client().Resources().Create(ctx, client.Pod)
+				if err != nil {
+					t.Error(err)
+					t.FailNow()
+				}
+
+				objs = append(objs, server.Pod, client.Pod)
+				ctx = SaveResources(ctx, objs...)
+				return ctx
+			}).
+			Assess("Client can access server via node external IP + hostPort", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-hostport-ext", Namespace: config.Namespace()}}
+				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client-hostport-ext", Namespace: config.Namespace()}}
+
+				// Wait for pods to be ready
+				err := waitPodsReady(config.Client(), server, client)
+				if err != nil {
+					t.Error(err)
+					t.FailNow()
+				}
+
+				// Get server pod to find its node
+				err = config.Client().Resources().Get(ctx, "server-hostport-ext", config.Namespace(), server)
+				if err != nil {
+					t.Error(err)
+					t.FailNow()
+				}
+
+				// Get node to find its external IPs
+				node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: server.Spec.NodeName}}
+				err = config.Client().Resources().Get(ctx, server.Spec.NodeName, "", node)
+				if err != nil {
+					t.Error(err)
+					t.FailNow()
+				}
+
+				// Test for each IP stack
+				for _, stack := range getStack() {
+					isIPv6 := stack == "ipv6"
+
+					_, externalIP := getNodeIPs(node, isIPv6)
+					if externalIP == "" {
+						t.Logf("No external %s address found, skipping %s test", stack, stack)
+						continue
+					}
+
+					// Test connectivity via node external IP + hostPort using net.JoinHostPort
+					target := net.JoinHostPort(externalIP, "8081")
+					t.Logf("Testing %s connectivity to external IP %s", stack, target)
+					err = pullWithIPv6(config.Client(), client.Namespace, client.Name, "client", target, isIPv6)
+					if err != nil {
+						t.Errorf("Failed to connect via %s: %v", stack, err)
+						t.FailNow()
+					}
+				}
+
+				return ctx
+			}).
+			Feature()
+
+		feats = append(feats, hostPortNodeIP, hostPortExternalIP)
+	}
+
+	testenv.Test(t, feats...)
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
 func pull(client klient.Client, namespace, name, container, target string) error {
+	return pullWithIPv6(client, namespace, name, container, target, false)
+}
+
+func pullWithIPv6(client klient.Client, namespace, name, container, target string, ipv6 bool) error {
 	errors := []error{}
 
 	err := wait.For(func(ctx context.Context) (done bool, err error) {
 		var stdout, stderr bytes.Buffer
-		cmd := []string{"curl", "-m", "2", "--retry", "3", "-I", target}
+		cmd := []string{"curl", "-m", "2", "--retry", "3", "-I"}
+
+		// Add IPv6 support
+		if ipv6 {
+			cmd = append(cmd, "-6", "-g")
+		}
+
+		cmd = append(cmd, target)
+
 		err = client.Resources().ExecInPod(ctx, namespace, name, container, cmd, &stdout, &stderr)
 		if err != nil {
 			errors = append(errors, fmt.Errorf("failed %s %w", cmd, err))

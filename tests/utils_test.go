@@ -4,6 +4,7 @@ package tests
 
 import (
 	"context"
+	"net"
 	"net/netip"
 
 	corev1 "k8s.io/api/core/v1"
@@ -158,6 +159,21 @@ func (p *Pod) WithDNSPolicy(policy corev1.DNSPolicy) *Pod {
 	return p
 }
 
+func (p *Pod) WithHostPort(containerPort, hostPort int32) *Pod {
+	if len(p.Spec.Containers) == 0 {
+		return p
+	}
+
+	// Add hostPort to the first container
+	p.Spec.Containers[0].Ports = append(p.Spec.Containers[0].Ports, corev1.ContainerPort{
+		ContainerPort: containerPort,
+		HostPort:      hostPort,
+		Protocol:      corev1.ProtocolTCP,
+	})
+
+	return p
+}
+
 type Service struct {
 	*corev1.Service
 }
@@ -278,4 +294,28 @@ func SaveResources(ctx context.Context, resources ...client.Object) context.Cont
 	prev := ResourcesFromCtx(ctx)
 	prev = append(prev, resources...)
 	return context.WithValue(ctx, resourceKey{}, prev)
+}
+
+// getNodeIPs returns the internal and external IPs of a node
+// ipv6: true returns IPv6 addresses, false returns IPv4 addresses
+func getNodeIPs(node *corev1.Node, ipv6 bool) (internalIP, externalIP string) {
+	for _, addr := range node.Status.Addresses {
+		ip := net.ParseIP(addr.Address)
+		if ip == nil {
+			continue
+		}
+
+		isIPv6 := ip.To4() == nil
+		if isIPv6 != ipv6 {
+			continue
+		}
+
+		switch addr.Type {
+		case corev1.NodeInternalIP:
+			internalIP = addr.Address
+		case corev1.NodeExternalIP:
+			externalIP = addr.Address
+		}
+	}
+	return internalIP, externalIP
 }
