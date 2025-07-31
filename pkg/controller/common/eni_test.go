@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	. "github.com/onsi/ginkgo/v2"
@@ -303,6 +304,89 @@ var _ = Describe("Common ENI Operations", func() {
 				},
 			})
 			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("ToNetworkInterfaceCR", func() {
+		It("should convert aliyunClient.NetworkInterface to NetworkInterface CR", func() {
+			aliyunENI := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-123",
+				MacAddress:         "00:11:22:33:44:55",
+				VPCID:              "vpc-123",
+				ZoneID:             "zone-1",
+				VSwitchID:          "vsw-123",
+				ResourceGroupID:    "rg-123",
+				SecurityGroupIDs:   []string{"sg-1", "sg-2"},
+				PrivateIPAddress:   "192.168.1.100",
+				IPv6Set: []aliyunClient.IPSet{
+					{IPAddress: "2001:db8::1"},
+				},
+			}
+
+			result := ToNetworkInterfaceCR(aliyunENI)
+
+			Expect(result.Name).To(Equal("eni-123"))
+			Expect(result.Spec.ENI.ID).To(Equal("eni-123"))
+			Expect(result.Spec.ENI.MAC).To(Equal("00:11:22:33:44:55"))
+			Expect(result.Spec.IPv4).To(Equal("192.168.1.100"))
+			Expect(result.Spec.IPv6).To(Equal("2001:db8::1"))
+		})
+	})
+
+	Context("WaitCreated", func() {
+		It("should wait for object to be created successfully", func() {
+			obj := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "wait-created-test",
+				},
+			}
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+
+			err := WaitCreated(ctx, k8sClient, obj, "", "wait-created-test")
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("WaitDeleted", func() {
+		It("should wait for object to be deleted successfully", func() {
+			obj := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "wait-deleted-test",
+				},
+			}
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, obj)).To(Succeed())
+
+			WaitDeleted(ctx, k8sClient, obj, "", "wait-deleted-test")
+
+			err := k8sClient.Get(ctx, client.ObjectKey{Name: "wait-deleted-test"}, obj)
+			Expect(k8sErr.IsNotFound(err)).To(BeTrue())
+		})
+	})
+
+	Context("WaitRVChanged", func() {
+		It("should wait for resource version to change", func() {
+			obj := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "wait-rv-test",
+				},
+			}
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "wait-rv-test"}, obj)).To(Succeed())
+			initialRV := obj.GetResourceVersion()
+
+			update := obj.DeepCopy()
+
+			go func() {
+				time.Sleep(50 * time.Millisecond)
+				update.Spec.IPv4 = "192.168.1.100"
+				Expect(k8sClient.Update(ctx, update)).To(Succeed())
+			}()
+
+			err := WaitRVChanged(ctx, k8sClient, obj, "", "wait-rv-test", initialRV)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(obj.GetResourceVersion()).NotTo(Equal(initialRV))
 		})
 	})
 })

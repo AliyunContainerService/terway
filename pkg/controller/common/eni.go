@@ -8,8 +8,6 @@ import (
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
-	"github.com/AliyunContainerService/terway/types"
-	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -30,59 +28,6 @@ type CreateOption struct {
 
 	PodName      string
 	PodNamespace string
-}
-
-func FromPodENI(podENI *v1beta1.PodENI) []*v1beta1.NetworkInterface {
-	var result []*v1beta1.NetworkInterface
-
-	for _, alloc := range podENI.Spec.Allocations {
-		eniID := alloc.ENI.ID
-		if eniID == "" {
-			continue
-		}
-
-		// create it
-		networkInterface := &v1beta1.NetworkInterface{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   eniID,
-				Labels: map[string]string{},
-			},
-		}
-
-		if podENI.Labels[types.ENIRelatedNodeName] != "" {
-			networkInterface.Labels[types.ENIRelatedNodeName] = podENI.Labels[types.ENIRelatedNodeName]
-		}
-
-		networkInterface.Spec.ENI = alloc.ENI
-		networkInterface.Spec.IPv4 = alloc.IPv4
-		networkInterface.Spec.IPv6 = alloc.IPv6
-		// leave cidr to empty
-		networkInterface.Spec.ExtraConfig = alloc.ExtraConfig
-
-		networkInterface.Spec.ManagePolicy = v1beta1.ManagePolicy{
-			Cache:     false,
-			UnManaged: false,
-		}
-
-		if _, ok := podENI.Annotations[types.ENIAllocFromPool]; ok {
-			networkInterface.Spec.ManagePolicy.Cache = true
-		}
-
-		networkInterface.Spec.PodENIRef = &corev1.ObjectReference{
-			Kind:      "Pod",
-			Name:      podENI.Name,
-			Namespace: podENI.Namespace,
-		}
-
-		networkInterface.Status.Phase = podENI.Status.Phase
-
-		networkInterface.Status.NodeName = podENI.Labels[types.ENIRelatedNodeName]
-		networkInterface.Status.InstanceID = podENI.Status.InstanceID
-		networkInterface.Status.TrunkENIID = podENI.Status.TrunkENIID
-		networkInterface.Status.ENIInfo = podENI.Status.ENIInfos[eniID]
-		// NetworkCardIndex is not stored
-	}
-	return result
 }
 
 func ToNetworkInterfaceCR(eni *aliyunClient.NetworkInterface) *v1beta1.NetworkInterface {
