@@ -6,6 +6,7 @@ import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/utils/ptr"
 )
 
 // MockIdempotentKeyGen is a mock implementation of IdempotentKeyGen interface
@@ -133,8 +134,8 @@ func TestApplyTo(t *testing.T) {
 	t.Run("All fields are nil", func(t *testing.T) {
 		src := &AttachNetworkInterfaceOptions{}
 		dst := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("old-nic"),
-			InstanceID:         ptr("old-instance"),
+			NetworkInterfaceID: ptr.To("old-nic"),
+			InstanceID:         ptr.To("old-instance"),
 		}
 		src.ApplyTo(dst)
 		assert.Equal(t, "old-nic", *dst.NetworkInterfaceID)
@@ -143,11 +144,11 @@ func TestApplyTo(t *testing.T) {
 
 	t.Run("Some fields are non-nil", func(t *testing.T) {
 		src := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("new-nic"),
+			NetworkInterfaceID: ptr.To("new-nic"),
 		}
 		dst := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("old-nic"),
-			InstanceID:         ptr("old-instance"),
+			NetworkInterfaceID: ptr.To("old-nic"),
+			InstanceID:         ptr.To("old-instance"),
 		}
 		src.ApplyTo(dst)
 		assert.Equal(t, "new-nic", *dst.NetworkInterfaceID)
@@ -156,12 +157,12 @@ func TestApplyTo(t *testing.T) {
 
 	t.Run("All fields are non-nil", func(t *testing.T) {
 		src := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("new-nic"),
-			InstanceID:         ptr("new-instance"),
+			NetworkInterfaceID: ptr.To("new-nic"),
+			InstanceID:         ptr.To("new-instance"),
 		}
 		dst := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("old-nic"),
-			InstanceID:         ptr("old-instance"),
+			NetworkInterfaceID: ptr.To("old-nic"),
+			InstanceID:         ptr.To("old-instance"),
 		}
 		src.ApplyTo(dst)
 		assert.Equal(t, "new-nic", *dst.NetworkInterfaceID)
@@ -172,10 +173,10 @@ func TestApplyTo(t *testing.T) {
 func TestECS(t *testing.T) {
 	t.Run("All fields are non-nil", func(t *testing.T) {
 		opts := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID:     ptr("nic-123"),
-			InstanceID:             ptr("instance-456"),
-			TrunkNetworkInstanceID: ptr("trunk-789"),
-			NetworkCardIndex:       ptr(1),
+			NetworkInterfaceID:     ptr.To("nic-123"),
+			InstanceID:             ptr.To("instance-456"),
+			TrunkNetworkInstanceID: ptr.To("trunk-789"),
+			NetworkCardIndex:       ptr.To(1),
 			Backoff:                &wait.Backoff{Steps: 2},
 		}
 		req, err := opts.ECS()
@@ -190,7 +191,7 @@ func TestECS(t *testing.T) {
 
 	t.Run("Missing required fields", func(t *testing.T) {
 		opts := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("nic-123"),
+			NetworkInterfaceID: ptr.To("nic-123"),
 			InstanceID:         nil,
 		}
 		_, err := opts.ECS()
@@ -199,8 +200,8 @@ func TestECS(t *testing.T) {
 
 	t.Run("Backoff is nil", func(t *testing.T) {
 		opts := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID: ptr("nic-123"),
-			InstanceID:         ptr("instance-456"),
+			NetworkInterfaceID: ptr.To("nic-123"),
+			InstanceID:         ptr.To("instance-456"),
 			Backoff:            nil,
 		}
 		_, err := opts.ECS()
@@ -210,8 +211,8 @@ func TestECS(t *testing.T) {
 
 	t.Run("Partial fields are nil", func(t *testing.T) {
 		opts := &AttachNetworkInterfaceOptions{
-			NetworkInterfaceID:     ptr("nic-123"),
-			InstanceID:             ptr("instance-456"),
+			NetworkInterfaceID:     ptr.To("nic-123"),
+			InstanceID:             ptr.To("instance-456"),
 			TrunkNetworkInstanceID: nil,
 			NetworkCardIndex:       nil,
 		}
@@ -224,7 +225,356 @@ func TestECS(t *testing.T) {
 	})
 }
 
-// Helper function to create pointers for string and int values
-func ptr[T any](v T) *T {
-	return &v
+func TestCreateNetworkInterfaceOptions_EFLO(t *testing.T) {
+	tests := []struct {
+		name    string
+		options *CreateNetworkInterfaceOptions
+		wantErr error
+	}{
+		{
+			name: "Valid EFLO options",
+			options: &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					VSwitchID:        "vsw-xxxxxx",
+					SecurityGroupIDs: []string{"sg-xxxxxx"},
+					InstanceID:       "i-xxxxxx",
+					ZoneID:           "cn-hangzhou-a",
+					VPCID:            "vpc-xxxxxx",
+					IPCount:          1, // EFLO only supports single IP
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Missing VSwitchID",
+			options: &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					SecurityGroupIDs: []string{"sg-xxxxxx"},
+					InstanceID:       "i-xxxxxx",
+					ZoneID:           "cn-hangzhou-a",
+					VPCID:            "vpc-xxxxxx",
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Multi IP not supported",
+			options: &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					VSwitchID:        "vsw-xxxxxx",
+					SecurityGroupIDs: []string{"sg-xxxxxx"},
+					IPCount:          2, // EFLO doesn't support multi IP
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Missing SecurityGroupID",
+			options: &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					VSwitchID: "vsw-xxxxxx",
+					ZoneID:    "cn-hangzhou-a",
+					VPCID:     "vpc-xxxxxx",
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Missing ZoneID",
+			options: &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					VSwitchID:        "vsw-xxxxxx",
+					SecurityGroupIDs: []string{"sg-xxxxxx"},
+					VPCID:            "vpc-xxxxxx",
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, cleanup, err := tt.options.EFLO(&MockIdempotentKeyGen{generatedKeys: map[string]string{}})
+
+			if tt.wantErr != nil {
+				assert.Equal(t, tt.wantErr, err)
+				assert.Nil(t, req)
+				assert.Nil(t, cleanup)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.NotNil(t, req)
+			assert.NotNil(t, cleanup)
+
+			// Verify the request fields
+			assert.Equal(t, tt.options.NetworkInterfaceOptions.VSwitchID, req.VSwitchId)
+			if len(tt.options.NetworkInterfaceOptions.SecurityGroupIDs) > 0 {
+				assert.Equal(t, tt.options.NetworkInterfaceOptions.SecurityGroupIDs[0], req.SecurityGroupId)
+			}
+			assert.Equal(t, eniDescription, req.Description)
+			if tt.options.NetworkInterfaceOptions.InstanceID != "" {
+				assert.Equal(t, tt.options.NetworkInterfaceOptions.InstanceID, req.NodeId)
+			}
+			if tt.options.NetworkInterfaceOptions.ZoneID != "" {
+				assert.Equal(t, tt.options.NetworkInterfaceOptions.ZoneID, req.ZoneId)
+			}
+			if tt.options.NetworkInterfaceOptions.VPCID != "" {
+				assert.Equal(t, tt.options.NetworkInterfaceOptions.VPCID, req.VpcId)
+			}
+			assert.Equal(t, "mockToken", req.ClientToken)
+
+			// Verify backoff is set
+			assert.NotNil(t, tt.options.Backoff)
+			assert.Equal(t, 1, tt.options.Backoff.Steps)
+
+			// Cleanup
+			cleanup()
+		})
+	}
+}
+
+func TestAssignPrivateIPAddressOptions_ApplyAssignPrivateIPAddress(t *testing.T) {
+	tests := []struct {
+		name   string
+		source *AssignPrivateIPAddressOptions
+		target *AssignPrivateIPAddressOptions
+		want   *AssignPrivateIPAddressOptions
+	}{
+		{
+			name: "Apply with all fields",
+			source: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPCount:            2,
+				},
+				Backoff: &wait.Backoff{Steps: 3},
+			},
+			target: &AssignPrivateIPAddressOptions{},
+			want: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPCount:            2,
+				},
+				Backoff: &wait.Backoff{Steps: 3},
+			},
+		},
+		{
+			name: "Apply with nil backoff",
+			source: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPCount:            1,
+				},
+				Backoff: nil,
+			},
+			target: &AssignPrivateIPAddressOptions{
+				Backoff: &wait.Backoff{Steps: 1},
+			},
+			want: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPCount:            1,
+				},
+				Backoff: &wait.Backoff{Steps: 1},
+			},
+		},
+		{
+			name: "Apply with existing target",
+			source: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-new",
+					IPCount:            3,
+				},
+				Backoff: &wait.Backoff{Steps: 5},
+			},
+			target: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-old",
+					IPCount:            1,
+				},
+				Backoff: &wait.Backoff{Steps: 1},
+			},
+			want: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-new",
+					IPCount:            3,
+				},
+				Backoff: &wait.Backoff{Steps: 5},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.source.ApplyAssignPrivateIPAddress(tt.target)
+
+			assert.Equal(t, tt.want.NetworkInterfaceOptions, tt.target.NetworkInterfaceOptions)
+			assert.Equal(t, tt.want.Backoff, tt.target.Backoff)
+		})
+	}
+}
+
+func TestAssignPrivateIPAddressOptions_EFLO(t *testing.T) {
+	tests := []struct {
+		name    string
+		options *AssignPrivateIPAddressOptions
+		wantErr error
+	}{
+		{
+			name: "Valid EFLO options with single IP",
+			options: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPCount:            1,
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Missing NetworkInterfaceID",
+			options: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					IPCount: 1,
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Invalid IP count (not 1)",
+			options: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPCount:            2,
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Zero IP count",
+			options: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPCount:            0,
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Nil NetworkInterfaceOptions",
+			options: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: nil,
+			},
+			wantErr: ErrInvalidArgs,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, cleanup, err := tt.options.EFLO(&MockIdempotentKeyGen{generatedKeys: map[string]string{}})
+
+			if tt.wantErr != nil {
+				assert.Equal(t, tt.wantErr, err)
+				assert.Nil(t, req)
+				assert.Nil(t, cleanup)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.NotNil(t, req)
+			assert.NotNil(t, cleanup)
+
+			// Verify the request fields
+			assert.Equal(t, tt.options.NetworkInterfaceOptions.NetworkInterfaceID, req.ElasticNetworkInterfaceId)
+			assert.Equal(t, "mockToken", req.ClientToken)
+
+			// Verify backoff is set
+			assert.NotNil(t, tt.options.Backoff)
+			assert.Equal(t, 1, tt.options.Backoff.Steps)
+
+			// Cleanup
+			cleanup()
+		})
+	}
+}
+
+func TestAssignIPv6AddressesOptions_ApplyAssignIPv6Addresses(t *testing.T) {
+	tests := []struct {
+		name   string
+		source *AssignIPv6AddressesOptions
+		target *AssignIPv6AddressesOptions
+		want   *AssignIPv6AddressesOptions
+	}{
+		{
+			name: "Apply with all fields",
+			source: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPv6Count:          2,
+				},
+				Backoff: &wait.Backoff{Steps: 3},
+			},
+			target: &AssignIPv6AddressesOptions{},
+			want: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPv6Count:          2,
+				},
+				Backoff: &wait.Backoff{Steps: 3},
+			},
+		},
+		{
+			name: "Apply with nil backoff",
+			source: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPv6Count:          1,
+				},
+				Backoff: nil,
+			},
+			target: &AssignIPv6AddressesOptions{
+				Backoff: &wait.Backoff{Steps: 1},
+			},
+			want: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPv6Count:          1,
+				},
+				Backoff: &wait.Backoff{Steps: 1},
+			},
+		},
+		{
+			name: "Apply with existing target",
+			source: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-new",
+					IPv6Count:          3,
+				},
+				Backoff: &wait.Backoff{Steps: 5},
+			},
+			target: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-old",
+					IPv6Count:          1,
+				},
+				Backoff: &wait.Backoff{Steps: 1},
+			},
+			want: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-new",
+					IPv6Count:          3,
+				},
+				Backoff: &wait.Backoff{Steps: 5},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.source.ApplyAssignIPv6Addresses(tt.target)
+
+			assert.Equal(t, tt.want.NetworkInterfaceOptions, tt.target.NetworkInterfaceOptions)
+			assert.Equal(t, tt.want.Backoff, tt.target.Backoff)
+		})
+	}
 }

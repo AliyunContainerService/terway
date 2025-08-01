@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"net"
 
 	"github.com/samber/lo"
@@ -18,7 +19,7 @@ import (
 func gcPolicyRoutes(ctx context.Context, mac string, containerIPNet *types.IPNetSet, namespace, name string) error {
 	index, err := link.GetDeviceNumber(mac)
 	if err != nil {
-		if _, ok := err.(netlink.LinkNotFoundError); ok {
+		if errors.Is(err, link.ErrNotFound) {
 			return nil
 		}
 		return err
