@@ -9,7 +9,7 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 87f4fe20dd..8107f94de4 100644
+index 33d18ab335..120d749348 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -3063,7 +3063,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {

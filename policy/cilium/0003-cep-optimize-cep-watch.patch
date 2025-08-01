@@ -72,10 +72,10 @@ index 495cd217e6..33cb1e6021 100644
  							Status: *mdl,
  						}
 diff --git a/pkg/k8s/resource_ctors.go b/pkg/k8s/resource_ctors.go
-index 809d13a776..49a7633460 100644
+index f4e63e5736..e835b21447 100644
 --- a/pkg/k8s/resource_ctors.go
 +++ b/pkg/k8s/resource_ctors.go
-@@ -9,10 +9,13 @@ import (
+@@ -10,10 +10,13 @@ import (
  
  	"github.com/cilium/cilium/pkg/allocator"
  	"github.com/cilium/cilium/pkg/identity/key"
@@ -89,7 +89,7 @@ index 809d13a776..49a7633460 100644
  	k8sRuntime "k8s.io/apimachinery/pkg/runtime"
  	"k8s.io/apimachinery/pkg/watch"
  	"k8s.io/client-go/tools/cache"
-@@ -397,14 +400,24 @@ func transformEndpoint(obj any) (any, error) {
+@@ -401,14 +404,24 @@ func transformEndpoint(obj any) (any, error) {
  // to initialize it before the first access.
  // To reflect this, the node.LocalNodeStore dependency is explicitly requested in the function
  // signature.
