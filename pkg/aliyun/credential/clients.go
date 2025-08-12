@@ -3,6 +3,7 @@ package credential
 import (
 	"os"
 
+	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
@@ -14,6 +15,10 @@ import (
 
 type ECSClient interface {
 	GetClient() *ecs.Client
+}
+
+type ECSV2Client interface {
+	GetClient() *ecs20140526.Client
 }
 
 type VPCClient interface {
@@ -39,6 +44,11 @@ type ClientConfig struct {
 type ecsClientImpl struct {
 	config ClientConfig
 	client *ecs.Client
+}
+
+type ecsV2ClientImpl struct {
+	config ClientConfig
+	client *ecs20140526.Client
 }
 
 type vpcClientImpl struct {
@@ -77,6 +87,43 @@ func NewECSClient(config ClientConfig, credential auth.Credential) (ECSClient, e
 	}
 
 	return &ecsClientImpl{
+		config: config,
+		client: client,
+	}, nil
+}
+
+func NewECSV2Client(config ClientConfig, credential credential.Credential) (ECSV2Client, error) {
+	domain, err := parseURL(os.Getenv("ECS_ENDPOINT"))
+	if err != nil {
+		return nil, err
+	}
+	if domain != "" {
+		config.Domain = domain
+	}
+
+	regionID := os.Getenv("ECS_ENDPOINT")
+	if regionID != "" {
+		config.RegionID = regionID
+	}
+
+	sdkConfig := provideSDKV2Config(config, credential)
+
+	client, err := ecs20140526.NewClient(sdkConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	var endpoint *string
+	if config.Domain != "" {
+		endpoint = &config.Domain
+	}
+	ep, err := client.GetEndpoint(ptr.To("ecs"), &config.RegionID, &config.EndpointType, &config.NetworkType, nil, nil, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	client.Endpoint = ep
+
+	return &ecsV2ClientImpl{
 		config: config,
 		client: client,
 	}, nil
@@ -176,6 +223,10 @@ func NewEFLOV2Client(config ClientConfig, credential credential.Credential) (EFL
 }
 
 func (e *ecsClientImpl) GetClient() *ecs.Client {
+	return e.client
+}
+
+func (e *ecsV2ClientImpl) GetClient() *ecs20140526.Client {
 	return e.client
 }
 

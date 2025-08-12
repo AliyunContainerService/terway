@@ -10,6 +10,7 @@ import (
 
 	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
+	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth"
@@ -25,6 +26,7 @@ import (
 
 type Client interface {
 	ECS() *ecs.Client
+	ECSV2() *ecs20140526.Client
 	VPC() *vpc.Client
 	EFLO() *eflo.Client
 	EFLOV2() *eflo20220530.Client
@@ -115,6 +117,7 @@ type ClientMgr struct {
 	provider provider.CredentialsProvider
 
 	ecsClient    ECSClient
+	ecsV2Client  ECSV2Client
 	vpcClient    VPCClient
 	efloClient   EFLOClient
 	efloV2Client EFLOV2Client
