@@ -4,15 +4,23 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/netip"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/e2e-framework/klient/k8s"
+	"sigs.k8s.io/e2e-framework/klient/wait"
+	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
+	"sigs.k8s.io/e2e-framework/pkg/envconf"
 )
 
 type Pod struct {
@@ -318,4 +326,23 @@ func getNodeIPs(node *corev1.Node, ipv6 bool) (internalIP, externalIP string) {
 		}
 	}
 	return internalIP, externalIP
+}
+
+func restartTerway(ctx context.Context, config *envconf.Config) error {
+	ds := &appsv1.DaemonSet{}
+	err := config.Client().Resources().Get(ctx, "terway-eniip", "kube-system", ds)
+	if err != nil {
+		return err
+	}
+
+	annotationPatchStr := fmt.Sprintf(`{ "spec": { "template": { "metadata": { "annotations": { "%v": "%v" } } } } }`, "e2e/restartedAt", time.Now().Format(time.RFC3339))
+
+	err = config.Client().Resources().Patch(ctx, ds, k8s.Patch{PatchType: types.StrategicMergePatchType, Data: []byte(annotationPatchStr)})
+	if err != nil {
+		return err
+	}
+	err = wait.For(conditions.New(config.Client().Resources()).DaemonSetReady(ds),
+		wait.WithTimeout(5*time.Minute),
+		wait.WithInterval(5*time.Second))
+	return err
 }
