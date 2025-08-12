@@ -67,6 +67,8 @@ var (
 
 	defaultPodNetworkingName string
 	affinityLabel            string
+
+	eniConfig *Config
 )
 
 func init() {
@@ -208,6 +210,8 @@ func checkENIConfig(ctx context.Context, config *envconf.Config) (context.Contex
 	if cfg.IPStack == "dual" || cfg.IPStack == "ipv6" {
 		testIPv6 = true
 	}
+
+	eniConfig = cfg
 
 	return ctx, nil
 }
