@@ -224,6 +224,11 @@ func (a *ECSService) DeleteNetworkInterface(ctx context.Context, eniID string) e
 	metric.OpenAPILatency.WithLabelValues(APIDeleteNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
+
+		if apiErr.ErrorCodeIs(err, apiErr.ErrInvalidENINotFound) {
+			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Info("succeed, %s", apiErr.ErrInvalidENINotFound)
+			return nil
+		}
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "delete eni failed")
 		return err
 	}
