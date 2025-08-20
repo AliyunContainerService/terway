@@ -12,6 +12,7 @@ import (
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
+	eflocontroller20221215 "github.com/alibabacloud-go/eflo-controller-20221215/v2/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth/credentials"
@@ -30,6 +31,7 @@ type Client interface {
 	VPC() *vpc.Client
 	EFLO() *eflo.Client
 	EFLOV2() *eflo20220530.Client
+	EFLOController() *eflocontroller20221215.Client
 }
 
 var (
@@ -116,11 +118,12 @@ func ProviderV2(providers provider.CredentialsProvider) credential.Credential {
 type ClientMgr struct {
 	provider provider.CredentialsProvider
 
-	ecsClient    ECSClient
-	ecsV2Client  ECSV2Client
-	vpcClient    VPCClient
-	efloClient   EFLOClient
-	efloV2Client EFLOV2Client
+	ecsClient            ECSClient
+	ecsV2Client          ECSV2Client
+	vpcClient            VPCClient
+	efloClient           EFLOClient
+	efloV2Client         EFLOV2Client
+	efloControllerClient EFLOControllerClient
 
 	sync.RWMutex
 }
@@ -128,6 +131,11 @@ type ClientMgr struct {
 func (c *ClientMgr) ECS() *ecs.Client {
 	return c.ecsClient.GetClient()
 }
+
+func (c *ClientMgr) ECSV2() *ecs20140526.Client {
+	return c.ecsV2Client.GetClient()
+}
+
 func (c *ClientMgr) VPC() *vpc.Client {
 	return c.vpcClient.GetClient()
 }
@@ -136,6 +144,10 @@ func (c *ClientMgr) EFLO() *eflo.Client {
 }
 func (c *ClientMgr) EFLOV2() *eflo20220530.Client {
 	return c.efloV2Client.GetClient()
+}
+
+func (c *ClientMgr) EFLOController() *eflocontroller20221215.Client {
+	return c.efloControllerClient.GetClient()
 }
 
 type ClientScheme string

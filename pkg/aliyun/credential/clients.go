@@ -5,6 +5,7 @@ import (
 
 	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
+	eflocontroller20221215 "github.com/alibabacloud-go/eflo-controller-20221215/v2/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
@@ -31,6 +32,10 @@ type EFLOClient interface {
 
 type EFLOV2Client interface {
 	GetClient() *eflo20220530.Client
+}
+
+type EFLOControllerClient interface {
+	GetClient() *eflocontroller20221215.Client
 }
 
 type ClientConfig struct {
@@ -64,6 +69,11 @@ type efloClientImpl struct {
 type efloV2ClientImpl struct {
 	config ClientConfig
 	client *eflo20220530.Client
+}
+
+type efloControllerClientImpl struct {
+	config ClientConfig
+	client *eflocontroller20221215.Client
 }
 
 func NewECSClient(config ClientConfig, credential auth.Credential) (ECSClient, error) {
@@ -222,6 +232,44 @@ func NewEFLOV2Client(config ClientConfig, credential credential.Credential) (EFL
 	}, nil
 }
 
+func NewEFLOControllerClient(config ClientConfig, credential credential.Credential) (EFLOControllerClient, error) {
+	domain, err := parseURL(os.Getenv("EFLO_CONTROLLER_ENDPOINT"))
+	if err != nil {
+		return nil, err
+	}
+
+	if domain != "" {
+		config.Domain = domain
+	}
+
+	regionID := os.Getenv("EFLO_CONTROLLER_REGION_ID")
+	if regionID != "" {
+		config.RegionID = regionID
+	}
+
+	sdkConfig := provideSDKV2Config(config, credential)
+
+	client, err := eflocontroller20221215.NewClient(sdkConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	var endpoint *string
+	if config.Domain != "" {
+		endpoint = &config.Domain
+	}
+	ep, err := client.GetEndpoint(ptr.To("eflo-controller"), &config.RegionID, &config.EndpointType, &config.NetworkType, nil, nil, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	client.Endpoint = ep
+
+	return &efloControllerClientImpl{
+		config: config,
+		client: client,
+	}, nil
+}
+
 func (e *ecsClientImpl) GetClient() *ecs.Client {
 	return e.client
 }
@@ -239,5 +287,9 @@ func (e *efloClientImpl) GetClient() *eflo.Client {
 }
 
 func (e *efloV2ClientImpl) GetClient() *eflo20220530.Client {
+	return e.client
+}
+
+func (e *efloControllerClientImpl) GetClient() *eflocontroller20221215.Client {
 	return e.client
 }

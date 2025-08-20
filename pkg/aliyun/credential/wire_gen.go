@@ -40,7 +40,11 @@ func InitializeClientMgr(regionID string, credProvider provider.CredentialsProvi
 	if err != nil {
 		return nil, err
 	}
-	clientMgr := NewClientMgr(credProvider, ecsClient, ecsv2Client, vpcClient, efloClient, eflov2Client)
+	efloControllerClient, err := NewEFLOControllerClient(clientConfig, credentialsCredential)
+	if err != nil {
+		return nil, err
+	}
+	clientMgr := NewClientMgr(credProvider, ecsClient, ecsv2Client, vpcClient, efloClient, eflov2Client, efloControllerClient)
 	return clientMgr, nil
 }
 
@@ -50,16 +54,17 @@ func NewClientMgr(credProvider provider.CredentialsProvider,
 	ecsClient ECSClient,
 	ecsV2Client ECSV2Client,
 	vpcClient VPCClient, efloClient EFLOClient,
-	efloV2Client EFLOV2Client) *ClientMgr {
+	efloV2Client EFLOV2Client, efloControllerClient EFLOControllerClient) *ClientMgr {
 
 	return &ClientMgr{
 
-		provider:     credProvider,
-		ecsV2Client:  ecsV2Client,
-		ecsClient:    ecsClient,
-		vpcClient:    vpcClient,
-		efloClient:   efloClient,
-		efloV2Client: efloV2Client,
+		provider:             credProvider,
+		ecsV2Client:          ecsV2Client,
+		ecsClient:            ecsClient,
+		vpcClient:            vpcClient,
+		efloClient:           efloClient,
+		efloV2Client:         efloV2Client,
+		efloControllerClient: efloControllerClient,
 	}
 }
 

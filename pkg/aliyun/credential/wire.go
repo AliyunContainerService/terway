@@ -20,6 +20,7 @@ func InitializeClientMgr(regionID string, credProvider provider.CredentialsProvi
 		NewVPCClient,
 		NewEFLOClient,
 		NewEFLOV2Client,
+		NewEFLOControllerClient,
 		NewClientMgr,
 		ProviderV2,
 		ProviderV1,
@@ -31,16 +32,17 @@ func NewClientMgr(credProvider provider.CredentialsProvider,
 	ecsClient ECSClient,
 	ecsV2Client ECSV2Client,
 	vpcClient VPCClient, efloClient EFLOClient,
-	efloV2Client EFLOV2Client) *ClientMgr {
+	efloV2Client EFLOV2Client, efloControllerClient EFLOControllerClient) *ClientMgr {
 
 	return &ClientMgr{
 
-		provider:     credProvider,
-		ecsV2Client:  ecsV2Client,
-		ecsClient:    ecsClient,
-		vpcClient:    vpcClient,
-		efloClient:   efloClient,
-		efloV2Client: efloV2Client,
+		provider:             credProvider,
+		ecsV2Client:          ecsV2Client,
+		ecsClient:            ecsClient,
+		vpcClient:            vpcClient,
+		efloClient:           efloClient,
+		efloV2Client:         efloV2Client,
+		efloControllerClient: efloControllerClient,
 	}
 }
 

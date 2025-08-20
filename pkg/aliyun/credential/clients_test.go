@@ -22,7 +22,8 @@ func (f *fakeProvider) Credentials(ctx context.Context) (*provider.Credentials, 
 
 func TestNewECSClient(t *testing.T) {
 	os.Setenv("ECS_ENDPOINT", "")
-	cfg := ClientConfig{RegionID: "cn-test"}
+	os.Setenv("X-ACSPROXY-ASCM-CONTEXT", "X-ACSPROXY-ASCM-CONTEXT")
+	cfg := ClientConfig{RegionID: "cn-test", Domain: "domain"}
 	cred := ProviderV1(&fakeProvider{})
 	client, err := NewECSClient(cfg, cred)
 	if err != nil {
@@ -33,9 +34,22 @@ func TestNewECSClient(t *testing.T) {
 	}
 }
 
+func TestNewECSV2Client(t *testing.T) {
+	os.Setenv("ECS_ENDPOINT", "")
+	cfg := ClientConfig{RegionID: "cn-test", Domain: "domain"}
+	cred := ProviderV2(&fakeProvider{})
+	client, err := NewECSV2Client(cfg, cred)
+	if err != nil && !errors.Is(err, nil) { // allow for not implemented
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if client == nil && err == nil {
+		t.Fatal("expected non-nil client or error")
+	}
+}
+
 func TestNewVPCClient(t *testing.T) {
 	os.Setenv("VPC_ENDPOINT", "")
-	cfg := ClientConfig{RegionID: "cn-test"}
+	cfg := ClientConfig{RegionID: "cn-test", Domain: "domain"}
 	cred := ProviderV1(&fakeProvider{})
 	client, err := NewVPCClient(cfg, cred)
 	if err != nil {
@@ -49,7 +63,7 @@ func TestNewVPCClient(t *testing.T) {
 func TestNewEFLOClient(t *testing.T) {
 	os.Setenv("EFLO_ENDPOINT", "")
 	os.Setenv("EFLO_REGION_ID", "")
-	cfg := ClientConfig{RegionID: "cn-test"}
+	cfg := ClientConfig{RegionID: "cn-test", Domain: "domain"}
 	cred := ProviderV1(&fakeProvider{})
 	client, err := NewEFLOClient(cfg, cred)
 	if err != nil {
@@ -63,9 +77,23 @@ func TestNewEFLOClient(t *testing.T) {
 func TestNewEFLOV2Client(t *testing.T) {
 	os.Setenv("EFLO_ENDPOINT", "")
 	os.Setenv("EFLO_REGION_ID", "")
-	cfg := ClientConfig{RegionID: "cn-test"}
+	cfg := ClientConfig{RegionID: "cn-test", Domain: "domain"}
 	cred := ProviderV2(&fakeProvider{})
 	client, err := NewEFLOV2Client(cfg, cred)
+	if err != nil && !errors.Is(err, nil) { // allow for not implemented
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if client == nil && err == nil {
+		t.Fatal("expected non-nil client or error")
+	}
+}
+
+func TestNewEFLOControllerClient(t *testing.T) {
+	os.Setenv("EFLO_ENDPOINT", "")
+	os.Setenv("EFLO_REGION_ID", "")
+	cfg := ClientConfig{RegionID: "cn-test", Domain: "domain"}
+	cred := ProviderV2(&fakeProvider{})
+	client, err := NewEFLOControllerClient(cfg, cred)
 	if err != nil && !errors.Is(err, nil) { // allow for not implemented
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -78,4 +106,12 @@ func TestInitializeClientMgr(t *testing.T) {
 	c, err := InitializeClientMgr("cn-test", &fakeProvider{})
 	require.NoError(t, err)
 	require.NotNil(t, c)
+
+	// test client
+	require.NotNil(t, c.ECS())
+	require.NotNil(t, c.VPC())
+	require.NotNil(t, c.EFLO())
+	require.NotNil(t, c.EFLOV2())
+	require.NotNil(t, c.EFLOController())
+	require.NotNil(t, c.ECSV2())
 }
