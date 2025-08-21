@@ -15,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/rest"
+	toolscache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -55,11 +57,16 @@ type CRDV2 struct {
 	// record pods cni del is called, it is indexed by pod uid
 	deletedPods   map[string]*networkv1beta1.RuntimePodStatus
 	cacheSyncedCh chan struct{}
+
+	notifier *Notifier
 }
 
 func NewCRDV2(nodeName, namespace string) *CRDV2 {
 	restConfig := ctrl.GetConfigOrDie()
+	return newCRDV2(restConfig, nodeName, namespace)
+}
 
+func newCRDV2(restConfig *rest.Config, nodeName, namespace string) *CRDV2 {
 	options := ctrl.Options{
 		Scheme:                 types.Scheme,
 		HealthProbeBindAddress: "0",
@@ -149,6 +156,7 @@ func NewCRDV2(nodeName, namespace string) *CRDV2 {
 		nodeName:      nodeName,
 		deletedPods:   make(map[string]*networkv1beta1.RuntimePodStatus),
 		cacheSyncedCh: cacheSyncedCh,
+		notifier:      NewNotifier(),
 	}
 }
 
@@ -170,6 +178,27 @@ func (r *CRDV2) Run(ctx context.Context, podResources []daemon.PodResources, wg 
 	// block until cache ready, workaround for now
 	<-r.cacheSyncedCh
 	klog.Info("crd v2 controller cache synced")
+
+	nodeInformer, err := r.mgr.GetCache().GetInformer(ctx, &networkv1beta1.Node{})
+	if err != nil {
+		return err
+	}
+
+	_, err = nodeInformer.AddEventHandler(&toolscache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			r.notifier.Notify()
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			newNode := newObj.(*networkv1beta1.Node)
+			if newNode.Status.NetworkInterfaces == nil {
+				return
+			}
+			r.notifier.Notify()
+		},
+	})
+	if err != nil {
+		return err
+	}
 
 	go wait.UntilWithContext(ctx, func(ctx context.Context) {
 		err := r.syncNodeRuntime(ctx)
@@ -228,127 +257,143 @@ func (r *CRDV2) multiIP(ctx context.Context, cni *daemon.CNI, request ResourceRe
 
 	go func() {
 		l := logf.FromContext(ctx, "ipam", "crd")
+		defer close(resp)
 
-		node := &networkv1beta1.Node{}
-		allocResp := &AllocResp{}
+		// Subscribe to Node CR change messages
+		ch := r.notifier.Subscribe()
+		defer r.notifier.Unsubscribe(ch)
 
-		var err error
-		err = backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.WaitPodENIStatus), func(ctx context.Context) (bool, error) {
-			err = r.client.Get(ctx, client.ObjectKey{Name: r.nodeName}, node)
-			if err != nil {
-				l.Error(err, "get node failed")
-				return false, nil
-			}
-			// cni.PodName
-			var ipv4, ipv6 netip.Addr
-			var eniInfo *networkv1beta1.Nic
-			for _, eni := range node.Status.NetworkInterfaces {
-				if eni.Status != aliyunClient.ENIStatusInUse {
-					continue
-				}
-				for _, ip := range eni.IPv4 {
-					if ip.Status != networkv1beta1.IPStatusValid ||
-						ip.PodID != cni.PodID {
-						continue
-					}
-					if ip.PodUID != "" && ip.PodUID != cni.PodUID {
-						continue
-					}
-					addr, err := netip.ParseAddr(ip.IP)
-					if err != nil {
-						return false, err
-					}
-					ipv4 = addr
-					eniInfo = eni
-				}
-				for _, ip := range eni.IPv6 {
-					if ip.Status != networkv1beta1.IPStatusValid ||
-						ip.PodID != cni.PodID {
-						continue
-					}
-					if ip.PodUID != "" && ip.PodUID != cni.PodUID {
-						continue
-					}
-					addr, err := netip.ParseAddr(ip.IP)
-					if err != nil {
-						return false, err
-					}
-					ipv6 = addr
-					eniInfo = eni
-				}
-			}
-			if (!ipv4.IsValid() && !ipv6.IsValid()) || eniInfo == nil {
-				l.V(2).Info("no valid ip found")
-				return false, nil
-			}
-
-			var ip types.IPSet2
-
-			ip.IPv4 = ipv4
-			ip.IPv6 = ipv6
-			gw := types.IPSet{}
-			vsw := types.IPNetSet{}
-			if ipv4.IsValid() {
-				gw.IPv4 = net.ParseIP(terwayIP.DeriveGatewayIP(eniInfo.IPv4CIDR))
-
-				_, cidr, err := net.ParseCIDR(eniInfo.IPv4CIDR)
-				if err != nil {
-					return false, err
-				}
-				vsw.IPv4 = cidr
-			}
-			if ipv6.IsValid() {
-				gw.IPv6 = net.ParseIP(terwayIP.DeriveGatewayIP(eniInfo.IPv6CIDR))
-
-				_, cidr, err := net.ParseCIDR(eniInfo.IPv6CIDR)
-				if err != nil {
-					return false, err
-				}
-				vsw.IPv6 = cidr
-			}
-
-			allocResp.NetworkConfigs = append(allocResp.NetworkConfigs, &LocalIPResource{
-				ENI: daemon.ENI{
-					ID:               eniInfo.ID,
-					MAC:              eniInfo.MacAddress,
-					SecurityGroupIDs: eniInfo.SecurityGroupIDs,
-					Trunk:            false,
-					ERdma: node.Spec.ENISpec.EnableERDMA &&
-						eniInfo.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance,
-					GatewayIP:   gw,
-					VSwitchCIDR: vsw,
-					VSwitchID:   eniInfo.VSwitchID,
-				},
-				IP: ip,
-			})
-			l.Info("get valid ip from crd", "cfg", allocResp.NetworkConfigs)
-
-			return true, nil
-		})
-
-		if err != nil {
-			if wait.Interrupted(err) {
-				allocResp.Err = &types.Error{
-					Code: types.ErrIPNotAllocated,
-					Msg:  fmt.Sprintf("timed out waiting for ip allocated. Use 'kubectl describe nodes.network.alibabacloud.com %s' to see more detail", r.nodeName),
-					R:    err,
-				}
-			} else {
-				allocResp.Err = err
-			}
+		// Try once first to avoid waiting
+		if allocResp, success := r.tryAllocateIP(ctx, cni, l); success {
+			resp <- allocResp
+			return
 		}
 
-		select {
-		case <-ctx.Done():
-			l.Error(ctx.Err(), "parent ctx done")
-		case resp <- allocResp:
-			r.lock.Lock()
-			delete(r.deletedPods, cni.PodUID)
-			r.lock.Unlock()
+		// Wait for Node CR change messages
+		for {
+			select {
+			case <-ctx.Done():
+				l.Info("context cancelled, allocation failed")
+				return
+			case <-ch:
+				l.V(2).Info("received node change notification, trying to allocate IP")
+				if allocResp, success := r.tryAllocateIP(ctx, cni, l); success {
+					resp <- allocResp
+					return
+				}
+			}
 		}
 	}()
 
 	return resp, nil
+}
+
+// tryAllocateIP attempts to allocate IP, returns allocation result and success status
+func (r *CRDV2) tryAllocateIP(ctx context.Context, cni *daemon.CNI, l logr.Logger) (*AllocResp, bool) {
+	node := &networkv1beta1.Node{}
+	allocResp := &AllocResp{}
+
+	err := r.client.Get(ctx, client.ObjectKey{Name: r.nodeName}, node)
+	if err != nil {
+		l.Error(err, "get node failed")
+		return nil, false
+	}
+
+	if node.Spec.ENISpec == nil {
+		l.V(2).Info("nodes.network.alibabacloud.com %s has not been initialized", r.nodeName)
+		return nil, false
+	}
+
+	// cni.PodName
+	var ipv4, ipv6 netip.Addr
+	var eniInfo *networkv1beta1.Nic
+	for _, eni := range node.Status.NetworkInterfaces {
+		if eni.Status != aliyunClient.ENIStatusInUse {
+			continue
+		}
+		for _, ip := range eni.IPv4 {
+			if ip.Status != networkv1beta1.IPStatusValid ||
+				ip.PodID != cni.PodID {
+				continue
+			}
+			if ip.PodUID != "" && ip.PodUID != cni.PodUID {
+				continue
+			}
+			addr, err := netip.ParseAddr(ip.IP)
+			if err != nil {
+				return nil, false
+			}
+			ipv4 = addr
+			eniInfo = eni
+		}
+		for _, ip := range eni.IPv6 {
+			if ip.Status != networkv1beta1.IPStatusValid ||
+				ip.PodID != cni.PodID {
+				continue
+			}
+			if ip.PodUID != "" && ip.PodUID != cni.PodUID {
+				continue
+			}
+			addr, err := netip.ParseAddr(ip.IP)
+			if err != nil {
+				return nil, false
+			}
+			ipv6 = addr
+			eniInfo = eni
+		}
+	}
+	if (!ipv4.IsValid() && !ipv6.IsValid()) || eniInfo == nil {
+		l.V(2).Info("no valid ip found")
+		return nil, false
+	}
+
+	var ip types.IPSet2
+
+	ip.IPv4 = ipv4
+	ip.IPv6 = ipv6
+	gw := types.IPSet{}
+	vsw := types.IPNetSet{}
+	if ipv4.IsValid() {
+		gw.IPv4 = net.ParseIP(terwayIP.DeriveGatewayIP(eniInfo.IPv4CIDR))
+
+		_, cidr, err := net.ParseCIDR(eniInfo.IPv4CIDR)
+		if err != nil {
+			return nil, false
+		}
+		vsw.IPv4 = cidr
+	}
+	if ipv6.IsValid() {
+		gw.IPv6 = net.ParseIP(terwayIP.DeriveGatewayIP(eniInfo.IPv6CIDR))
+
+		_, cidr, err := net.ParseCIDR(eniInfo.IPv6CIDR)
+		if err != nil {
+			return nil, false
+		}
+		vsw.IPv6 = cidr
+	}
+
+	allocResp.NetworkConfigs = append(allocResp.NetworkConfigs, &LocalIPResource{
+		ENI: daemon.ENI{
+			ID:               eniInfo.ID,
+			MAC:              eniInfo.MacAddress,
+			SecurityGroupIDs: eniInfo.SecurityGroupIDs,
+			Trunk:            false,
+			ERdma: node.Spec.ENISpec.EnableERDMA &&
+				eniInfo.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance,
+			GatewayIP:   gw,
+			VSwitchCIDR: vsw,
+			VSwitchID:   eniInfo.VSwitchID,
+		},
+		IP: ip,
+	})
+	l.Info("get valid ip from crd", "cfg", allocResp.NetworkConfigs)
+
+	// Clean up deletedPods
+	r.lock.Lock()
+	delete(r.deletedPods, cni.PodUID)
+	r.lock.Unlock()
+
+	return allocResp, true
 }
 
 func (r *CRDV2) remote(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace) {
@@ -380,7 +425,7 @@ func (r *CRDV2) getTrunkENI(ctx context.Context) (*daemon.ENI, error) {
 	var trunkENI *daemon.ENI
 
 	var innerErr error
-	err := backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.WaitPodENIStatus), func(ctx context.Context) (bool, error) {
+	err := wait.ExponentialBackoffWithContext(ctx, backoff.Backoff(backoff.WaitPodENIStatus).Backoff, func(ctx context.Context) (bool, error) {
 		node = &networkv1beta1.Node{}
 		innerErr = r.client.Get(ctx, client.ObjectKey{Name: r.nodeName}, node)
 		if innerErr != nil {
