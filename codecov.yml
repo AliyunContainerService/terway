@@ -1,0 +1,5 @@
+coverage:
+  status:
+    project:
+      default: 
+        removed_code_behavior: fully_covered_patch #removals_only, fully_covered_patch, adjust_base",
