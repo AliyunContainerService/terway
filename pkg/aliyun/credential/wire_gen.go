@@ -23,6 +23,11 @@ func InitializeClientMgr(regionID string, credProvider provider.CredentialsProvi
 	if err != nil {
 		return nil, err
 	}
+	credentialsCredential := ProviderV2(credProvider)
+	ecsv2Client, err := NewECSV2Client(clientConfig, credentialsCredential)
+	if err != nil {
+		return nil, err
+	}
 	vpcClient, err := NewVPCClient(clientConfig, credential)
 	if err != nil {
 		return nil, err
@@ -31,28 +36,35 @@ func InitializeClientMgr(regionID string, credProvider provider.CredentialsProvi
 	if err != nil {
 		return nil, err
 	}
-	credentialsCredential := ProviderV2(credProvider)
 	eflov2Client, err := NewEFLOV2Client(clientConfig, credentialsCredential)
 	if err != nil {
 		return nil, err
 	}
-	clientMgr := NewClientMgr(credProvider, ecsClient, vpcClient, efloClient, eflov2Client)
+	efloControllerClient, err := NewEFLOControllerClient(clientConfig, credentialsCredential)
+	if err != nil {
+		return nil, err
+	}
+	clientMgr := NewClientMgr(credProvider, ecsClient, ecsv2Client, vpcClient, efloClient, eflov2Client, efloControllerClient)
 	return clientMgr, nil
 }
 
 // wire.go:
 
 func NewClientMgr(credProvider provider.CredentialsProvider,
-	ecsClient ECSClient, vpcClient VPCClient, efloClient EFLOClient,
-	efloV2Client EFLOV2Client) *ClientMgr {
+	ecsClient ECSClient,
+	ecsV2Client ECSV2Client,
+	vpcClient VPCClient, efloClient EFLOClient,
+	efloV2Client EFLOV2Client, efloControllerClient EFLOControllerClient) *ClientMgr {
 
 	return &ClientMgr{
 
-		provider:     credProvider,
-		ecsClient:    ecsClient,
-		vpcClient:    vpcClient,
-		efloClient:   efloClient,
-		efloV2Client: efloV2Client,
+		provider:             credProvider,
+		ecsV2Client:          ecsV2Client,
+		ecsClient:            ecsClient,
+		vpcClient:            vpcClient,
+		efloClient:           efloClient,
+		efloV2Client:         efloV2Client,
+		efloControllerClient: efloControllerClient,
 	}
 }
 
