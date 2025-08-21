@@ -12,9 +12,10 @@ import (
 var _ ENI = &APIFacade{}
 
 type APIFacade struct {
-	ecsService  ECS
-	efloService EFLO
-	vpcService  VPC
+	ecsService         ECS
+	efloService        EFLO
+	vpcService         VPC
+	efloControlService EFLOControl
 }
 
 func NewAPIFacade(clientSet credential.Client, limitConfig LimitConfig) *APIFacade {
@@ -22,9 +23,10 @@ func NewAPIFacade(clientSet credential.Client, limitConfig LimitConfig) *APIFaca
 	tracer := otel.Tracer("aliyun-api")
 
 	return &APIFacade{
-		ecsService:  NewECSService(clientSet, rateLimiter, tracer),
-		efloService: NewEFLOService(clientSet, rateLimiter, tracer),
-		vpcService:  NewVPCService(clientSet, rateLimiter, tracer),
+		ecsService:         NewECSService(clientSet, rateLimiter, tracer),
+		efloService:        NewEFLOService(clientSet, rateLimiter, tracer),
+		vpcService:         NewVPCService(clientSet, rateLimiter, tracer),
+		efloControlService: NewEFLOControlService(clientSet, rateLimiter, tracer),
 	}
 }
 
@@ -40,6 +42,10 @@ func (a *APIFacade) GetVPC() VPC {
 
 func (a *APIFacade) GetEFLO() EFLO {
 	return a.efloService
+}
+
+func (a *APIFacade) GetEFLOController() EFLOControl {
+	return a.efloControlService
 }
 
 func (a *APIFacade) CreateNetworkInterfaceV2(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error) {

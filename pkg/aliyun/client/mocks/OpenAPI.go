@@ -273,6 +273,26 @@ func (_m *OpenAPI) GetEFLO() client.EFLO {
 	return r0
 }
 
+// GetEFLOController provides a mock function with no fields
+func (_m *OpenAPI) GetEFLOController() client.EFLOControl {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEFLOController")
+	}
+
+	var r0 client.EFLOControl
+	if rf, ok := ret.Get(0).(func() client.EFLOControl); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(client.EFLOControl)
+		}
+	}
+
+	return r0
+}
+
 // GetVPC provides a mock function with no fields
 func (_m *OpenAPI) GetVPC() client.VPC {
 	ret := _m.Called()

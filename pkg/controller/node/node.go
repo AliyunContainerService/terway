@@ -404,27 +404,31 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		node.Spec.NodeMetadata.ZoneID = nodeInfo.ZoneID
 		node.Spec.NodeMetadata.RegionID = nodeInfo.RegionID
 
-		resp, err := r.aliyun.GetEFLO().GetNodeInfoForPod(ctx, node.Spec.NodeMetadata.InstanceID)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-		node.Spec.NodeCap.Adapters = resp.LeniQuota
-		node.Spec.NodeCap.TotalAdapters = resp.LeniQuota
-		node.Spec.NodeCap.IPv4PerAdapter = resp.LeniSipQuota
-
-		// fallback to hdeni if leni not available
-		if (node.Spec.NodeCap.Adapters <= 1 &&
-			resp.HdeniQuota > 0 &&
-			types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly) ||
-			k8sNode.Annotations[types.ENOApi] == "hdeni" { // check k8s config
-			node.Spec.NodeCap.Adapters = resp.HdeniQuota
-			node.Spec.NodeCap.TotalAdapters = resp.HdeniQuota
-			node.Spec.NodeCap.IPv4PerAdapter = 1
-
-			if node.Annotations == nil {
-				node.Annotations = make(map[string]string)
+		if node.Labels[types.LinJunNetworkWorkKey] == "eni" {
+			resp, err := r.aliyun.GetEFLOController().DescribeNode(ctx, node.Spec.NodeMetadata.InstanceID)
+		} else {
+			resp, err := r.aliyun.GetEFLO().GetNodeInfoForPod(ctx, node.Spec.NodeMetadata.InstanceID)
+			if err != nil {
+				return reconcile.Result{}, err
 			}
-			node.Annotations[types.ENOApi] = "hdeni"
+			node.Spec.NodeCap.Adapters = resp.LeniQuota
+			node.Spec.NodeCap.TotalAdapters = resp.LeniQuota
+			node.Spec.NodeCap.IPv4PerAdapter = resp.LeniSipQuota
+
+			// fallback to hdeni if leni not available
+			if (node.Spec.NodeCap.Adapters <= 1 &&
+				resp.HdeniQuota > 0 &&
+				types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly) ||
+				k8sNode.Annotations[types.ENOApi] == "hdeni" { // check k8s config
+				node.Spec.NodeCap.Adapters = resp.HdeniQuota
+				node.Spec.NodeCap.TotalAdapters = resp.HdeniQuota
+				node.Spec.NodeCap.IPv4PerAdapter = 1
+
+				if node.Annotations == nil {
+					node.Annotations = make(map[string]string)
+				}
+				node.Annotations[types.ENOApi] = "hdeni"
+			}
 		}
 	}
 
