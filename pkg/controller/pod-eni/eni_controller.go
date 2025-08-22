@@ -674,7 +674,8 @@ func (m *ReconcilePodENI) detach(ctx context.Context, podENI *v1beta1.PodENI) (r
 }
 
 func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI, nodeName string) error {
-	var err error
+	// Remove the shared err variable that causes data race
+	var finalErr error
 	if podENI.Status.InstanceID == "" {
 		return fmt.Errorf("instanceID missing")
 	}
@@ -682,8 +683,8 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 		return nil
 	}
 	defer func() {
-		if err != nil {
-			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventAttachENIFailed, err.Error())
+		if finalErr != nil {
+			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventAttachENIFailed, finalErr.Error())
 		} else {
 			m.record.Eventf(podENI, corev1.EventTypeNormal, types.EventAttachENISucceed, fmt.Sprintf("attached eni %s", strings.Join(allocIDs(podENI), ",")))
 		}
@@ -692,6 +693,18 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 	// override the config
 	podENI.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
 	lock := sync.Mutex{}
+
+	crNode := &v1beta1.Node{}
+	err := m.client.Get(ctx, k8stypes.NamespacedName{Name: nodeName}, crNode)
+	if err != nil {
+		finalErr = err
+		return err
+	}
+
+	var ecsHighDensity bool
+	if crNode.Annotations[types.ENOApi] == types.APIEcsHDeni {
+		ecsHighDensity = true
+	}
 
 	g, _ := errgroup.WithContext(context.Background())
 	for i := range podENI.Spec.Allocations {
@@ -705,10 +718,16 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 				cardIndex = m.getENIIndex(ctx, podENI.Namespace, podENI.Name, alloc.ENI.ID)
 			}
 
-			err = common.Attach(ctx, m.client, &common.AttachOption{
+			trunkID := podENI.Status.TrunkENIID
+
+			if ecsHighDensity {
+				trunkID = "DenseModeTrunkEniId"
+			}
+
+			err := common.Attach(ctx, m.client, &common.AttachOption{
 				InstanceID:         podENI.Status.InstanceID,
 				NetworkInterfaceID: alloc.ENI.ID,
-				TrunkENIID:         podENI.Status.TrunkENIID,
+				TrunkENIID:         trunkID,
 				NetworkCardIndex:   cardIndex,
 				NodeName:           nodeName,
 			})
@@ -738,26 +757,36 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 			alloc.IPv6 = eni.Spec.IPv6
 
 			podENI.Spec.Allocations[ii] = alloc
+
+			vid := eni.Status.ENIInfo.Vid
+			vfID := eni.Status.ENIInfo.VfID
+
+			if ecsHighDensity && vid > 0 { // ensure >0
+				vfID = ptr.To(uint32(vid))
+				vid = 0
+			}
+
 			podENI.Status.ENIInfos[alloc.ENI.ID] = v1beta1.ENIInfo{
 				ID:               eni.Name,
 				Type:             eni.Status.ENIInfo.Type,
-				Vid:              eni.Status.ENIInfo.Vid,
+				Vid:              vid,
 				Status:           v1beta1.ENIStatusBind,
 				NetworkCardIndex: cardIndex,
-				VfID:             eni.Status.ENIInfo.VfID,
+				VfID:             vfID,
 			}
+
 			lock.Unlock()
 
 			return nil
 		})
 	}
-	err = g.Wait()
+	finalErr = g.Wait()
 
 	sort.Slice(podENI.Spec.Allocations, func(i, j int) bool {
 		return podENI.Spec.Allocations[i].Interface < podENI.Spec.Allocations[j].Interface
 	})
 
-	return err
+	return finalErr
 }
 
 func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.PodENI) error {

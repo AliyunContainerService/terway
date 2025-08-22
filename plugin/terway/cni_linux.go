@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/go-logr/logr"
 	"github.com/vishvananda/netlink"
@@ -467,7 +468,14 @@ func doCmdCheck(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cn
 }
 
 func prepareVF(ctx context.Context, id int, mac string) (int32, error) {
-	deviceID, err := vf.SetupDriverAndGetNetInterface(id, "")
+	// vf-topo-vpc
+	configPath := ""
+	v := nodecap.GetNodeCapabilities(nodecap.NodeCapabilityLinJunNetwork)
+	if v == string(terwayTypes.LinjunNetworkWorkENI) {
+		configPath = "/var/run/hc-eni-host/vf-topo-vpc"
+	}
+
+	deviceID, err := vf.SetupDriverAndGetNetInterface(id, configPath)
 	if err != nil {
 		return 0, err
 	}

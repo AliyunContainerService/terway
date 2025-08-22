@@ -65,6 +65,12 @@ const (
 	ENOApi = AnnotationPrefix + "eno-api"
 )
 
+const (
+	APIEcs      = "ecs"
+	APIEcsHDeni = "ecs-hdeni"
+	APIEnoHDeni = "hdeni"
+)
+
 // labels
 
 const (
@@ -74,8 +80,6 @@ const (
 	ExclusiveENIModeLabel = LabelPrefix + "exclusive-mode-eni-type"
 
 	LinJunNodeLabelKey = "alibabacloud.com/lingjun-worker"
-
-	LinJunNetworkWorkKey = "alibabacloud.com/lingjun-vpc-network-type-override"
 )
 
 // FinalizerPodENI finalizer for podENI resource

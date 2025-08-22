@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 
@@ -69,6 +70,76 @@ func TestToRPC(t *testing.T) {
 		assert.Equal(t, "00:00:00:00:00:00", result[0].ENIInfo.MAC)
 		assert.Equal(t, "eth0", result[0].IfName)
 		assert.Equal(t, true, result[0].DefaultRoute)
+	})
+
+	t.Run("test with VfTypeVPC when APIEcsHDeni annotation is set", func(t *testing.T) {
+		l := &RemoteIPResource{
+			podENI: networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						types.ENOApi: types.APIEcsHDeni,
+					},
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							IPv4:     "192.168.1.1",
+							IPv4CIDR: "192.168.1.0/24",
+							ENI: networkv1beta1.ENI{
+								ID:  "eni-11",
+								MAC: "00:00:00:00:00:00",
+							},
+							Interface:    "eth0",
+							DefaultRoute: true,
+						},
+					},
+				},
+				Status: networkv1beta1.PodENIStatus{
+					ENIInfos: map[string]networkv1beta1.ENIInfo{
+						"eni-11": {},
+					},
+				},
+			},
+		}
+
+		result := l.ToRPC()
+		assert.NotNil(t, result)
+		assert.Equal(t, 1, len(result))
+		assert.Equal(t, rpc.VfType_VfTypeVPC, *result[0].ENIInfo.VfType)
+	})
+
+	t.Run("test without ENOApi annotation", func(t *testing.T) {
+		l := &RemoteIPResource{
+			podENI: networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							IPv4:     "192.168.1.1",
+							IPv4CIDR: "192.168.1.0/24",
+							ENI: networkv1beta1.ENI{
+								ID:  "eni-11",
+								MAC: "00:00:00:00:00:00",
+							},
+							Interface:    "eth0",
+							DefaultRoute: true,
+						},
+					},
+				},
+				Status: networkv1beta1.PodENIStatus{
+					ENIInfos: map[string]networkv1beta1.ENIInfo{
+						"eni-11": {},
+					},
+				},
+			},
+		}
+
+		result := l.ToRPC()
+		assert.NotNil(t, result)
+		assert.Equal(t, 1, len(result))
+		assert.Nil(t, result[0].ENIInfo.VfType)
 	})
 }
 

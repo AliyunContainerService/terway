@@ -873,6 +873,137 @@ var _ = Describe("Pod controller", func() {
 		})
 	})
 
+	Context("create pod on linjun node", func() {
+		ctx := context.Background()
+		name := "linjun-pod"
+		ns := "default"
+		eniID := "eni-linjun"
+		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+		request := reconcile.Request{
+			NamespacedName: key,
+		}
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      key.Name,
+				Namespace: key.Namespace,
+				Annotations: map[string]string{
+					types.PodENI:      "true",
+					types.PodNetworks: "{\"podNetworks\":[{\"vSwitchOptions\":[\"vsw-0\",\"vsw-1\",\"vsw-2\"],\"securityGroupIDs\":[\"sg-1\"],\"interface\":\"eth0\",\"eniOptions\":{\"eniType\":\"Default\"},\"vSwitchSelectOptions\":{\"vSwitchSelectionPolicy\":\"ordered\"},\"resourceGroupID\":\"\",\"networkInterfaceTrafficMode\":\"\",\"defaultRoute\":false,\"allocationType\":{\"type\":\"Elastic\",\"releaseStrategy\":\"\",\"releaseAfter\":\"\"}}]}",
+				},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: nodeName,
+				Containers: []corev1.Container{
+					{
+						Name:  "foo",
+						Image: "busybox",
+					},
+				},
+			},
+		}
+
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Labels: map[string]string{
+					"topology.kubernetes.io/region":          "cn-hangzhou",
+					"topology.kubernetes.io/zone":            "cn-hangzhou-a",
+					"node.kubernetes.io/instance-type":       "instanceType",
+					"alibabacloud.com/lingjun-worker":        "true",
+					"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
+				},
+			},
+			Spec: corev1.NodeSpec{ProviderID: "cn-hangzhou.i-xxx"},
+		}
+
+		crNode := &networkv1beta1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					"k8s.aliyun.com/eno-api": "ecs-hdeni",
+				},
+			},
+			Spec: networkv1beta1.NodeSpec{
+				NodeMetadata: networkv1beta1.NodeMetadata{
+					RegionID:     "cn-hangzhou",
+					InstanceType: "instanceType",
+					InstanceID:   "i-xxx",
+					ZoneID:       "cn-hangzhou-a",
+				},
+				NodeCap: networkv1beta1.NodeCap{},
+				ENISpec: nil,
+				Pool:    nil,
+				Flavor:  nil,
+			},
+		}
+
+		podENI := &networkv1beta1.PodENI{}
+
+		It("Create podENI should succeed", func() {
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+			Expect(k8sClient.Create(ctx, crNode)).Should(Succeed())
+
+			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything).Return(&aliyun.NetworkInterface{
+				Status:             "Available",
+				MacAddress:         "mac",
+				NetworkInterfaceID: eniID,
+				VPCID:              "vpc-0",
+				VSwitchID:          "vsw-0",
+				PrivateIPAddress:   "127.0.0.1",
+				PrivateIPSets:      nil,
+				ZoneID:             "cn-hangzhou-a",
+				SecurityGroupIDs: []string{
+					"sg-0",
+				},
+				ResourceGroupID:             "rg-0",
+				IPv6Set:                     nil,
+				Tags:                        nil,
+				Type:                        "Secondary",
+				InstanceID:                  "",
+				TrunkNetworkInterfaceID:     "",
+				NetworkInterfaceTrafficMode: "Standard",
+				DeviceIndex:                 0,
+				CreationTime:                "",
+			}, nil).Once()
+
+			vpcClient.On("DescribeVSwitchByID", mock.Anything, mock.Anything).Return(&vpc.VSwitch{
+				VpcId:                   "vpc-0",
+				Status:                  "",
+				AvailableIpAddressCount: 10,
+				VSwitchId:               "vsw-0",
+				CidrBlock:               "127.0.0.0/24",
+				ZoneId:                  "cn-hangzhou-a",
+				Ipv6CidrBlock:           "fd00::0/120",
+				EnabledIpv6:             true,
+			}, nil).Once()
+
+			controlplane.SetConfig(&controlplane.Config{})
+
+			r := &ReconcilePod{
+				client:    k8sClient,
+				scheme:    scheme.Scheme,
+				aliyun:    openAPI,
+				swPool:    switchPool,
+				record:    record.NewFakeRecorder(1000),
+				trunkMode: false,
+				crdMode:   false,
+			}
+
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, key, podENI)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("PodENI should be created with ENOApi annotation", func() {
+			// Verify that the PodENI has the ENOApi annotation set to APIEcsHDeni for LinJun nodes
+			Expect(podENI.Annotations[types.ENOApi]).Should(BeEquivalentTo(types.APIEcsHDeni))
+		})
+	})
+
 	Context("delete pod with non-fixed ip", func() {
 		ctx := context.Background()
 		name := "delete-non-fixed-ip-pod"

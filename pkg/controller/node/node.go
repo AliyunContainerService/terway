@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -141,11 +142,18 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		return r.delete(ctx, request)
 	}
 
+	defer func() {
+		if err != nil {
+			r.record.Event(k8sNode, "Warning", "ConfigError", err.Error())
+		}
+	}()
 	if utils.ISLinJunNode(k8sNode.Labels) {
 		if !r.supportEFLO {
 			return reconcile.Result{}, nil
 		}
-		return r.handleEFLO(ctx, k8sNode, node)
+		var result reconcile.Result
+		result, err = r.handleEFLO(ctx, k8sNode, node)
+		return result, err
 	}
 	// create or update the crdNode
 	err = r.createOrUpdate(ctx, k8sNode, node)
@@ -172,7 +180,6 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 		node.Labels[types.ExclusiveENIModeLabel] = string(types.NodeExclusiveENIMode(k8sNode.Labels))
 	} else if prev != string(types.NodeExclusiveENIMode(k8sNode.Labels)) {
 		err = fmt.Errorf("node exclusive mode changed to %s, this is not allowd", types.NodeExclusiveENIMode(k8sNode.Labels))
-		r.record.Event(k8sNode, "Warning", "ConfigError", err.Error())
 		return err
 	}
 
@@ -377,6 +384,9 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	if node.Labels == nil {
 		node.Labels = make(map[string]string)
 	}
+	if node.Annotations == nil {
+		node.Annotations = make(map[string]string)
+	}
 	node.Labels["name"] = k8sNode.Name
 	node.Labels[types.LinJunNodeLabelKey] = "true"
 
@@ -385,7 +395,6 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		node.Labels[types.ExclusiveENIModeLabel] = string(types.NodeExclusiveENIMode(k8sNode.Labels))
 	} else if prev != string(types.NodeExclusiveENIMode(k8sNode.Labels)) {
 		err := fmt.Errorf("node exclusive mode changed to %s, this is not allowd", types.NodeExclusiveENIMode(k8sNode.Labels))
-		r.record.Event(k8sNode, "Warning", "ConfigError", err.Error())
 		return reconcile.Result{}, err
 	}
 
@@ -404,8 +413,54 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		node.Spec.NodeMetadata.ZoneID = nodeInfo.ZoneID
 		node.Spec.NodeMetadata.RegionID = nodeInfo.RegionID
 
-		if node.Labels[types.LinJunNetworkWorkKey] == "eni" {
-			resp, err := r.aliyun.GetEFLOController().DescribeNode(ctx, node.Spec.NodeMetadata.InstanceID)
+		isEni, err := r.hasPrimaryENI(ctx, node.Spec.NodeMetadata.InstanceID)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+
+		if isEni {
+			describeNodeReq := &aliyunClient.DescribeNodeRequestOptions{
+				NodeID: &node.Spec.NodeMetadata.InstanceID,
+			}
+
+			if types.NodeExclusiveENIMode(node.Labels) != types.ExclusiveENIOnly {
+				return reconcile.Result{}, fmt.Errorf("exclusive ENI mode must be enabled for EFLO nodes")
+			}
+
+			resp, err := r.aliyun.GetEFLOController().DescribeNode(ctx, describeNodeReq)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+
+			limit, err := aliyunClient.GetLimitProvider().GetLimit(r.aliyun.GetEFLOController(), resp.NodeType)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+
+			// this case use ecs api
+			node.Spec.NodeCap.Adapters = limit.Adapters
+			node.Spec.NodeCap.TotalAdapters = limit.Adapters
+			node.Spec.NodeCap.IPv4PerAdapter = limit.IPv4PerAdapter
+
+			if (node.Spec.NodeCap.Adapters <= 1 &&
+				limit.HighDenseQuantity > 0) ||
+				k8sNode.Annotations[types.ENOApi] == types.APIEcsHDeni { // check k8s config
+				node.Spec.NodeCap.Adapters = limit.HighDenseQuantity
+				node.Spec.NodeCap.TotalAdapters = limit.HighDenseQuantity
+
+				if node.Annotations[types.ENOApi] != "" && node.Annotations[types.ENOApi] != types.APIEcsHDeni {
+					return reconcile.Result{}, fmt.Errorf("cannot change ENOApi from %s to ecs-hdeni", node.Annotations[types.ENOApi])
+				}
+
+				node.Annotations[types.ENOApi] = types.APIEcsHDeni
+			} else {
+				if node.Annotations[types.ENOApi] != "" && node.Annotations[types.ENOApi] != types.APIEcs {
+					return reconcile.Result{}, fmt.Errorf("cannot change ENOApi from %s to ecs", node.Annotations[types.ENOApi])
+				}
+				node.Annotations[types.ENOApi] = types.APIEcs
+
+				return reconcile.Result{}, fmt.Errorf("unsupported mode")
+			}
 		} else {
 			resp, err := r.aliyun.GetEFLO().GetNodeInfoForPod(ctx, node.Spec.NodeMetadata.InstanceID)
 			if err != nil {
@@ -419,15 +474,12 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 			if (node.Spec.NodeCap.Adapters <= 1 &&
 				resp.HdeniQuota > 0 &&
 				types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly) ||
-				k8sNode.Annotations[types.ENOApi] == "hdeni" { // check k8s config
+				k8sNode.Annotations[types.ENOApi] == types.APIEnoHDeni { // check k8s config
 				node.Spec.NodeCap.Adapters = resp.HdeniQuota
 				node.Spec.NodeCap.TotalAdapters = resp.HdeniQuota
 				node.Spec.NodeCap.IPv4PerAdapter = 1
 
-				if node.Annotations == nil {
-					node.Annotations = make(map[string]string)
-				}
-				node.Annotations[types.ENOApi] = "hdeni"
+				node.Annotations[types.ENOApi] = types.APIEnoHDeni
 			}
 		}
 	}
@@ -441,6 +493,19 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		return nil
 	})
 	return reconcile.Result{}, err
+}
+
+func (r *ReconcileNode) hasPrimaryENI(ctx context.Context, instanceID string) (bool, error) {
+	req := &aliyunClient.DescribeNetworkInterfaceOptions{
+		InstanceID:   &instanceID,
+		InstanceType: ptr.To(aliyunClient.ENITypePrimary),
+	}
+	resp, err := r.aliyun.DescribeNetworkInterfaceV2(ctx, req)
+	if err != nil {
+		return false, err
+	}
+
+	return len(resp) == 1, nil
 }
 
 func (r *ReconcileNode) delete(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {

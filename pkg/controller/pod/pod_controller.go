@@ -187,7 +187,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		}
 		switch prePodENI.Status.Phase {
 		case v1beta1.ENIPhaseUnbind:
-			return m.reConfig(ctx, pod, prePodENI)
+			return m.reConfig(ctx, pod, prePodENI, node)
 		case v1beta1.ENIPhaseBind:
 			// check pod uid
 			if prePodENI.Annotations[types.PodUID] == string(pod.UID) {
@@ -215,19 +215,6 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 
 	l.Info("creating eni")
 
-	if utils.ISLinJunNode(node.Labels) {
-		crNode := &v1beta1.Node{}
-		err = m.client.Get(ctx, k8stypes.NamespacedName{Name: node.Name}, crNode)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-		backend := aliyunClient.BackendAPIEFLO
-		if crNode.Annotations[types.ENOApi] == "hdeni" {
-			backend = aliyunClient.BackendAPIEFLOHDENI
-		}
-		ctx = aliyunClient.SetBackendAPI(ctx, backend)
-	}
-
 	podENI := &v1beta1.PodENI{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pod.Name,
@@ -242,6 +229,25 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 				types.ENIRelatedNodeName: nodeInfo.NodeName,
 			},
 		},
+	}
+
+	if utils.ISLinJunNode(node.Labels) {
+		crNode := &v1beta1.Node{}
+		err = m.client.Get(ctx, k8stypes.NamespacedName{Name: node.Name}, crNode)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		backend := aliyunClient.BackendAPIEFLO
+
+		switch crNode.Annotations[types.ENOApi] {
+		case types.APIEcsHDeni, types.APIEcs:
+			backend = aliyunClient.BackendAPIECS
+		case types.APIEnoHDeni:
+			backend = aliyunClient.BackendAPIEFLOHDENI
+		}
+
+		podENI.Annotations[types.ENOApi] = crNode.Annotations[types.ENOApi]
+		ctx = aliyunClient.SetBackendAPI(ctx, backend)
 	}
 
 	defer func() {
@@ -462,40 +468,44 @@ func (m *ReconcilePod) parse(ctx context.Context, pod *corev1.Pod, node *corev1.
 // reConfig this phase will re-config the eni if possible
 // 1. update pod uid
 // 2. re-generate the target spec
-func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI *v1beta1.PodENI) (reconcile.Result, error) {
-	update := prePodENI.DeepCopy()
+func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI *v1beta1.PodENI, node *corev1.Node) (reconcile.Result, error) {
+	if prePodENI.Labels == nil {
+		prePodENI.Labels = make(map[string]string)
+	}
+	if prePodENI.Annotations == nil {
+		prePodENI.Annotations = make(map[string]string)
+	}
+	changed := false
+	if prePodENI.Labels[types.ENIRelatedNodeName] != node.Name {
+		prePodENI.Labels[types.ENIRelatedNodeName] = node.Name
+		changed = true
+	}
+	if prePodENI.Annotations[types.PodUID] != string(pod.UID) {
+		prePodENI.Annotations[types.PodUID] = string(pod.UID)
+		changed = true
+	}
 
-	if prePodENI.Labels[types.ENIRelatedNodeName] != "" {
-		// ignore all create for eci pod
-		node, err := m.getNode(ctx, pod.Spec.NodeName)
+	if utils.ISLinJunNode(node.Labels) {
+		crNode := &v1beta1.Node{}
+		err := m.client.Get(ctx, k8stypes.NamespacedName{Name: node.Name}, crNode)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("error get node %s, %w", node.Name, err)
+			return reconcile.Result{}, err
 		}
-		if utils.ISVKNode(node) {
-			return reconcile.Result{}, nil
-		}
-		if prePodENI.Labels[types.ENIRelatedNodeName] != node.Name {
-			update.Labels[types.ENIRelatedNodeName] = node.Name
-			err = m.client.Patch(ctx, update, client.MergeFrom(prePodENI))
-			return reconcile.Result{Requeue: true}, err
+		enoAPI, ok := crNode.Annotations[types.ENOApi]
+		if ok {
+			prePodENI.Annotations[types.ENOApi] = enoAPI
+			changed = true
 		}
 	}
 
-	if prePodENI.Annotations[types.PodUID] == string(pod.UID) {
-		update.Status.Phase = v1beta1.ENIPhaseBinding
-		err := m.client.Status().Update(ctx, update)
-
-		return reconcile.Result{}, err
+	if changed {
+		err := m.client.Update(ctx, prePodENI)
+		return reconcile.Result{Requeue: true}, err
 	}
 
-	if update.Annotations == nil {
-		update.Annotations = make(map[string]string)
-	}
-	update.Annotations[types.PodUID] = string(pod.UID)
-
-	err := m.client.Update(ctx, update)
-
-	return reconcile.Result{Requeue: true}, err
+	prePodENI.Status.Phase = v1beta1.ENIPhaseBinding
+	err := m.client.Status().Update(ctx, prePodENI)
+	return reconcile.Result{}, err
 }
 
 func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocation, pod *corev1.Pod, podENI *v1beta1.PodENI, nodeInfo *common.NodeInfo) error {

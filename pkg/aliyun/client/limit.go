@@ -51,6 +51,8 @@ type Limits struct {
 
 	InstanceBandwidthTx int
 
+	HighDenseQuantity int
+
 	NetworkCards []NetworkCard
 }
 
@@ -165,6 +167,42 @@ func (d *Provider) GetLimit(client interface{}, instanceType string) (*Limits, e
 			TotalAdapters:  resp.LeniQuota,
 			IPv4PerAdapter: resp.LniSipQuota,
 		}, nil
+
+	case EFLOControl:
+		v, ok := d.cache.Get(instanceType)
+		if ok {
+			return v.(*Limits), nil
+		}
+
+		var req []string
+		if instanceType != "" {
+			req = append(req, instanceType)
+		}
+
+		v, err, _ := d.g.Do(instanceType, func() (interface{}, error) {
+			describeReq := &DescribeNodeTypeRequestOptions{}
+			describeReq.NodeType = &instanceType
+
+			ins, err := cc.DescribeNodeType(context.Background(), describeReq)
+			if err != nil {
+				return nil, err
+			}
+
+			limit := &Limits{
+				Adapters:          ins.EniQuantity,
+				TotalAdapters:     ins.EniQuantity,
+				IPv4PerAdapter:    ins.EniPrivateIpAddressQuantity,
+				HighDenseQuantity: ins.EniHighDenseQuantity,
+			}
+			d.cache.Add(instanceType, limit, d.ttl)
+
+			return limit, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		return v.(*Limits), nil
 	default:
 		return nil, fmt.Errorf("unsupported client")
 	}
