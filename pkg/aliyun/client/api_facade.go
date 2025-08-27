@@ -15,6 +15,8 @@ type APIFacade struct {
 	ecsService  ECS
 	efloService EFLO
 	vpcService  VPC
+
+	rateLimiter *RateLimiter
 }
 
 func NewAPIFacade(clientSet credential.Client, limitConfig LimitConfig) *APIFacade {
@@ -25,6 +27,7 @@ func NewAPIFacade(clientSet credential.Client, limitConfig LimitConfig) *APIFaca
 		ecsService:  NewECSService(clientSet, rateLimiter, tracer),
 		efloService: NewEFLOService(clientSet, rateLimiter, tracer),
 		vpcService:  NewVPCService(clientSet, rateLimiter, tracer),
+		rateLimiter: rateLimiter,
 	}
 }
 
@@ -40,6 +43,10 @@ func (a *APIFacade) GetVPC() VPC {
 
 func (a *APIFacade) GetEFLO() EFLO {
 	return a.efloService
+}
+
+func (a *APIFacade) UpdateRateLimitConfig(cfg LimitConfig) {
+	a.rateLimiter.UpdateConfig(cfg)
 }
 
 func (a *APIFacade) CreateNetworkInterfaceV2(ctx context.Context, opts ...CreateNetworkInterfaceOption) (*NetworkInterface, error) {
