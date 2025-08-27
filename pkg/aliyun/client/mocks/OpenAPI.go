@@ -349,6 +349,11 @@ func (_m *OpenAPI) UnAssignPrivateIPAddressesV2(ctx context.Context, eniID strin
 	return r0
 }
 
+// UpdateRateLimitConfig provides a mock function with given fields: cfg
+func (_m *OpenAPI) UpdateRateLimitConfig(cfg client.LimitConfig) {
+	_m.Called(cfg)
+}
+
 // WaitForNetworkInterfaceV2 provides a mock function with given fields: ctx, eniID, status, backoff, ignoreNotExist
 func (_m *OpenAPI) WaitForNetworkInterfaceV2(ctx context.Context, eniID string, status string, backoff wait.Backoff, ignoreNotExist bool) (*client.NetworkInterface, error) {
 	ret := _m.Called(ctx, eniID, status, backoff, ignoreNotExist)

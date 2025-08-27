@@ -22,6 +22,8 @@ type OpenAPI interface {
 	GetEFLO() EFLO
 	GetEFLOController() EFLOControl
 	ENI
+
+	UpdateRateLimitConfig(cfg LimitConfig)
 }
 
 type ECS interface {
