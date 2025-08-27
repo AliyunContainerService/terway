@@ -20,6 +20,8 @@ type OpenAPI interface {
 	GetVPC() VPC
 	GetEFLO() EFLO
 	ENI
+
+	UpdateRateLimitConfig(cfg LimitConfig)
 }
 
 type ECS interface {
