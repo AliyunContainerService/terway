@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/go-logr/logr"
 	"github.com/vishvananda/netlink"
@@ -467,12 +466,16 @@ func doCmdCheck(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cn
 	return nil
 }
 
-func prepareVF(ctx context.Context, id int, mac string) (int32, error) {
+func prepareVF(ctx context.Context, id int, mac string, vfType rpc.VfType) (int32, error) {
 	// vf-topo-vpc
 	configPath := ""
-	v := nodecap.GetNodeCapabilities(nodecap.NodeCapabilityLinJunNetwork)
-	if v == string(terwayTypes.LinjunNetworkWorkENI) {
+
+	switch vfType {
+	case rpc.VfType_VfTypeDefault:
+	case rpc.VfType_VfTypeVPC:
 		configPath = "/var/run/hc-eni-host/vf-topo-vpc"
+	default:
+		return 0, fmt.Errorf("not support this vf type")
 	}
 
 	deviceID, err := vf.SetupDriverAndGetNetInterface(ctx, id, configPath)
