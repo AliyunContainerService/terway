@@ -475,7 +475,7 @@ func prepareVF(ctx context.Context, id int, mac string) (int32, error) {
 		configPath = "/var/run/hc-eni-host/vf-topo-vpc"
 	}
 
-	deviceID, err := vf.SetupDriverAndGetNetInterface(id, configPath)
+	deviceID, err := vf.SetupDriverAndGetNetInterface(ctx, id, configPath)
 	if err != nil {
 		return 0, err
 	}
