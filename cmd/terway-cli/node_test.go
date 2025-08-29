@@ -24,7 +24,9 @@ func TestExclusiveModeNewNode(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 
 	store := nodecap.NewFileNodeCapabilities(tempFile.Name())
-	labels := map[string]string{"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly"}
+	labels := map[string]string{
+		"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
+	}
 	cniPath := tempFile.Name() + "_cni_config"
 
 	err = setExclusiveMode(store, labels, cniPath)

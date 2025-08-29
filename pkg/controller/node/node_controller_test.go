@@ -28,12 +28,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	cc "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
@@ -57,7 +59,7 @@ var _ = Describe("Node Controller", func() {
 		openAPI.On("GetEFLO").Return(efloClient).Maybe()
 	})
 
-	Context("When reconciling a resource", func() {
+	Context("ECS node", func() {
 		const resourceName = "test-resource"
 
 		ctx := context.Background()
@@ -140,6 +142,7 @@ var _ = Describe("Node Controller", func() {
 				client:          k8sClient,
 				scheme:          k8sClient.Scheme(),
 				aliyun:          openAPI,
+				record:          record.NewFakeRecorder(1000),
 				centralizedIPAM: true,
 			}
 
@@ -313,6 +316,7 @@ var _ = Describe("Node Controller", func() {
 				client:          k8sClient,
 				scheme:          k8sClient.Scheme(),
 				aliyun:          openAPI,
+				record:          record.NewFakeRecorder(1000),
 				centralizedIPAM: true,
 			}
 
@@ -339,27 +343,6 @@ var _ = Describe("Node Controller", func() {
 		}
 
 		BeforeEach(func() {
-			By("create a k8s node")
-			k8sNode := &corev1.Node{}
-			err := k8sClient.Get(ctx, typeNamespacedName, k8sNode)
-			if err != nil && k8sErr.IsNotFound(err) {
-				resource := &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: resourceName,
-						Labels: map[string]string{
-							"alibabacloud.com/lingjun-worker":  "true",
-							"node.kubernetes.io/instance-type": "instanceType",
-							"topology.kubernetes.io/region":    "regionID",
-							"topology.kubernetes.io/zone":      "zoneID",
-						},
-					},
-
-					Spec: corev1.NodeSpec{
-						ProviderID: "instanceID",
-					},
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
 		})
 
 		AfterEach(func() {
@@ -398,20 +381,39 @@ var _ = Describe("Node Controller", func() {
 			}, 5*time.Second, 500*time.Millisecond).Should(BeTrue())
 		})
 
-		It("new eflo node", func() {
+		It("new eflo node (eno)", func() {
 			By("Reconciling the created resource")
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: resourceName,
+					Labels: map[string]string{
+						"alibabacloud.com/lingjun-worker":  "true",
+						"node.kubernetes.io/instance-type": "instanceType",
+						"topology.kubernetes.io/region":    "regionID",
+						"topology.kubernetes.io/zone":      "zoneID",
+					},
+				},
+
+				Spec: corev1.NodeSpec{
+					ProviderID: "instanceID",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
 			efloClient.On("GetNodeInfoForPod", mock.Anything, "instanceID").Return(&eflo.Content{
 				LeniQuota:   20,
 				LniSipQuota: 10,
 			}, nil).Maybe()
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{}, nil).Maybe()
 
 			controllerReconciler := &ReconcileNode{
 				client:          k8sClient,
 				scheme:          k8sClient.Scheme(),
 				aliyun:          openAPI,
+				record:          record.NewFakeRecorder(1000),
 				supportEFLO:     true,
-				centralizedIPAM: true,
+				centralizedIPAM: false,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -429,6 +431,200 @@ var _ = Describe("Node Controller", func() {
 			Expect(resource.Spec.NodeCap.TotalAdapters, 20)
 			Expect(resource.Spec.NodeCap.IPv4PerAdapter, 10)
 		})
+
+		It("node with ecs standard eni", func() {
+			By("Creating k8s node")
+
+			// Create new k8sNode with correct labels
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: resourceName,
+					Labels: map[string]string{
+						"alibabacloud.com/lingjun-worker":        "true",
+						"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
+						"node.kubernetes.io/instance-type":       "instanceType",
+						"topology.kubernetes.io/region":          "regionID",
+						"topology.kubernetes.io/zone":            "zoneID",
+					},
+					Annotations: make(map[string]string),
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "instanceID",
+				},
+			}
+			err := k8sClient.Create(ctx, k8sNode)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Mock EFLOController responses
+			efloController := mocks.NewEFLOControl(GinkgoT())
+			//efloController.On("GetNodeInfoForPod", mock.Anything, mock.Anything).Return(*eflo.Content{})
+			openAPI.On("GetEFLOController").Return(efloController).Maybe()
+
+			// Mock DescribeNode response
+			efloController.On("DescribeNode", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeResponse{
+				NodeType: "test-machine-type-normal",
+			}, nil).Maybe()
+
+			// Mock DescribeNodeType response for GetLimit
+			efloController.On("DescribeNodeType", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeTypeResponse{
+				EniQuantity:                 4,
+				EniPrivateIpAddressQuantity: 10,
+				EniHighDenseQuantity:        8,
+			}, nil).Maybe()
+
+			// Mock DescribeNetworkInterfaceV2 for hasPrimaryENI method (though not called in this test)
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-test",
+					Type:               aliyunClient.ENITypePrimary,
+				},
+			}, nil).Maybe()
+
+			controllerReconciler := &ReconcileNode{
+				client:          k8sClient,
+				scheme:          k8sClient.Scheme(),
+				aliyun:          openAPI,
+				record:          record.NewFakeRecorder(1000),
+				supportEFLO:     true,
+				centralizedIPAM: true,
+			}
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("unsupported mode"))
+
+			//resource := &networkv1beta1.Node{}
+			//err = k8sClient.Get(ctx, typeNamespacedName, resource)
+			//Expect(err).NotTo(HaveOccurred())
+			//
+			//// Verify EFLO node configuration
+			//Expect(resource.Spec.NodeCap.Adapters).To(Equal(4))
+			//Expect(resource.Spec.NodeCap.TotalAdapters).To(Equal(4))
+			//Expect(resource.Spec.NodeCap.IPv4PerAdapter).To(Equal(10))
+			//Expect(resource.Annotations["k8s.aliyun.com/eno-api"]).To(Equal("ecs"))
+			//
+			//// Verify the label is preserved
+			//Expect(resource.Labels["alibabacloud.com/lingjun-vpc-network-type-override"]).To(Equal("eni"))
+			//Expect(resource.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]).To(Equal("eniOnly"))
+		})
+
+		It("node with ecs high density eni", func() {
+			By("Creating k8s node")
+
+			// Create new k8sNode with correct labels and annotations
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: resourceName,
+					Labels: map[string]string{
+						"alibabacloud.com/lingjun-worker":        "true",
+						"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
+						"node.kubernetes.io/instance-type":       "instanceType",
+						"topology.kubernetes.io/region":          "regionID",
+						"topology.kubernetes.io/zone":            "zoneID",
+					},
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "instanceID",
+				},
+			}
+			err := k8sClient.Create(ctx, k8sNode)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Mock EFLOController responses
+			efloController := mocks.NewEFLOControl(GinkgoT())
+			openAPI.On("GetEFLOController").Return(efloController).Maybe()
+
+			// Mock DescribeNode response
+			efloController.On("DescribeNode", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeResponse{
+				NodeType: "test-machine-type-hd",
+			}, nil).Maybe()
+
+			// Mock DescribeNodeType response for GetLimit with high density support
+			efloController.On("DescribeNodeType", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeTypeResponse{
+				EniQuantity:                 1, // Low adapter count to trigger high density
+				EniPrivateIpAddressQuantity: 10,
+				EniHighDenseQuantity:        8,
+			}, nil).Maybe()
+
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-test",
+					Type:               aliyunClient.ENITypePrimary,
+				},
+			}, nil).Maybe()
+
+			controllerReconciler := &ReconcileNode{
+				client:          k8sClient,
+				scheme:          k8sClient.Scheme(),
+				aliyun:          openAPI,
+				record:          record.NewFakeRecorder(1000),
+				supportEFLO:     true,
+				centralizedIPAM: false,
+			}
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			resource := &networkv1beta1.Node{}
+			err = k8sClient.Get(ctx, typeNamespacedName, resource)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify high density configuration is applied
+			Expect(resource.Spec.NodeCap.Adapters).To(Equal(8))
+			Expect(resource.Spec.NodeCap.TotalAdapters).To(Equal(8))
+			Expect(resource.Annotations["k8s.aliyun.com/eno-api"]).To(Equal("ecs-hdeni"))
+		})
+
+		It("should reject LinJunNetworkWorkKey without exclusive ENI mode", func() {
+			By("Testing LinJunNetworkWorkKey without exclusive ENI mode should fail")
+
+			// Create new k8sNode with LinJunNetworkWorkKey label but without exclusive ENI mode
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: resourceName,
+					Labels: map[string]string{
+						"alibabacloud.com/lingjun-worker": "true",
+						// Note: not setting exclusive ENI mode
+						"node.kubernetes.io/instance-type": "instanceType",
+						"topology.kubernetes.io/region":    "regionID",
+						"topology.kubernetes.io/zone":      "zoneID",
+					},
+					Annotations: make(map[string]string),
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "instanceID",
+				},
+			}
+			err := k8sClient.Create(ctx, k8sNode)
+			Expect(err).NotTo(HaveOccurred())
+
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-test",
+					Type:               aliyunClient.ENITypePrimary,
+				},
+			}, nil).Maybe()
+
+			controllerReconciler := &ReconcileNode{
+				client:          k8sClient,
+				scheme:          k8sClient.Scheme(),
+				aliyun:          openAPI,
+				record:          record.NewFakeRecorder(1000),
+				supportEFLO:     true,
+				centralizedIPAM: true,
+			}
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("exclusive ENI mode must be enabled for EFLO nodes"))
+		})
+
 	})
 
 	Context("When reconciling a resource", func() {
@@ -505,6 +701,7 @@ var _ = Describe("Node Controller", func() {
 				client:          k8sClient,
 				scheme:          k8sClient.Scheme(),
 				aliyun:          openAPI,
+				record:          record.NewFakeRecorder(1000),
 				centralizedIPAM: true,
 			}
 

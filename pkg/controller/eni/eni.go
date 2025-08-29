@@ -336,10 +336,15 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 			}
 
 		} else {
+			var trunkID *string
+			if networkInterface.Status.TrunkENIID != "DenseModeTrunkEniId" {
+				trunkID = toPtr(networkInterface.Status.TrunkENIID)
+			}
+
 			err = r.aliyun.DetachNetworkInterfaceV2(ctx, &aliyunClient.DetachNetworkInterfaceOptions{
 				NetworkInterfaceID: toPtr(networkInterface.Name),
 				InstanceID:         toPtr(networkInterface.Status.InstanceID),
-				TrunkID:            toPtr(networkInterface.Status.TrunkENIID),
+				TrunkID:            trunkID,
 			})
 			if err != nil {
 				return reconcile.Result{}, err

@@ -196,6 +196,7 @@ func (a *ECSService) DetachNetworkInterface(ctx context.Context, eniID, instance
 	if err != nil {
 		err = apiErr.WarpError(err)
 		if apiErr.ErrorCodeIs(err, apiErr.ErrInvalidENINotFound, apiErr.ErrInvalidEcsIDNotFound) {
+			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Info("succeed, not found")
 			return nil
 		}
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "detach eni failed")

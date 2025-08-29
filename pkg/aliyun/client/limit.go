@@ -51,6 +51,8 @@ type Limits struct {
 
 	InstanceBandwidthTx int
 
+	HighDenseQuantity int
+
 	NetworkCards []NetworkCard
 }
 
@@ -113,7 +115,6 @@ func NewProvider() *Provider {
 func (d *Provider) GetLimit(client interface{}, instanceType string) (*Limits, error) {
 	switch cc := client.(type) {
 	case ECS:
-
 		v, ok := d.cache.Get(instanceType)
 		if ok {
 			return v.(*Limits), nil
@@ -129,28 +130,30 @@ func (d *Provider) GetLimit(client interface{}, instanceType string) (*Limits, e
 			if err != nil {
 				return nil, err
 			}
-			return ins, nil
+
+			for _, instanceTypeInfo := range ins {
+				instanceTypeID := instanceTypeInfo.InstanceTypeId
+				limit := GetInstanceType(&instanceTypeInfo)
+				d.cache.Add(instanceTypeID, limit, d.ttl)
+				logf.Log.Info("instance limit", instanceTypeID, limit)
+			}
+
+			if instanceType == "" {
+				return nil, nil
+			}
+
+			if cachedLimit, ok := d.cache.Get(instanceType); ok {
+				return cachedLimit, nil
+			}
+
+			return nil, fmt.Errorf("unexpected error: instance type %s not found in cache after processing", instanceType)
 		})
 		if err != nil {
 			return nil, err
 		}
 
-		ins := v.([]ecs.InstanceType)
-
-		for _, instanceTypeInfo := range ins {
-			instanceTypeID := instanceTypeInfo.InstanceTypeId
-
-			limit := getInstanceType(&instanceTypeInfo)
-
-			d.cache.Add(instanceTypeID, limit, d.ttl)
-			logf.Log.Info("instance limit", instanceTypeID, limit)
-		}
-		if instanceType == "" {
+		if v == nil {
 			return nil, nil
-		}
-		v, ok = d.cache.Get(instanceType)
-		if !ok {
-			return nil, fmt.Errorf("unexpected error")
 		}
 
 		return v.(*Limits), nil
@@ -165,6 +168,41 @@ func (d *Provider) GetLimit(client interface{}, instanceType string) (*Limits, e
 			TotalAdapters:  resp.LeniQuota,
 			IPv4PerAdapter: resp.LniSipQuota,
 		}, nil
+
+	case EFLOControl:
+		v, ok := d.cache.Get(instanceType)
+		if ok {
+			return v.(*Limits), nil
+		}
+
+		if instanceType == "" {
+			return nil, fmt.Errorf("instance type is empty")
+		}
+
+		v, err, _ := d.g.Do(instanceType, func() (interface{}, error) {
+			describeReq := &DescribeNodeTypeRequestOptions{}
+			describeReq.NodeType = &instanceType
+
+			ins, err := cc.DescribeNodeType(context.Background(), describeReq)
+			if err != nil {
+				return nil, err
+			}
+
+			limit := &Limits{
+				Adapters:          ins.EniQuantity,
+				TotalAdapters:     ins.EniQuantity,
+				IPv4PerAdapter:    ins.EniPrivateIpAddressQuantity,
+				HighDenseQuantity: ins.EniHighDenseQuantity,
+			}
+			d.cache.Add(instanceType, limit, d.ttl)
+
+			return limit, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		return v.(*Limits), nil
 	default:
 		return nil, fmt.Errorf("unsupported client")
 	}
@@ -184,10 +222,10 @@ func (d *Provider) GetLimitFromAnno(anno map[string]string) (*Limits, error) {
 		return nil, err
 	}
 
-	return getInstanceType(instanceType), nil
+	return GetInstanceType(instanceType), nil
 }
 
-func getInstanceType(instanceTypeInfo *ecs.InstanceType) *Limits {
+func GetInstanceType(instanceTypeInfo *ecs.InstanceType) *Limits {
 	adapterLimit := instanceTypeInfo.EniQuantity
 	ipv4PerAdapter := instanceTypeInfo.EniPrivateIpAddressQuantity
 	ipv6PerAdapter := instanceTypeInfo.EniIpv6AddressQuantity

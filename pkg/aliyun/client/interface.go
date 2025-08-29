@@ -1,6 +1,7 @@
 //go:generate mockery --name ECS --tags default_build
 //go:generate mockery --name VPC --tags default_build
 //go:generate mockery --name EFLO --tags default_build
+//go:generate mockery --name EFLOControl
 //go:generate mockery --name OpenAPI --tags default_build
 
 package client
@@ -19,6 +20,7 @@ type OpenAPI interface {
 	GetECS() ECS
 	GetVPC() VPC
 	GetEFLO() EFLO
+	GetEFLOController() EFLOControl
 	ENI
 }
 
@@ -82,6 +84,11 @@ type EFLO interface {
 	DescribeHDENI(ctx context.Context, opts ...DescribeNetworkInterfaceOption) ([]*NetworkInterface, error)
 	AttachHDENI(ctx context.Context, opts ...AttachNetworkInterfaceOption) error
 	DetachHDENI(ctx context.Context, opts ...DetachNetworkInterfaceOption) error
+}
+
+type EFLOControl interface {
+	DescribeNode(ctx context.Context, opts ...DescribeNodeRequestOption) (*DescribeNodeResponse, error)
+	DescribeNodeType(ctx context.Context, opts ...DescribeNodeTypeRequestOption) (*DescribeNodeTypeResponse, error)
 }
 
 type BackendAPI int

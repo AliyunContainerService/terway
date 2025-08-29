@@ -466,8 +466,19 @@ func doCmdCheck(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cn
 	return nil
 }
 
-func prepareVF(ctx context.Context, id int, mac string) (int32, error) {
-	deviceID, err := vf.SetupDriverAndGetNetInterface(id, "")
+func prepareVF(ctx context.Context, id int, mac string, vfType rpc.VfType) (int32, error) {
+	// vf-topo-vpc
+	configPath := ""
+
+	switch vfType {
+	case rpc.VfType_VfTypeDefault:
+	case rpc.VfType_VfTypeVPC:
+		configPath = "/var/run/hc-eni-host/vf-topo-vpc"
+	default:
+		return 0, fmt.Errorf("not support this vf type")
+	}
+
+	deviceID, err := vf.SetupDriverAndGetNetInterface(ctx, id, configPath)
 	if err != nil {
 		return 0, err
 	}

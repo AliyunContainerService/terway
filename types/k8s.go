@@ -65,6 +65,12 @@ const (
 	ENOApi = AnnotationPrefix + "eno-api"
 )
 
+const (
+	APIEcs      = "ecs"
+	APIEcsHDeni = "ecs-hdeni"
+	APIEnoHDeni = "hdeni"
+)
+
 // labels
 
 const (

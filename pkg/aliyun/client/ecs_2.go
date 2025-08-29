@@ -53,7 +53,7 @@ func (a *ECSService) DescribeNetworkInterface2(ctx context.Context, opts ...Desc
 			result = append(result, FromDescribeResp(&r))
 		}
 
-		l.WithValues(LogFieldRequestID, resp.RequestId).Info("describe enis")
+		l.WithValues(LogFieldRequestID, resp.RequestId, "count", len(result)).Info("describe enis")
 
 		if len(resp.NetworkInterfaceSets.NetworkInterfaceSet) < maxSinglePageSize {
 			break

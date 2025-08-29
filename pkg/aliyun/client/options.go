@@ -2,6 +2,7 @@ package client
 
 import (
 	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
+	eflocontroller20221215 "github.com/alibabacloud-go/eflo-controller-20221215/v2/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
@@ -567,6 +568,56 @@ func (o *DetachNetworkInterfaceOptions) EFLO() (*eflo20220530.DetachElasticNetwo
 	}
 
 	if req.NodeId == nil || req.ElasticNetworkInterfaceId == nil {
+		return nil, ErrInvalidArgs
+	}
+
+	return req, nil
+}
+
+type DescribeNodeRequestOption interface {
+	ApplyTo(*DescribeNodeRequestOptions)
+}
+
+type DescribeNodeRequestOptions struct {
+	NodeID *string
+}
+
+func (o *DescribeNodeRequestOptions) ApplyTo(opts *DescribeNodeRequestOptions) {
+	if o.NodeID != nil {
+		opts.NodeID = o.NodeID
+	}
+}
+
+func (o *DescribeNodeRequestOptions) EFLOControl() (*eflocontroller20221215.DescribeNodeRequest, error) {
+	req := &eflocontroller20221215.DescribeNodeRequest{}
+	req.NodeId = o.NodeID
+
+	if o.NodeID == nil || len(*o.NodeID) == 0 {
+		return nil, ErrInvalidArgs
+	}
+
+	return req, nil
+}
+
+type DescribeNodeTypeRequestOption interface {
+	ApplyTo(*DescribeNodeTypeRequestOptions)
+}
+
+type DescribeNodeTypeRequestOptions struct {
+	NodeType *string
+}
+
+func (o *DescribeNodeTypeRequestOptions) ApplyTo(opts *DescribeNodeTypeRequestOptions) {
+	if o.NodeType != nil {
+		opts.NodeType = o.NodeType
+	}
+}
+
+func (o *DescribeNodeTypeRequestOptions) EFLOControl() (*eflocontroller20221215.DescribeNodeTypeRequest, error) {
+	req := &eflocontroller20221215.DescribeNodeTypeRequest{}
+	req.NodeType = o.NodeType
+
+	if o.NodeType == nil || len(*o.NodeType) == 0 {
 		return nil, ErrInvalidArgs
 	}
 
