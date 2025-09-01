@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,10 +17,13 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/mod/semver"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -544,11 +548,22 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 func releasePodNotFound(ctx context.Context, c client.Client, nodeName string, podsMapper map[string]*PodRequest, ipMapper ...map[string]*EniIP) {
 	l := logf.FromContext(ctx)
 
+	// NodeRuntime is created by daemon, so unless it is supported, we can't get node runtime
+	daemonSupport := true
 	nodeRuntime := &networkv1beta1.NodeRuntime{}
 	err := c.Get(ctx, client.ObjectKey{Name: nodeName}, nodeRuntime)
 	if err != nil {
-		l.Error(err, "failed to get node runtime, ignore ipam release ip")
-		return
+		if !k8sErr.IsNotFound(err) {
+			l.Error(err, "failed to get node runtime, ignore ipam release ip")
+			return
+		}
+		// not found, try to determine by pod version
+		daemonSupport = isDaemonSupportNodeRuntime(ctx, c, nodeName)
+		if daemonSupport {
+			l.Info("daemon support node runtime, but not found, try next time")
+			return
+		}
+		l.Info("daemon not support node runtime")
 	}
 	for _, ipMap := range ipMapper {
 		for _, v := range ipMap {
@@ -561,7 +576,7 @@ func releasePodNotFound(ctx context.Context, c client.Client, nodeName string, p
 				continue
 			}
 
-			if v.IP.PodUID != "" {
+			if v.IP.PodUID != "" && daemonSupport {
 				// check cni has finished
 				runtimePodStatus, ok := nodeRuntime.Status.Pods[v.IP.PodUID]
 				if !ok {
@@ -1626,4 +1641,71 @@ func (n *ReconcileNode) getDegradation() controlplane.Degradation {
 		return ""
 	}
 	return controlplane.Degradation(n.v.GetString("degradation"))
+}
+
+func isDaemonSupportNodeRuntime(ctx context.Context, c client.Client, nodeName string) bool {
+	l := logr.FromContextOrDiscard(ctx)
+	podList := &corev1.PodList{}
+	// Define the list options
+	listOpts := &client.ListOptions{
+		Namespace: "kube-system",
+		LabelSelector: labels.SelectorFromSet(labels.Set{
+			"app": "terway-eniip",
+		}),
+		FieldSelector: fields.SelectorFromSet(fields.Set{
+			"spec.nodeName": nodeName,
+		}),
+	}
+
+	// List the pods
+	err := c.List(ctx, podList, listOpts)
+	if err != nil {
+		// nb(l1b0k): if daemon not exist, or error happen, we assume it is support
+		l.Error(err, "failed to list terway-eniip pod, assume it is support")
+		return true
+	}
+
+	if len(podList.Items) == 0 {
+		l.Info("terway-eniip pod not exist, assume it is support")
+		return true
+	}
+
+	if len(podList.Items[0].Spec.Containers) == 0 {
+		l.Info("terway-eniip pod not exist, assume it is support")
+		return true
+	}
+
+	image := podList.Items[0].Spec.Containers[0].Image
+	tag := getTagFromImage(image)
+
+	if !semver.IsValid(tag) {
+		l.Info("terway version is not valid, assume it is support")
+		return true
+	}
+
+	if semver.Compare(tag, "v1.11.3") < 0 {
+		l.Info("terway version is less than v1.11.3, it is not support node runtime")
+		return false
+	}
+	l.Info("terway version is greater than v1.11.3, it is support node runtime")
+
+	return true
+}
+
+func getTagFromImage(image string) string {
+	parts := strings.Split(image, "@")
+	imageWithoutDigest := parts[0]
+
+	lastColon := strings.LastIndex(imageWithoutDigest, ":")
+	if lastColon == -1 {
+		return "latest"
+	}
+
+	tag := imageWithoutDigest[lastColon+1:]
+
+	if !strings.Contains(tag, "/") {
+		return tag
+	}
+
+	return "latest"
 }
