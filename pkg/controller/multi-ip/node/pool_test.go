@@ -149,6 +149,7 @@ func TestReleasePodNotFound(t *testing.T) {
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
+			ctx = MetaIntoCtx(ctx)
 			scheme := runtime.NewScheme()
 			// Add networkv1beta1 scheme
 			_ = networkv1beta1.AddToScheme(scheme)
@@ -2843,6 +2844,267 @@ var _ = Describe("Test ReconcileNode", func() {
 
 			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
 			Expect(result).To(BeFalse())
+		})
+	})
+
+	Context("Test isDaemonSupportNodeRuntime", func() {
+		var testNodeName string
+
+		BeforeEach(func() {
+			testNodeName = "test-daemon-support-node"
+		})
+
+		AfterEach(func() {
+			// Clean up any test pods created during the test
+			podList := &corev1.PodList{}
+			err := k8sClient.List(ctx, podList, client.InNamespace("kube-system"), client.MatchingLabels{"app": "terway-eniip"})
+			if err == nil {
+				for _, pod := range podList.Items {
+					if pod.Spec.NodeName == testNodeName {
+						err := k8sClient.Delete(ctx, &pod, &client.DeleteOptions{
+							GracePeriodSeconds: func() *int64 {
+								i := int64(0)
+								return &i
+							}(),
+						})
+						if err != nil {
+							GinkgoT().Logf("Failed to delete test pod %s: %v", pod.Name, err)
+						}
+					}
+				}
+			}
+
+			// Wait for pods to be deleted
+			Eventually(func() bool {
+				podList := &corev1.PodList{}
+				err := k8sClient.List(ctx, podList, client.InNamespace("kube-system"), client.MatchingLabels{"app": "terway-eniip"})
+				if err != nil {
+					return false
+				}
+				for _, pod := range podList.Items {
+					if pod.Spec.NodeName == testNodeName {
+						return false
+					}
+				}
+				return true
+			}).WithTimeout(10 * time.Second).Should(BeTrue())
+		})
+
+		It("Should return true when no terway-eniip pods exist", func() {
+			ctx := MetaIntoCtx(context.Background())
+
+			result := isDaemonSupportNodeRuntime(ctx, k8sClient, testNodeName)
+			Expect(result).To(BeTrue())
+		})
+
+		It("Should return true when terway-eniip pod has invalid image format", func() {
+			ctx := MetaIntoCtx(context.Background())
+
+			// Create a pod with invalid image format
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "terway-eniip-invalid-image",
+					Namespace: "kube-system",
+					Labels: map[string]string{
+						"app": "terway-eniip",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: testNodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "terway",
+							Image: "invalid-image-format", // no colon
+						},
+					},
+				},
+			}
+
+			err := k8sClient.Create(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+
+			result := isDaemonSupportNodeRuntime(ctx, k8sClient, testNodeName)
+			Expect(result).To(BeTrue())
+		})
+
+		It("Should return false when terway version is less than v1.11.3", func() {
+			ctx := MetaIntoCtx(context.Background())
+
+			// Create a pod with version less than v1.11.3
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "terway-eniip-old-version",
+					Namespace: "kube-system",
+					Labels: map[string]string{
+						"app": "terway-eniip",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: testNodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "terway",
+							Image: "terway:v1.11.2", // less than v1.11.3
+						},
+					},
+				},
+			}
+
+			err := k8sClient.Create(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+
+			result := isDaemonSupportNodeRuntime(ctx, k8sClient, testNodeName)
+			Expect(result).To(BeFalse())
+		})
+
+		It("Should return false when terway version is less than v1.11.3 (v2)", func() {
+			ctx := MetaIntoCtx(context.Background())
+
+			// Create a pod with version less than v1.11.3
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "terway-eniip-old-version",
+					Namespace: "kube-system",
+					Labels: map[string]string{
+						"app": "terway-eniip",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: testNodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "terway",
+							Image: "terway:v1.11.2-xxxxx", // less than v1.11.3
+						},
+					},
+				},
+			}
+
+			err := k8sClient.Create(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+
+			result := isDaemonSupportNodeRuntime(ctx, k8sClient, testNodeName)
+			Expect(result).To(BeFalse())
+		})
+
+		It("Should return true when terway version is equal to v1.11.3", func() {
+			ctx := MetaIntoCtx(context.Background())
+
+			// Create a pod with version equal to v1.11.3
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "terway-eniip-equal-version",
+					Namespace: "kube-system",
+					Labels: map[string]string{
+						"app": "terway-eniip",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: testNodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "terway",
+							Image: "terway:v1.11.3", // equal to v1.11.3
+						},
+					},
+				},
+			}
+
+			err := k8sClient.Create(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+
+			result := isDaemonSupportNodeRuntime(ctx, k8sClient, testNodeName)
+			Expect(result).To(BeTrue())
+		})
+
+		It("Should return true when terway version is greater than v1.11.3", func() {
+			ctx := MetaIntoCtx(context.Background())
+
+			// Create a pod with version greater than v1.11.3
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "terway-eniip-new-version",
+					Namespace: "kube-system",
+					Labels: map[string]string{
+						"app": "terway-eniip",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: testNodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "terway",
+							Image: "terway:v1.12.0", // greater than v1.11.3
+						},
+					},
+				},
+			}
+
+			err := k8sClient.Create(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+
+			result := isDaemonSupportNodeRuntime(ctx, k8sClient, testNodeName)
+			Expect(result).To(BeTrue())
+		})
+
+		It("Should return true when terway version is greater than v1.11.3 (v2)", func() {
+			ctx := MetaIntoCtx(context.Background())
+
+			// Create a pod with version greater than v1.11.3
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "terway-eniip-new-version",
+					Namespace: "kube-system",
+					Labels: map[string]string{
+						"app": "terway-eniip",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: testNodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "terway",
+							Image: "terway:v1.12.0-xxxx", // greater than v1.11.3
+						},
+					},
+				},
+			}
+
+			err := k8sClient.Create(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+
+			result := isDaemonSupportNodeRuntime(ctx, k8sClient, testNodeName)
+			Expect(result).To(BeTrue())
+		})
+
+		It("Should return true when image has multiple colons", func() {
+			ctx := MetaIntoCtx(context.Background())
+
+			// Create a pod with image having multiple colons
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "terway-eniip-registry-image",
+					Namespace: "kube-system",
+					Labels: map[string]string{
+						"app": "terway-eniip",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: testNodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "terway",
+							Image: "registry.com:5000/terway:v1.12.0", // multiple colons
+						},
+					},
+				},
+			}
+
+			err := k8sClient.Create(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+
+			result := isDaemonSupportNodeRuntime(ctx, k8sClient, testNodeName)
+			Expect(result).To(BeTrue())
 		})
 	})
 })
