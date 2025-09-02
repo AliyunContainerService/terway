@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strings"
@@ -40,6 +41,8 @@ type CNIConfig struct {
 	HubbleListenAddress string `json:"cilium_hubble_listen_address,omitempty"`
 	HubbleMetricServer  string `json:"cilium_hubble_metrics_server,omitempty"`
 	CiliumExtraArgs     string `json:"cilium_args,omitempty"` // legacy way. should move to config map
+
+	HostStackCIDRs []string `json:"host_stack_cidrs,omitempty"`
 }
 
 var policyCmd = &cobra.Command{
@@ -304,6 +307,19 @@ func policyConfig(container *gabs.Container) ([]string, error) {
 				"--hubble-listen-address=" + h.HubbleListenAddress,
 				"--hubble-metrics-server=" + h.HubbleMetricServer,
 			}...)
+		}
+
+		for _, cidr := range h.HostStackCIDRs {
+			_, err = netip.ParsePrefix(cidr)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if len(h.HostStackCIDRs) > 0 {
+			ciliumArgs = append(ciliumArgs, "--terway-host-stack-cidr="+strings.Join(h.HostStackCIDRs, ","))
+		} else {
+			ciliumArgs = append(ciliumArgs, "--terway-host-stack-cidr=169.254.20.10/32")
 		}
 
 		// parse extra args
