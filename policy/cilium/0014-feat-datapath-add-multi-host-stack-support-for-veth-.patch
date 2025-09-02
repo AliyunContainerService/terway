@@ -1,0 +1,393 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Tue, 2 Sep 2025 11:28:33 +0800
+Subject: =?UTF-8?q?feat(datapath):=20add=20multi-host=20stack=20support=20?=
+ =?UTF-8?q?for=20veth=20datapath-=20Implement=20host=20stack=20CIDR=20map?=
+ =?UTF-8?q?=20and=20related=20functions=0A-=20Add=20support=20for=20multip?=
+ =?UTF-8?q?le=20host=20stack=20CIDRs=20in=20veth=20datapath=20mode=0A-=20U?=
+ =?UTF-8?q?pdate=20bpf=5Flxc=20to=20handle=20multiple=20host=20stack=20CID?=
+ =?UTF-8?q?Rs=0A-=20Modify=20daemon=20initialization=20to=20set=20up=20hos?=
+ =?UTF-8?q?t=20stack=20CIDR=20map=0A-=20Remove=20redundant=20host=20IP=20s?=
+ =?UTF-8?q?ynchronization=20logic?=
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ bpf/bpf_lxc.c                           |  12 +-
+ bpf/lib/eps.h                           |   5 +
+ bpf/lib/maps.h                          |  15 +++
+ daemon/cmd/daemon.go                    |   8 ++
+ daemon/cmd/daemon_main.go               |   3 +
+ daemon/cmd/hoststack-cidr.go            |  47 ++++++++
+ pkg/datapath/linux/config/config.go     |  11 ++
+ pkg/maps/hoststackcidr/hoststackcidr.go | 150 ++++++++++++++++++++++++
+ pkg/option/config.go                    |   5 +
+ 9 files changed, 254 insertions(+), 2 deletions(-)
+ create mode 100644 daemon/cmd/hoststack-cidr.go
+ create mode 100644 pkg/maps/hoststackcidr/hoststackcidr.go
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index 596dcdd30d..30cc8f6c19 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -14,7 +14,10 @@
+ #define IS_BPF_LXC 1
+
+ #define EVENT_SOURCE LXC_ID
++
++#ifndef ENABLE_MULTI_HOST_STACK
+ #define LOCAL_DNS_IP 0x0A14FEA9
++#endif
+
+ #include "lib/auth.h"
+ #include "lib/tailcall.h"
+@@ -1272,8 +1275,13 @@ maybe_pass_to_stack: __maybe_unused;
+ 		int oif = 0;
+ #endif
+
+-        if (ip4->daddr == LOCAL_DNS_IP )
+-            goto pass_to_stack;
++#ifdef ENABLE_MULTI_HOST_STACK
++		if (lookup_ip4_hoststack(ip4->daddr, 0 ))
++			goto pass_to_stack;
++#else
++		if (ip4->daddr == LOCAL_DNS_IP )
++			goto pass_to_stack;
++#endif
+
+ 		if (oif > 0) {
+ 			ret = ipv4_l3(ctx, ETH_HLEN, NULL, NULL, ip4);
+diff --git a/bpf/lib/eps.h b/bpf/lib/eps.h
+index c76f3dc68d..241789d546 100644
+--- a/bpf/lib/eps.h
++++ b/bpf/lib/eps.h
+@@ -95,3 +95,8 @@ ipcache_lookup4(const void *map, __be32 addr, __u32 prefix, __u32 cluster_id)
+ 	ipcache_lookup6(&IPCACHE_MAP, addr, V6_CACHE_KEY_LEN, cluster_id)
+ #define lookup_ip4_remote_endpoint(addr, cluster_id) \
+ 	ipcache_lookup4(&IPCACHE_MAP, addr, V4_CACHE_KEY_LEN, cluster_id)
++
++#define lookup_ip6_hoststack(addr, cluster_id) \
++	ipcache_lookup6(&terway_host_stack_cidr, addr, V6_CACHE_KEY_LEN, cluster_id)
++#define lookup_ip4_hoststack(addr, cluster_id) \
++	ipcache_lookup4(&terway_host_stack_cidr, addr, V4_CACHE_KEY_LEN, cluster_id)
+\ No newline at end of file
+diff --git a/bpf/lib/maps.h b/bpf/lib/maps.h
+index ee514400f4..b6ad2d84ae 100644
+--- a/bpf/lib/maps.h
++++ b/bpf/lib/maps.h
+@@ -297,3 +297,18 @@ tail_call_internal(struct __ctx_buff *ctx, const __u32 index, __s8 *ext_err)
+ 	return DROP_MISSED_TAIL_CALL;
+ }
+ #endif /* SKIP_CALLS_MAP */
++
++
++struct host_stack_value {
++	__u32		action;
++	__u32		pad;
++};
++
++struct {
++	__uint(type, BPF_MAP_TYPE_LPM_TRIE);
++	__type(key, struct ipcache_key);
++	__type(value, struct host_stack_value);
++	__uint(pinning, LIBBPF_PIN_BY_NAME);
++	__uint(max_entries, 256);
++	__uint(map_flags, BPF_F_NO_PREALLOC);
++} terway_host_stack_cidr __section_maps_btf;
+\ No newline at end of file
+diff --git a/daemon/cmd/daemon.go b/daemon/cmd/daemon.go
+index 40aef24988..1ce95572ac 100644
+--- a/daemon/cmd/daemon.go
++++ b/daemon/cmd/daemon.go
+@@ -387,6 +387,14 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
+ 	}
+ 	lbmap.Init(lbmapInitParams)
+
++	// no bother for ipvlan
++	if option.Config.DatapathMode == datapathOption.DatapathModeVeth {
++		err = initHostStackCIDR()
++		if err != nil {
++			return nil, nil, fmt.Errorf("unable to initialize host stack CIDR: %w", err)
++		}
++	}
++
+ 	params.NodeManager.Subscribe(params.Datapath.Node())
+
+ 	identity.IterateReservedIdentities(func(_ identity.NumericIdentity, _ *identity.Identity) {
+diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
+index 5a80538e8d..1b8e51ea63 100644
+--- a/daemon/cmd/daemon_main.go
++++ b/daemon/cmd/daemon_main.go
+@@ -378,6 +378,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
+ 	flags.Bool(option.EnableInClusterLoadBalance, false, "Enable k8s in cluster loadbalance")
+ 	option.BindEnv(vp, option.EnableInClusterLoadBalance)
+
++	flags.StringSlice(option.TerwayHostStackCIDR, []string{"169.254.20.10/32"}, "CIDRs to route traffic to host stack, this is node level config, if you change this config, you need to restart this node")
++	option.BindEnv(vp, option.TerwayHostStackCIDR)
++
+ 	flags.Bool(option.EnableL7Proxy, defaults.EnableL7Proxy, "Enable L7 proxy for L7 policy enforcement")
+ 	option.BindEnv(vp, option.EnableL7Proxy)
+
+diff --git a/daemon/cmd/hoststack-cidr.go b/daemon/cmd/hoststack-cidr.go
+new file mode 100644
+index 0000000000..9e6f6e8326
+--- /dev/null
++++ b/daemon/cmd/hoststack-cidr.go
+@@ -0,0 +1,47 @@
++package cmd
++
++import (
++	"fmt"
++	"net/netip"
++
++	"github.com/cilium/cilium/pkg/maps/hoststackcidr"
++	"github.com/cilium/cilium/pkg/option"
++)
++
++func initHostStackCIDR() error {
++	if err := hoststackcidr.HostStackCIDRMap().OpenOrCreate(); err != nil {
++		return fmt.Errorf("failed to create host stack CIDR map: %w", err)
++	}
++
++	exists, err := hoststackcidr.DumpToMap()
++	if err != nil {
++		return fmt.Errorf("failed to dump host stack CIDR map: %w", err)
++	}
++
++	for prefix := range exists {
++		log.Debugf("host stack CIDR entry: %s", prefix)
++	}
++
++	for _, cidr := range option.Config.HostStackCIDRs {
++		expect, err := netip.ParsePrefix(cidr)
++		if err != nil {
++			log.Debugf("parse cidr error, ignored : %s", err)
++		} else {
++			err = hoststackcidr.AddCIDREntry(expect, 0)
++			if err != nil {
++				log.WithError(err).Warn("Failed to add default host stack CIDR entry")
++			} else {
++				delete(exists, expect)
++			}
++		}
++	}
++
++	for prefix := range exists {
++		err = hoststackcidr.DeleteCIDREntry(prefix)
++		if err != nil {
++			log.WithError(err).Warn("Failed to delete default host stack CIDR entry")
++		}
++	}
++
++	return nil
++}
+diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
+index 28ff4c121f..0901a7e695 100644
+--- a/pkg/datapath/linux/config/config.go
++++ b/pkg/datapath/linux/config/config.go
+@@ -1096,6 +1096,17 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, devices []strin
+ 	case datapathOption.DatapathModeVeth:
+ 		fmt.Fprintf(fw, "#define DATAPATH_VETH 1\n")
+
++		hasExtra := false
++		for _, hostStack := range option.Config.HostStackCIDRs {
++			if hostStack != "169.254.20.10/32" {
++				hasExtra = true
++				break
++			}
++		}
++		if hasExtra {
++			fmt.Fprintf(fw, "#define ENABLE_MULTI_HOST_STACK 1\n")
++		}
++
+ 		if !e.IsHost() {
+ 			if e.GetENIIndex() == 0 {
+ 				return fmt.Errorf("ENI index is 0")
+diff --git a/pkg/maps/hoststackcidr/hoststackcidr.go b/pkg/maps/hoststackcidr/hoststackcidr.go
+new file mode 100644
+index 0000000000..97ddc373fc
+--- /dev/null
++++ b/pkg/maps/hoststackcidr/hoststackcidr.go
+@@ -0,0 +1,150 @@
++package hoststackcidr
++
++import (
++	"fmt"
++	"net/netip"
++	"sync"
++	"unsafe"
++
++	"github.com/cilium/cilium/pkg/types"
++	"github.com/cilium/ebpf"
++
++	"github.com/cilium/cilium/pkg/bpf"
++	"github.com/cilium/cilium/pkg/option"
++)
++
++const (
++	MapName = "terway_host_stack_cidr"
++
++	// MaxEntries represents the maximum number of CIDR entries in the map
++	MaxEntries = 256
++)
++
++var (
++	// HostStackCIDRMap represents the BPF map for host stack CIDR entries
++	hostStackCIDRMap     *bpf.Map
++	hostStackCIDRMapOnce sync.Once
++)
++
++func HostStackCIDRMap() *bpf.Map {
++	hostStackCIDRMapOnce.Do(func() {
++		hostStackCIDRMap = bpf.NewMap(MapName,
++			ebpf.LPMTrie,
++			&Key{},
++			&HostStackCIDRValue{},
++			MaxEntries,
++			0,
++		).WithCache().WithPressureMetric().
++			WithEvents(option.Config.GetEventBufferConfig(MapName))
++	})
++	return hostStackCIDRMap
++}
++
++// Key represents the key for the host stack CIDR map
++type Key struct {
++	PrefixLen uint32 `align:"lpm_key"`
++	ClusterID uint16 `align:"cluster_id"`
++	Pad1      uint8  `align:"pad1"`
++	Family    uint8  `align:"family"`
++	// represents both IPv6 and IPv4 (in the lowest four bytes)
++	IP types.IPv6 `align:"$union0"`
++}
++
++// HostStackCIDRValue represents the value for the host stack CIDR map
++type HostStackCIDRValue struct {
++	Action uint32 `align:"action"` // 0: pass_to_stack, 1: drop, etc.
++	_      uint32 `align:"pad"`
++}
++
++// NewHostStackCIDRKey creates a new Key from a netip.Prefix
++func NewHostStackCIDRKey(prefix netip.Prefix) *Key {
++	key := &Key{
++		PrefixLen: getStaticPrefixBits() + uint32(prefix.Bits()),
++	}
++
++	addr := prefix.Addr()
++	if addr.Is4() {
++		key.Family = bpf.EndpointKeyIPv4
++		ip4 := addr.As4()
++		copy(key.IP[:4], ip4[:])
++	} else if addr.Is6() {
++		key.Family = bpf.EndpointKeyIPv6
++		ip6 := addr.As16()
++		copy(key.IP[:], ip6[:])
++	}
++
++	return key
++}
++
++func getStaticPrefixBits() uint32 {
++	staticMatchSize := unsafe.Sizeof(Key{})
++	staticMatchSize -= unsafe.Sizeof(Key{}.PrefixLen)
++	staticMatchSize -= unsafe.Sizeof(Key{}.IP)
++	return uint32(staticMatchSize) * 8
++}
++
++func (k *Key) New() bpf.MapKey { return &Key{} }
++
++func (k Key) Prefix() netip.Prefix {
++	var addr netip.Addr
++	prefixLen := int(k.PrefixLen - getStaticPrefixBits())
++	switch k.Family {
++	case bpf.EndpointKeyIPv4:
++		addr = netip.AddrFrom4(*(*[4]byte)(k.IP[:4]))
++	case bpf.EndpointKeyIPv6:
++		addr = netip.AddrFrom16(k.IP)
++	}
++	return netip.PrefixFrom(addr, prefixLen)
++}
++
++func (v *HostStackCIDRValue) New() bpf.MapValue { return &HostStackCIDRValue{} }
++
++// String returns the human readable representation of a Key
++func (k *Key) String() string {
++	return k.Prefix().String()
++}
++
++// String returns the human readable representation of a HostStackCIDRValue
++func (v *HostStackCIDRValue) String() string {
++	switch v.Action {
++	case 0:
++		return "pass_to_stack"
++	case 1:
++		return "drop"
++	default:
++		return fmt.Sprintf("unknown(%d)", v.Action)
++	}
++}
++
++// AddCIDREntry adds a CIDR entry to the host stack CIDR map
++func AddCIDREntry(prefix netip.Prefix, action uint32) error {
++	key := NewHostStackCIDRKey(prefix)
++	value := &HostStackCIDRValue{Action: action}
++
++	return HostStackCIDRMap().Update(key, value)
++}
++
++// DeleteCIDREntry removes a CIDR entry from the host stack CIDR map
++func DeleteCIDREntry(prefix netip.Prefix) error {
++	key := NewHostStackCIDRKey(prefix)
++	return HostStackCIDRMap().Delete(key)
++}
++
++// DumpToMap dumps the contents of the host stack CIDR map
++func DumpToMap() (map[netip.Prefix]*HostStackCIDRValue, error) {
++	result := make(map[netip.Prefix]*HostStackCIDRValue)
++
++	callback := func(key bpf.MapKey, value bpf.MapValue) {
++		if k, ok := key.(*Key); ok {
++			if v, ok := value.(*HostStackCIDRValue); ok {
++				result[k.Prefix()] = v
++			}
++		}
++	}
++
++	if err := HostStackCIDRMap().DumpWithCallback(callback); err != nil {
++		return nil, fmt.Errorf("unable to read host stack CIDR map: %w", err)
++	}
++
++	return result, nil
++}
+diff --git a/pkg/option/config.go b/pkg/option/config.go
+index 120d749348..b8d3364107 100644
+--- a/pkg/option/config.go
++++ b/pkg/option/config.go
+@@ -1235,6 +1235,8 @@ const (
+ 	BPFEventsTraceEnabled = "bpf-events-trace-enabled"
+ 
+ 	DisablePerPacketLB = "disable-per-package-lb"
++
++	TerwayHostStackCIDR = "terway-host-stack-cidr"
+ )
+ 
+ // Default string arguments
+@@ -2439,6 +2441,8 @@ type DaemonConfig struct {
+ 	EnableSocketLBPodConnectionTermination bool
+ 
+ 	DisablePerPacketLB bool
++
++	HostStackCIDRs []string
+ }
+ 
+ var (
+@@ -3176,6 +3180,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
+ 	c.EnableIPSecEncryptedOverlay = vp.GetBool(EnableIPSecEncryptedOverlay)
+ 
+ 	c.DisablePerPacketLB = vp.GetBool(DisablePerPacketLB)
++	c.HostStackCIDRs = vp.GetStringSlice(TerwayHostStackCIDR)
+ 
+ 	c.ServiceNoBackendResponse = vp.GetString(ServiceNoBackendResponse)
+ 	switch c.ServiceNoBackendResponse {
+-- 
+2.39.5 (Apple Git-154)
+
