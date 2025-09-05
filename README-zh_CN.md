@@ -14,6 +14,17 @@ Terway网络插件是ACK自研的容器网络接口（CNI）插件，基于阿�
 
 在Terway网络插件中，每个Pod都拥有自己的网络栈和IP地址。同一台ECS内的Pod之间通信，直接通过机器内部的转发，跨ECS的Pod通信、报文通过VPC的弹性网卡直接转发。由于不需要使用VxLAN等的隧道技术封装报文，因此Terway模式网络具有较高的通信性能。
 
+## 📖 文档
+
+查看完整的文档、教程和指南，请访问我们的 **[Terway Wiki](wiki/zh-cn/Home.md)**：
+
+- **[入门指南](wiki/zh-cn/入门指南.md)** - 初次使用 Terway？从这里开始！
+- **[安装指南](wiki/zh-cn/安装指南.md)** - 详细的安装步骤说明
+- **[用户指南](wiki/zh-cn/Home.md#-用户指南)** - 配置和使用说明
+- **[开发者指南](wiki/zh-cn/Home.md#-开发者指南)** - 贡献和开发指南
+- **[故障排查](wiki/zh-cn/Home.md#-故障排查)** - 常见问题解答
+- **[参考文档](wiki/zh-cn/Home.md#-参考文档)** - API 和配置参考
+
 ## 特性
 
 - ENI网络模式：分配 Elastic Network Interfaces (ENIs) 给Pod，优化资源利用率和网络性能。
