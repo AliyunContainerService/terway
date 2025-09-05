@@ -194,6 +194,79 @@ func Test_policyConfig(t *testing.T) {
 				assert.Contains(t, strings, "--enable-hubble=true")
 			},
 		},
+		{
+			name: "host stack cidr not set",
+			args: args{container: func() *gabs.Container {
+				cniJSON, _ := gabs.ParseJSON([]byte(`{
+  "cniVersion": "0.4.0",
+  "name": "terway-chainer",
+  "plugins": [
+    {
+      "bandwidth_mode": "edt",
+      "capabilities": {
+        "bandwidth": true
+      },
+      "cilium_args": "disable-per-package-lb=true",
+      "eniip_virtual_type": "datapathv2",
+      "network_policy_provider": "ebpf",
+      "type": "terway"
+    },
+    {
+      "data-path": "datapathv2",
+      "enable-debug": false,
+      "log-file": "/var/run/cilium/cilium-cni.log",
+      "type": "cilium-cni"
+    }
+  ]
+}`))
+				return cniJSON
+			}()},
+			readFunc: func(name string) ([]byte, error) {
+				return []byte("#define DIRECT_ROUTING_DEV_IFINDEX 0\n#define DISABLE_PER_PACKET_LB 1\n"), nil
+			},
+			checkFunc: func(t *testing.T, strings []string, err error) {
+				assert.NoError(t, err)
+				assert.Contains(t, strings, "--disable-per-package-lb=true")
+				assert.Contains(t, strings, "--terway-host-stack-cidr=169.254.20.10/32")
+			},
+		},
+		{
+			name: "multi host stack cidr",
+			args: args{container: func() *gabs.Container {
+				cniJSON, _ := gabs.ParseJSON([]byte(`{
+  "cniVersion": "0.4.0",
+  "name": "terway-chainer",
+  "plugins": [
+    {
+      "bandwidth_mode": "edt",
+      "capabilities": {
+        "bandwidth": true
+      },
+      "cilium_args": "disable-per-package-lb=true",
+      "eniip_virtual_type": "datapathv2",
+      "network_policy_provider": "ebpf",
+      "host_stack_cidrs": ["169.254.20.10/32", "169.254.20.11/32"],
+      "type": "terway"
+    },
+    {
+      "data-path": "datapathv2",
+      "enable-debug": false,
+      "log-file": "/var/run/cilium/cilium-cni.log",
+      "type": "cilium-cni"
+    }
+  ]
+}`))
+				return cniJSON
+			}()},
+			readFunc: func(name string) ([]byte, error) {
+				return []byte("#define DIRECT_ROUTING_DEV_IFINDEX 0\n#define DISABLE_PER_PACKET_LB 1\n"), nil
+			},
+			checkFunc: func(t *testing.T, strings []string, err error) {
+				assert.NoError(t, err)
+				assert.Contains(t, strings, "--disable-per-package-lb=true")
+				assert.Contains(t, strings, "--terway-host-stack-cidr=169.254.20.10/32,169.254.20.11/32")
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
