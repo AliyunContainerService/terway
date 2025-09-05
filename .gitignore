@@ -2,3 +2,30 @@
 vendor
 **/*.exe
 .run
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Editor backup files
+*~
+*.swp
+*.swo
+.vscode/
+*.orig
+
+# Build artifacts
+/bin/
+/build/
+/dist/
+*.log
+
+# Test artifacts
+coverage.out
+*.test
+
+# Documentation build artifacts
+.jekyll-cache/
+_site/
