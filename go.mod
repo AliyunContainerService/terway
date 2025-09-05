@@ -7,6 +7,7 @@ require (
 	github.com/Jeffail/gabs/v2 v2.7.0
 	github.com/Microsoft/go-winio v0.6.0
 	github.com/Microsoft/hcsshim v0.9.9
+	github.com/agiledragon/gomonkey/v2 v2.13.0
 	github.com/alexflint/go-filemutex v1.2.0
 	github.com/alibabacloud-go/darabonba-openapi/v2 v2.1.11
 	github.com/alibabacloud-go/ecs-20140526/v7 v7.1.3
