@@ -167,17 +167,18 @@ func TestNewValidIP(t *testing.T) {
 	}
 }
 
-func TestIP_GetAddr(t *testing.T) {
+func TestIP_IPField(t *testing.T) {
 	addr := netip.MustParseAddr("10.0.0.1")
 	ip := NewIP(addr, true)
 
-	result := ip.GetAddr()
-	if result != addr {
-		t.Errorf("IP.GetAddr() = %v, want %v", result, addr)
+	// Test the String() method which accesses the ip field
+	result := ip.String()
+	if result != addr.String() {
+		t.Errorf("IP.String() = %v, want %v", result, addr.String())
 	}
 }
 
-func TestIP_IsPrimary(t *testing.T) {
+func TestIP_Primary(t *testing.T) {
 	tests := []struct {
 		name     string
 		primary  bool
@@ -198,48 +199,50 @@ func TestIP_IsPrimary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ip := NewIP(netip.MustParseAddr("192.168.1.1"), tt.primary)
-			result := ip.IsPrimary()
+			result := ip.Primary()
 			if result != tt.expected {
-				t.Errorf("IP.IsPrimary() = %v, want %v", result, tt.expected)
+				t.Errorf("IP.Primary() = %v, want %v", result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestIP_AssignPod(t *testing.T) {
+func TestIP_Allocate(t *testing.T) {
 	ip := NewValidIP(netip.MustParseAddr("192.168.1.1"), false)
 	podID := "test-pod-123"
 
-	ip.AssignPod(podID)
+	ip.Allocate(podID)
 
 	if ip.podID != podID {
-		t.Errorf("IP.AssignPod() podID = %v, want %v", ip.podID, podID)
+		t.Errorf("IP.Allocate() podID = %v, want %v", ip.podID, podID)
 	}
 }
 
-func TestIP_UnAssignPod(t *testing.T) {
+func TestIP_Release(t *testing.T) {
 	ip := NewValidIP(netip.MustParseAddr("192.168.1.1"), false)
-	ip.AssignPod("test-pod-123")
+	podID := "test-pod-123"
+	ip.Allocate(podID)
 
-	ip.UnAssignPod()
+	ip.Release(podID)
 
 	if ip.podID != "" {
-		t.Errorf("IP.UnAssignPod() podID = %v, want empty string", ip.podID)
+		t.Errorf("IP.Release() podID = %v, want empty string", ip.podID)
 	}
 }
 
-func TestIP_GetPodID(t *testing.T) {
+func TestIP_PodIDAccess(t *testing.T) {
 	ip := NewValidIP(netip.MustParseAddr("192.168.1.1"), false)
 	podID := "test-pod-456"
-	ip.AssignPod(podID)
+	ip.Allocate(podID)
 
-	result := ip.GetPodID()
-	if result != podID {
-		t.Errorf("IP.GetPodID() = %v, want %v", result, podID)
+	// Test that podID is correctly set by checking InUse()
+	result := ip.InUse()
+	if !result {
+		t.Errorf("IP should be InUse after allocation")
 	}
 }
 
-func TestIP_IsAssigned(t *testing.T) {
+func TestIP_InUse(t *testing.T) {
 	tests := []struct {
 		name     string
 		podID    string
@@ -261,18 +264,18 @@ func TestIP_IsAssigned(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ip := NewValidIP(netip.MustParseAddr("192.168.1.1"), false)
 			if tt.podID != "" {
-				ip.AssignPod(tt.podID)
+				ip.Allocate(tt.podID)
 			}
 
-			result := ip.IsAssigned()
+			result := ip.InUse()
 			if result != tt.expected {
-				t.Errorf("IP.IsAssigned() = %v, want %v", result, tt.expected)
+				t.Errorf("IP.InUse() = %v, want %v", result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestIP_IsValid(t *testing.T) {
+func TestIP_Valid(t *testing.T) {
 	tests := []struct {
 		name     string
 		status   ipStatus
@@ -305,37 +308,39 @@ func TestIP_IsValid(t *testing.T) {
 			ip := NewIP(netip.MustParseAddr("192.168.1.1"), false)
 			ip.status = tt.status
 
-			result := ip.IsValid()
+			result := ip.Valid()
 			if result != tt.expected {
-				t.Errorf("IP.IsValid() = %v, want %v", result, tt.expected)
+				t.Errorf("IP.Valid() = %v, want %v", result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestIP_MarkValid(t *testing.T) {
-	ip := NewIP(netip.MustParseAddr("192.168.1.1"), false)
-	ip.MarkValid()
-
-	if ip.status != ipStatusValid {
-		t.Errorf("IP.MarkValid() status = %v, want %v", ip.status, ipStatusValid)
-	}
-}
-
-func TestIP_MarkInvalid(t *testing.T) {
+func TestIP_SetInvalid(t *testing.T) {
 	ip := NewValidIP(netip.MustParseAddr("192.168.1.1"), false)
-	ip.MarkInvalid()
+	ip.SetInvalid()
 
 	if ip.status != ipStatusInvalid {
-		t.Errorf("IP.MarkInvalid() status = %v, want %v", ip.status, ipStatusInvalid)
+		t.Errorf("IP.SetInvalid() status = %v, want %v", ip.status, ipStatusInvalid)
 	}
 }
 
-func TestIP_MarkDeleting(t *testing.T) {
+func TestIP_Dispose(t *testing.T) {
 	ip := NewValidIP(netip.MustParseAddr("192.168.1.1"), false)
-	ip.MarkDeleting()
+	ip.Dispose()
 
 	if ip.status != ipStatusDeleting {
-		t.Errorf("IP.MarkDeleting() status = %v, want %v", ip.status, ipStatusDeleting)
+		t.Errorf("IP.Dispose() status = %v, want %v", ip.status, ipStatusDeleting)
+	}
+}
+
+func TestIP_Dispose_Primary(t *testing.T) {
+	// Primary IP should not be disposed
+	ip := NewValidIP(netip.MustParseAddr("192.168.1.1"), true)
+	originalStatus := ip.status
+	ip.Dispose()
+
+	if ip.status != originalStatus {
+		t.Errorf("Primary IP.Dispose() should not change status, got %v", ip.status)
 	}
 }
