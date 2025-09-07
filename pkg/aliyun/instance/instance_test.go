@@ -134,22 +134,22 @@ var _ = Describe("Metadata BDD Tests", func() {
 			zoneID, err := instance.GetZoneID()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(zoneID).To(Equal("cn-test-a"))
-			
+
 			// Test GetVSwitchID
 			vSwitchID, err := instance.GetVSwitchID()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(vSwitchID).To(Equal("vsw-test"))
-			
+
 			// Test GetPrimaryMAC
 			primaryMAC, err := instance.GetPrimaryMAC()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(primaryMAC).To(Equal("mac1"))
-			
+
 			// Test GetRegionID
 			regionID, err := instance.GetRegionID()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(regionID).To(Equal("cn-test"))
-			
+
 			// Test GetInstanceType
 			instanceType, err := instance.GetInstanceType()
 			Expect(err).NotTo(HaveOccurred())

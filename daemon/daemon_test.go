@@ -557,3 +557,281 @@ func TestParseNetworkResource(t *testing.T) {
 		t.Errorf("expected nil for non-ENIIP/ENI type")
 	}
 }
+
+func TestVerifyPodNetworkType(t *testing.T) {
+	service := &networkService{
+		daemonMode: daemon.ModeENIMultiIP,
+	}
+
+	tests := []struct {
+		name           string
+		podNetworkMode string
+		daemonMode     string
+		expected       bool
+	}{
+		{
+			name:           "ENIMultiIP mode with ENIMultiIP pod",
+			podNetworkMode: daemon.ModeENIMultiIP,
+			daemonMode:     daemon.ModeENIMultiIP,
+			expected:       true,
+		},
+		{
+			name:           "ENIMultiIP mode with VPC pod",
+			podNetworkMode: daemon.ModeVPC,
+			daemonMode:     daemon.ModeENIMultiIP,
+			expected:       true,
+		},
+		{
+			name:           "ENIOnly mode with ENIOnly pod",
+			podNetworkMode: daemon.ModeENIOnly,
+			daemonMode:     daemon.ModeENIOnly,
+			expected:       true,
+		},
+		{
+			name:           "VPC mode with VPC pod",
+			podNetworkMode: daemon.ModeVPC,
+			daemonMode:     daemon.ModeVPC,
+			expected:       true,
+		},
+		{
+			name:           "Mismatched modes",
+			podNetworkMode: daemon.ModeENIOnly,
+			daemonMode:     daemon.ModeVPC,
+			expected:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service.daemonMode = tt.daemonMode
+			result := service.verifyPodNetworkType(tt.podNetworkMode)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestDefaultIf(t *testing.T) {
+	tests := []struct {
+		name     string
+		ifName   string
+		expected bool
+	}{
+		{
+			name:     "eth0 interface",
+			ifName:   "eth0",
+			expected: true,
+		},
+		{
+			name:     "eth1 interface",
+			ifName:   "eth1",
+			expected: false,
+		},
+		{
+			name:     "lo interface",
+			ifName:   "lo",
+			expected: false,
+		},
+		{
+			name:     "empty interface",
+			ifName:   "",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := defaultIf(tt.ifName)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetPodResources(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []interface{}
+		expected []daemon.PodResources
+	}{
+		{
+			name:     "Empty list",
+			input:    []interface{}{},
+			expected: []daemon.PodResources{},
+		},
+		{
+			name: "Valid pod resources",
+			input: []interface{}{
+				daemon.PodResources{
+					PodInfo: &daemon.PodInfo{
+						Namespace: "default",
+						Name:      "test-pod",
+					},
+					Resources: []daemon.ResourceItem{
+						{
+							Type:  daemon.ResourceTypeENIIP,
+							ENIID: "eni-1",
+							IPv4:  "10.0.0.1",
+						},
+					},
+				},
+			},
+			expected: []daemon.PodResources{
+				{
+					PodInfo: &daemon.PodInfo{
+						Namespace: "default",
+						Name:      "test-pod",
+					},
+					Resources: []daemon.ResourceItem{
+						{
+							Type:  daemon.ResourceTypeENIIP,
+							ENIID: "eni-1",
+							IPv4:  "10.0.0.1",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Mixed valid and invalid types",
+			input: []interface{}{
+				daemon.PodResources{
+					PodInfo: &daemon.PodInfo{
+						Namespace: "default",
+						Name:      "test-pod",
+					},
+				},
+				"invalid_type",
+				123,
+			},
+			expected: []daemon.PodResources{
+				{
+					PodInfo: &daemon.PodInfo{
+						Namespace: "default",
+						Name:      "test-pod",
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getPodResources(tt.input)
+			assert.Equal(t, len(tt.expected), len(result))
+			for i, expected := range tt.expected {
+				if i < len(result) {
+					assert.Equal(t, expected, result[i])
+				}
+			}
+		})
+	}
+}
+
+func TestCheckInstance_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name       string
+		limit      *client.Limits
+		daemonMode string
+		config     *daemon.Config
+		expectV4   bool
+		expectV6   bool
+	}{
+		{
+			name: "IPv4 only stack",
+			limit: &client.Limits{
+				Adapters:       10,
+				IPv4PerAdapter: 10,
+				IPv6PerAdapter: 0,
+			},
+			daemonMode: daemon.ModeENIMultiIP,
+			config: &daemon.Config{
+				IPStack: "ipv4",
+			},
+			expectV4: true,
+			expectV6: false,
+		},
+		{
+			name: "IPv6 only stack",
+			limit: &client.Limits{
+				Adapters:       10,
+				IPv4PerAdapter: 0,
+				IPv6PerAdapter: 10,
+			},
+			daemonMode: daemon.ModeENIMultiIP,
+			config: &daemon.Config{
+				IPStack: "ipv6",
+			},
+			expectV4: false,
+			expectV6: true,
+		},
+		{
+			name: "No adapters available",
+			limit: &client.Limits{
+				Adapters: 0,
+			},
+			daemonMode: daemon.ModeENIMultiIP,
+			config: &daemon.Config{
+				IPStack: "dual",
+			},
+			expectV4: false,
+			expectV6: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v4, v6 := checkInstance(tt.limit, tt.daemonMode, tt.config)
+			assert.Equal(t, tt.expectV4, v4)
+			assert.Equal(t, tt.expectV6, v6)
+		})
+	}
+}
+
+func TestRunDevicePlugin(t *testing.T) {
+	// Test that runDevicePlugin doesn't panic with various configurations
+	tests := []struct {
+		name       string
+		daemonMode string
+		config     *daemon.Config
+		poolConfig *daemon.PoolConfig
+	}{
+		{
+			name:       "ENIMultiIP mode",
+			daemonMode: daemon.ModeENIMultiIP,
+			config: &daemon.Config{
+				EnableENITrunking: false,
+			},
+			poolConfig: &daemon.PoolConfig{
+				MaxENI: 5,
+			},
+		},
+		{
+			name:       "ENIOnly mode",
+			daemonMode: daemon.ModeENIOnly,
+			config: &daemon.Config{
+				EnableENITrunking: false,
+			},
+			poolConfig: &daemon.PoolConfig{
+				MaxENI: 3,
+			},
+		},
+		{
+			name:       "VPC mode",
+			daemonMode: daemon.ModeVPC,
+			config: &daemon.Config{
+				EnableENITrunking: false,
+			},
+			poolConfig: &daemon.PoolConfig{
+				MaxENI: 1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// This function should not panic
+			assert.NotPanics(t, func() {
+				runDevicePlugin(tt.daemonMode, tt.config, tt.poolConfig)
+			})
+		})
+	}
+}

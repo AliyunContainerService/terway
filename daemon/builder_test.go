@@ -173,3 +173,136 @@ func TestNetworkServiceBuilder_GetConfigFromFileWithMerge_2(t *testing.T) {
 
 	assert.False(t, *config.EnablePatchPodIPs)
 }
+
+func TestNetworkServiceBuilder_WithNamespace(t *testing.T) {
+	ctx := context.Background()
+	builder := NewNetworkServiceBuilder(ctx)
+	namespace := "kube-system"
+
+	builder = builder.WithNamespace(namespace)
+
+	assert.Equal(t, namespace, builder.namespace, "The namespace should be set correctly in the NetworkServiceBuilder")
+}
+
+func TestNetworkServiceBuilder_InitService_AllModes(t *testing.T) {
+	tests := []struct {
+		name          string
+		daemonMode    string
+		expectedError bool
+	}{
+		{
+			name:          "ENIMultiIP mode",
+			daemonMode:    daemon.ModeENIMultiIP,
+			expectedError: false,
+		},
+		{
+			name:          "ENIOnly mode",
+			daemonMode:    daemon.ModeENIOnly,
+			expectedError: false,
+		},
+		{
+			name:          "VPC mode",
+			daemonMode:    daemon.ModeVPC,
+			expectedError: false,
+		},
+		{
+			name:          "Unsupported mode",
+			daemonMode:    "invalid_mode",
+			expectedError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			builder := &NetworkServiceBuilder{
+				daemonMode: tc.daemonMode,
+			}
+
+			builder = builder.InitService()
+
+			if tc.expectedError {
+				assert.NotNil(t, builder.err)
+			} else {
+				assert.Nil(t, builder.err)
+				assert.NotNil(t, builder.service)
+				assert.Equal(t, tc.daemonMode, builder.service.daemonMode)
+			}
+		})
+	}
+}
+
+func TestNetworkServiceBuilder_LoadGlobalConfig_InvalidFile(t *testing.T) {
+	builder := &NetworkServiceBuilder{
+		configFilePath: "/non/existent/file.json",
+		service:        &networkService{},
+	}
+
+	builder = builder.LoadGlobalConfig()
+
+	assert.NotNil(t, builder.err)
+}
+
+func TestNetworkServiceBuilder_LoadGlobalConfig_InvalidJSON(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "config-*.json")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer tmpFile.Close()
+	
+	// Write invalid JSON
+	configContent := `{ "version": "1", invalid json }`
+	err = os.WriteFile(tmpFile.Name(), []byte(configContent), 0644)
+	assert.NoError(t, err)
+
+	builder := &NetworkServiceBuilder{
+		configFilePath: tmpFile.Name(),
+		service:        &networkService{},
+	}
+
+	builder = builder.LoadGlobalConfig()
+
+	assert.NotNil(t, builder.err)
+}
+
+func TestNetworkServiceBuilder_Build_Success(t *testing.T) {
+	ctx := context.Background()
+	builder := NewNetworkServiceBuilder(ctx).
+		WithDaemonMode(daemon.ModeENIMultiIP).
+		InitService()
+
+	// Set up minimal required fields
+	builder.service.config = &daemon.Config{
+		Version: "1",
+	}
+
+	service, err := builder.Build()
+
+	assert.NoError(t, err)
+	assert.NotNil(t, service)
+	assert.Equal(t, daemon.ModeENIMultiIP, service.daemonMode)
+}
+
+func TestNetworkServiceBuilder_Build_WithError(t *testing.T) {
+	ctx := context.Background()
+	builder := NewNetworkServiceBuilder(ctx).
+		WithDaemonMode("invalid_mode").
+		InitService()
+
+	service, err := builder.Build()
+
+	assert.Error(t, err)
+	assert.Nil(t, service)
+}
+
+func TestNetworkServiceBuilder_RegisterTracing(t *testing.T) {
+	ctx := context.Background()
+	builder := NewNetworkServiceBuilder(ctx).
+		WithConfigFilePath("/test/config").
+		WithDaemonMode(daemon.ModeENIMultiIP).
+		InitService()
+
+	builder = builder.RegisterTracing()
+
+	// Should not return error for basic tracing registration
+	assert.Nil(t, builder.err)
+}
