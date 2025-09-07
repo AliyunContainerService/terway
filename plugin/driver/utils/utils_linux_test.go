@@ -1888,4 +1888,410 @@ var _ = Describe("Utils", func() {
 			})
 		})
 	})
+
+	Describe("DelEgressPriority", func() {
+		var hostNS ns.NetNS
+		const nicName = "test-nic-prio"
+
+		BeforeEach(func() {
+			var err error
+			hostNS, err = testutils.NewNS()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				return netlink.LinkAdd(&netlink.Dummy{
+					LinkAttrs: netlink.LinkAttrs{Name: nicName},
+				})
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			_ = hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				link, err := netlink.LinkByName(nicName)
+				if err == nil {
+					err = netlink.LinkDel(link)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				return nil
+			})
+			Expect(hostNS.Close()).To(Succeed())
+			Expect(testutils.UnmountNS(hostNS)).To(Succeed())
+		})
+
+		It("should handle empty qdisc list", func() {
+			err := hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				link, err := netlink.LinkByName(nicName)
+				Expect(err).NotTo(HaveOccurred())
+
+				ipNetSet := &terwayTypes.IPNetSet{}
+				ipNetSet.SetIPNet("192.168.1.0/24")
+
+				err = DelEgressPriority(context.Background(), link, ipNetSet)
+				Expect(err).NotTo(HaveOccurred())
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle link with prio qdisc", func() {
+			err := hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				link, err := netlink.LinkByName(nicName)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Set link up first
+				err = netlink.LinkSetUp(link)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Add a prio qdisc
+				prio := &netlink.Prio{
+					QdiscAttrs: netlink.QdiscAttrs{
+						LinkIndex: link.Attrs().Index,
+						Parent:    netlink.HANDLE_ROOT,
+						Handle:    netlink.MakeHandle(1, 0),
+					},
+					Bands: 3,
+				}
+				err = netlink.QdiscAdd(prio)
+				if err != nil {
+					// Ignore error if qdisc already exists
+					Skip("Cannot add prio qdisc, skipping test")
+				}
+
+				ipNetSet := &terwayTypes.IPNetSet{}
+				ipNetSet.SetIPNet("192.168.1.0/24")
+
+				err = DelEgressPriority(context.Background(), link, ipNetSet)
+				Expect(err).NotTo(HaveOccurred())
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Describe("SetupTC", func() {
+		var hostNS ns.NetNS
+		const nicName = "test-nic-tc"
+
+		BeforeEach(func() {
+			var err error
+			hostNS, err = testutils.NewNS()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				return netlink.LinkAdd(&netlink.Dummy{
+					LinkAttrs: netlink.LinkAttrs{
+						Name: nicName,
+						MTU:  1500,
+					},
+				})
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			_ = hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				link, err := netlink.LinkByName(nicName)
+				if err == nil {
+					err = netlink.LinkDel(link)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				return nil
+			})
+			Expect(hostNS.Close()).To(Succeed())
+			Expect(testutils.UnmountNS(hostNS)).To(Succeed())
+		})
+
+		It("should setup traffic control successfully", func() {
+			err := hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				link, err := netlink.LinkByName(nicName)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Set link up first
+				err = netlink.LinkSetUp(link)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Test with valid bandwidth
+				bandwidthInBytes := uint64(1000000) // 1MB/s
+				err = SetupTC(link, bandwidthInBytes)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Verify qdisc was added
+				qdiscs, err := netlink.QdiscList(link)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(len(qdiscs)).To(BeNumerically(">", 0))
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should return error for invalid bandwidth", func() {
+			err := hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				link, err := netlink.LinkByName(nicName)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Test with zero bandwidth
+				err = SetupTC(link, 0)
+				Expect(err).To(HaveOccurred())
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Describe("GenericTearDown", func() {
+		var hostNS, containerNS ns.NetNS
+		const nicName = "test-nic-teardown"
+
+		BeforeEach(func() {
+			var err error
+			hostNS, err = testutils.NewNS()
+			Expect(err).NotTo(HaveOccurred())
+
+			containerNS, err = testutils.NewNS()
+			Expect(err).NotTo(HaveOccurred())
+
+			// Set host NS as current
+			err = hostNS.Set()
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			Expect(containerNS.Close()).To(Succeed())
+			Expect(testutils.UnmountNS(containerNS)).To(Succeed())
+			Expect(hostNS.Close()).To(Succeed())
+			Expect(testutils.UnmountNS(hostNS)).To(Succeed())
+		})
+
+		It("should clean up virtual interfaces", func() {
+			// Add various types of interfaces to container NS
+			err := containerNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				
+				// Add dummy interface
+				err := netlink.LinkAdd(&netlink.Dummy{
+					LinkAttrs: netlink.LinkAttrs{Name: "dummy0"},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				// Add veth pair
+				veth := &netlink.Veth{
+					LinkAttrs: netlink.LinkAttrs{Name: "veth0"},
+					PeerName:  "veth1",
+				}
+				err = netlink.LinkAdd(veth)
+				if err == nil {
+					// Set up the interfaces
+					veth0, _ := netlink.LinkByName("veth0")
+					if veth0 != nil {
+						netlink.LinkSetUp(veth0)
+					}
+					veth1, _ := netlink.LinkByName("veth1")
+					if veth1 != nil {
+						netlink.LinkSetUp(veth1)
+					}
+				}
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Perform teardown
+			err = GenericTearDown(context.Background(), containerNS)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify interfaces were cleaned up
+			err = containerNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				links, err := netlink.LinkList()
+				Expect(err).NotTo(HaveOccurred())
+				
+				// Should only have loopback interface left
+				nonLoLinks := 0
+				for _, link := range links {
+					if link.Attrs().Name != "lo" {
+						nonLoLinks++
+					}
+				}
+				Expect(nonLoLinks).To(Equal(0))
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle empty namespace", func() {
+			// Test teardown on empty namespace (only loopback)
+			err := GenericTearDown(context.Background(), containerNS)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Describe("CleanIPRules", func() {
+		var hostNS ns.NetNS
+
+		BeforeEach(func() {
+			var err error
+			hostNS, err = testutils.NewNS()
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			Expect(hostNS.Close()).To(Succeed())
+			Expect(testutils.UnmountNS(hostNS)).To(Succeed())
+		})
+
+		It("should clean IP rules successfully", func() {
+			err := hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+
+				// Add some test rules with priority 512 and 2048
+				rule512 := netlink.NewRule()
+				rule512.Priority = 512
+				rule512.Dst = &net.IPNet{
+					IP:   net.ParseIP("192.168.1.0"),
+					Mask: net.CIDRMask(24, 32),
+				}
+				rule512.Table = 100
+
+				rule2048 := netlink.NewRule()
+				rule2048.Priority = 2048
+				rule2048.Src = &net.IPNet{
+					IP:   net.ParseIP("10.0.0.0"),
+					Mask: net.CIDRMask(8, 32),
+				}
+				rule2048.Table = 200
+
+				// Add rules (ignore errors if they already exist)
+				_ = netlink.RuleAdd(rule512)
+				_ = netlink.RuleAdd(rule2048)
+
+				// Clean the rules
+				err := CleanIPRules(context.Background())
+				Expect(err).NotTo(HaveOccurred())
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle rules with different priorities", func() {
+			err := hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+
+				// Add rule with different priority (should not be cleaned)
+				rule1000 := netlink.NewRule()
+				rule1000.Priority = 1000
+				rule1000.Dst = &net.IPNet{
+					IP:   net.ParseIP("172.16.0.0"),
+					Mask: net.CIDRMask(12, 32),
+				}
+				rule1000.Table = 300
+
+				_ = netlink.RuleAdd(rule1000)
+
+				// Clean the rules
+				err := CleanIPRules(context.Background())
+				Expect(err).NotTo(HaveOccurred())
+
+				// Verify rule with priority 1000 still exists
+				rules, err := netlink.RuleList(netlink.FAMILY_V4)
+				Expect(err).NotTo(HaveOccurred())
+
+				found := false
+				for _, r := range rules {
+					if r.Priority == 1000 {
+						found = true
+						break
+					}
+				}
+				Expect(found).To(BeTrue())
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Describe("GetERdmaFromLink", func() {
+		var hostNS ns.NetNS
+		const nicName = "test-nic-erdma"
+
+		BeforeEach(func() {
+			var err error
+			hostNS, err = testutils.NewNS()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				return netlink.LinkAdd(&netlink.Dummy{
+					LinkAttrs: netlink.LinkAttrs{
+						Name:         nicName,
+						HardwareAddr: net.HardwareAddr{0x02, 0x42, 0xac, 0x11, 0x00, 0x02},
+					},
+				})
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			_ = hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				link, err := netlink.LinkByName(nicName)
+				if err == nil {
+					err = netlink.LinkDel(link)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				return nil
+			})
+			Expect(hostNS.Close()).To(Succeed())
+			Expect(testutils.UnmountNS(hostNS)).To(Succeed())
+		})
+
+		It("should return error when no RDMA links found", func() {
+			err := hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				link, err := netlink.LinkByName(nicName)
+				Expect(err).NotTo(HaveOccurred())
+
+				// This should return error since we don't have real RDMA hardware
+				_, err = GetERdmaFromLink(link)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("cannot found rdma link"))
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle netlink.RdmaLinkList error gracefully", func() {
+			err := hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				link, err := netlink.LinkByName(nicName)
+				Expect(err).NotTo(HaveOccurred())
+
+				// This will likely fail due to no RDMA support in test environment
+				// but should handle the error gracefully
+				rdmaLink, err := GetERdmaFromLink(link)
+				if err != nil {
+					// Expected in test environment without RDMA hardware
+					Expect(err.Error()).To(SatisfyAny(
+						ContainSubstring("error list rdma links"),
+						ContainSubstring("cannot found rdma link"),
+					))
+					Expect(rdmaLink).To(BeNil())
+				}
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
 })
