@@ -821,7 +821,7 @@ func checkInstance(limit *client.Limits, daemonMode string, config *daemon.Confi
 		if !limit.SupportIPv6() {
 			enableIPv6 = false
 			serviceLog.Info("instance is not support ipv6")
-		} else if daemonMode == daemon.ModeENIMultiIP && !limit.SupportMultiIPIPv6() {
+		} else if daemonMode == daemon.ModeENIMultiIP && !limit.SupportMultiIPIPv6() && enableIPv4 {
 			enableIPv6 = false
 			serviceLog.Info("instance is not support multi ipv6")
 		}

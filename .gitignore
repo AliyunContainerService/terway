@@ -2,3 +2,8 @@
 vendor
 **/*.exe
 .run
+
+# Test and build artifacts
+bin/
+coverage*.txt
+*.coverprofile
