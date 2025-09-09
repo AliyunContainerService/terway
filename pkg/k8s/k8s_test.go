@@ -2,11 +2,14 @@ package k8s
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/AliyunContainerService/terway/deviceplugin"
+	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -17,36 +20,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
-
-type mockClient struct {
-	client.Client
-	mock.Mock
-}
-
-func (m *mockClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	args := m.Called(ctx, key, obj)
-	if pod, ok := obj.(*corev1.Pod); ok {
-		if returnedPod, ok := args.Get(0).(*corev1.Pod); ok {
-			*pod = *returnedPod
-		}
-	}
-	return args.Error(1)
-}
-
-func (m *mockClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	args := m.Called(ctx, list)
-	if podList, ok := list.(*corev1.PodList); ok {
-		if returnedList, ok := args.Get(0).(*corev1.PodList); ok {
-			*podList = *returnedList
-		}
-	}
-	return args.Error(1)
-}
 
 func TestK8s_PodExist(t *testing.T) {
 	// Setup
@@ -1224,6 +1203,854 @@ func TestGetTrunkID(t *testing.T) {
 			// Execute GetTrunkID
 			trunkID := k8sObj.GetTrunkID()
 			assert.Equal(t, tt.expectedTrunk, trunkID)
+		})
+	}
+}
+
+// Mock storage for testing
+type mockStorage struct {
+	mock.Mock
+	data map[string]interface{}
+}
+
+func (m *mockStorage) Put(key string, item interface{}) error {
+	args := m.Called(key, item)
+	if args.Error(0) == nil {
+		if m.data == nil {
+			m.data = make(map[string]interface{})
+		}
+		m.data[key] = item
+	}
+	return args.Error(0)
+}
+
+func (m *mockStorage) Get(key string) (interface{}, error) {
+	args := m.Called(key)
+	if args.Error(1) != nil {
+		return nil, args.Error(1)
+	}
+	if item, exists := m.data[key]; exists {
+		return item, nil
+	}
+	return args.Get(0), args.Error(1)
+}
+
+func (m *mockStorage) Delete(key string) error {
+	args := m.Called(key)
+	if args.Error(0) == nil && m.data != nil {
+		delete(m.data, key)
+	}
+	return args.Error(0)
+}
+
+func (m *mockStorage) List() ([]interface{}, error) {
+	args := m.Called()
+	if args.Error(1) != nil {
+		return nil, args.Error(1)
+	}
+	var items []interface{}
+	for _, item := range m.data {
+		items = append(items, item)
+	}
+	if args.Get(0) != nil {
+		return args.Get(0).([]interface{}), args.Error(1)
+	}
+	return items, args.Error(1)
+}
+
+// ==============================================================================
+// setSvcCIDR TESTS
+// ==============================================================================
+
+func TestSetSvcCIDR(t *testing.T) {
+	tests := []struct {
+		name        string
+		inputCIDR   *types.IPNetSet
+		expectError bool
+		description string
+	}{
+		{
+			name: "set service CIDR with IPv4",
+			inputCIDR: func() *types.IPNetSet {
+				cidr := &types.IPNetSet{}
+				_, ipNet, _ := net.ParseCIDR("10.96.0.0/12")
+				cidr.IPv4 = ipNet
+				return cidr
+			}(),
+			expectError: false,
+			description: "Should successfully set IPv4 service CIDR",
+		},
+		{
+			name: "set service CIDR with IPv6",
+			inputCIDR: func() *types.IPNetSet {
+				cidr := &types.IPNetSet{}
+				_, ipNet, _ := net.ParseCIDR("fd00:10:96::/108")
+				cidr.IPv6 = ipNet
+				return cidr
+			}(),
+			expectError: true, // Will fail because IPv4 is nil and no kubeadm config
+			description: "Should attempt to fetch IPv4 service CIDR from API server when IPv4 is nil",
+		},
+		{
+			name: "set service CIDR with both IPv4 and IPv6",
+			inputCIDR: func() *types.IPNetSet {
+				cidr := &types.IPNetSet{}
+				_, ipNet4, _ := net.ParseCIDR("10.96.0.0/12")
+				_, ipNet6, _ := net.ParseCIDR("fd00:10:96::/108")
+				cidr.IPv4 = ipNet4
+				cidr.IPv6 = ipNet6
+				return cidr
+			}(),
+			expectError: false,
+			description: "Should successfully set dual-stack service CIDR",
+		},
+		{
+			name: "set service CIDR with nil IPv4 - should fetch from API server",
+			inputCIDR: func() *types.IPNetSet {
+				cidr := &types.IPNetSet{}
+				// IPv4 is nil, should trigger API server fetch
+				return cidr
+			}(),
+			expectError: true, // Will fail because no kubeadm-config in fake client
+			description: "Should attempt to fetch service CIDR from API server when IPv4 is nil",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fake client with kubeadm config for successful API server fetch
+			builder := fake.NewClientBuilder().WithScheme(scheme.Scheme)
+			if tt.name == "set service CIDR with nil IPv4 - should fetch from API server" ||
+				tt.name == "set service CIDR with IPv6" {
+				// Add kubeadm configmap for successful test
+				kubeadmCM := &corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      k8sKubeadmConfigmap,
+						Namespace: k8sSystemNamespace,
+					},
+					Data: map[string]string{
+						k8sKubeadmConfigmapNetworking: "networking:\n  serviceSubnet: 10.96.0.0/12",
+					},
+				}
+				builder.WithObjects(kubeadmCM)
+				tt.expectError = false // Should succeed now
+			}
+
+			client := builder.Build()
+
+			k8sObj := &k8s{
+				client: client,
+				Locker: &sync.RWMutex{},
+			}
+
+			err := k8sObj.setSvcCIDR(tt.inputCIDR)
+
+			if tt.expectError {
+				assert.Error(t, err, tt.description)
+			} else {
+				assert.NoError(t, err, tt.description)
+				assert.NotNil(t, k8sObj.svcCIDR, "Service CIDR should be set")
+				if tt.inputCIDR.IPv4 != nil {
+					assert.Equal(t, tt.inputCIDR.IPv4, k8sObj.svcCIDR.IPv4, "IPv4 CIDR should match")
+				}
+				if tt.inputCIDR.IPv6 != nil {
+					assert.Equal(t, tt.inputCIDR.IPv6, k8sObj.svcCIDR.IPv6, "IPv6 CIDR should match")
+				}
+			}
+		})
+	}
+}
+
+func TestSetSvcCIDR_APIServerError(t *testing.T) {
+	// Test case where API server fetch fails
+	client := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build() // No kubeadm config
+
+	k8sObj := &k8s{
+		client: client,
+		Locker: &sync.RWMutex{},
+	}
+
+	cidr := &types.IPNetSet{} // IPv4 is nil, should trigger API server fetch
+
+	err := k8sObj.setSvcCIDR(cidr)
+	assert.Error(t, err, "Should fail when kubeadm config is not found")
+	assert.Contains(t, err.Error(), "error retrieving service cidr", "Error should mention service CIDR retrieval")
+}
+
+// ==============================================================================
+// GetPod TESTS
+// ==============================================================================
+
+func TestGetPod(t *testing.T) {
+	tests := []struct {
+		name          string
+		podExists     bool
+		useCache      bool
+		storageExists bool
+		storageError  error
+		expectError   bool
+		description   string
+	}{
+		{
+			name:          "get existing pod with cache",
+			podExists:     true,
+			useCache:      true,
+			storageExists: false,
+			expectError:   false,
+			description:   "Should successfully get pod from Kubernetes API",
+		},
+		{
+			name:          "get existing pod without cache",
+			podExists:     true,
+			useCache:      false,
+			storageExists: false,
+			expectError:   false,
+			description:   "Should successfully get pod from Kubernetes API without cache",
+		},
+		{
+			name:          "get non-existent pod with storage fallback",
+			podExists:     false,
+			useCache:      true,
+			storageExists: true,
+			expectError:   false,
+			description:   "Should get pod from storage when not found in Kubernetes API",
+		},
+		{
+			name:          "get non-existent pod without storage fallback",
+			podExists:     false,
+			useCache:      true,
+			storageExists: false,
+			expectError:   true,
+			description:   "Should return error when pod not found in API and storage",
+		},
+		{
+			name:          "storage error on fallback",
+			podExists:     false,
+			useCache:      true,
+			storageExists: false,
+			storageError:  fmt.Errorf("storage error"),
+			expectError:   true,
+			description:   "Should return storage error when storage operation fails",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup fake client
+			builder := fake.NewClientBuilder().WithScheme(scheme.Scheme)
+			if tt.podExists {
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pod",
+						Namespace: "default",
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "test-node",
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+						PodIP: "10.0.0.1",
+					},
+				}
+				builder.WithObjects(pod)
+			}
+			client := builder.Build()
+
+			// Setup mock storage
+			mockStore := &mockStorage{data: make(map[string]interface{})}
+
+			// Only set up storage expectations when pod doesn't exist in Kubernetes
+			if !tt.podExists {
+				if tt.storageExists {
+					storageItem := &storageItem{
+						Pod: &daemon.PodInfo{
+							Name:      "test-pod",
+							Namespace: "default",
+						},
+					}
+					mockStore.data["default/test-pod"] = storageItem
+					mockStore.On("Get", "default/test-pod").Return(storageItem, nil)
+				} else if tt.storageError != nil {
+					mockStore.On("Get", "default/test-pod").Return(nil, tt.storageError)
+				} else {
+					mockStore.On("Get", "default/test-pod").Return(nil, storage.ErrNotFound)
+				}
+			} else {
+				// When pod exists in Kubernetes, we should expect Put to be called
+				mockStore.On("Put", "default/test-pod", mock.Anything).Return(nil)
+			}
+
+			k8sObj := &k8s{
+				client:                  client,
+				storage:                 mockStore,
+				mode:                    daemon.ModeENIMultiIP,
+				enableErdma:             false,
+				statefulWorkloadKindSet: sets.New[string](),
+			}
+
+			// Execute GetPod
+			podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", tt.useCache)
+
+			if tt.expectError {
+				assert.Error(t, err, tt.description)
+				assert.Nil(t, podInfo, "PodInfo should be nil on error")
+			} else {
+				assert.NoError(t, err, tt.description)
+				assert.NotNil(t, podInfo, "PodInfo should not be nil")
+				assert.Equal(t, "test-pod", podInfo.Name, "Pod name should match")
+				assert.Equal(t, "default", podInfo.Namespace, "Pod namespace should match")
+			}
+
+			mockStore.AssertExpectations(t)
+		})
+	}
+}
+
+func TestGetPod_StoragePutError(t *testing.T) {
+	// Test case where storage put fails
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "test-node",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	client := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
+
+	mockStore := &mockStorage{}
+	mockStore.On("Put", "default/test-pod", mock.Anything).Return(fmt.Errorf("storage put error"))
+
+	k8sObj := &k8s{
+		client:                  client,
+		storage:                 mockStore,
+		mode:                    daemon.ModeENIMultiIP,
+		enableErdma:             false,
+		statefulWorkloadKindSet: sets.New[string](),
+	}
+
+	podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", true)
+
+	assert.Error(t, err, "Should return error when storage put fails")
+	assert.Nil(t, podInfo, "PodInfo should be nil on error")
+	assert.Contains(t, err.Error(), "storage put error", "Error should contain storage error message")
+}
+
+// ==============================================================================
+// clean TESTS
+// ==============================================================================
+
+func TestClean(t *testing.T) {
+	tests := []struct {
+		name           string
+		storageItems   []interface{}
+		localPods      []*daemon.PodInfo
+		expectDeleted  []string
+		expectTagged   []string
+		expectUntagged []string
+		description    string
+	}{
+		{
+			name: "clean deleted pods from storage",
+			storageItems: []interface{}{
+				&storageItem{
+					Pod: &daemon.PodInfo{Name: "pod1", Namespace: "default"},
+				},
+				&storageItem{
+					Pod: &daemon.PodInfo{Name: "pod2", Namespace: "default"},
+				},
+			},
+			localPods: []*daemon.PodInfo{
+				{Name: "pod1", Namespace: "default"}, // pod1 still exists
+			},
+			expectTagged:   []string{"default/pod2"}, // pod2 should be tagged for deletion
+			expectUntagged: []string{},               // pod1 should not need untagging since it's not tagged
+			description:    "Should tag non-existent pods for deletion",
+		},
+		{
+			name: "delete old tagged items",
+			storageItems: []interface{}{
+				&storageItem{
+					Pod:          &daemon.PodInfo{Name: "old-pod", Namespace: "default"},
+					deletionTime: func() *time.Time { t := time.Now().Add(-2 * time.Hour); return &t }(), // Old deletion time
+				},
+			},
+			localPods:     []*daemon.PodInfo{},
+			expectDeleted: []string{"default/old-pod"},
+			description:   "Should delete items tagged for deletion beyond timeout",
+		},
+		{
+			name: "keep recently tagged items",
+			storageItems: []interface{}{
+				&storageItem{
+					Pod:          &daemon.PodInfo{Name: "recent-pod", Namespace: "default"},
+					deletionTime: func() *time.Time { t := time.Now().Add(-30 * time.Minute); return &t }(), // Recent deletion time
+				},
+			},
+			localPods:   []*daemon.PodInfo{},
+			description: "Should keep items tagged for deletion within timeout",
+		},
+		{
+			name: "untag restored pods",
+			storageItems: []interface{}{
+				&storageItem{
+					Pod:          &daemon.PodInfo{Name: "restored-pod", Namespace: "default"},
+					deletionTime: func() *time.Time { t := time.Now().Add(-30 * time.Minute); return &t }(), // Was tagged for deletion
+				},
+			},
+			localPods: []*daemon.PodInfo{
+				{Name: "restored-pod", Namespace: "default"}, // Pod came back
+			},
+			expectUntagged: []string{"default/restored-pod"},
+			description:    "Should untag pods that were restored",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup fake client for GetLocalPods
+			builder := fake.NewClientBuilder().WithScheme(scheme.Scheme)
+			for _, pod := range tt.localPods {
+				k8sPod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      pod.Name,
+						Namespace: pod.Namespace,
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "test-node",
+					},
+				}
+				builder.WithObjects(k8sPod)
+			}
+			client := builder.Build()
+
+			// Setup mock storage
+			mockStore := &mockStorage{data: make(map[string]interface{})}
+			for _, item := range tt.storageItems {
+				storageItem := item.(*storageItem)
+				key := fmt.Sprintf("%s/%s", storageItem.Pod.Namespace, storageItem.Pod.Name)
+				mockStore.data[key] = item
+			}
+
+			mockStore.On("List").Return(tt.storageItems, nil)
+
+			// Setup expectations for Put operations (tagging/untagged)
+			for _, key := range tt.expectTagged {
+				mockStore.On("Put", key, mock.MatchedBy(func(item interface{}) bool {
+					if si, ok := item.(*storageItem); ok {
+						return si.deletionTime != nil
+					}
+					return false
+				})).Return(nil)
+			}
+			for _, key := range tt.expectUntagged {
+				mockStore.On("Put", key, mock.MatchedBy(func(item interface{}) bool {
+					if si, ok := item.(*storageItem); ok {
+						return si.deletionTime == nil
+					}
+					return false
+				})).Return(nil)
+			}
+
+			// Setup expectations for Delete operations
+			for _, key := range tt.expectDeleted {
+				mockStore.On("Delete", key).Return(nil)
+			}
+
+			k8sObj := &k8s{
+				client:                  client,
+				storage:                 mockStore,
+				nodeName:                "test-node",
+				mode:                    daemon.ModeENIMultiIP,
+				enableErdma:             false,
+				statefulWorkloadKindSet: sets.New[string](),
+			}
+
+			// Execute clean
+			err := k8sObj.clean()
+
+			assert.NoError(t, err, tt.description)
+			mockStore.AssertExpectations(t)
+		})
+	}
+}
+
+func TestClean_Errors(t *testing.T) {
+	tests := []struct {
+		name        string
+		storageErr  error
+		description string
+	}{
+		{
+			name:        "storage list error",
+			storageErr:  fmt.Errorf("storage list error"),
+			description: "Should return error when storage list fails",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup fake client
+			client := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+			// Setup mock storage
+			mockStore := &mockStorage{}
+			mockStore.On("List").Return(nil, tt.storageErr)
+
+			k8sObj := &k8s{
+				client:   client,
+				storage:  mockStore,
+				nodeName: "test-node",
+				mode:     daemon.ModeENIMultiIP,
+			}
+
+			err := k8sObj.clean()
+
+			assert.Error(t, err, tt.description)
+			assert.Contains(t, err.Error(), "storage list error", "Should contain storage error")
+		})
+	}
+}
+
+// Test clean method with storage operations errors
+func TestClean_StorageOperationErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		operation   string
+		expectError bool
+		description string
+	}{
+		{
+			name:        "storage put error when tagging for deletion",
+			operation:   "put_error_tag",
+			expectError: true,
+			description: "Should return error when storage Put fails during tagging",
+		},
+		{
+			name:        "storage put error when untagging",
+			operation:   "put_error_untag",
+			expectError: true,
+			description: "Should return error when storage Put fails during untagging",
+		},
+		{
+			name:        "storage delete error",
+			operation:   "delete_error",
+			expectError: true,
+			description: "Should return error when storage Delete fails",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup fake client
+			client := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+			// Setup mock storage with different error scenarios
+			mockStore := &mockStorage{data: make(map[string]interface{})}
+
+			switch tt.operation {
+			case "put_error_tag":
+				// Item exists in storage but not in local pods - should be tagged for deletion
+				storageItem := &storageItem{
+					Pod: &daemon.PodInfo{Name: "pod1", Namespace: "default"},
+				}
+				mockStore.data["default/pod1"] = storageItem
+				mockStore.On("List").Return([]interface{}{storageItem}, nil)
+				mockStore.On("Put", "default/pod1", mock.Anything).Return(fmt.Errorf("put error"))
+
+			case "put_error_untag":
+				// Item exists in storage and also in local pods - should be untagged
+				storageItem := &storageItem{
+					Pod:          &daemon.PodInfo{Name: "pod1", Namespace: "default"},
+					deletionTime: func() *time.Time { t := time.Now(); return &t }(),
+				}
+				mockStore.data["default/pod1"] = storageItem
+				mockStore.On("List").Return([]interface{}{storageItem}, nil)
+				mockStore.On("Put", "default/pod1", mock.Anything).Return(fmt.Errorf("put error"))
+
+				// Add corresponding pod to client
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pod1",
+						Namespace: "default",
+					},
+					Spec: corev1.PodSpec{NodeName: "test-node"},
+				}
+				client = fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
+
+			case "delete_error":
+				// Old item should be deleted
+				oldTime := time.Now().Add(-2 * time.Hour)
+				storageItem := &storageItem{
+					Pod:          &daemon.PodInfo{Name: "old-pod", Namespace: "default"},
+					deletionTime: &oldTime,
+				}
+				mockStore.data["default/old-pod"] = storageItem
+				mockStore.On("List").Return([]interface{}{storageItem}, nil)
+				mockStore.On("Delete", "default/old-pod").Return(fmt.Errorf("delete error"))
+			}
+
+			k8sObj := &k8s{
+				client:                  client,
+				storage:                 mockStore,
+				nodeName:                "test-node",
+				mode:                    daemon.ModeENIMultiIP,
+				enableErdma:             false,
+				statefulWorkloadKindSet: sets.New[string](),
+			}
+
+			err := k8sObj.clean()
+
+			if tt.expectError {
+				assert.Error(t, err, tt.description)
+			} else {
+				assert.NoError(t, err, tt.description)
+			}
+
+			mockStore.AssertExpectations(t)
+		})
+	}
+}
+
+// ==============================================================================
+// RecordPodEvent TESTS
+// ==============================================================================
+
+func TestRecordPodEvent(t *testing.T) {
+	tests := []struct {
+		name        string
+		podExists   bool
+		expectError bool
+		description string
+	}{
+		{
+			name:        "record event for existing pod",
+			podExists:   true,
+			expectError: false,
+			description: "Should successfully record event for existing pod",
+		},
+		{
+			name:        "record event for non-existent pod",
+			podExists:   false,
+			expectError: true,
+			description: "Should return error when pod does not exist",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup fake client
+			builder := fake.NewClientBuilder().WithScheme(scheme.Scheme)
+			if tt.podExists {
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pod",
+						Namespace: "default",
+						UID:       "test-uid",
+					},
+				}
+				builder.WithObjects(pod)
+			}
+			client := builder.Build()
+
+			// Create fake recorder
+			recorder := record.NewFakeRecorder(10)
+
+			k8sObj := &k8s{
+				client:   client,
+				recorder: recorder,
+			}
+
+			// Execute RecordPodEvent
+			err := k8sObj.RecordPodEvent("test-pod", "default", corev1.EventTypeNormal, "TestReason", "Test message")
+
+			if tt.expectError {
+				assert.Error(t, err, tt.description)
+			} else {
+				assert.NoError(t, err, tt.description)
+
+				// Verify event was recorded
+				select {
+				case event := <-recorder.Events:
+					assert.Contains(t, event, "TestReason", "Event should contain the reason")
+					assert.Contains(t, event, "Test message", "Event should contain the message")
+				case <-time.After(100 * time.Millisecond):
+					t.Fatal("Expected event was not recorded")
+				}
+			}
+		})
+	}
+}
+
+func TestRecordPodEvent_GetPodError(t *testing.T) {
+	// Test specific error scenarios
+	client := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build() // No pod exists
+
+	recorder := record.NewFakeRecorder(10)
+
+	k8sObj := &k8s{
+		client:   client,
+		recorder: recorder,
+	}
+
+	err := k8sObj.RecordPodEvent("non-existent-pod", "default", corev1.EventTypeWarning, "TestReason", "Test message")
+
+	assert.Error(t, err, "Should return error when pod does not exist")
+	assert.True(t, apierrors.IsNotFound(err), "Error should be NotFound")
+
+	// Verify no event was recorded
+	select {
+	case <-recorder.Events:
+		t.Fatal("No event should have been recorded for non-existent pod")
+	case <-time.After(100 * time.Millisecond):
+		// Expected - no event recorded
+	}
+}
+
+// ==============================================================================
+// GetNodeDynamicConfigLabel TESTS
+// ==============================================================================
+
+func TestGetNodeDynamicConfigLabel(t *testing.T) {
+	tests := []struct {
+		name           string
+		nodeLabels     map[string]string
+		expectedConfig string
+		description    string
+	}{
+		{
+			name: "node with dynamic config label",
+			nodeLabels: map[string]string{
+				labelDynamicConfig: "my-config",
+				"other-label":      "other-value",
+			},
+			expectedConfig: "my-config",
+			description:    "Should return the dynamic config label value",
+		},
+		{
+			name: "node without dynamic config label",
+			nodeLabels: map[string]string{
+				"other-label": "other-value",
+			},
+			expectedConfig: "",
+			description:    "Should return empty string when label is not present",
+		},
+		{
+			name:           "node with no labels",
+			nodeLabels:     nil,
+			expectedConfig: "",
+			description:    "Should return empty string when node has no labels",
+		},
+		{
+			name: "node with empty dynamic config label",
+			nodeLabels: map[string]string{
+				labelDynamicConfig: "",
+				"other-label":      "other-value",
+			},
+			expectedConfig: "",
+			description:    "Should return empty string when label value is empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create node with specified labels
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "test-node",
+					Labels: tt.nodeLabels,
+				},
+			}
+
+			k8sObj := &k8s{
+				node: node,
+			}
+
+			// Execute GetNodeDynamicConfigLabel
+			result := k8sObj.GetNodeDynamicConfigLabel()
+
+			assert.Equal(t, tt.expectedConfig, result, tt.description)
+		})
+	}
+}
+
+// ==============================================================================
+// ADDITIONAL HELPER TESTS
+// ==============================================================================
+
+func TestGetDynamicConfigWithName(t *testing.T) {
+	tests := []struct {
+		name            string
+		configMapExists bool
+		hasEniConf      bool
+		eniConfContent  string
+		expectError     bool
+		expectedContent string
+		description     string
+	}{
+		{
+			name:            "get config with valid eni_conf",
+			configMapExists: true,
+			hasEniConf:      true,
+			eniConfContent:  `{"ip_stack": "dual"}`,
+			expectError:     false,
+			expectedContent: `{"ip_stack": "dual"}`,
+			description:     "Should return eni_conf content from ConfigMap",
+		},
+		{
+			name:            "get config without eni_conf key",
+			configMapExists: true,
+			hasEniConf:      false,
+			expectError:     true,
+			description:     "Should return error when eni_conf key is missing",
+		},
+		{
+			name:            "get config with non-existent ConfigMap",
+			configMapExists: false,
+			expectError:     true,
+			description:     "Should return error when ConfigMap does not exist",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup fake client
+			builder := fake.NewClientBuilder().WithScheme(scheme.Scheme)
+			if tt.configMapExists {
+				cm := &corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-config",
+						Namespace: "test-namespace",
+					},
+					Data: map[string]string{},
+				}
+				if tt.hasEniConf {
+					cm.Data["eni_conf"] = tt.eniConfContent
+				}
+				builder.WithObjects(cm)
+			}
+			client := builder.Build()
+
+			k8sObj := &k8s{
+				client:          client,
+				daemonNamespace: "test-namespace",
+			}
+
+			// Execute GetDynamicConfigWithName
+			content, err := k8sObj.GetDynamicConfigWithName(context.Background(), "test-config")
+
+			if tt.expectError {
+				assert.Error(t, err, tt.description)
+				assert.Empty(t, content, "Content should be empty on error")
+			} else {
+				assert.NoError(t, err, tt.description)
+				assert.Equal(t, tt.expectedContent, content, "Content should match expected")
+			}
 		})
 	}
 }

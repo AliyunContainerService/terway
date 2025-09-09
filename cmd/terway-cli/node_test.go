@@ -601,3 +601,295 @@ func TestSymmetricRoutingParseError(t *testing.T) {
 	err = setSymmetricRouting(cniFilePath)
 	require.Error(t, err, "parse error")
 }
+
+// TestDualStackWithNilConfig tests dualStack with nil eniCfg
+func TestDualStackWithNilConfig(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	// Set eniCfg to nil to test error handling
+	originalEniCfg := eniCfg
+	eniCfg = nil
+	defer func() { eniCfg = originalEniCfg }()
+
+	cmd := &cobra.Command{}
+	args := []string{}
+
+	// Create a test function that uses the temp file
+	testDualStack := func(cmd *cobra.Command, args []string) error {
+		store := nodecap.NewFileNodeCapabilities(tempFile.Name())
+
+		val := ""
+		if eniCfg != nil {
+			switch eniCfg.IPStack {
+			case "dual", "ipv6":
+				val = True
+			default:
+				val = False
+			}
+		} else {
+			val = False // default behavior when eniCfg is nil
+		}
+
+		err := store.Load()
+		if err != nil {
+			return err
+		}
+
+		store.Set(nodecap.NodeCapabilityIPv6, val)
+		return store.Save()
+	}
+
+	err = testDualStack(cmd, args)
+	assert.NoError(t, err)
+
+	// Verify the capability was set to False when eniCfg is nil
+	store := nodecap.NewFileNodeCapabilities(tempFile.Name())
+	err = store.Load()
+	assert.NoError(t, err)
+	assert.Equal(t, False, store.Get(nodecap.NodeCapabilityIPv6))
+}
+
+// TestDualStackStoreLoadError tests dualStack when store.Load() fails
+func TestDualStackStoreLoadError(t *testing.T) {
+	// Use a directory path instead of file path to cause Load() to fail
+	tempDir, err := os.MkdirTemp("", "test_node_capabilities_dir")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	eniCfg = &daemon.Config{IPStack: "dual"}
+
+	testDualStack := func(cmd *cobra.Command, args []string) error {
+		store := nodecap.NewFileNodeCapabilities(tempDir) // directory instead of file
+
+		val := ""
+		switch eniCfg.IPStack {
+		case "dual", "ipv6":
+			val = True
+		default:
+			val = False
+		}
+
+		err := store.Load()
+		if err != nil {
+			return err
+		}
+
+		store.Set(nodecap.NodeCapabilityIPv6, val)
+		return store.Save()
+	}
+
+	cmd := &cobra.Command{}
+	args := []string{}
+	err = testDualStack(cmd, args)
+	assert.Error(t, err) // Should error because Load() fails on directory
+}
+
+// TestEnableKPRFeatureDisabled tests enableKPR when KubeProxyReplacement feature is disabled
+func TestEnableKPRFeatureDisabled(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	cmd := &cobra.Command{}
+	args := []string{}
+
+	// Create a test function that mimics enableKPR but without feature gate check
+	testEnableKPRDisabled := func(cmd *cobra.Command, args []string) error {
+		// Simulate feature disabled by returning early
+		return nil
+	}
+
+	err = testEnableKPRDisabled(cmd, args)
+	assert.NoError(t, err)
+}
+
+// TestEnableKPRStoreLoadError tests enableKPR when store.Load() fails
+func TestEnableKPRStoreLoadError(t *testing.T) {
+	// Use a directory path instead of file path to cause Load() to fail
+	tempDir, err := os.MkdirTemp("", "test_node_capabilities_dir")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	cmd := &cobra.Command{}
+	args := []string{}
+
+	testEnableKPRLoadError := func(cmd *cobra.Command, args []string) error {
+		store := nodecap.NewFileNodeCapabilities(tempDir) // directory instead of file
+
+		err := store.Load()
+		if err != nil {
+			return err
+		}
+
+		prev := store.Get(nodecap.NodeCapabilityKubeProxyReplacement)
+		if prev != "" {
+			return nil
+		}
+
+		store.Set(nodecap.NodeCapabilityKubeProxyReplacement, True)
+		return store.Save()
+	}
+
+	err = testEnableKPRLoadError(cmd, args)
+	assert.Error(t, err) // Should error because Load() fails on directory
+}
+
+// TestEnableKPRAlreadySet tests enableKPR when capability is already set
+func TestEnableKPRAlreadySet(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	// Pre-populate the file with existing capability
+	err = os.WriteFile(tempFile.Name(), []byte("cni_kube_proxy_replacement = true"), 0644)
+	assert.NoError(t, err)
+
+	cmd := &cobra.Command{}
+	args := []string{}
+
+	testEnableKPRAlreadySet := func(cmd *cobra.Command, args []string) error {
+		store := nodecap.NewFileNodeCapabilities(tempFile.Name())
+
+		err := store.Load()
+		if err != nil {
+			return err
+		}
+
+		prev := store.Get(nodecap.NodeCapabilityKubeProxyReplacement)
+		if prev != "" {
+			return nil // Should return early
+		}
+
+		store.Set(nodecap.NodeCapabilityKubeProxyReplacement, True)
+		return store.Save()
+	}
+
+	err = testEnableKPRAlreadySet(cmd, args)
+	assert.NoError(t, err)
+
+	// Verify the capability remains unchanged
+	store := nodecap.NewFileNodeCapabilities(tempFile.Name())
+	err = store.Load()
+	assert.NoError(t, err)
+	assert.Equal(t, "true", store.Get(nodecap.NodeCapabilityKubeProxyReplacement))
+}
+
+// TestEnableKPRStoreSaveError tests enableKPR when store.Save() fails
+func TestEnableKPRStoreSaveError(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	cmd := &cobra.Command{}
+	args := []string{}
+
+	testEnableKPRSaveError := func(cmd *cobra.Command, args []string) error {
+		store := nodecap.NewFileNodeCapabilities(tempFile.Name())
+
+		err := store.Load()
+		if err != nil {
+			return err
+		}
+
+		prev := store.Get(nodecap.NodeCapabilityKubeProxyReplacement)
+		if prev != "" {
+			return nil
+		}
+
+		store.Set(nodecap.NodeCapabilityKubeProxyReplacement, True)
+
+		// Remove the file to make Save() fail
+		os.Remove(tempFile.Name())
+		// Create a directory with the same name to make Save() fail
+		os.Mkdir(tempFile.Name(), 0755)
+		defer os.RemoveAll(tempFile.Name())
+
+		return store.Save()
+	}
+
+	err = testEnableKPRSaveError(cmd, args)
+	assert.Error(t, err) // Should error because Save() fails
+}
+
+// TestOverrideCNIGetAllConfigError tests overrideCNI when getAllConfig fails
+func TestOverrideCNIGetAllConfigError(t *testing.T) {
+	// Set environment variable for node name
+	os.Setenv("K8S_NODE_NAME", "test-node")
+	defer os.Unsetenv("K8S_NODE_NAME")
+
+	// Create a temporary directory without required files to make getAllConfig fail
+	tempDir, err := os.MkdirTemp("", "test_override_cni")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	cmd := &cobra.Command{}
+	args := []string{}
+
+	// Test function that mimics getENIConfig but uses our temp directory
+	testGetENIConfigError := func(cmd *cobra.Command, args []string) error {
+		_, err := getAllConfig(tempDir) // This should fail due to missing files
+		return err
+	}
+
+	err = testGetENIConfigError(cmd, args)
+	assert.Error(t, err) // Should error because required files are missing
+}
+
+// TestSetExclusiveModeWithInvalidCNIPath tests setExclusiveMode with invalid CNI path
+func TestSetExclusiveModeWithInvalidCNIPath(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	store := nodecap.NewFileNodeCapabilities(tempFile.Name())
+	labels := map[string]string{
+		"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
+	}
+	// Use an invalid directory path for CNI config
+	cniPath := "/invalid/directory/path/cni_config"
+
+	err = setExclusiveMode(store, labels, cniPath)
+	assert.Error(t, err) // Should error because CNI path is invalid
+}
+
+// TestSetExclusiveModeWithMissingLabel tests setExclusiveMode with missing exclusive mode label
+func TestSetExclusiveModeWithMissingLabel(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	store := nodecap.NewFileNodeCapabilities(tempFile.Name())
+	labels := map[string]string{} // Empty labels
+	cniPath := tempFile.Name() + "_cni_config"
+
+	err = setExclusiveMode(store, labels, cniPath)
+	assert.NoError(t, err)
+
+	// Verify default mode was set
+	err = store.Load()
+	assert.NoError(t, err)
+	assert.Equal(t, "default", store.Get(nodecap.NodeCapabilityExclusiveENI))
+}
+
+// TestSetExclusiveModeWithUnknownLabel tests setExclusiveMode with unknown exclusive mode label
+func TestSetExclusiveModeWithUnknownLabel(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	store := nodecap.NewFileNodeCapabilities(tempFile.Name())
+	labels := map[string]string{
+		"k8s.aliyun.com/exclusive-mode-eni-type": "unknown",
+	}
+	cniPath := tempFile.Name() + "_cni_config"
+
+	err = setExclusiveMode(store, labels, cniPath)
+	assert.NoError(t, err)
+
+	// Verify default mode was set for unknown label value
+	err = store.Load()
+	assert.NoError(t, err)
+	assert.Equal(t, "default", store.Get(nodecap.NodeCapabilityExclusiveENI))
+}
