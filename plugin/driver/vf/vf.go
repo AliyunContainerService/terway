@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	defaultNUSAConfigPath = "/etc/sysconfig/pcie_topo"
+	defaultNUSAConfigPath = "/var/rdma/eni_topo"
 	defaultSysfsBasePath  = "/sys/bus/pci/devices"
 
 	vfBind = "/sys/bus/pci/drivers/virtio-pci"
