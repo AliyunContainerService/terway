@@ -71,7 +71,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/controller/webhook"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/AliyunContainerService/terway/pkg/utils"
-	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
 	"github.com/AliyunContainerService/terway/pkg/version"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
@@ -141,7 +140,6 @@ func main() {
 	restConfig.QPS = cfg.KubeClientQPS
 	restConfig.Burst = cfg.KubeClientBurst
 	restConfig.UserAgent = version.UA
-	k8sclient.RegisterClients(restConfig)
 
 	directClient, err := client.New(restConfig, client.Options{Scheme: scheme})
 	if err != nil {

@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -33,7 +34,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/pkg/utils"
-	"github.com/AliyunContainerService/terway/pkg/utils/k8sclient"
 	"github.com/AliyunContainerService/terway/pkg/version"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
@@ -117,7 +117,6 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config, namespace string) (K
 	if err != nil {
 		return nil, err
 	}
-	k8sclient.RegisterClients(restConfig)
 
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
@@ -138,8 +137,9 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config, namespace string) (K
 	source := corev1.EventSource{Component: "terway-daemon"}
 	recorder := broadcaster.NewRecorder(scheme.Scheme, source)
 
+	corev1Client := kubernetes.NewForConfigOrDie(restConfig).CoreV1().RESTClient()
 	sink := &typedv1.EventSinkImpl{
-		Interface: typedv1.New(k8sclient.K8sClient.CoreV1().RESTClient()).Events(""),
+		Interface: typedv1.New(corev1Client).Events(""),
 	}
 	broadcaster.StartRecordingToSink(sink)
 

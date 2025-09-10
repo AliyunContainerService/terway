@@ -670,7 +670,7 @@ func (n *networkService) cleanRuntimeNode(ctx context.Context, localUIDs sets.Se
 	l := logf.FromContext(ctx)
 
 	if l.V(4).Enabled() {
-		l.Info("clean runtime node", "localUIDs", localUIDs, nodeRuntime)
+		l.Info("clean runtime node", "localUIDs", localUIDs, "nodeRuntime", nodeRuntime)
 	}
 
 	for uid, status := range nodeRuntime.Status.Pods {
