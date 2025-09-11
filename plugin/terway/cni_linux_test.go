@@ -59,6 +59,7 @@ func (s *CniSuite) SetupTest() {
 func (s *CniSuite) TearDownTest() {
 	if s.netNS != nil {
 		_ = s.netNS.Close()
+		_ = testutils.UnmountNS(s.netNS)
 	}
 }
 
