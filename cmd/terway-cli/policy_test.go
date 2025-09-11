@@ -846,3 +846,114 @@ func Test_runCilium_ArgumentsAndEnvironment(t *testing.T) {
 	// Verify environment variables are passed through
 	assert.NotEmpty(t, capturedEnv)
 }
+func Test_getPolicyConfig(t *testing.T) {
+	tests := []struct {
+		name           string
+		capFileContent string
+		envVars        map[string]string
+		want           *PolicyConfig
+		wantErr        bool
+	}{
+		{
+			name: "basic config with IPv6",
+			capFileContent: `cni_ipv6_stack = true
+datapath = veth
+network_policy_provider = calico
+cni_exclusive_eni = false
+has_cilium_chainer = false
+kube_proxy_replacement = false`,
+			envVars: map[string]string{"FELIX_HEALTHPORT": "9099"},
+			want: &PolicyConfig{
+				Datapath:            "veth",
+				EnableNetworkPolicy: false,
+				PolicyProvider:      "calico",
+				ExclusiveENI:        false,
+				HealthCheckPort:     "9099",
+				IPv6:                true,
+				HasCiliumChainer:    false,
+				EnableKPR:           false,
+			},
+			wantErr: false,
+		},
+		{
+			name: "exclusive eni mode",
+			capFileContent: `cni_ipv6_stack = false
+datapath = ipvlan
+network_policy_provider = ebpf
+cni_exclusive_eni = eniOnly
+has_cilium_chainer = true
+kube_proxy_replacement = true`,
+			envVars: map[string]string{"FELIX_HEALTHPORT": "8080"},
+			want: &PolicyConfig{
+				Datapath:            "ipvlan",
+				EnableNetworkPolicy: false,
+				PolicyProvider:      "ebpf",
+				ExclusiveENI:        true,
+				HealthCheckPort:     "8080",
+				IPv6:                false,
+				HasCiliumChainer:    true,
+				EnableKPR:           true,
+			},
+			wantErr: false,
+		},
+		{
+			name:           "file not exist",
+			capFileContent: "",
+			want:           nil,
+			wantErr:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a temporary file for node capabilities
+			var capFilePath string
+			if tt.capFileContent != "" {
+				tempFile, err := os.CreateTemp("", "node_capabilities")
+				assert.NoError(t, err)
+				defer os.Remove(tempFile.Name())
+
+				_, err = tempFile.Write([]byte(tt.capFileContent))
+				assert.NoError(t, err)
+				err = tempFile.Close()
+				assert.NoError(t, err)
+
+				capFilePath = tempFile.Name()
+			} else {
+				capFilePath = "/nonexistent/file"
+			}
+
+			// Set environment variables
+			for k, v := range tt.envVars {
+				os.Setenv(k, v)
+				defer os.Unsetenv(k)
+			}
+
+			// Mock getAllConfig function
+			patches := gomonkey.NewPatches()
+			defer patches.Reset()
+			patches.ApplyFunc(getAllConfig, func(base string) (*TerwayConfig, error) {
+				return &TerwayConfig{
+					enableNetworkPolicy: tt.want.EnableNetworkPolicy,
+					enableInClusterLB:   false,
+				}, nil
+			})
+
+			got, err := getPolicyConfig(capFilePath)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.want.Datapath, got.Datapath)
+				assert.Equal(t, tt.want.EnableNetworkPolicy, got.EnableNetworkPolicy)
+				assert.Equal(t, tt.want.PolicyProvider, got.PolicyProvider)
+				assert.Equal(t, tt.want.ExclusiveENI, got.ExclusiveENI)
+				assert.Equal(t, tt.want.HealthCheckPort, got.HealthCheckPort)
+				assert.Equal(t, tt.want.IPv6, got.IPv6)
+				assert.Equal(t, tt.want.HasCiliumChainer, got.HasCiliumChainer)
+				assert.Equal(t, tt.want.EnableKPR, got.EnableKPR)
+			}
+		})
+	}
+}
