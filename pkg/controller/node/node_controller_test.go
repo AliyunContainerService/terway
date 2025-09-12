@@ -492,22 +492,19 @@ var _ = Describe("Node Controller", func() {
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("unsupported mode"))
 
-			//resource := &networkv1beta1.Node{}
-			//err = k8sClient.Get(ctx, typeNamespacedName, resource)
-			//Expect(err).NotTo(HaveOccurred())
-			//
-			//// Verify EFLO node configuration
-			//Expect(resource.Spec.NodeCap.Adapters).To(Equal(4))
-			//Expect(resource.Spec.NodeCap.TotalAdapters).To(Equal(4))
-			//Expect(resource.Spec.NodeCap.IPv4PerAdapter).To(Equal(10))
-			//Expect(resource.Annotations["k8s.aliyun.com/eno-api"]).To(Equal("ecs"))
-			//
-			//// Verify the label is preserved
-			//Expect(resource.Labels["alibabacloud.com/lingjun-vpc-network-type-override"]).To(Equal("eni"))
-			//Expect(resource.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]).To(Equal("eniOnly"))
+			resource := &networkv1beta1.Node{}
+			err = k8sClient.Get(ctx, typeNamespacedName, resource)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify EFLO node configuration
+			Expect(resource.Spec.NodeCap.Adapters).To(Equal(4))
+			Expect(resource.Spec.NodeCap.TotalAdapters).To(Equal(4))
+			Expect(resource.Spec.NodeCap.IPv4PerAdapter).To(Equal(10))
+			Expect(resource.Annotations["k8s.aliyun.com/eno-api"]).To(Equal("ecs"))
+
+			// Verify the label is preserved
+			Expect(resource.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]).To(Equal("eniOnly"))
 		})
 
 		It("node with ecs high density eni", func() {
