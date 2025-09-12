@@ -2054,3 +2054,12 @@ func TestGetDynamicConfigWithName(t *testing.T) {
 		})
 	}
 }
+
+func TestSerialize(t *testing.T) {
+	v, err := serialize(&storageItem{})
+	assert.NoError(t, err)
+	assert.NotEmpty(t, v)
+
+	_, err = deserialize(v)
+	assert.NoError(t, err)
+}

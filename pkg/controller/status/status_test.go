@@ -1,12 +1,24 @@
 package status
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/utils/ptr"
 )
+
+func TestNewCache(t *testing.T) {
+	cache := NewCache[string]()
+	assert.NotNil(t, cache)
+
+	cache.LoadOrStore("test", ptr.To("test"))
+	v, ok := cache.Get("test")
+	assert.True(t, ok)
+	assert.Equal(t, "test", *v)
+}
 
 func TestRequestNetworkIndex(t *testing.T) {
 	nodeStatus := NewNodeStatus(2)
@@ -60,4 +72,14 @@ func TestRequestNetworkIndex_Numa(t *testing.T) {
 	wg.Wait()
 	assert.Equal(t, 100, len(nodeStatus.NetworkCards[0].NetworkInterfaces))
 	assert.Equal(t, 0, len(nodeStatus.NetworkCards[1].NetworkInterfaces))
+}
+
+func TestMetaCtx(t *testing.T) {
+	ctx := context.Background()
+	nodeStatus := NewNodeStatus(1)
+	ctx = WithMeta(ctx, nodeStatus)
+
+	v, ok := MetaCtx[NodeStatus](ctx)
+	assert.True(t, ok)
+	assert.Equal(t, nodeStatus, v)
 }
