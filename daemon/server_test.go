@@ -9,6 +9,8 @@ import (
 	"github.com/agiledragon/gomonkey/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	corev1 "k8s.io/api/core/v1"
+	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/AliyunContainerService/terway/pkg/eni"
 	"github.com/AliyunContainerService/terway/pkg/k8s/mocks"
@@ -324,6 +326,471 @@ func TestAllocIP(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestReleaseIP tests the ReleaseIP function with various scenarios
+func TestReleaseIP(t *testing.T) {
+	tests := []struct {
+		name          string
+		request       *rpc.ReleaseIPRequest
+		podInfo       *daemon.PodInfo
+		oldResource   daemon.PodResources
+		expectedError bool
+		setupMocks    func(*gomonkey.Patches, *networkService)
+	}{
+		{
+			name: "successful release for ENIMultiIP pod",
+			request: &rpc.ReleaseIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			podInfo: &daemon.PodInfo{
+				Namespace:      "default",
+				Name:           "test-pod",
+				PodUID:         "pod-uid-123",
+				PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				IPStickTime:    0, // No IP stick time
+			},
+			oldResource: daemon.PodResources{
+				PodInfo: &daemon.PodInfo{
+					Namespace: "default",
+					Name:      "test-pod",
+					PodUID:    "pod-uid-123",
+				},
+				ContainerID: stringPtr("container-123"),
+				Resources: []daemon.ResourceItem{
+					{
+						Type:   daemon.ResourceTypeENIIP,
+						ID:     "eni-123.192.168.1.100",
+						ENIID:  "eni-123",
+						ENIMAC: "aa:bb:cc:dd:ee:ff",
+						IPv4:   "192.168.1.100",
+					},
+				},
+			},
+			expectedError: false,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+					IPStickTime:    0,
+				}, nil)
+
+				// Mock resourceDB.Get to return existing resource
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+							PodUID:    "pod-uid-123",
+						},
+						ContainerID: stringPtr("container-123"),
+						Resources: []daemon.ResourceItem{
+							{
+								Type:   daemon.ResourceTypeENIIP,
+								ID:     "eni-123.192.168.1.100",
+								ENIID:  "eni-123",
+								ENIMAC: "aa:bb:cc:dd:ee:ff",
+								IPv4:   "192.168.1.100",
+							},
+						},
+					}, nil
+				})
+
+				// Mock eniMgr.Release
+				patches.ApplyMethodFunc(ns.eniMgr, "Release", func(ctx context.Context, cni *daemon.CNI, req *eni.ReleaseRequest) error {
+					return nil
+				})
+
+				// Mock resourceDB.Delete
+				patches.ApplyMethodFunc(ns.resourceDB, "Delete", func(key string) error {
+					return nil
+				})
+			},
+		},
+		{
+			name: "successful release for VPCENI pod",
+			request: &rpc.ReleaseIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			podInfo: &daemon.PodInfo{
+				Namespace:      "default",
+				Name:           "test-pod",
+				PodUID:         "pod-uid-123",
+				PodNetworkType: daemon.PodNetworkTypeVPCENI,
+				IPStickTime:    0,
+			},
+			oldResource: daemon.PodResources{
+				PodInfo: &daemon.PodInfo{
+					Namespace: "default",
+					Name:      "test-pod",
+					PodUID:    "pod-uid-123",
+				},
+				ContainerID: stringPtr("container-123"),
+				Resources: []daemon.ResourceItem{
+					{
+						Type:   daemon.ResourceTypeENI,
+						ID:     "eni-123",
+						ENIID:  "eni-123",
+						ENIMAC: "aa:bb:cc:dd:ee:ff",
+						IPv4:   "192.168.1.100",
+					},
+				},
+			},
+			expectedError: false,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Set daemon mode to ENIOnly for VPCENI
+				ns.daemonMode = daemon.ModeENIOnly
+
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeVPCENI,
+					IPStickTime:    0,
+				}, nil)
+
+				// Mock resourceDB.Get to return existing resource
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+							PodUID:    "pod-uid-123",
+						},
+						ContainerID: stringPtr("container-123"),
+						Resources: []daemon.ResourceItem{
+							{
+								Type:   daemon.ResourceTypeENI,
+								ID:     "eni-123",
+								ENIID:  "eni-123",
+								ENIMAC: "aa:bb:cc:dd:ee:ff",
+								IPv4:   "192.168.1.100",
+							},
+						},
+					}, nil
+				})
+
+				// Mock eniMgr.Release
+				patches.ApplyMethodFunc(ns.eniMgr, "Release", func(ctx context.Context, cni *daemon.CNI, req *eni.ReleaseRequest) error {
+					return nil
+				})
+
+				// Mock resourceDB.Delete
+				patches.ApplyMethodFunc(ns.resourceDB, "Delete", func(key string) error {
+					return nil
+				})
+			},
+		},
+		{
+			name: "pod not found - should return success",
+			request: &rpc.ReleaseIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: false,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod to return NotFound error
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return((*daemon.PodInfo)(nil), k8sErr.NewNotFound(corev1.Resource("pod"), "test-pod"))
+			},
+		},
+		{
+			name: "error when pod not found but not NotFound error",
+			request: &rpc.ReleaseIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod to return non-NotFound error
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return((*daemon.PodInfo)(nil), assert.AnError)
+			},
+		},
+		{
+			name: "error when getPodResource fails",
+			request: &rpc.ReleaseIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				}, nil)
+
+				// Mock resourceDB.Get to return error
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return nil, assert.AnError
+				})
+			},
+		},
+		{
+			name: "error when eniMgr.Release fails",
+			request: &rpc.ReleaseIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+					IPStickTime:    0,
+				}, nil)
+
+				// Mock resourceDB.Get to return existing resource
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+							PodUID:    "pod-uid-123",
+						},
+						ContainerID: stringPtr("container-123"),
+						Resources: []daemon.ResourceItem{
+							{
+								Type:   daemon.ResourceTypeENIIP,
+								ID:     "eni-123.192.168.1.100",
+								ENIID:  "eni-123",
+								ENIMAC: "aa:bb:cc:dd:ee:ff",
+								IPv4:   "192.168.1.100",
+							},
+						},
+					}, nil
+				})
+
+				// Mock eniMgr.Release to return error
+				patches.ApplyMethodFunc(ns.eniMgr, "Release", func(ctx context.Context, cni *daemon.CNI, req *eni.ReleaseRequest) error {
+					return assert.AnError
+				})
+			},
+		},
+		{
+			name: "error when deletePodResource fails",
+			request: &rpc.ReleaseIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+					IPStickTime:    0,
+				}, nil)
+
+				// Mock resourceDB.Get to return existing resource
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+							PodUID:    "pod-uid-123",
+						},
+						ContainerID: stringPtr("container-123"),
+						Resources: []daemon.ResourceItem{
+							{
+								Type:   daemon.ResourceTypeENIIP,
+								ID:     "eni-123.192.168.1.100",
+								ENIID:  "eni-123",
+								ENIMAC: "aa:bb:cc:dd:ee:ff",
+								IPv4:   "192.168.1.100",
+							},
+						},
+					}, nil
+				})
+
+				// Mock eniMgr.Release
+				patches.ApplyMethodFunc(ns.eniMgr, "Release", func(ctx context.Context, cni *daemon.CNI, req *eni.ReleaseRequest) error {
+					return nil
+				})
+
+				// Mock resourceDB.Delete to return error
+				patches.ApplyMethodFunc(ns.resourceDB, "Delete", func(key string) error {
+					return assert.AnError
+				})
+			},
+		},
+		{
+			name: "pod already processing",
+			request: &rpc.ReleaseIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Pre-populate pendingPods to simulate already processing
+				ns.pendingPods.Store("default/test-pod", struct{}{})
+			},
+		},
+		{
+			name: "container ID mismatch - should return success without releasing",
+			request: &rpc.ReleaseIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "different-container-123",
+			},
+			expectedError: false,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				}, nil)
+
+				// Mock resourceDB.Get with different container ID
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+							PodUID:    "pod-uid-123",
+						},
+						ContainerID: stringPtr("old-container-123"), // Different container ID
+						Resources: []daemon.ResourceItem{
+							{
+								Type:   daemon.ResourceTypeENIIP,
+								ID:     "eni-123.192.168.1.100",
+								ENIID:  "eni-123",
+								ENIMAC: "aa:bb:cc:dd:ee:ff",
+								IPv4:   "192.168.1.100",
+							},
+						},
+					}, nil
+				})
+			},
+		},
+		{
+			name: "IP stick time > 0 and not CRD mode - should not release",
+			request: &rpc.ReleaseIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: false,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Set IPAM type to non-CRD
+				ns.ipamType = types.IPAMTypeDefault
+
+				// Mock k8s.GetPod with IPStickTime > 0
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+					IPStickTime:    3600, // 1 hour stick time
+				}, nil)
+
+				// Mock resourceDB.Get to return existing resource
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+							PodUID:    "pod-uid-123",
+						},
+						ContainerID: stringPtr("container-123"),
+						Resources: []daemon.ResourceItem{
+							{
+								Type:   daemon.ResourceTypeENIIP,
+								ID:     "eni-123.192.168.1.100",
+								ENIID:  "eni-123",
+								ENIMAC: "aa:bb:cc:dd:ee:ff",
+								IPv4:   "192.168.1.100",
+							},
+						},
+					}, nil
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create patches for mocking
+			patches := gomonkey.NewPatches()
+			defer patches.Reset()
+
+			// Create mock k8s client
+			mockK8s := &mocks.Kubernetes{}
+
+			// Create mock network service
+			ns := &networkService{
+				daemonMode:        daemon.ModeENIMultiIP,
+				enableIPv4:        true,
+				enableIPv6:        false,
+				ipamType:          types.IPAMTypeDefault,
+				eniMgr:            &eni.Manager{},
+				resourceDB:        &mockStorage{},
+				k8s:               mockK8s,
+				pendingPods:       sync.Map{},
+				enablePatchPodIPs: false,
+			}
+
+			// Setup mocks
+			if tt.setupMocks != nil {
+				tt.setupMocks(patches, ns)
+			}
+
+			// Call ReleaseIP
+			ctx := context.Background()
+			reply, err := ns.ReleaseIP(ctx, tt.request)
+
+			// Verify results
+			if tt.expectedError {
+				assert.Error(t, err)
+				assert.Nil(t, reply)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, reply)
+				assert.True(t, reply.Success)
+				assert.Equal(t, ns.enableIPv4, reply.IPv4)
+				assert.Equal(t, ns.enableIPv6, reply.IPv6)
+			}
+
+			// Verify mock expectations
+			mockK8s.AssertExpectations(t)
+		})
+	}
+}
+
+// Helper function to create string pointer
+func stringPtr(s string) *string {
+	return &s
 }
 
 // Mock implementations for testing
