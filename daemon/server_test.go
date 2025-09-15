@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"net"
 	"net/netip"
 	"sync"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/AliyunContainerService/terway/pkg/eni"
 	"github.com/AliyunContainerService/terway/pkg/k8s/mocks"
@@ -1113,6 +1115,427 @@ func TestGetIPInfo(t *testing.T) {
 				assert.Equal(t, tt.expectedIPType, reply.IPType)
 				assert.Equal(t, ns.enableIPv4, reply.IPv4)
 				assert.Equal(t, ns.enableIPv6, reply.IPv6)
+			}
+
+			// Verify mock expectations
+			mockK8s.AssertExpectations(t)
+		})
+	}
+}
+
+// TestGcPods tests the gcPods function with various scenarios
+func TestGcPods(t *testing.T) {
+	tests := []struct {
+		name          string
+		expectedError bool
+		setupMocks    func(*gomonkey.Patches, *networkService)
+	}{
+		{
+			name:          "successful gc with no pods to clean",
+			expectedError: false,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetLocalPods to return empty list
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+
+				// Mock resourceDB.List to return empty list
+				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
+					return []interface{}{}, nil
+				})
+
+				// Mock cleanRuntimeNode private method
+				patches.ApplyPrivateMethod(ns, "cleanRuntimeNode", func(ctx context.Context, localUIDs sets.Set[string]) error {
+					return nil
+				})
+			},
+		},
+		{
+			name:          "successful gc with existing pods",
+			expectedError: false,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetLocalPods to return existing pods
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{
+					{
+						Namespace:     "default",
+						Name:          "test-pod-1",
+						PodUID:        "pod-uid-1",
+						SandboxExited: false,
+						PodIPs: types.IPSet{
+							IPv4: net.ParseIP("192.168.1.100"),
+						},
+					},
+				}, nil)
+
+				// Mock resourceDB.List to return pod resources
+				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
+					return []interface{}{
+						daemon.PodResources{
+							PodInfo: &daemon.PodInfo{
+								Namespace: "default",
+								Name:      "test-pod-1",
+								PodUID:    "pod-uid-1",
+								PodIPs: types.IPSet{
+									IPv4: net.ParseIP("192.168.1.100"),
+								},
+							},
+							Resources: []daemon.ResourceItem{
+								{
+									Type:   daemon.ResourceTypeENIIP,
+									ID:     "eni-123.192.168.1.100",
+									ENIID:  "eni-123",
+									ENIMAC: "aa:bb:cc:dd:ee:ff",
+									IPv4:   "192.168.1.100",
+								},
+							},
+						},
+					}, nil
+				})
+
+				// Mock ruleSync
+				patches.ApplyFunc(ruleSync, func(ctx context.Context, res daemon.PodResources) error {
+					return nil
+				})
+
+				// Mock cleanRuntimeNode private method
+				patches.ApplyPrivateMethod(ns, "cleanRuntimeNode", func(ctx context.Context, localUIDs sets.Set[string]) error {
+					return nil
+				})
+			},
+		},
+		{
+			name:          "successful gc with pods to clean up",
+			expectedError: false,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetLocalPods to return empty list (no existing pods)
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+
+				// Mock resourceDB.List to return pod resources that need cleanup
+				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
+					return []interface{}{
+						daemon.PodResources{
+							PodInfo: &daemon.PodInfo{
+								Namespace:   "default",
+								Name:        "test-pod-1",
+								PodUID:      "pod-uid-1",
+								IPStickTime: 0, // No IP stick time
+								PodIPs: types.IPSet{
+									IPv4: net.ParseIP("192.168.1.100"),
+								},
+							},
+							Resources: []daemon.ResourceItem{
+								{
+									Type:   daemon.ResourceTypeENIIP,
+									ID:     "eni-123.192.168.1.100",
+									ENIID:  "eni-123",
+									ENIMAC: "aa:bb:cc:dd:ee:ff",
+									IPv4:   "192.168.1.100",
+								},
+							},
+						},
+					}, nil
+				})
+
+				// Mock k8s.PodExist to return false (pod doesn't exist)
+				mockK8s.On("PodExist", "default", "test-pod-1").Return(false, nil)
+
+				// Mock gcPolicyRoutes
+				patches.ApplyFunc(gcPolicyRoutes, func(ctx context.Context, mac string, containerIPNet *types.IPNetSet, namespace, name string) error {
+					return nil
+				})
+
+				// Mock eniMgr.Release
+				patches.ApplyMethodFunc(ns.eniMgr, "Release", func(ctx context.Context, cni *daemon.CNI, req *eni.ReleaseRequest) error {
+					return nil
+				})
+
+				// Mock deletePodResource private method
+				patches.ApplyPrivateMethod(ns, "deletePodResource", func(info *daemon.PodInfo) error {
+					return nil
+				})
+
+				// Mock cleanRuntimeNode private method
+				patches.ApplyPrivateMethod(ns, "cleanRuntimeNode", func(ctx context.Context, localUIDs sets.Set[string]) error {
+					return nil
+				})
+			},
+		},
+		{
+			name:          "error when GetLocalPods fails",
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetLocalPods to return error
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetLocalPods").Return(([]*daemon.PodInfo)(nil), assert.AnError)
+			},
+		},
+		{
+			name:          "error when resourceDB.List fails",
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetLocalPods
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+
+				// Mock resourceDB.List to return error
+				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
+					return nil, assert.AnError
+				})
+			},
+		},
+		{
+			name:          "error when eniMgr.Release fails",
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetLocalPods to return empty list
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+
+				// Mock resourceDB.List to return pod resources
+				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
+					return []interface{}{
+						daemon.PodResources{
+							PodInfo: &daemon.PodInfo{
+								Namespace:   "default",
+								Name:        "test-pod-1",
+								PodUID:      "pod-uid-1",
+								IPStickTime: 0,
+								PodIPs: types.IPSet{
+									IPv4: net.ParseIP("192.168.1.100"),
+								},
+							},
+							Resources: []daemon.ResourceItem{
+								{
+									Type:   daemon.ResourceTypeENIIP,
+									ID:     "eni-123.192.168.1.100",
+									ENIID:  "eni-123",
+									ENIMAC: "aa:bb:cc:dd:ee:ff",
+									IPv4:   "192.168.1.100",
+								},
+							},
+						},
+					}, nil
+				})
+
+				// Mock k8s.PodExist to return false
+				mockK8s.On("PodExist", "default", "test-pod-1").Return(false, nil)
+
+				// Mock gcPolicyRoutes
+				patches.ApplyFunc(gcPolicyRoutes, func(ctx context.Context, mac string, containerIPNet *types.IPNetSet, namespace, name string) error {
+					return nil
+				})
+
+				// Mock eniMgr.Release to return error
+				patches.ApplyMethodFunc(ns.eniMgr, "Release", func(ctx context.Context, cni *daemon.CNI, req *eni.ReleaseRequest) error {
+					return assert.AnError
+				})
+			},
+		},
+		{
+			name:          "error when deletePodResource fails",
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetLocalPods to return empty list
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+
+				// Mock resourceDB.List to return pod resources
+				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
+					return []interface{}{
+						daemon.PodResources{
+							PodInfo: &daemon.PodInfo{
+								Namespace:   "default",
+								Name:        "test-pod-1",
+								PodUID:      "pod-uid-1",
+								IPStickTime: 0,
+								PodIPs: types.IPSet{
+									IPv4: net.ParseIP("192.168.1.100"),
+								},
+							},
+							Resources: []daemon.ResourceItem{
+								{
+									Type:   daemon.ResourceTypeENIIP,
+									ID:     "eni-123.192.168.1.100",
+									ENIID:  "eni-123",
+									ENIMAC: "aa:bb:cc:dd:ee:ff",
+									IPv4:   "192.168.1.100",
+								},
+							},
+						},
+					}, nil
+				})
+
+				// Mock k8s.PodExist to return false
+				mockK8s.On("PodExist", "default", "test-pod-1").Return(false, nil)
+
+				// Mock gcPolicyRoutes
+				patches.ApplyFunc(gcPolicyRoutes, func(ctx context.Context, mac string, containerIPNet *types.IPNetSet, namespace, name string) error {
+					return nil
+				})
+
+				// Mock eniMgr.Release
+				patches.ApplyMethodFunc(ns.eniMgr, "Release", func(ctx context.Context, cni *daemon.CNI, req *eni.ReleaseRequest) error {
+					return nil
+				})
+
+				// Mock deletePodResource private method to return error
+				patches.ApplyPrivateMethod(ns, "deletePodResource", func(info *daemon.PodInfo) error {
+					return assert.AnError
+				})
+			},
+		},
+		{
+			name:          "successful gc with IP stick time logic",
+			expectedError: false,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Set IPAM type to non-CRD
+				ns.ipamType = types.IPAMTypeDefault
+
+				// Mock k8s.GetLocalPods to return empty list
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+
+				// Mock resourceDB.List to return pod resources with IP stick time
+				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
+					return []interface{}{
+						daemon.PodResources{
+							PodInfo: &daemon.PodInfo{
+								Namespace:   "default",
+								Name:        "test-pod-1",
+								PodUID:      "pod-uid-1",
+								IPStickTime: 3600, // 1 hour stick time
+								PodIPs: types.IPSet{
+									IPv4: net.ParseIP("192.168.1.100"),
+								},
+							},
+							Resources: []daemon.ResourceItem{
+								{
+									Type:   daemon.ResourceTypeENIIP,
+									ID:     "eni-123.192.168.1.100",
+									ENIID:  "eni-123",
+									ENIMAC: "aa:bb:cc:dd:ee:ff",
+									IPv4:   "192.168.1.100",
+								},
+							},
+						},
+					}, nil
+				})
+
+				// Mock k8s.PodExist to return false
+				mockK8s.On("PodExist", "default", "test-pod-1").Return(false, nil)
+
+				// Mock resourceDB.Put to update IP stick time
+				patches.ApplyMethodFunc(ns.resourceDB, "Put", func(key string, value interface{}) error {
+					return nil
+				})
+
+				// Mock cleanRuntimeNode private method
+				patches.ApplyPrivateMethod(ns, "cleanRuntimeNode", func(ctx context.Context, localUIDs sets.Set[string]) error {
+					return nil
+				})
+			},
+		},
+		{
+			name:          "successful gc with CRD mode",
+			expectedError: false,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Set IPAM type to CRD and daemon mode to ENIMultiIP for cleanRuntimeNode
+				ns.ipamType = types.IPAMTypeCRD
+				ns.daemonMode = daemon.ModeENIMultiIP
+
+				// Mock k8s.GetLocalPods to return empty list
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+
+				// Mock resourceDB.List to return pod resources
+				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
+					return []interface{}{
+						daemon.PodResources{
+							PodInfo: &daemon.PodInfo{
+								Namespace:   "default",
+								Name:        "test-pod-1",
+								PodUID:      "pod-uid-1",
+								IPStickTime: 3600, // IP stick time should be ignored in CRD mode
+								PodIPs: types.IPSet{
+									IPv4: net.ParseIP("192.168.1.100"),
+								},
+							},
+							Resources: []daemon.ResourceItem{
+								{
+									Type:   daemon.ResourceTypeENIIP,
+									ID:     "eni-123.192.168.1.100",
+									ENIID:  "eni-123",
+									ENIMAC: "aa:bb:cc:dd:ee:ff",
+									IPv4:   "192.168.1.100",
+								},
+							},
+						},
+					}, nil
+				})
+
+				// Mock k8s.PodExist to return false
+				mockK8s.On("PodExist", "default", "test-pod-1").Return(false, nil)
+
+				// Mock gcPolicyRoutes
+				patches.ApplyFunc(gcPolicyRoutes, func(ctx context.Context, mac string, containerIPNet *types.IPNetSet, namespace, name string) error {
+					return nil
+				})
+
+				// Mock eniMgr.Release
+				patches.ApplyMethodFunc(ns.eniMgr, "Release", func(ctx context.Context, cni *daemon.CNI, req *eni.ReleaseRequest) error {
+					return nil
+				})
+
+				// Mock deletePodResource private method
+				patches.ApplyPrivateMethod(ns, "deletePodResource", func(info *daemon.PodInfo) error {
+					return nil
+				})
+
+				// Mock cleanRuntimeNode private method to avoid complex k8s client mocking
+				patches.ApplyPrivateMethod(ns, "cleanRuntimeNode", func(ctx context.Context, localUIDs sets.Set[string]) error {
+					return nil
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create patches for mocking
+			patches := gomonkey.NewPatches()
+			defer patches.Reset()
+
+			// Create mock k8s client
+			mockK8s := &mocks.Kubernetes{}
+
+			// Create mock network service
+			ns := &networkService{
+				daemonMode:        daemon.ModeENIMultiIP,
+				enableIPv4:        true,
+				enableIPv6:        false,
+				ipamType:          types.IPAMTypeDefault,
+				eniMgr:            &eni.Manager{},
+				resourceDB:        &mockStorage{},
+				k8s:               mockK8s,
+				pendingPods:       sync.Map{},
+				enablePatchPodIPs: false,
+			}
+
+			// Setup mocks
+			if tt.setupMocks != nil {
+				tt.setupMocks(patches, ns)
+			}
+
+			// Call gcPods
+			ctx := context.Background()
+			err := ns.gcPods(ctx)
+
+			// Verify results
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
 			}
 
 			// Verify mock expectations
