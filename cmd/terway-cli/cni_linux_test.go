@@ -274,3 +274,7 @@ func Test_isMounted(t *testing.T) {
 	_, err := isMounted("/sys/fs/cgroup")
 	assert.NoError(t, err)
 }
+
+func Test_allowEBPFNetworkPolicy(t *testing.T) {
+
+}
