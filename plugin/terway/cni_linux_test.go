@@ -3,18 +3,28 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"testing"
 
+	"github.com/AliyunContainerService/terway/pkg/link"
+	"github.com/AliyunContainerService/terway/plugin/datapath"
 	"github.com/AliyunContainerService/terway/plugin/driver/types"
+	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 	"github.com/AliyunContainerService/terway/rpc"
+	terwayTypes "github.com/AliyunContainerService/terway/types"
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/containernetworking/cni/pkg/skel"
 	cniTypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/testr"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"github.com/vishvananda/netlink"
+	"google.golang.org/grpc"
 )
 
 type CniSuite struct {
@@ -294,4 +304,890 @@ func (s *CniSuite) TestGetCmdArgsWithAdditionalConfig() {
 	// Clean up
 	err = cmdArgs.Close()
 	s.Require().NoError(err)
+}
+
+// Mock TerwayBackendClient
+type mockTerwayBackendClient struct{}
+
+func (m *mockTerwayBackendClient) AllocIP(ctx context.Context, req *rpc.AllocIPRequest, opts ...grpc.CallOption) (*rpc.AllocIPReply, error) {
+	return &rpc.AllocIPReply{
+		Success: true,
+		IPv4:    true,
+		IPv6:    false,
+		NetConfs: []*rpc.NetConf{
+			{
+				BasicInfo: &rpc.BasicInfo{
+					PodIP: &rpc.IPSet{
+						IPv4: "10.0.0.1",
+					},
+					GatewayIP: &rpc.IPSet{
+						IPv4: "10.0.0.1",
+					},
+					ServiceCIDR: &rpc.IPSet{
+						IPv4: "10.96.0.0/12",
+					},
+				},
+				ENIInfo: &rpc.ENIInfo{
+					MAC: "00:11:22:33:44:55",
+				},
+				IfName: "eth0",
+			},
+		},
+		IPType: rpc.IPType_TypeENIMultiIP,
+	}, nil
+}
+
+func (m *mockTerwayBackendClient) ReleaseIP(ctx context.Context, req *rpc.ReleaseIPRequest, opts ...grpc.CallOption) (*rpc.ReleaseIPReply, error) {
+	return &rpc.ReleaseIPReply{Success: true}, nil
+}
+
+func (m *mockTerwayBackendClient) GetIPInfo(ctx context.Context, req *rpc.GetInfoRequest, opts ...grpc.CallOption) (*rpc.GetInfoReply, error) {
+	return &rpc.GetInfoReply{}, nil
+}
+
+func (m *mockTerwayBackendClient) RecordEvent(ctx context.Context, req *rpc.EventRequest, opts ...grpc.CallOption) (*rpc.EventReply, error) {
+	return &rpc.EventReply{}, nil
+}
+
+func TestDoCmdAdd(t *testing.T) {
+	tests := []struct {
+		name            string
+		setupMocks      func() *gomonkey.Patches
+		expectedError   bool
+		expectedIPNet   bool
+		expectedGateway bool
+	}{
+		{
+			name: "Success case with IPv4",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock utils.GetHostIP
+				patches.ApplyFunc(utils.GetHostIP, func(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
+					return &terwayTypes.IPNetSet{
+						IPv4: &net.IPNet{
+							IP:   net.ParseIP("192.168.1.1"),
+							Mask: net.CIDRMask(32, 32),
+						},
+					}, nil
+				})
+
+				// Mock utils.EnsureHostNsConfig
+				patches.ApplyFunc(utils.EnsureHostNsConfig, func(ipv4, ipv6 bool) error {
+					return nil
+				})
+
+				// Mock utils.GrabFileLock
+				patches.ApplyFunc(utils.GrabFileLock, func(path string) (*utils.Locker, error) {
+					return &utils.Locker{}, nil
+				})
+
+				// Mock datapath.CheckIPVLanAvailable
+				patches.ApplyFunc(datapath.CheckIPVLanAvailable, func() (bool, error) {
+					return true, nil
+				})
+
+				// Mock datapath.NewIPVlanDriver().Setup
+				patches.ApplyFunc(datapath.NewIPVlanDriver, func() *datapath.IPvlanDriver {
+					return &datapath.IPvlanDriver{}
+				})
+
+				// Mock link.GetDeviceNumber to return a fake device ID
+				patches.ApplyFunc(link.GetDeviceNumber, func(mac string) (int32, error) {
+					return 1, nil
+				})
+
+				// Mock prepareVF function
+				patches.ApplyFunc(prepareVF, func(ctx context.Context, id int, mac string, vfType rpc.VfType) (int32, error) {
+					return 1, nil
+				})
+
+				// Mock netlink.LinkByIndex to return a fake link
+				patches.ApplyFunc(netlink.LinkByIndex, func(index int) (netlink.Link, error) {
+					return &netlink.Dummy{
+						LinkAttrs: netlink.LinkAttrs{
+							Index:        index,
+							Name:         "fake-eni",
+							HardwareAddr: net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+						},
+					}, nil
+				})
+
+				// Mock netlink.LinkByName to return a fake link
+				patches.ApplyFunc(netlink.LinkByName, func(name string) (netlink.Link, error) {
+					return &netlink.Dummy{
+						LinkAttrs: netlink.LinkAttrs{
+							Index: 1,
+							Name:  name,
+						},
+					}, nil
+				})
+
+				// Mock utils.LinkAdd to avoid real link creation
+				patches.ApplyFunc(utils.LinkAdd, func(ctx context.Context, link netlink.Link) error {
+					return nil
+				})
+
+				// Mock utils.LinkDel to avoid real link deletion
+				patches.ApplyFunc(utils.LinkDel, func(ctx context.Context, link netlink.Link) error {
+					return nil
+				})
+
+				// Mock utils.EnsureLinkName to avoid real link name changes
+				patches.ApplyFunc(utils.EnsureLinkName, func(ctx context.Context, link netlink.Link, name string) (bool, error) {
+					return false, nil
+				})
+
+				// Mock utils.EnsureLinkMTU to avoid real MTU changes
+				patches.ApplyFunc(utils.EnsureLinkMTU, func(ctx context.Context, link netlink.Link, mtu int) (bool, error) {
+					return false, nil
+				})
+
+				// Mock utils.EnsureLinkUp to avoid real link state changes
+				patches.ApplyFunc(utils.EnsureLinkUp, func(ctx context.Context, link netlink.Link) (bool, error) {
+					return false, nil
+				})
+
+				// Mock utils.EnsureAddr to avoid real address assignment
+				patches.ApplyFunc(utils.EnsureAddr, func(ctx context.Context, link netlink.Link, addr *netlink.Addr) (bool, error) {
+					return false, nil
+				})
+
+				// Mock utils.EnsureNeigh to avoid real neighbor setup
+				patches.ApplyFunc(utils.EnsureNeigh, func(ctx context.Context, neigh *netlink.Neigh) (bool, error) {
+					return false, nil
+				})
+
+				// Mock utils.EnsureRoute to avoid real route setup
+				patches.ApplyFunc(utils.EnsureRoute, func(ctx context.Context, route *netlink.Route) (bool, error) {
+					return false, nil
+				})
+
+				// Mock utils.EnsureIPRule to avoid real IP rule setup
+				patches.ApplyFunc(utils.EnsureIPRule, func(ctx context.Context, rule *netlink.Rule) (bool, error) {
+					return false, nil
+				})
+
+				// Mock utils.EnsureVlanUntagger to avoid real vlan operations
+				patches.ApplyFunc(utils.EnsureVlanUntagger, func(ctx context.Context, link netlink.Link) error {
+					return nil
+				})
+
+				return patches
+			},
+			expectedError:   false,
+			expectedIPNet:   true,
+			expectedGateway: true,
+		},
+		{
+			name: "AllocIP failure",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock client.AllocIP to return error
+				patches.ApplyMethodReturn(&mockTerwayBackendClient{}, "AllocIP",
+					&rpc.AllocIPReply{Success: false}, assert.AnError)
+
+				return patches
+			},
+			expectedError:   true,
+			expectedIPNet:   false,
+			expectedGateway: false,
+		},
+		{
+			name: "GetHostIP failure",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock utils.GetHostIP to return error
+				patches.ApplyFunc(utils.GetHostIP, func(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
+					return nil, assert.AnError
+				})
+
+				return patches
+			},
+			expectedError:   true,
+			expectedIPNet:   false,
+			expectedGateway: false,
+		},
+		{
+			name: "EnsureHostNsConfig failure",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock utils.GetHostIP
+				patches.ApplyFunc(utils.GetHostIP, func(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
+					return &terwayTypes.IPNetSet{
+						IPv4: &net.IPNet{
+							IP:   net.ParseIP("192.168.1.1"),
+							Mask: net.CIDRMask(32, 32),
+						},
+					}, nil
+				})
+
+				// Mock utils.EnsureHostNsConfig to return error
+				patches.ApplyFunc(utils.EnsureHostNsConfig, func(ipv4, ipv6 bool) error {
+					return assert.AnError
+				})
+
+				return patches
+			},
+			expectedError:   true,
+			expectedIPNet:   false,
+			expectedGateway: false,
+		},
+		{
+			name: "GrabFileLock failure",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock utils.GetHostIP
+				patches.ApplyFunc(utils.GetHostIP, func(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
+					return &terwayTypes.IPNetSet{
+						IPv4: &net.IPNet{
+							IP:   net.ParseIP("192.168.1.1"),
+							Mask: net.CIDRMask(32, 32),
+						},
+					}, nil
+				})
+
+				// Mock utils.EnsureHostNsConfig
+				patches.ApplyFunc(utils.EnsureHostNsConfig, func(ipv4, ipv6 bool) error {
+					return nil
+				})
+
+				// Mock utils.GrabFileLock to return error
+				patches.ApplyFunc(utils.GrabFileLock, func(path string) (*utils.Locker, error) {
+					return nil, assert.AnError
+				})
+
+				return patches
+			},
+			expectedError:   true,
+			expectedIPNet:   false,
+			expectedGateway: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup patches
+			patches := tt.setupMocks()
+			defer patches.Reset()
+
+			// Create test network namespace
+			testNS, err := ns.GetNS("/proc/self/ns/net")
+			if err != nil {
+				t.Skipf("Skipping test due to inability to create test namespace: %v", err)
+			}
+			defer testNS.Close()
+
+			// Create test cmdArgs
+			cmdArgs := &cniCmdArgs{
+				conf: &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				},
+				netNS: testNS,
+				k8sArgs: &types.K8SArgs{
+					K8S_POD_NAME:               "test-pod",
+					K8S_POD_NAMESPACE:          "test-ns",
+					K8S_POD_INFRA_CONTAINER_ID: "test-container-id",
+				},
+				inputArgs: &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       testNS.Path(),
+					IfName:      "eth0",
+				},
+			}
+
+			// Create mock client
+			client := &mockTerwayBackendClient{}
+
+			// Execute doCmdAdd
+			ctx := context.Background()
+			containerIPNet, gatewayIPSet, err := doCmdAdd(ctx, client, cmdArgs)
+
+			// Assertions
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			if tt.expectedIPNet {
+				assert.NotNil(t, containerIPNet)
+			} else {
+				assert.Nil(t, containerIPNet)
+			}
+
+			if tt.expectedGateway {
+				assert.NotNil(t, gatewayIPSet)
+			} else {
+				assert.Nil(t, gatewayIPSet)
+			}
+		})
+	}
+}
+
+// Mock implementations are not needed as we're using gomonkey to patch the actual functions
+
+func TestDoCmdDel(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupMocks    func() *gomonkey.Patches
+		expectedError bool
+	}{
+		{
+			name: "Success case",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock utils.GrabFileLock
+				patches.ApplyFunc(utils.GrabFileLock, func(path string) (*utils.Locker, error) {
+					return &utils.Locker{}, nil
+				})
+
+				// Mock utils.GenericTearDown
+				patches.ApplyFunc(utils.GenericTearDown, func(ctx context.Context, netNS ns.NetNS) error {
+					return nil
+				})
+
+				// Mock client.GetIPInfo
+				patches.ApplyMethodReturn(&mockTerwayBackendClient{}, "GetIPInfo",
+					&rpc.GetInfoReply{
+						Success: true,
+						IPv4:    true,
+						IPv6:    false,
+						NetConfs: []*rpc.NetConf{
+							{
+								BasicInfo: &rpc.BasicInfo{
+									PodIP: &rpc.IPSet{
+										IPv4: "10.0.0.1",
+									},
+									PodCIDR: &rpc.IPSet{
+										IPv4: "10.0.0.0/24",
+									},
+									ServiceCIDR: &rpc.IPSet{
+										IPv4: "10.96.0.0/12",
+									},
+								},
+								ENIInfo: &rpc.ENIInfo{
+									MAC: "00:11:22:33:44:55",
+								},
+								IfName: "eth0",
+							},
+						},
+						IPType: rpc.IPType_TypeENIMultiIP,
+					}, nil)
+
+				// Mock client.ReleaseIP
+				patches.ApplyMethodReturn(&mockTerwayBackendClient{}, "ReleaseIP",
+					&rpc.ReleaseIPReply{Success: true}, nil)
+
+				// Mock link.GetDeviceNumber
+				patches.ApplyFunc(link.GetDeviceNumber, func(mac string) (int32, error) {
+					return 1, nil
+				})
+
+				// Mock datapath.CheckIPVLanAvailable
+				patches.ApplyFunc(datapath.CheckIPVLanAvailable, func() (bool, error) {
+					return true, nil
+				})
+
+				// Mock datapath.NewIPVlanDriver().Teardown
+				patches.ApplyFunc(datapath.NewIPVlanDriver, func() *datapath.IPvlanDriver {
+					return &datapath.IPvlanDriver{}
+				})
+
+				return patches
+			},
+			expectedError: false,
+		},
+		{
+			name: "GetIPInfo failure",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock utils.GrabFileLock
+				patches.ApplyFunc(utils.GrabFileLock, func(path string) (*utils.Locker, error) {
+					return &utils.Locker{}, nil
+				})
+
+				// Mock utils.GenericTearDown
+				patches.ApplyFunc(utils.GenericTearDown, func(ctx context.Context, netNS ns.NetNS) error {
+					return nil
+				})
+
+				// Mock client.GetIPInfo to return error
+				patches.ApplyMethodReturn(&mockTerwayBackendClient{}, "GetIPInfo",
+					&rpc.GetInfoReply{}, assert.AnError)
+
+				return patches
+			},
+			expectedError: true,
+		},
+		{
+			name: "GenericTearDown failure",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock utils.GrabFileLock
+				patches.ApplyFunc(utils.GrabFileLock, func(path string) (*utils.Locker, error) {
+					return &utils.Locker{}, nil
+				})
+
+				// Mock utils.GenericTearDown to return error
+				patches.ApplyFunc(utils.GenericTearDown, func(ctx context.Context, netNS ns.NetNS) error {
+					return assert.AnError
+				})
+
+				return patches
+			},
+			expectedError: false, // GenericTearDown errors are swallowed
+		},
+		{
+			name: "CRD not found",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock utils.GrabFileLock
+				patches.ApplyFunc(utils.GrabFileLock, func(path string) (*utils.Locker, error) {
+					return &utils.Locker{}, nil
+				})
+
+				// Mock utils.GenericTearDown
+				patches.ApplyFunc(utils.GenericTearDown, func(ctx context.Context, netNS ns.NetNS) error {
+					return nil
+				})
+
+				// Mock client.GetIPInfo to return CRD not found error
+				patches.ApplyMethodReturn(&mockTerwayBackendClient{}, "GetIPInfo",
+					&rpc.GetInfoReply{
+						Error: rpc.Error_ErrCRDNotFound,
+					}, nil)
+
+				return patches
+			},
+			expectedError: false, // CRD not found errors are swallowed
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup patches
+			patches := tt.setupMocks()
+			defer patches.Reset()
+
+			// Create test network namespace
+			testNS, err := ns.GetNS("/proc/self/ns/net")
+			if err != nil {
+				t.Skipf("Skipping test due to inability to create test namespace: %v", err)
+			}
+			defer testNS.Close()
+
+			// Create test cmdArgs
+			cmdArgs := &cniCmdArgs{
+				conf: &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				},
+				netNS: testNS,
+				k8sArgs: &types.K8SArgs{
+					K8S_POD_NAME:               "test-pod",
+					K8S_POD_NAMESPACE:          "test-ns",
+					K8S_POD_INFRA_CONTAINER_ID: "test-container-id",
+				},
+				inputArgs: &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       testNS.Path(),
+					IfName:      "eth0",
+				},
+			}
+
+			// Create mock client
+			client := &mockTerwayBackendClient{}
+
+			// Execute doCmdDel
+			ctx := context.Background()
+			err = doCmdDel(ctx, client, cmdArgs)
+
+			// Assertions
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestDoCmdCheck(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupMocks    func() *gomonkey.Patches
+		expectedError bool
+	}{
+		{
+			name: "Success case with IPv4",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock client.GetIPInfo
+				patches.ApplyMethodReturn(&mockTerwayBackendClient{}, "GetIPInfo",
+					&rpc.GetInfoReply{
+						Success: true,
+						IPv4:    true,
+						IPv6:    false,
+						NetConfs: []*rpc.NetConf{
+							{
+								BasicInfo: &rpc.BasicInfo{
+									PodIP: &rpc.IPSet{
+										IPv4: "10.0.0.1",
+									},
+									PodCIDR: &rpc.IPSet{
+										IPv4: "10.0.0.0/24",
+									},
+									GatewayIP: &rpc.IPSet{
+										IPv4: "10.0.0.1",
+									},
+									ServiceCIDR: &rpc.IPSet{
+										IPv4: "10.96.0.0/12",
+									},
+								},
+								ENIInfo: &rpc.ENIInfo{
+									MAC: "00:11:22:33:44:55",
+								},
+								IfName: "eth0",
+							},
+						},
+						IPType: rpc.IPType_TypeENIMultiIP,
+					}, nil)
+
+				// Mock utils.GetHostIP
+				patches.ApplyFunc(utils.GetHostIP, func(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
+					return &terwayTypes.IPNetSet{
+						IPv4: &net.IPNet{
+							IP:   net.ParseIP("192.168.1.1"),
+							Mask: net.CIDRMask(32, 32),
+						},
+					}, nil
+				})
+
+				// Mock utils.EnsureHostNsConfig
+				patches.ApplyFunc(utils.EnsureHostNsConfig, func(ipv4, ipv6 bool) error {
+					return nil
+				})
+
+				// Mock utils.GrabFileLock
+				patches.ApplyFunc(utils.GrabFileLock, func(path string) (*utils.Locker, error) {
+					return &utils.Locker{}, nil
+				})
+
+				// Mock link.GetDeviceNumber
+				patches.ApplyFunc(link.GetDeviceNumber, func(mac string) (int32, error) {
+					return 1, nil
+				})
+
+				// Mock datapath.CheckIPVLanAvailable
+				patches.ApplyFunc(datapath.CheckIPVLanAvailable, func() (bool, error) {
+					return true, nil
+				})
+
+				// Mock datapath.NewIPVlanDriver().Check
+				patches.ApplyFunc(datapath.NewIPVlanDriver, func() *datapath.IPvlanDriver {
+					return &datapath.IPvlanDriver{}
+				})
+
+				// Mock netlink.LinkByIndex
+				patches.ApplyFunc(netlink.LinkByIndex, func(index int) (netlink.Link, error) {
+					return &netlink.Dummy{
+						LinkAttrs: netlink.LinkAttrs{
+							Index:        index,
+							Name:         "fake-eni",
+							HardwareAddr: net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+						},
+					}, nil
+				})
+
+				// Mock netlink.LinkByName
+				patches.ApplyFunc(netlink.LinkByName, func(name string) (netlink.Link, error) {
+					return &netlink.Dummy{
+						LinkAttrs: netlink.LinkAttrs{
+							Index: 1,
+							Name:  name,
+						},
+					}, nil
+				})
+
+				// Mock utils.EnsureLinkUp
+				patches.ApplyFunc(utils.EnsureLinkUp, func(ctx context.Context, link netlink.Link) (bool, error) {
+					return false, nil
+				})
+
+				// Mock utils.EnsureLinkMTU
+				patches.ApplyFunc(utils.EnsureLinkMTU, func(ctx context.Context, link netlink.Link, mtu int) (bool, error) {
+					return false, nil
+				})
+
+				// Mock utils.EnsureNetConfSet
+				patches.ApplyFunc(utils.EnsureNetConfSet, func(ipv4, ipv6 bool) error {
+					return nil
+				})
+
+				return patches
+			},
+			expectedError: false,
+		},
+		{
+			name: "GetIPInfo failure",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock client.GetIPInfo to return error
+				patches.ApplyMethodReturn(&mockTerwayBackendClient{}, "GetIPInfo",
+					&rpc.GetInfoReply{}, assert.AnError)
+
+				return patches
+			},
+			expectedError: false, // GetIPInfo errors are swallowed in doCmdCheck
+		},
+		{
+			name: "No valid IP type",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock client.GetIPInfo to return no valid IP type
+				patches.ApplyMethodReturn(&mockTerwayBackendClient{}, "GetIPInfo",
+					&rpc.GetInfoReply{
+						Success: true,
+						IPv4:    false,
+						IPv6:    false,
+					}, nil)
+
+				return patches
+			},
+			expectedError: true,
+		},
+		{
+			name: "GetHostIP failure",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock client.GetIPInfo
+				patches.ApplyMethodReturn(&mockTerwayBackendClient{}, "GetIPInfo",
+					&rpc.GetInfoReply{
+						Success: true,
+						IPv4:    true,
+						IPv6:    false,
+						NetConfs: []*rpc.NetConf{
+							{
+								BasicInfo: &rpc.BasicInfo{
+									PodIP: &rpc.IPSet{
+										IPv4: "10.0.0.1",
+									},
+									PodCIDR: &rpc.IPSet{
+										IPv4: "10.0.0.0/24",
+									},
+									GatewayIP: &rpc.IPSet{
+										IPv4: "10.0.0.1",
+									},
+									ServiceCIDR: &rpc.IPSet{
+										IPv4: "10.96.0.0/12",
+									},
+								},
+								ENIInfo: &rpc.ENIInfo{
+									MAC: "00:11:22:33:44:55",
+								},
+								IfName: "eth0",
+							},
+						},
+						IPType: rpc.IPType_TypeENIMultiIP,
+					}, nil)
+
+				// Mock utils.GetHostIP to return error
+				patches.ApplyFunc(utils.GetHostIP, func(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
+					return nil, assert.AnError
+				})
+
+				return patches
+			},
+			expectedError: true,
+		},
+		{
+			name: "EnsureHostNsConfig failure",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock client.GetIPInfo
+				patches.ApplyMethodReturn(&mockTerwayBackendClient{}, "GetIPInfo",
+					&rpc.GetInfoReply{
+						Success: true,
+						IPv4:    true,
+						IPv6:    false,
+						NetConfs: []*rpc.NetConf{
+							{
+								BasicInfo: &rpc.BasicInfo{
+									PodIP: &rpc.IPSet{
+										IPv4: "10.0.0.1",
+									},
+									PodCIDR: &rpc.IPSet{
+										IPv4: "10.0.0.0/24",
+									},
+									GatewayIP: &rpc.IPSet{
+										IPv4: "10.0.0.1",
+									},
+									ServiceCIDR: &rpc.IPSet{
+										IPv4: "10.96.0.0/12",
+									},
+								},
+								ENIInfo: &rpc.ENIInfo{
+									MAC: "00:11:22:33:44:55",
+								},
+								IfName: "eth0",
+							},
+						},
+						IPType: rpc.IPType_TypeENIMultiIP,
+					}, nil)
+
+				// Mock utils.GetHostIP
+				patches.ApplyFunc(utils.GetHostIP, func(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
+					return &terwayTypes.IPNetSet{
+						IPv4: &net.IPNet{
+							IP:   net.ParseIP("192.168.1.1"),
+							Mask: net.CIDRMask(32, 32),
+						},
+					}, nil
+				})
+
+				// Mock utils.EnsureHostNsConfig to return error
+				patches.ApplyFunc(utils.EnsureHostNsConfig, func(ipv4, ipv6 bool) error {
+					return assert.AnError
+				})
+
+				return patches
+			},
+			expectedError: true,
+		},
+		{
+			name: "GrabFileLock failure",
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock client.GetIPInfo
+				patches.ApplyMethodReturn(&mockTerwayBackendClient{}, "GetIPInfo",
+					&rpc.GetInfoReply{
+						Success: true,
+						IPv4:    true,
+						IPv6:    false,
+						NetConfs: []*rpc.NetConf{
+							{
+								BasicInfo: &rpc.BasicInfo{
+									PodIP: &rpc.IPSet{
+										IPv4: "10.0.0.1",
+									},
+									PodCIDR: &rpc.IPSet{
+										IPv4: "10.0.0.0/24",
+									},
+									GatewayIP: &rpc.IPSet{
+										IPv4: "10.0.0.1",
+									},
+									ServiceCIDR: &rpc.IPSet{
+										IPv4: "10.96.0.0/12",
+									},
+								},
+								ENIInfo: &rpc.ENIInfo{
+									MAC: "00:11:22:33:44:55",
+								},
+								IfName: "eth0",
+							},
+						},
+						IPType: rpc.IPType_TypeENIMultiIP,
+					}, nil)
+
+				// Mock utils.GetHostIP
+				patches.ApplyFunc(utils.GetHostIP, func(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
+					return &terwayTypes.IPNetSet{
+						IPv4: &net.IPNet{
+							IP:   net.ParseIP("192.168.1.1"),
+							Mask: net.CIDRMask(32, 32),
+						},
+					}, nil
+				})
+
+				// Mock utils.EnsureHostNsConfig
+				patches.ApplyFunc(utils.EnsureHostNsConfig, func(ipv4, ipv6 bool) error {
+					return nil
+				})
+
+				// Mock utils.GrabFileLock to return error
+				patches.ApplyFunc(utils.GrabFileLock, func(path string) (*utils.Locker, error) {
+					return nil, assert.AnError
+				})
+
+				return patches
+			},
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup patches
+			patches := tt.setupMocks()
+			defer patches.Reset()
+
+			// Create test network namespace
+			testNS, err := ns.GetNS("/proc/self/ns/net")
+			if err != nil {
+				t.Skipf("Skipping test due to inability to create test namespace: %v", err)
+			}
+			defer testNS.Close()
+
+			// Create test cmdArgs
+			cmdArgs := &cniCmdArgs{
+				conf: &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				},
+				netNS: testNS,
+				k8sArgs: &types.K8SArgs{
+					K8S_POD_NAME:               "test-pod",
+					K8S_POD_NAMESPACE:          "test-ns",
+					K8S_POD_INFRA_CONTAINER_ID: "test-container-id",
+				},
+				inputArgs: &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       testNS.Path(),
+					IfName:      "eth0",
+				},
+			}
+
+			// Create mock client
+			client := &mockTerwayBackendClient{}
+
+			// Execute doCmdCheck
+			ctx := context.Background()
+			err = doCmdCheck(ctx, client, cmdArgs)
+
+			// Assertions
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

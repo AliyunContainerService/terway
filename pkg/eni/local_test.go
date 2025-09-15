@@ -3,6 +3,7 @@ package eni
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 	"sync"
 	"testing"
@@ -373,6 +374,257 @@ func Test_parseResourceID(t *testing.T) {
 			assert.Equalf(t, tt.want1, got1, "parseResourceID(%v)", tt.args.id)
 		})
 	}
+}
+
+func TestLocal_load_NilENI(t *testing.T) {
+	local := NewLocalTest(nil, nil, &daemon.PoolConfig{}, "")
+
+	err := local.load([]daemon.PodResources{})
+
+	assert.NoError(t, err)
+}
+
+func TestLocal_load_FactoryError(t *testing.T) {
+	mockFactory := factorymocks.NewFactory(t)
+	mockFactory.On("LoadNetworkInterface", "00:00:00:00:00:01").Return(nil, nil, fmt.Errorf("factory error"))
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+		PrimaryIP: types.IPSet{
+			IPv4: net.ParseIP("192.0.2.1"),
+		},
+	}
+	local := NewLocalTest(eni, mockFactory, &daemon.PoolConfig{}, "")
+
+	err := local.load([]daemon.PodResources{})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "factory error")
+}
+
+func TestLocal_load_SuccessNoPods(t *testing.T) {
+	mockFactory := factorymocks.NewFactory(t)
+	ipv4Addrs := []netip.Addr{
+		netip.MustParseAddr("192.0.2.1"),
+		netip.MustParseAddr("192.0.2.2"),
+	}
+	ipv6Addrs := []netip.Addr{
+		netip.MustParseAddr("2001:db8::1"),
+	}
+	mockFactory.On("LoadNetworkInterface", "00:00:00:00:00:01").Return(ipv4Addrs, ipv6Addrs, nil)
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+		PrimaryIP: types.IPSet{
+			IPv4: net.ParseIP("192.0.2.1"),
+		},
+	}
+	local := NewLocalTest(eni, mockFactory, &daemon.PoolConfig{EnableIPv4: true, EnableIPv6: true}, "")
+
+	err := local.load([]daemon.PodResources{})
+
+	assert.NoError(t, err)
+	assert.Equal(t, statusInUse, local.status)
+	assert.Equal(t, 2, len(local.ipv4))
+	assert.Equal(t, 1, len(local.ipv6))
+
+	// Check that primary IP is marked as primary
+	primaryIP := netip.MustParseAddr("192.0.2.1")
+	assert.True(t, local.ipv4[primaryIP].Primary())
+}
+
+func TestLocal_load_WithLegacyPods(t *testing.T) {
+	mockFactory := factorymocks.NewFactory(t)
+	ipv4Addrs := []netip.Addr{
+		netip.MustParseAddr("192.0.2.1"),
+		netip.MustParseAddr("192.0.2.2"),
+	}
+	ipv6Addrs := []netip.Addr{}
+	mockFactory.On("LoadNetworkInterface", "00:00:00:00:00:01").Return(ipv4Addrs, ipv6Addrs, nil)
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+		PrimaryIP: types.IPSet{
+			IPv4: net.ParseIP("192.0.2.1"),
+		},
+	}
+	local := NewLocalTest(eni, mockFactory, &daemon.PoolConfig{EnableIPv4: true, EnableIPv6: false}, "")
+
+	// Create legacy pod resources using parseResourceID format
+	podResources := []daemon.PodResources{
+		{
+			PodInfo: &daemon.PodInfo{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+			Resources: []daemon.ResourceItem{
+				{
+					Type: daemon.ResourceTypeENIIP,
+					ID:   "00:00:00:00:00:01.192.0.2.2", // MAC.IP format
+				},
+			},
+		},
+	}
+
+	err := local.load(podResources)
+
+	assert.NoError(t, err)
+	assert.Equal(t, statusInUse, local.status)
+	assert.Equal(t, 2, len(local.ipv4))
+
+	// Check that the IP is allocated to the pod
+	allocatedIP := netip.MustParseAddr("192.0.2.2")
+	assert.True(t, local.ipv4[allocatedIP].InUse())
+}
+
+func TestLocal_load_WithModernPods(t *testing.T) {
+	mockFactory := factorymocks.NewFactory(t)
+	ipv4Addrs := []netip.Addr{
+		netip.MustParseAddr("192.0.2.1"),
+		netip.MustParseAddr("192.0.2.2"),
+	}
+	ipv6Addrs := []netip.Addr{
+		netip.MustParseAddr("2001:db8::1"),
+	}
+	mockFactory.On("LoadNetworkInterface", "00:00:00:00:00:01").Return(ipv4Addrs, ipv6Addrs, nil)
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+		PrimaryIP: types.IPSet{
+			IPv4: net.ParseIP("192.0.2.1"),
+		},
+	}
+	local := NewLocalTest(eni, mockFactory, &daemon.PoolConfig{EnableIPv4: true, EnableIPv6: true}, "")
+
+	// Create modern pod resources using ENIID
+	podResources := []daemon.PodResources{
+		{
+			PodInfo: &daemon.PodInfo{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+			Resources: []daemon.ResourceItem{
+				{
+					Type:  daemon.ResourceTypeENIIP,
+					ENIID: "eni-1",
+					IPv4:  "192.0.2.2",
+					IPv6:  "2001:db8::1",
+				},
+			},
+		},
+	}
+
+	err := local.load(podResources)
+
+	assert.NoError(t, err)
+	assert.Equal(t, statusInUse, local.status)
+	assert.Equal(t, 2, len(local.ipv4))
+	assert.Equal(t, 1, len(local.ipv6))
+
+	// Check that the IPs are allocated to the pod
+	allocatedIPv4 := netip.MustParseAddr("192.0.2.2")
+	allocatedIPv6 := netip.MustParseAddr("2001:db8::1")
+	assert.True(t, local.ipv4[allocatedIPv4].InUse())
+	assert.True(t, local.ipv6[allocatedIPv6].InUse())
+}
+
+func TestLocal_load_CapAdjustment(t *testing.T) {
+	mockFactory := factorymocks.NewFactory(t)
+	// Create more IPs than the cap allows
+	ipv4Addrs := []netip.Addr{
+		netip.MustParseAddr("192.0.2.1"),
+		netip.MustParseAddr("192.0.2.2"),
+		netip.MustParseAddr("192.0.2.3"),
+		netip.MustParseAddr("192.0.2.4"),
+	}
+	ipv6Addrs := []netip.Addr{
+		netip.MustParseAddr("2001:db8::1"),
+		netip.MustParseAddr("2001:db8::2"),
+		netip.MustParseAddr("2001:db8::3"),
+	}
+	mockFactory.On("LoadNetworkInterface", "00:00:00:00:00:01").Return(ipv4Addrs, ipv6Addrs, nil)
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+		PrimaryIP: types.IPSet{
+			IPv4: net.ParseIP("192.0.2.1"),
+		},
+	}
+	// Set cap to 2, but we have 4 IPv4 and 3 IPv6 addresses
+	local := NewLocalTest(eni, mockFactory, &daemon.PoolConfig{EnableIPv4: true, EnableIPv6: true, MaxIPPerENI: 2}, "")
+
+	err := local.load([]daemon.PodResources{})
+
+	assert.NoError(t, err)
+	assert.Equal(t, statusInUse, local.status)
+}
+
+func TestLocal_load_InvalidIPParsing(t *testing.T) {
+	mockFactory := factorymocks.NewFactory(t)
+	ipv4Addrs := []netip.Addr{
+		netip.MustParseAddr("192.0.2.1"),
+	}
+	ipv6Addrs := []netip.Addr{}
+	mockFactory.On("LoadNetworkInterface", "00:00:00:00:00:01").Return(ipv4Addrs, ipv6Addrs, nil)
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+		PrimaryIP: types.IPSet{
+			IPv4: net.ParseIP("192.0.2.1"),
+		},
+	}
+	local := NewLocalTest(eni, mockFactory, &daemon.PoolConfig{EnableIPv4: true, EnableIPv6: false}, "")
+
+	// Create pod resources with invalid IPv4
+	podResources := []daemon.PodResources{
+		{
+			PodInfo: &daemon.PodInfo{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+			Resources: []daemon.ResourceItem{
+				{
+					Type:  daemon.ResourceTypeENIIP,
+					ENIID: "eni-1",
+					IPv4:  "invalid-ip",
+				},
+			},
+		},
+	}
+
+	err := local.load(podResources)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "InvalidDataType")
+}
+
+func TestLocal_load_InvalidPrimaryIP(t *testing.T) {
+	mockFactory := factorymocks.NewFactory(t)
+	ipv4Addrs := []netip.Addr{
+		netip.MustParseAddr("192.0.2.1"),
+	}
+	ipv6Addrs := []netip.Addr{}
+	mockFactory.On("LoadNetworkInterface", "00:00:00:00:00:01").Return(ipv4Addrs, ipv6Addrs, nil)
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+		PrimaryIP: types.IPSet{
+			IPv4: nil, // Invalid primary IP (nil)
+		},
+	}
+	local := NewLocalTest(eni, mockFactory, &daemon.PoolConfig{EnableIPv4: true, EnableIPv6: false}, "")
+
+	err := local.load([]daemon.PodResources{})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unable to parse IP")
 }
 
 func Test_orphanIP(t *testing.T) {
