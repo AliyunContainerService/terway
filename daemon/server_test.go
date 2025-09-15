@@ -788,6 +788,339 @@ func TestReleaseIP(t *testing.T) {
 	}
 }
 
+// TestGetIPInfo tests the GetIPInfo function with various scenarios
+func TestGetIPInfo(t *testing.T) {
+	tests := []struct {
+		name           string
+		request        *rpc.GetInfoRequest
+		podInfo        *daemon.PodInfo
+		oldResource    daemon.PodResources
+		expectedError  bool
+		expectedIPType rpc.IPType
+		setupMocks     func(*gomonkey.Patches, *networkService)
+	}{
+		{
+			name: "successful get info for ENIMultiIP pod",
+			request: &rpc.GetInfoRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			podInfo: &daemon.PodInfo{
+				Namespace:      "default",
+				Name:           "test-pod",
+				PodUID:         "pod-uid-123",
+				PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+			},
+			oldResource: daemon.PodResources{
+				PodInfo: &daemon.PodInfo{
+					Namespace: "default",
+					Name:      "test-pod",
+					PodUID:    "pod-uid-123",
+				},
+				ContainerID: stringPtr("container-123"),
+				NetConf:     `[{"BasicInfo":{"PodIP":{"IPv4":"192.168.1.100"}}}]`,
+			},
+			expectedError:  false,
+			expectedIPType: rpc.IPType_TypeENIMultiIP,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				}, nil)
+
+				// Mock resourceDB.Get to return existing resource
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+							PodUID:    "pod-uid-123",
+						},
+						ContainerID: stringPtr("container-123"),
+						NetConf:     `[{"BasicInfo":{"PodIP":{"IPv4":"192.168.1.100"}}}]`,
+					}, nil
+				})
+			},
+		},
+		{
+			name: "successful get info for VPCENI pod",
+			request: &rpc.GetInfoRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			podInfo: &daemon.PodInfo{
+				Namespace:      "default",
+				Name:           "test-pod",
+				PodUID:         "pod-uid-123",
+				PodNetworkType: daemon.PodNetworkTypeVPCENI,
+			},
+			oldResource: daemon.PodResources{
+				PodInfo: &daemon.PodInfo{
+					Namespace: "default",
+					Name:      "test-pod",
+					PodUID:    "pod-uid-123",
+				},
+				ContainerID: stringPtr("container-123"),
+				NetConf:     `[{"BasicInfo":{"PodIP":{"IPv4":"192.168.1.100"}}}]`,
+			},
+			expectedError:  false,
+			expectedIPType: rpc.IPType_TypeVPCENI,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Set daemon mode to ENIOnly for VPCENI
+				ns.daemonMode = daemon.ModeENIOnly
+
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeVPCENI,
+				}, nil)
+
+				// Mock resourceDB.Get to return existing resource
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+							PodUID:    "pod-uid-123",
+						},
+						ContainerID: stringPtr("container-123"),
+						NetConf:     `[{"BasicInfo":{"PodIP":{"IPv4":"192.168.1.100"}}}]`,
+					}, nil
+				})
+			},
+		},
+		{
+			name: "error when pod not found",
+			request: &rpc.GetInfoRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod to return error
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return((*daemon.PodInfo)(nil), assert.AnError)
+			},
+		},
+		{
+			name: "error when getPodResource fails",
+			request: &rpc.GetInfoRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				}, nil)
+
+				// Mock resourceDB.Get to return error
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return nil, assert.AnError
+				})
+			},
+		},
+		{
+			name: "error when pod network type is unknown",
+			request: &rpc.GetInfoRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod with unknown network type
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: "UnknownType", // Unknown network type
+				}, nil)
+			},
+		},
+		{
+			name: "error when daemon mode doesn't match pod network type",
+			request: &rpc.GetInfoRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Set daemon mode to ENIOnly but pod is ENIMultiIP
+				ns.daemonMode = daemon.ModeENIOnly
+
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP, // Mismatch with daemon mode
+				}, nil)
+
+				// Mock resourceDB.Get to return existing resource
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+							PodUID:    "pod-uid-123",
+						},
+						ContainerID: stringPtr("container-123"),
+						NetConf:     `[{"BasicInfo":{"PodIP":{"IPv4":"192.168.1.100"}}}]`,
+					}, nil
+				})
+			},
+		},
+		{
+			name: "pod already processing",
+			request: &rpc.GetInfoRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: true,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Pre-populate pendingPods to simulate already processing
+				ns.pendingPods.Store("default/test-pod", struct{}{})
+			},
+		},
+		{
+			name: "container ID mismatch - should return success without netconf",
+			request: &rpc.GetInfoRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "different-container-123",
+			},
+			expectedError:  false,
+			expectedIPType: rpc.IPType_TypeENIMultiIP,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				}, nil)
+
+				// Mock resourceDB.Get with different container ID
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+							PodUID:    "pod-uid-123",
+						},
+						ContainerID: stringPtr("old-container-123"), // Different container ID
+						NetConf:     `[{"BasicInfo":{"PodIP":{"IPv4":"192.168.1.100"}}}]`,
+					}, nil
+				})
+			},
+		},
+		{
+			name: "successful get info with invalid JSON netconf - should ignore error",
+			request: &rpc.GetInfoRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError:  false,
+			expectedIPType: rpc.IPType_TypeENIMultiIP,
+			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
+				// Mock k8s.GetPod
+				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
+					Namespace:      "default",
+					Name:           "test-pod",
+					PodUID:         "pod-uid-123",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				}, nil)
+
+				// Mock resourceDB.Get with invalid JSON
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+							PodUID:    "pod-uid-123",
+						},
+						ContainerID: stringPtr("container-123"),
+						NetConf:     `invalid json`, // Invalid JSON
+					}, nil
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create patches for mocking
+			patches := gomonkey.NewPatches()
+			defer patches.Reset()
+
+			// Create mock k8s client
+			mockK8s := &mocks.Kubernetes{}
+
+			// Create mock network service
+			ns := &networkService{
+				daemonMode:        daemon.ModeENIMultiIP,
+				enableIPv4:        true,
+				enableIPv6:        false,
+				ipamType:          types.IPAMTypeDefault,
+				eniMgr:            &eni.Manager{},
+				resourceDB:        &mockStorage{},
+				k8s:               mockK8s,
+				pendingPods:       sync.Map{},
+				enablePatchPodIPs: false,
+			}
+
+			// Setup mocks
+			if tt.setupMocks != nil {
+				tt.setupMocks(patches, ns)
+			}
+
+			// Call GetIPInfo
+			ctx := context.Background()
+			reply, err := ns.GetIPInfo(ctx, tt.request)
+
+			// Verify results
+			if tt.expectedError {
+				assert.Error(t, err)
+				assert.Nil(t, reply)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, reply)
+				assert.True(t, reply.Success)
+				assert.Equal(t, tt.expectedIPType, reply.IPType)
+				assert.Equal(t, ns.enableIPv4, reply.IPv4)
+				assert.Equal(t, ns.enableIPv6, reply.IPv6)
+			}
+
+			// Verify mock expectations
+			mockK8s.AssertExpectations(t)
+		})
+	}
+}
+
 // Helper function to create string pointer
 func stringPtr(s string) *string {
 	return &s
