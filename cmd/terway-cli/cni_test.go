@@ -1,8 +1,10 @@
 package main
 
 import (
+	"os"
 	"testing"
 
+	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/Jeffail/gabs/v2"
 	"github.com/stretchr/testify/assert"
 )
@@ -202,6 +204,8 @@ func TestVeth(t *testing.T) {
 	_switchDataPathV2 = func() bool {
 		return true
 	}
+
+	_ = os.Remove(nodeCapabilitiesFile)
 	out, err := mergeConfigList([][]byte{
 		[]byte(`{
 			"type":"terway",
@@ -225,6 +229,8 @@ func TestVethWithNoPolicy(t *testing.T) {
 	_switchDataPathV2 = func() bool {
 		return true
 	}
+
+	_ = os.Remove(nodeCapabilitiesFile)
 	out, err := mergeConfigList([][]byte{
 		[]byte(`{
 			"type":"terway",
@@ -249,6 +255,8 @@ func TestVethToDatapathV2(t *testing.T) {
 	_switchDataPathV2 = func() bool {
 		return true
 	}
+
+	_ = os.Remove(nodeCapabilitiesFile)
 	out, err := mergeConfigList([][]byte{
 		[]byte(`{
 			"type":"terway",
@@ -268,4 +276,35 @@ func TestVethToDatapathV2(t *testing.T) {
 	assert.Equal(t, 2, len(g.Path("plugins").Children()))
 	assert.Equal(t, "datapathv2", g.Path("plugins.0.eniip_virtual_type").Data())
 	assert.Equal(t, "cilium-cni", g.Path("plugins.1.type").Data())
+}
+
+func TestVethNotAllowToSwitch(t *testing.T) {
+	_switchDataPathV2 = func() bool {
+		return true
+	}
+
+	_ = os.Remove(nodeCapabilitiesFile)
+	store := nodecap.NewFileNodeCapabilities(nodeCapabilitiesFile)
+	store.Set(nodecap.NodeCapabilityHasCiliumChainer, False)
+	err := store.Save()
+	assert.NoError(t, err)
+
+	out, err := mergeConfigList([][]byte{
+		[]byte(`{
+			"type":"terway",
+			"foo":"bar",
+            "network_policy_provider": "ebpf"
+		}`)}, &feature{
+		EBPF:                true,
+		EDT:                 true,
+		EnableNetworkPolicy: true,
+	})
+	assert.NoError(t, err)
+
+	g, err := gabs.ParseJSON([]byte(out))
+	assert.NoError(t, err)
+
+	assert.Equal(t, "terway", g.Path("plugins.0.type").Data())
+	assert.Equal(t, 1, len(g.Path("plugins").Children()))
+	assert.Equal(t, "veth", g.Path("plugins.0.eniip_virtual_type").Data())
 }

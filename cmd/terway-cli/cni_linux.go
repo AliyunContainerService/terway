@@ -38,12 +38,26 @@ func switchDataPathV2() bool {
 // new node ( based on user require).
 // true -> false: keep cilium chain, but disable policy
 func allowEBPFNetworkPolicy(require bool) (bool, error) {
-	has, err := hasCilium()
-	if err != nil {
+	store := nodecap.NewFileNodeCapabilities(nodeCapabilitiesFile)
+	if err := store.Load(); err != nil {
 		return false, err
 	}
-	if has {
+	switch store.Get(nodecap.NodeCapabilityHasCiliumChainer) {
+	case True:
+		fmt.Printf("has prev cilium chainer\n")
 		return true, nil
+	case False:
+		fmt.Printf("no prev cilium chainer\n")
+		return false, nil
+	}
+
+	_, err := netlink.LinkByName("cilium_net")
+	if err == nil {
+		fmt.Printf("link cilium_net exist\n")
+		return true, nil
+	}
+	if !errors.As(err, &netlink.LinkNotFoundError{}) {
+		return false, err
 	}
 
 	return require, nil
