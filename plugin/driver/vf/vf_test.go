@@ -9,6 +9,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestParse(t *testing.T) {
+	t.Run("valid config eni controller", func(t *testing.T) {
+		config := []byte(`[{"bdf": "0000:1:1.6","mac": "cc:48:15:ff:00:09","vf_id": 9,"pf_id": 2}]`)
+		configs, err := parse(defaultNUSAConfigPath, config)
+		require.NoError(t, err)
+		assert.Len(t, configs.EniVFs, 1)
+		assert.Equal(t, "0000:1:1.6", configs.EniVFs[0].BDF)
+		assert.Equal(t, 9, configs.EniVFs[0].VfID)
+		assert.Equal(t, 2, configs.EniVFs[0].PfID)
+	})
+	t.Run("invalid config eni controller", func(t *testing.T) {
+		config := []byte(`{"eniVFs": [{ "pf_id": 0,"vf_id": 0,"bdf": "0000:1:2.5"}]}`)
+		_, err := parse(defaultNUSAConfigPath, config)
+		require.NotNil(t, err)
+	})
+	t.Run("valid config vpc eni agent", func(t *testing.T) {
+		config := []byte(`{"eniVFs": [{"pf_id": 1,"vf_id": 9,"bdf": "0000:1:1.6"}]}`)
+		configs, err := parse("/var/run/hc-eni-host/vf-topo-vpc", config)
+		require.NoError(t, err)
+		assert.Len(t, configs.EniVFs, 1)
+		assert.Equal(t, "0000:1:1.6", configs.EniVFs[0].BDF)
+		assert.Equal(t, 9, configs.EniVFs[0].VfID)
+		assert.Equal(t, 1, configs.EniVFs[0].PfID)
+	})
+	t.Run("invalid config vpc eni agent", func(t *testing.T) {
+		config := []byte(`[{"bdf": "0000:1:1.6","mac": "cc:48:15:ff:00:09","vf_id": 9,"pf_id": 2}]`)
+		_, err := parse("/var/run/hc-eni-host/vf-topo-vpc", config)
+		require.NotNil(t, err)
+	})
+}
+
 // TestGetPFBDF tests the getPFBDF function with mocked sysfs structure
 func TestGetPFBDF(t *testing.T) {
 	t.Run("invalid BDF format", func(t *testing.T) {
