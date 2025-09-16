@@ -5,8 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agiledragon/gomonkey/v2"
+	"github.com/AliyunContainerService/terway/pkg/k8s/mocks"
+	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -239,9 +242,19 @@ func TestCleanRuntimeNode(t *testing.T) {
 			}
 
 			// Create mock k8s interface
-			mockK8s := &mockKubernetes{
-				client:   fakeClient,
-				nodeName: "test-node",
+			mockK8s := &mocks.Kubernetes{}
+			mockK8s.On("GetClient").Return(fakeClient).Maybe()
+			mockK8s.On("NodeName").Return("test-node").Maybe()
+			if tt.mockPodExist != nil {
+				mockK8s.On("PodExist", mock.Anything, mock.Anything).Return(
+					func(namespace string, name string) bool {
+						result, _ := tt.mockPodExist(namespace, name)
+						return result
+					},
+					func(namespace string, name string) error {
+						_, err := tt.mockPodExist(namespace, name)
+						return err
+					}).Maybe()
 			}
 
 			// Create networkService instance
@@ -249,14 +262,6 @@ func TestCleanRuntimeNode(t *testing.T) {
 				ipamType:   tt.ipamType,
 				daemonMode: tt.daemonMode,
 				k8s:        mockK8s,
-			}
-
-			// Mock PodExist method if provided
-			if tt.mockPodExist != nil {
-				patches := gomonkey.ApplyMethod(mockK8s, "PodExist", func(m *mockKubernetes, namespace, name string) (bool, error) {
-					return tt.mockPodExist(namespace, name)
-				})
-				defer patches.Reset()
 			}
 
 			// Execute the function
@@ -292,49 +297,296 @@ func TestCleanRuntimeNode(t *testing.T) {
 					}
 				}
 			}
+
+			mockK8s.AssertExpectations(t)
 		})
 	}
 }
 
-// Mock implementation of k8s.Kubernetes interface
-type mockKubernetes struct {
-	client   client.Client
-	nodeName string
+func TestGetPodIPs(t *testing.T) {
+	tests := []struct {
+		name     string
+		netConfs []*rpc.NetConf
+		want     []string
+	}{
+		{
+			name:     "empty net confs",
+			netConfs: []*rpc.NetConf{},
+			want:     []string{},
+		},
+		{
+			name: "nil basic info",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName:    "eth0",
+					BasicInfo: nil,
+				},
+			},
+			want: []string{},
+		},
+		{
+			name: "nil pod ip",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName: "eth0",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: nil,
+					},
+				},
+			},
+			want: []string{},
+		},
+		{
+			name: "only ipv4",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName: "eth0",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv4: "192.168.1.10",
+							IPv6: "",
+						},
+					},
+				},
+			},
+			want: []string{"192.168.1.10"},
+		},
+		{
+			name: "only ipv6",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName: "eth0",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv4: "",
+							IPv6: "2001:db8::1",
+						},
+					},
+				},
+			},
+			want: []string{"2001:db8::1"},
+		},
+		{
+			name: "both ipv4 and ipv6",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName: "eth0",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv4: "192.168.1.10",
+							IPv6: "2001:db8::1",
+						},
+					},
+				},
+			},
+			want: []string{"192.168.1.10", "2001:db8::1"},
+		},
+		{
+			name: "multiple interfaces with eth0 only",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName: "eth1",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv4: "192.168.2.10",
+						},
+					},
+				},
+				{
+					IfName: "eth0",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv4: "192.168.1.10",
+						},
+					},
+				},
+			},
+			want: []string{"192.168.1.10"},
+		},
+		{
+			name: "multiple interfaces with empty ifname",
+			netConfs: []*rpc.NetConf{
+				{
+					IfName: "",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv6: "2001:db8::1",
+						},
+					},
+				},
+				{
+					IfName: "eth1",
+					BasicInfo: &rpc.BasicInfo{
+						PodIP: &rpc.IPSet{
+							IPv4: "192.168.2.10",
+						},
+					},
+				},
+			},
+			want: []string{"2001:db8::1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getPodIPs(tt.netConfs)
+			require.ElementsMatch(t, tt.want, got)
+		})
+	}
 }
 
-func (m *mockKubernetes) GetClient() client.Client {
-	return m.client
-}
+func TestFilterENINotFound(t *testing.T) {
+	tests := []struct {
+		name           string
+		podResources   []daemon.PodResources
+		attachedENIID  map[string]*daemon.ENI
+		expectedResult []daemon.PodResources
+	}{
+		{
+			name:           "empty pod resources",
+			podResources:   []daemon.PodResources{},
+			attachedENIID:  map[string]*daemon.ENI{},
+			expectedResult: []daemon.PodResources{},
+		},
+		{
+			name: "pod resources with no ENIIP type",
+			podResources: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{
+							Type: "eni",
+							ID:   "eni-1",
+						},
+					},
+				},
+			},
+			attachedENIID: map[string]*daemon.ENI{},
+			expectedResult: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{
+							Type: "eni",
+							ID:   "eni-1",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "eniip resource with eniID found",
+			podResources: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{
+							Type:  "eniIp",
+							ENIID: "eni-1",
+						},
+					},
+				},
+			},
+			attachedENIID: map[string]*daemon.ENI{
+				"eni-1": {
+					ID: "eni-1",
+				},
+			},
+			expectedResult: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{
+							Type:  "eniIp",
+							ENIID: "eni-1",
+						},
+					},
+				},
+			},
+		},
 
-func (m *mockKubernetes) NodeName() string {
-	return m.nodeName
-}
+		{
+			name: "eniip resource with empty eniID and mac found",
+			podResources: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{
+							Type:  "eniIp",
+							ENIID: "",
+							ID:    "mac-1.ip-1",
+						},
+					},
+				},
+			},
+			attachedENIID: map[string]*daemon.ENI{
+				"eni-1": {
+					MAC: "mac-1",
+				},
+			},
+			expectedResult: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{
+							Type:  "eniIp",
+							ENIID: "",
+							ID:    "mac-1.ip-1",
+						},
+					},
+				},
+			},
+		},
 
-func (m *mockKubernetes) PodExist(namespace, name string) (bool, error) {
-	// This will be mocked in tests
-	return false, nil
-}
+		{
+			name: "multiple resources with mixed conditions",
+			podResources: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{
+							Type:  "eniIp",
+							ENIID: "eni-1",
+						},
+						{
+							Type:  "eniIp",
+							ENIID: "",
+							ID:    "mac-2.ip-2",
+						},
+						{
+							Type: "eni",
+							ID:   "eni-3",
+						},
+					},
+				},
+			},
+			attachedENIID: map[string]*daemon.ENI{
+				"eni-1": {
+					ID: "eni-1",
+				},
+				"eni-2": {
+					MAC: "mac-2",
+				},
+			},
+			expectedResult: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{
+							Type:  "eniIp",
+							ENIID: "eni-1",
+						},
+						{
+							Type:  "eniIp",
+							ENIID: "",
+							ID:    "mac-2.ip-2",
+						},
+						{
+							Type: "eni",
+							ID:   "eni-3",
+						},
+					},
+				},
+			},
+		},
+	}
 
-// Implement other required methods with dummy implementations
-func (m *mockKubernetes) GetLocalPods() ([]*daemon.PodInfo, error) { return nil, nil }
-func (m *mockKubernetes) GetPod(ctx context.Context, namespace, name string, cache bool) (*daemon.PodInfo, error) {
-	return nil, nil
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := filterENINotFound(tt.podResources, tt.attachedENIID)
+			require.ElementsMatch(t, tt.expectedResult, result)
+		})
+	}
 }
-func (m *mockKubernetes) GetServiceCIDR() *types.IPNetSet                       { return nil }
-func (m *mockKubernetes) SetNodeAllocatablePod(count int) error                 { return nil }
-func (m *mockKubernetes) PatchNodeAnnotations(anno map[string]string) error     { return nil }
-func (m *mockKubernetes) PatchPodIPInfo(info *daemon.PodInfo, ips string) error { return nil }
-func (m *mockKubernetes) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, message string) error {
-	return nil
-}
-func (m *mockKubernetes) RecordNodeEvent(eventType, reason, message string) {}
-func (m *mockKubernetes) RecordPodEvent(podName, podNamespace, eventType, reason, message string) error {
-	return nil
-}
-func (m *mockKubernetes) GetNodeDynamicConfigLabel() string { return "" }
-func (m *mockKubernetes) GetDynamicConfigWithName(ctx context.Context, name string) (string, error) {
-	return "", nil
-}
-func (m *mockKubernetes) SetCustomStatefulWorkloadKinds(kinds []string) error { return nil }
-func (m *mockKubernetes) GetTrunkID() string                                  { return "" }
-func (m *mockKubernetes) Node() *corev1.Node                                  { return &corev1.Node{} }
