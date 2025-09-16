@@ -2,9 +2,11 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"time"
 
-	"golang.org/x/time/rate"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -49,6 +51,61 @@ const (
 	longThrottleLatency = 5 * time.Second
 )
 
+// AliyunThrottleError represents a throttle error from Aliyun API
+type AliyunThrottleError struct {
+	Code    string
+	Message string
+}
+
+func (e *AliyunThrottleError) Error() string {
+	return fmt.Sprintf("throttle error: %s - %s", e.Code, e.Message)
+}
+
+// IsThrottleError checks if an error is a throttle error
+func IsThrottleError(err error) bool {
+	if err == nil {
+		return false
+	}
+	
+	// Check for common Aliyun throttle error codes
+	throttleCodes := []string{
+		"Throttling",
+		"Throttling.User",
+		"Throttling.Api",
+		"Throttling.RateLimit",
+		"Throttling.Quota",
+		"ServiceUnavailable",
+		"RequestLimitExceeded",
+		"RequestThrottled",
+		"TooManyRequests",
+	}
+	
+	errStr := err.Error()
+	for _, code := range throttleCodes {
+		if contains(errStr, code) {
+			return true
+		}
+	}
+	
+	return false
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || 
+		(len(s) > len(substr) && (s[:len(substr)] == substr || 
+		s[len(s)-len(substr):] == substr || 
+		containsSubstring(s, substr))))
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func FromMap(in map[string]int) LimitConfig {
 	l := make(LimitConfig)
 	for k, v := range in {
@@ -61,18 +118,33 @@ func FromMap(in map[string]int) LimitConfig {
 }
 
 type RateLimiter struct {
-	store map[string]*rate.Limiter
+	store map[string]*awsAdaptiveRetryer
+}
+
+// awsAdaptiveRetryer wraps AWS AdaptiveMode for per-API rate limiting
+type awsAdaptiveRetryer struct {
+	retryer aws.RetryerV2
 }
 
 func NewRateLimiter(cfg LimitConfig) *RateLimiter {
 	r := &RateLimiter{
-		store: make(map[string]*rate.Limiter),
+		store: make(map[string]*awsAdaptiveRetryer),
 	}
-	for k, v := range defaultLimit {
-		r.store[k] = rate.NewLimiter(rate.Limit(float64(v)/60), v)
+	
+	// Initialize with default limits
+	for k := range defaultLimit {
+		adaptiveRetryer := &awsAdaptiveRetryer{
+			retryer: retry.NewAdaptiveMode(),
+		}
+		r.store[k] = adaptiveRetryer
 	}
-	for k, v := range cfg {
-		r.store[k] = rate.NewLimiter(rate.Limit(v.QPS), v.Burst)
+	
+	// Override with custom config
+	for k := range cfg {
+		adaptiveRetryer := &awsAdaptiveRetryer{
+			retryer: retry.NewAdaptiveMode(),
+		}
+		r.store[k] = adaptiveRetryer
 	}
 
 	return r
@@ -89,9 +161,61 @@ func (r *RateLimiter) Wait(ctx context.Context, name string) error {
 			l.Info("client rate limit", "api", name, "took", took.Seconds())
 		}
 	}()
+	
 	v, ok := r.store[name]
-	if ok {
-		return v.Wait(ctx)
+	if !ok {
+		v = r.store[""]
 	}
-	return r.store[""].Wait(ctx)
+	
+	// Use AWS AdaptiveMode to get attempt token
+	releaseToken, err := v.retryer.GetAttemptToken(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get attempt token: %w", err)
+	}
+	
+	// Release the token immediately since we're just using it for rate limiting
+	// The actual API call will be made by the caller
+	releaseToken(nil)
+	
+	return nil
+}
+
+// UpdateThrottleStatus should be called after each API call to update the adaptive rate limiter
+// based on whether the call was throttled or not. This is crucial for the adaptive behavior to work.
+// 
+// Example usage:
+//   err := r.Wait(ctx, "DescribeInstances")
+//   if err != nil {
+//       // handle error
+//   }
+//   // After making the API call, update the status based on the response
+//   wasThrottled := IsThrottleError(apiResponse)
+//   r.UpdateThrottleStatus("DescribeInstances", wasThrottled)
+func (r *RateLimiter) UpdateThrottleStatus(name string, wasThrottled bool) {
+	v, ok := r.store[name]
+	if !ok {
+		v = r.store[""]
+	}
+	
+	// Create a throttle error if needed for AWS retryer
+	var err error
+	if wasThrottled {
+		err = &AliyunThrottleError{
+			Code:    "Throttling",
+			Message: "Rate limit exceeded",
+		}
+	}
+	
+	// Use AWS retryer's GetRetryToken to update the adaptive rate limiter
+	ctx := context.Background()
+	releaseToken, retryErr := v.retryer.GetRetryToken(ctx, err)
+	if retryErr != nil {
+		// Log error but don't fail the operation
+		l := logf.FromContext(ctx)
+		l.Error(retryErr, "failed to update throttle status", "api", name)
+		return
+	}
+	
+	// Release the token to complete the update
+	releaseToken(err)
 }
