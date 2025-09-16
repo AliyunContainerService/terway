@@ -28,8 +28,17 @@ type Configs struct {
 	EniVFs []*Config `json:"eniVFs"`
 }
 
-func parse(config []byte) (*Configs, error) {
+func parse(path string, config []byte) (*Configs, error) {
 	var configs Configs
+	if path == defaultNUSAConfigPath {
+		configs.EniVFs = make([]*Config, 0)
+		err := json.Unmarshal(config, &configs.EniVFs)
+		if err != nil {
+			return nil, err
+		}
+		return &configs, nil
+	}
+
 	err := json.Unmarshal(config, &configs)
 	if err != nil {
 		return nil, err
@@ -45,7 +54,7 @@ func GetBDFbyVFID(path string, vfID int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	config, err := parse(configContent)
+	config, err := parse(path, configContent)
 	if err != nil {
 		return "", err
 	}
