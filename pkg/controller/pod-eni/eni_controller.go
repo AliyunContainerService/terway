@@ -694,16 +694,25 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 	podENI.Status.ENIInfos = make(map[string]v1beta1.ENIInfo)
 	lock := sync.Mutex{}
 
-	crNode := &v1beta1.Node{}
-	err := m.client.Get(ctx, k8stypes.NamespacedName{Name: nodeName}, crNode)
+	node := &corev1.Node{}
+	err := m.client.Get(ctx, k8stypes.NamespacedName{Name: nodeName}, node)
 	if err != nil {
 		finalErr = err
 		return err
 	}
 
 	var ecsHighDensity bool
-	if crNode.Annotations[types.ENOApi] == types.APIEcsHDeni {
-		ecsHighDensity = true
+	if utils.ISLinJunNode(node.Labels) {
+		crNode := &v1beta1.Node{}
+		err := m.client.Get(ctx, k8stypes.NamespacedName{Name: nodeName}, crNode)
+		if err != nil {
+			finalErr = err
+			return err
+		}
+
+		if crNode.Annotations[types.ENOApi] == types.APIEcsHDeni {
+			ecsHighDensity = true
+		}
 	}
 
 	g, _ := errgroup.WithContext(context.Background())
