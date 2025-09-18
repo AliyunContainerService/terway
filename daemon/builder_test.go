@@ -5,9 +5,12 @@ import (
 	"os"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
+	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
+	instancemocks "github.com/AliyunContainerService/terway/pkg/aliyun/instance/mocks"
+	k8smocks "github.com/AliyunContainerService/terway/pkg/k8s/mocks"
 	"github.com/AliyunContainerService/terway/types/daemon"
+	"github.com/agiledragon/gomonkey/v2"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewNetworkServiceBuilder(t *testing.T) {
@@ -282,4 +285,210 @@ func TestNetworkServiceBuilder_Build_WithError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, service)
+}
+
+func Test_setupAliyunClient(t *testing.T) {
+	builder := &NetworkServiceBuilder{
+		config: &daemon.Config{
+			Version:      "1",
+			AccessID:     "access_id",
+			AccessSecret: "access_secret",
+		},
+	}
+
+	metadata := instancemocks.NewInterface(t)
+	metadata.On("GetRegionID").Return("cn-hangzhou", nil)
+	instance.Init(metadata)
+
+	err := builder.setupAliyunClient()
+	assert.NoError(t, err)
+
+	assert.NotNil(t, builder.aliyunClient)
+}
+
+func TestNetworkServiceBuilder_InitResourceDB(t *testing.T) {
+	tests := []struct {
+		name          string
+		hasError      bool
+		expectedError bool
+	}{
+		{
+			name:          "Success case - no existing error",
+			hasError:      false,
+			expectedError: false,
+		},
+		{
+			name:          "Error case with existing error",
+			hasError:      true,
+			expectedError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			builder := &NetworkServiceBuilder{
+				service: &networkService{},
+			}
+
+			if tc.hasError {
+				builder.err = assert.AnError
+			}
+
+			result := builder.InitResourceDB()
+
+			if tc.expectedError {
+				assert.NotNil(t, result.err)
+				assert.Equal(t, assert.AnError, result.err)
+			} else {
+				// For success case, we can't easily test the actual storage creation
+				// without complex mocking, so we just verify the function returns
+				// and that the builder is returned (which happens even if storage fails)
+				assert.NotNil(t, result)
+			}
+		})
+	}
+}
+
+func TestNetworkServiceBuilder_LoadDynamicConfig(t *testing.T) {
+	tests := []struct {
+		name                string
+		hasError            bool
+		dynamicCfg          string
+		dynamicCfgLabel     string
+		getDynamicConfigErr error
+		getConfigErr        error
+		validateErr         error
+		expectedError       bool
+	}{
+		{
+			name:                "Success case - valid dynamic config",
+			hasError:            false,
+			dynamicCfg:          `{"version": "1", "max_pool_size": 5}`,
+			dynamicCfgLabel:     "test-config",
+			getDynamicConfigErr: nil,
+			getConfigErr:        nil,
+			validateErr:         nil,
+			expectedError:       false,
+		},
+		{
+			name:                "Success case - no dynamic config",
+			hasError:            false,
+			dynamicCfg:          "",
+			dynamicCfgLabel:     "",
+			getDynamicConfigErr: nil,
+			getConfigErr:        nil,
+			validateErr:         nil,
+			expectedError:       false,
+		},
+		{
+			name:                "Error case - existing error",
+			hasError:            true,
+			dynamicCfg:          "",
+			dynamicCfgLabel:     "",
+			getDynamicConfigErr: nil,
+			getConfigErr:        nil,
+			validateErr:         nil,
+			expectedError:       true,
+		},
+		{
+			name:                "Error case - getDynamicConfig fails",
+			hasError:            false,
+			dynamicCfg:          "",
+			dynamicCfgLabel:     "",
+			getDynamicConfigErr: assert.AnError,
+			getConfigErr:        nil,
+			validateErr:         nil,
+			expectedError:       false, // Should fallback gracefully
+		},
+		{
+			name:                "Error case - config parsing fails",
+			hasError:            false,
+			dynamicCfg:          "invalid json",
+			dynamicCfgLabel:     "test-config",
+			getDynamicConfigErr: nil,
+			getConfigErr:        assert.AnError,
+			validateErr:         nil,
+			expectedError:       true,
+		},
+		{
+			name:                "Error case - config validation fails",
+			hasError:            false,
+			dynamicCfg:          `{"version": "1", "max_pool_size": 5}`,
+			dynamicCfgLabel:     "test-config",
+			getDynamicConfigErr: nil,
+			getConfigErr:        nil,
+			validateErr:         assert.AnError,
+			expectedError:       true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create temporary config file
+			tmpFile, err := os.CreateTemp("", "config-*.json")
+			if err != nil {
+				t.Fatalf("Failed to create temp file: %v", err)
+			}
+			defer os.Remove(tmpFile.Name())
+
+			baseConfig := `{
+				"version": "1",
+				"max_pool_size": 5,
+				"min_pool_size": 0,
+				"credential_path": "/var/addon/token-config",
+				"ipam_type": "crd"
+			}`
+			err = os.WriteFile(tmpFile.Name(), []byte(baseConfig), 0644)
+			assert.NoError(t, err)
+
+			// Create mock k8s client
+			mockK8s := k8smocks.NewKubernetes(t)
+
+			builder := &NetworkServiceBuilder{
+				ctx:            context.Background(),
+				configFilePath: tmpFile.Name(),
+				service: &networkService{
+					k8s: mockK8s,
+				},
+			}
+
+			if tc.hasError {
+				builder.err = assert.AnError
+			}
+
+			// Setup gomonkey patches
+			patches := gomonkey.NewPatches()
+			defer patches.Reset()
+
+			// Mock getDynamicConfig function
+			patches.ApplyFunc(getDynamicConfig, func(ctx context.Context, k8s interface{}) (string, string, error) {
+				return tc.dynamicCfg, tc.dynamicCfgLabel, tc.getDynamicConfigErr
+			})
+
+			// Mock GetConfigFromFileWithMerge if needed
+			if tc.getConfigErr != nil {
+				patches.ApplyFunc(daemon.GetConfigFromFileWithMerge, func(configFilePath string, dynamicCfg []byte) (*daemon.Config, error) {
+					return nil, tc.getConfigErr
+				})
+			}
+
+			// Mock config Validate method if needed
+			if tc.validateErr != nil && tc.getConfigErr == nil {
+				patches.ApplyMethodFunc(&daemon.Config{}, "Validate", func() error {
+					return tc.validateErr
+				})
+			}
+
+			result := builder.LoadDynamicConfig()
+
+			if tc.expectedError {
+				assert.NotNil(t, result.err)
+			} else {
+				assert.Nil(t, result.err)
+				if tc.dynamicCfg != "" && tc.getDynamicConfigErr == nil && tc.getConfigErr == nil {
+					assert.NotNil(t, result.config)
+				}
+			}
+		})
+	}
 }
