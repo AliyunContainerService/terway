@@ -1107,6 +1107,19 @@ func migrate(ctx context.Context, c client.Client) error {
 		return err
 	}
 
+	// List all existing NetworkInterface CRs to avoid multiple Get requests
+	existingNetworkInterfaces := &v1beta1.NetworkInterfaceList{}
+	err = c.List(ctx, existingNetworkInterfaces)
+	if err != nil {
+		return err
+	}
+
+	// Build a map for fast lookup
+	eniMap := make(map[string]*v1beta1.NetworkInterface, len(existingNetworkInterfaces.Items))
+	for i, ni := range existingNetworkInterfaces.Items {
+		eniMap[ni.Name] = &existingNetworkInterfaces.Items[i]
+	}
+
 	var toCreateOrUpdate []*v1beta1.NetworkInterface
 
 	for _, podENI := range podENIs.Items {
@@ -1116,16 +1129,18 @@ func migrate(ctx context.Context, c client.Client) error {
 					Name: alloc.ENI.ID,
 				},
 			}
-			err = c.Get(ctx, client.ObjectKeyFromObject(networkInterfaceCR), networkInterfaceCR)
-			if err == nil {
+
+			// Check if NetworkInterface CR exists using the map
+			existingNI, exists := eniMap[alloc.ENI.ID]
+			if exists {
+				// Copy existing data
+				existingNI.DeepCopyInto(networkInterfaceCR)
 				if networkInterfaceCR.Status.Phase == v1beta1.ENIPhaseInitial {
 					goto statusChange
 				}
 				continue
 			}
-			if !k8sErr.IsNotFound(err) {
-				return err
-			}
+
 			// not found, create it
 			networkInterfaceCR.Name = alloc.ENI.ID
 			controllerutil.AddFinalizer(networkInterfaceCR, types.FinalizerENI)
@@ -1156,43 +1171,34 @@ func migrate(ctx context.Context, c client.Client) error {
 
 	for _, networkInterfaceCR := range toCreateOrUpdate {
 		networkInterfaceCR := networkInterfaceCR
+		// Check if this NetworkInterface already exists
+		_, exists := eniMap[networkInterfaceCR.Name]
 		group.Go(func() error {
-			return syncNetworkInterfaceCR(ctx, c, networkInterfaceCR)
+			return syncNetworkInterfaceCR(ctx, c, networkInterfaceCR, exists)
 		})
 	}
 	err = group.Wait()
 	return err
 }
 
-func syncNetworkInterfaceCR(ctx context.Context, c client.Client, expect *v1beta1.NetworkInterface) error {
-	exist := &v1beta1.NetworkInterface{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: expect.Name,
-		},
-	}
-	err := c.Get(ctx, client.ObjectKeyFromObject(exist), exist)
-	if err != nil {
-		if !k8sErr.IsNotFound(err) {
-			return err
-		}
-
+func syncNetworkInterfaceCR(ctx context.Context, c client.Client, expect *v1beta1.NetworkInterface, exists bool) error {
+	if !exists {
 		status := expect.Status.DeepCopy()
 		// create expect
-		err = c.Create(ctx, expect)
+		err := c.Create(ctx, expect)
 		if err != nil {
 			return err
 		}
 
 		// wait cr created
-		err = common.WaitCreated(ctx, c, exist, exist.Namespace, exist.Name)
+		err = common.WaitCreated(ctx, c, expect, expect.Namespace, expect.Name)
 		if err != nil {
 			return err
 		}
 		expect.Status = *status
 	}
 
-	exist.Status = expect.Status
-	err = c.Status().Update(ctx, exist)
+	err := c.Status().Update(ctx, expect)
 
 	return err
 }
