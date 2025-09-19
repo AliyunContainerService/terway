@@ -1544,6 +1544,40 @@ func TestGcPods(t *testing.T) {
 	}
 }
 
+func Test_RecordEvent(t *testing.T) {
+	t.Run("Test_RecordEvent pod", func(t *testing.T) {
+		k8s := mocks.NewKubernetes(t)
+		k8s.On("RecordPodEvent", "test-pod", "default", corev1.EventTypeNormal, "test-reason", "test-message").Return(nil)
+		ns := &networkService{
+			k8s: k8s,
+		}
+		reply, err := ns.RecordEvent(context.Background(), &rpc.EventRequest{
+			EventTarget:     rpc.EventTarget_EventTargetPod,
+			K8SPodName:      "test-pod",
+			K8SPodNamespace: "default",
+			Reason:          "test-reason",
+			Message:         "test-message",
+		})
+		assert.NoError(t, err)
+		assert.NotNil(t, reply)
+	})
+
+	t.Run("Test_RecordEvent node", func(t *testing.T) {
+		k8s := mocks.NewKubernetes(t)
+		k8s.On("RecordNodeEvent", corev1.EventTypeNormal, "test-reason", "test-message").Return(nil)
+		ns := &networkService{
+			k8s: k8s,
+		}
+		reply, err := ns.RecordEvent(context.Background(), &rpc.EventRequest{
+			EventTarget: rpc.EventTarget_EventTargetNode,
+			Reason:      "test-reason",
+			Message:     "test-message",
+		})
+		assert.NoError(t, err)
+		assert.NotNil(t, reply)
+	})
+}
+
 // Helper function to create string pointer
 func stringPtr(s string) *string {
 	return &s

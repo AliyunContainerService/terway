@@ -603,6 +603,8 @@ func convertPod(daemonMode string, enableErdma bool, statefulWorkloadKindSet set
 		}
 	}
 
+	pi.CreateTimeStamp = pod.CreationTimestamp.Time
+
 	return pi
 }
 

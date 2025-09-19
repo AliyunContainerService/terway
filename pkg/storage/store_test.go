@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestMemoryStorage_Put tests the Put method of MemoryStorage
@@ -240,6 +241,7 @@ func TestDiskStorage_PutGet(t *testing.T) {
 		"bool":   true,
 		"array":  []string{"a", "b", "c"},
 		"object": map[string]string{"key": "value"},
+		"time":   time.Unix(1, 0),
 	}
 
 	for key, value := range testData {
