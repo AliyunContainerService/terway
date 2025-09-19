@@ -529,13 +529,13 @@ func (n *networkService) gcPods(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	exist := make(map[string]bool)
+	exist := make(map[string]*daemon.PodInfo)
 
 	existIPs := sets.Set[string]{}
 
-	for _, pod := range pods {
+	for i, pod := range pods {
 		if !pod.SandboxExited {
-			exist[utils.PodInfoKey(pod.Namespace, pod.Name)] = true
+			exist[utils.PodInfoKey(pod.Namespace, pod.Name)] = pods[i]
 			if pod.PodIPs.IPv4 != nil {
 				existIPs.Insert(pod.PodIPs.IPv4.String())
 			}
@@ -563,8 +563,9 @@ func (n *networkService) gcPods(ctx context.Context) error {
 			serviceLog.Info("pod res", "pod", podRes)
 		}
 
+		// for pod just created , cni may not be called, to avoid conflict we can skip resent created pods
 		podID := utils.PodInfoKey(podRes.PodInfo.Namespace, podRes.PodInfo.Name)
-		if _, ok := exist[podID]; ok {
+		if pod, ok := exist[podID]; ok && pod.CreateTimeStamp.Before(time.Now().Add(-2*time.Minute)) {
 			err = ruleSync(ctx, podRes)
 			if err != nil {
 				serviceLog.Error(err, "error sync pod rule")

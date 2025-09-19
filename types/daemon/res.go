@@ -39,6 +39,7 @@ type PodInfo struct {
 	PodUID          string
 	NetworkPriority string
 	ERdma           bool
+	CreateTimeStamp time.Time
 }
 
 // ExtraEipInfo store extra eip info
