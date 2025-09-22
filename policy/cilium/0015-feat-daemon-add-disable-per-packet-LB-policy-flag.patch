@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Mon, 22 Sep 2025 15:37:03 +0800
+Subject: feat(daemon): add disable per-packet LB policy flag
+
+- Introduce new flag to disable per-packet load balancing policy
+- Bind the new flag to the environment variable for configuration
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ daemon/cmd/daemon_main.go | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
+index 1b8e51ea63..afedac2475 100644
+--- a/daemon/cmd/daemon_main.go
++++ b/daemon/cmd/daemon_main.go
+@@ -378,6 +378,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
+ 	flags.Bool(option.EnableInClusterLoadBalance, false, "Enable k8s in cluster loadbalance")
+ 	option.BindEnv(vp, option.EnableInClusterLoadBalance)
+ 
++	flags.Bool(option.DisablePerPacketLB, false, "Disable per-packet LB policy")
++	option.BindEnv(vp, option.DisablePerPacketLB)
++
+ 	flags.StringSlice(option.TerwayHostStackCIDR, []string{"169.254.20.10/32"}, "CIDRs to route traffic to host stack, this is node level config, if you change this config, you need to restart this node")
+ 	option.BindEnv(vp, option.TerwayHostStackCIDR)
+ 
+-- 
+2.50.1 (Apple Git-155)
+
