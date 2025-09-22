@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1-labs
-ARG TERWAY_POLICY_IMAGE=registry-cn-zhangjiakou.ack.aliyuncs.com/acs/terway:policy-381dd606@sha256:726a12276a3cbbe11be5a497716aa6e4a9a9638de55195d5f71a89a613366040
+ARG TERWAY_POLICY_IMAGE=registry-cn-zhangjiakou.ack.aliyuncs.com/acs/terway:policy-8116f33a@sha256:73427c951721c0f59bb7a6f1030514527945d8169419869981cd887d0d4b7571
 ARG UBUNTU_IMAGE=registry.cn-hangzhou.aliyuncs.com/acs/ubuntu:24.04-update
 ARG CILIUM_IPROUTE2_IMAGE=quay.io/cilium/cilium-iproute2:3570d58349efb2d6b0342369a836998c93afd291@sha256:1abcd7a5d2117190ab2690a163ee9cd135bc9e4cf8a4df662a8f993044c79342
 ARG CILIUM_LLVM_IMAGE=quay.io/cilium/cilium-llvm:02191b3a68f4003f075e69a61b61faa8d12d4b6d@sha256:54ca04f65a6de3aa5243a7da392aed342c64f579ebd94ea1290590ce77a433a8
