@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -67,6 +69,8 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		r.record.Event(k8sNode, "Warning", types.EventConfigError, err.Error())
 		return reconcile.Result{}, err
 	}
+
+	eniConfig.Populate()
 
 	beforeStatus, err := runtime.DefaultUnstructuredConverter.ToUnstructured(node.DeepCopy())
 	if err != nil {
@@ -188,6 +192,31 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		MaxPoolSize:    eniConfig.MaxPoolSize,
 		MinPoolSize:    eniConfig.MinPoolSize,
 		PoolSyncPeriod: eniConfig.IPPoolSyncPeriod,
+	}
+
+	if eniConfig.IdleIPReclaimAfter != nil {
+		reclaim := &networkv1beta1.IPReclaimPolicy{}
+
+		duration, err := time.ParseDuration(*eniConfig.IdleIPReclaimAfter)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		reclaim.After = &metav1.Duration{Duration: duration}
+
+		if *eniConfig.IdleIPReclaimInterval != "" {
+			interval, err := time.ParseDuration(*eniConfig.IdleIPReclaimInterval)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+			reclaim.Interval = &metav1.Duration{Duration: interval}
+		}
+		reclaim.BatchSize = eniConfig.IdleIPReclaimBatchSize
+
+		if eniConfig.IdleIPReclaimJitterFactor != nil {
+			reclaim.JitterFactor = *eniConfig.IdleIPReclaimJitterFactor
+		}
+
+		node.Spec.Pool.Reclaim = reclaim
 	}
 
 	afterStatus, err := runtime.DefaultUnstructuredConverter.ToUnstructured(node.DeepCopy())

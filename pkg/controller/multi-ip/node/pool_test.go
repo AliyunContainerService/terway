@@ -708,7 +708,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resul := assignIPFromLocalPool(tt.args.log, tt.args.podsMapper, tt.args.ipv4Map, tt.args.ipv6Map, false)
+			resul := assignIPFromLocalPool(tt.args.log, tt.args.podsMapper, tt.args.ipv4Map, tt.args.ipv6Map, false, &networkv1beta1.Node{})
 			tt.checkResultFunc(t, resul)
 			tt.checkPodsMapFunc(t, tt.args.podsMapper)
 		})
@@ -1590,6 +1590,107 @@ func TestReconcileNode_adjustPool(t *testing.T) {
 				assert.Equal(t, networkv1beta1.IPStatusValid, node.Status.NetworkInterfaces["eni-2"].IPv6["fd00::1"].Status)
 			},
 		},
+		{
+			name: "idle ip reclaim - no reclaim policy",
+			args: args{
+				ctx: MetaIntoCtx(context.TODO()),
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{EnableIPv4: true},
+						Pool:    &networkv1beta1.PoolSpec{MaxPoolSize: 3, MinPoolSize: 1},
+					},
+					Status: networkv1beta1.NodeStatus{
+						LastModifiedTime: metav1.NewTime(time.Now().Add(-time.Hour)), // old modification
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								ID:     "eni-1",
+								Status: "InUse",
+								IPv4: map[string]*networkv1beta1.IP{
+									"192.168.0.1": {IP: "192.168.0.1", Status: networkv1beta1.IPStatusValid, Primary: true, PodID: "eni-primary"},
+									"192.168.0.2": {IP: "192.168.0.2", Status: networkv1beta1.IPStatusValid, PodID: "pod-1"},
+									"192.168.0.3": {IP: "192.168.0.3", Status: networkv1beta1.IPStatusValid}, // idle
+									"192.168.0.4": {IP: "192.168.0.4", Status: networkv1beta1.IPStatusValid}, // idle
+									"192.168.0.5": {IP: "192.168.0.5", Status: networkv1beta1.IPStatusValid}, // idle
+									"192.168.0.6": {IP: "192.168.0.6", Status: networkv1beta1.IPStatusValid}, // idle
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: assert.NoError,
+			checkFunc: func(t *testing.T, node *networkv1beta1.Node) {
+				// Without reclaim policy, should use normal logic: idles(4) - maxPoolSize(3) = 1, so delete 1 IP
+				deletingCount := 0
+				validCount := 0
+				for _, ip := range node.Status.NetworkInterfaces["eni-1"].IPv4 {
+					if ip.Status == networkv1beta1.IPStatusDeleting {
+						deletingCount++
+					} else if ip.Status == networkv1beta1.IPStatusValid {
+						validCount++
+					}
+				}
+				assert.Equal(t, 1, deletingCount, "should delete exactly 1 IP")
+				assert.Equal(t, 5, validCount, "should have 5 valid IPs (1 primary + 1 used + 3 remaining idle)")
+			},
+		},
+		{
+			name: "idle ip reclaim - with reclaim policy and extra deletion",
+			args: args{
+				ctx: MetaIntoCtx(context.TODO()),
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{EnableIPv4: true},
+						Pool: &networkv1beta1.PoolSpec{
+							MaxPoolSize: 5,
+							MinPoolSize: 2,
+							Reclaim: &networkv1beta1.IPReclaimPolicy{
+								After:     &metav1.Duration{Duration: 30 * time.Minute},
+								Interval:  &metav1.Duration{Duration: 10 * time.Minute},
+								BatchSize: 2,
+							},
+						},
+					},
+					Status: networkv1beta1.NodeStatus{
+						LastModifiedTime:      metav1.NewTime(time.Now().Add(-45 * time.Minute)), // past 30min
+						NextIdleIPReclaimTime: metav1.NewTime(time.Now().Add(-5 * time.Minute)),  // past reclaim time
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								ID:     "eni-1",
+								Status: "InUse",
+								IPv4: map[string]*networkv1beta1.IP{
+									"192.168.0.1": {IP: "192.168.0.1", Status: networkv1beta1.IPStatusValid, Primary: true, PodID: "eni-primary"},
+									"192.168.0.2": {IP: "192.168.0.2", Status: networkv1beta1.IPStatusValid, PodID: "pod-1"},
+									"192.168.0.3": {IP: "192.168.0.3", Status: networkv1beta1.IPStatusValid}, // idle
+									"192.168.0.4": {IP: "192.168.0.4", Status: networkv1beta1.IPStatusValid}, // idle
+									"192.168.0.5": {IP: "192.168.0.5", Status: networkv1beta1.IPStatusValid}, // idle
+									"192.168.0.6": {IP: "192.168.0.6", Status: networkv1beta1.IPStatusValid}, // idle
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: assert.NoError,
+			checkFunc: func(t *testing.T, node *networkv1beta1.Node) {
+				// With reclaim policy: normal toDel = idles(4) - maxPoolSize(5) = -1, max(0,-1)=0
+				// Extra deletion: min(batchSize, maxPoolSize - minPoolSize) = min(2, 3) = 2
+				// Total deletion: 0 + 2 = 2
+				deletingCount := 0
+				validCount := 0
+				for _, ip := range node.Status.NetworkInterfaces["eni-1"].IPv4 {
+					if ip.Status == networkv1beta1.IPStatusDeleting {
+						deletingCount++
+					} else if ip.Status == networkv1beta1.IPStatusValid {
+						validCount++
+					}
+				}
+				assert.Equal(t, 2, deletingCount, "should delete exactly 2 IPs due to reclaim policy")
+				assert.Equal(t, 4, validCount, "should have 4 valid IPs (1 primary + 1 used + 2 remaining idle)")
+				// NextIdleIPReclaimTime should be updated
+				assert.True(t, node.Status.NextIdleIPReclaimTime.After(time.Now().Add(9*time.Minute)))
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1684,6 +1785,260 @@ func TestUpdateCrCondition(t *testing.T) {
 	for _, tt := range tests {
 		updateCrCondition(tt.options)
 		tt.checkFunc(t, tt.options)
+	}
+}
+
+func Test_calculateToDel(t *testing.T) {
+	type args struct {
+		ctx  context.Context
+		node *networkv1beta1.Node
+	}
+	tests := []struct {
+		name string
+		args args
+		want int
+	}{
+		{
+			name: "no reclaim policy should use normal logic",
+			args: args{
+				ctx: MetaIntoCtx(context.TODO()),
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{
+							EnableIPv4: true,
+						},
+						Pool: &networkv1beta1.PoolSpec{
+							MaxPoolSize: 5,
+							MinPoolSize: 1,
+						},
+					},
+					Status: networkv1beta1.NodeStatus{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								Status: "InUse",
+								IPv4: map[string]*networkv1beta1.IP{
+									"192.168.0.1": {Status: networkv1beta1.IPStatusValid, Primary: true, PodID: "eni-primary"}, // primary
+									"192.168.0.2": {Status: networkv1beta1.IPStatusValid, PodID: "pod-1"},                      // used
+									"192.168.0.3": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.4": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.5": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.6": {Status: networkv1beta1.IPStatusValid},                                      // idle
+								},
+							},
+						},
+					},
+				},
+			},
+			want: -1, // idles(4) - maxPoolSize(5) = -1, no reclaim policy returns raw toDel
+		},
+		{
+			name: "with reclaim policy but not yet time",
+			args: args{
+				ctx: MetaIntoCtx(context.TODO()),
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{
+							EnableIPv4: true,
+						},
+						Pool: &networkv1beta1.PoolSpec{
+							MaxPoolSize: 5,
+							MinPoolSize: 1,
+							Reclaim: &networkv1beta1.IPReclaimPolicy{
+								After:     &metav1.Duration{Duration: 30 * time.Minute},
+								Interval:  &metav1.Duration{Duration: 10 * time.Minute},
+								BatchSize: 2,
+							},
+						},
+					},
+					Status: networkv1beta1.NodeStatus{
+						LastModifiedTime: metav1.NewTime(time.Now().Add(-10 * time.Minute)), // not yet 30min
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								Status: "InUse",
+								IPv4: map[string]*networkv1beta1.IP{
+									"192.168.0.1": {Status: networkv1beta1.IPStatusValid, Primary: true, PodID: "eni-primary"}, // primary
+									"192.168.0.2": {Status: networkv1beta1.IPStatusValid, PodID: "pod-1"},                      // used
+									"192.168.0.3": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.4": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.5": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.6": {Status: networkv1beta1.IPStatusValid},                                      // idle
+								},
+							},
+						},
+					},
+				},
+			},
+			want: -1, // not yet time, should return normal toDel = idles(4) - maxPoolSize(5) = -1
+		},
+		{
+			name: "with reclaim policy and time reached",
+			args: args{
+				ctx: MetaIntoCtx(context.TODO()),
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{
+							EnableIPv4: true,
+						},
+						Pool: &networkv1beta1.PoolSpec{
+							MaxPoolSize: 5,
+							MinPoolSize: 1,
+							Reclaim: &networkv1beta1.IPReclaimPolicy{
+								After:     &metav1.Duration{Duration: 30 * time.Minute},
+								Interval:  &metav1.Duration{Duration: 10 * time.Minute},
+								BatchSize: 2,
+							},
+						},
+					},
+					Status: networkv1beta1.NodeStatus{
+						LastModifiedTime:      metav1.NewTime(time.Now().Add(-40 * time.Minute)), // past 30min
+						NextIdleIPReclaimTime: metav1.NewTime(time.Now().Add(-40 * time.Minute)),
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								Status: "InUse",
+								IPv4: map[string]*networkv1beta1.IP{
+									"192.168.0.1": {Status: networkv1beta1.IPStatusValid, Primary: true, PodID: "eni-primary"}, // primary
+									"192.168.0.2": {Status: networkv1beta1.IPStatusValid, PodID: "pod-1"},                      // used
+									"192.168.0.3": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.4": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.5": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.6": {Status: networkv1beta1.IPStatusValid},                                      // idle
+								},
+							},
+						},
+					},
+				},
+			},
+			want: 2, // NextIdleIPReclaimTime not set yet, return normal toDel
+		},
+		{
+			name: "with reclaim policy and batch size limit",
+			args: args{
+				ctx: MetaIntoCtx(context.TODO()),
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{
+							EnableIPv4: true,
+						},
+						Pool: &networkv1beta1.PoolSpec{
+							MaxPoolSize: 10,
+							MinPoolSize: 5,
+							Reclaim: &networkv1beta1.IPReclaimPolicy{
+								After:     &metav1.Duration{Duration: 30 * time.Minute},
+								Interval:  &metav1.Duration{Duration: 10 * time.Minute},
+								BatchSize: 3,
+							},
+						},
+					},
+					Status: networkv1beta1.NodeStatus{
+						LastModifiedTime:      metav1.NewTime(time.Now().Add(-40 * time.Minute)),
+						NextIdleIPReclaimTime: metav1.NewTime(time.Now().Add(-40 * time.Minute)),
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								Status: "InUse",
+								IPv4: map[string]*networkv1beta1.IP{
+									"192.168.0.1": {Status: networkv1beta1.IPStatusValid, Primary: true, PodID: "eni-primary"}, // primary
+									"192.168.0.2": {Status: networkv1beta1.IPStatusValid, PodID: "pod-1"},                      // used
+									"192.168.0.3": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.4": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.5": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.6": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.7": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.8": {Status: networkv1beta1.IPStatusValid},                                      // idle
+								},
+							},
+						},
+					},
+				},
+			},
+			want: 3,
+		},
+		{
+			name: "reclaim respects min pool size",
+			args: args{
+				ctx: MetaIntoCtx(context.TODO()),
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{
+							EnableIPv4: true,
+						},
+						Pool: &networkv1beta1.PoolSpec{
+							MaxPoolSize: 10,
+							MinPoolSize: 2,
+							Reclaim: &networkv1beta1.IPReclaimPolicy{
+								After:     &metav1.Duration{Duration: 30 * time.Minute},
+								Interval:  &metav1.Duration{Duration: 10 * time.Minute},
+								BatchSize: 5,
+							},
+						},
+					},
+					Status: networkv1beta1.NodeStatus{
+						LastModifiedTime:      metav1.NewTime(time.Now().Add(-40 * time.Minute)),
+						NextIdleIPReclaimTime: metav1.NewTime(time.Now().Add(-40 * time.Minute)),
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								Status: "InUse",
+								IPv4: map[string]*networkv1beta1.IP{
+									"192.168.0.1": {Status: networkv1beta1.IPStatusValid, Primary: true, PodID: "eni-primary"}, // primary
+									"192.168.0.2": {Status: networkv1beta1.IPStatusValid, PodID: "pod-1"},                      // used
+									"192.168.0.3": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.4": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.5": {Status: networkv1beta1.IPStatusValid},                                      // idle
+								},
+							},
+						},
+					},
+				},
+			},
+			want: 1,
+		},
+		{
+			name: "reclaim extra",
+			args: args{
+				ctx: MetaIntoCtx(context.TODO()),
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{
+							EnableIPv4: true,
+						},
+						Pool: &networkv1beta1.PoolSpec{
+							MaxPoolSize: 5,
+							MinPoolSize: 2,
+							Reclaim: &networkv1beta1.IPReclaimPolicy{
+								After:     &metav1.Duration{Duration: 30 * time.Minute},
+								Interval:  &metav1.Duration{Duration: 10 * time.Minute},
+								BatchSize: 5,
+							},
+						},
+					},
+					Status: networkv1beta1.NodeStatus{
+						LastModifiedTime:      metav1.NewTime(time.Now().Add(-40 * time.Minute)),
+						NextIdleIPReclaimTime: metav1.NewTime(time.Now().Add(-40 * time.Minute)),
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								Status: "InUse",
+								IPv4: map[string]*networkv1beta1.IP{
+									"192.168.0.1": {Status: networkv1beta1.IPStatusValid, Primary: true, PodID: "eni-primary"}, // primary
+									"192.168.0.2": {Status: networkv1beta1.IPStatusValid, PodID: "pod-1"},                      // used
+									"192.168.0.3": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.4": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.5": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.6": {Status: networkv1beta1.IPStatusValid},                                      // idle
+									"192.168.0.7": {Status: networkv1beta1.IPStatusValid},                                      // idle
+								},
+							},
+						},
+					},
+				},
+			},
+			want: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := calculateToDel(tt.args.ctx, tt.args.node)
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }
 
