@@ -27,16 +27,22 @@ var addonSecretRootPath = addonSecretPath
 
 // Config configuration of terway daemon
 type Config struct {
-	Version                     string                             `yaml:"version" json:"version"`
-	AccessID                    secret.Secret                      `yaml:"access_key" json:"access_key"`
-	AccessSecret                secret.Secret                      `yaml:"access_secret" json:"access_secret"`
-	RegionID                    string                             `yaml:"region_id" json:"region_id"`
-	CredentialPath              string                             `yaml:"credential_path" json:"credential_path"`
-	ServiceCIDR                 string                             `yaml:"service_cidr" json:"service_cidr"`
-	VSwitches                   map[string][]string                `yaml:"vswitches" json:"vswitches"`
-	ENITags                     map[string]string                  `yaml:"eni_tags" json:"eni_tags"`
-	MaxPoolSize                 int                                `yaml:"max_pool_size" json:"max_pool_size"`
-	MinPoolSize                 int                                `yaml:"min_pool_size" json:"min_pool_size"`
+	Version        string              `yaml:"version" json:"version"`
+	AccessID       secret.Secret       `yaml:"access_key" json:"access_key"`
+	AccessSecret   secret.Secret       `yaml:"access_secret" json:"access_secret"`
+	RegionID       string              `yaml:"region_id" json:"region_id"`
+	CredentialPath string              `yaml:"credential_path" json:"credential_path"`
+	ServiceCIDR    string              `yaml:"service_cidr" json:"service_cidr"`
+	VSwitches      map[string][]string `yaml:"vswitches" json:"vswitches"`
+	ENITags        map[string]string   `yaml:"eni_tags" json:"eni_tags"`
+	MaxPoolSize    int                 `yaml:"max_pool_size" json:"max_pool_size"`
+	MinPoolSize    int                 `yaml:"min_pool_size" json:"min_pool_size"`
+
+	IdleIPReclaimAfter        *string `yaml:"idle_ip_reclaim_after,omitempty" json:"idle_ip_reclaim_after,omitempty"`
+	IdleIPReclaimBatchSize    int     `yaml:"idle_ip_reclaim_batch_size,omitempty" json:"idle_ip_reclaim_batch_size,omitempty"`
+	IdleIPReclaimInterval     *string `yaml:"idle_ip_reclaim_interval,omitempty" json:"idle_ip_reclaim_interval,omitempty"`
+	IdleIPReclaimJitterFactor *string `yaml:"idle_ip_reclaim_jitter_factor,omitempty" json:"idle_ip_reclaim_jitter_factor,omitempty"`
+
 	MinENI                      int                                `yaml:"min_eni" json:"min_eni"`
 	MaxENI                      int                                `yaml:"max_eni" json:"max_eni"`
 	Prefix                      string                             `yaml:"prefix" json:"prefix"`

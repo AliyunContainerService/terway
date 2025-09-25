@@ -95,6 +95,23 @@ type PoolSpec struct {
 	MinPoolSize int `json:"minPoolSize,omitempty"`
 
 	PoolSyncPeriod string `json:"poolSyncPeriod,omitempty"`
+
+	Reclaim *IPReclaimPolicy `json:"reclaim,omitempty"`
+}
+
+type IPReclaimPolicy struct {
+	// After specifies the duration an IP must be idle before it is eligible for reclamation.
+	// Examples: "300s", "5m", "1h"
+	// +optional
+	After *metav1.Duration `json:"after,omitempty"`
+
+	// Interval specifies the maximum number of IPs to reclaim in a single batch.
+	// +optional
+	Interval *metav1.Duration `json:"interval,omitempty"`
+	// +optional
+	BatchSize int `json:"batchSize,omitempty"`
+	// +optional
+	JitterFactor string `json:"jitterFactor,omitempty"`
 }
 
 type Flavor struct {
@@ -167,9 +184,11 @@ type Condition struct {
 
 // NodeStatus defines the observed state of Node
 type NodeStatus struct {
-	NextSyncOpenAPITime metav1.Time     `json:"nextSyncOpenAPITime,omitempty"`
-	LastSyncOpenAPITime metav1.Time     `json:"lastSyncOpenAPITime,omitempty"`
-	NetworkInterfaces   map[string]*Nic `json:"networkInterfaces,omitempty"`
+	NextSyncOpenAPITime   metav1.Time     `json:"nextSyncOpenAPITime,omitempty"`
+	LastSyncOpenAPITime   metav1.Time     `json:"lastSyncOpenAPITime,omitempty"`
+	LastModifiedTime      metav1.Time     `json:"lastModifiedTime,omitempty"`
+	NextIdleIPReclaimTime metav1.Time     `json:"nextIdleIPReclaimTime,omitempty"`
+	NetworkInterfaces     map[string]*Nic `json:"networkInterfaces,omitempty"`
 }
 
 // +genclient
