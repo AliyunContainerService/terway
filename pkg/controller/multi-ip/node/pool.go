@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -528,14 +529,14 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	releasePodNotFound(ctx, n.client, node.Name, podsMapper, ipv4Map, ipv6Map)
 
 	// 2. assign ip from local pool
-	unSucceedPods := assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA)
+	unSucceedPods := assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA, node)
 
 	// 3. if there is no enough ip, try to allocate from api
 	err := n.addIP(ctx, unSucceedPods, node)
 
 	// 4. after all is assigned , we can re-allocate ip
 	ipv4Map, ipv6Map = buildIPMap(podsMapper, node.Status.NetworkInterfaces)
-	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA)
+	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA, node)
 
 	if err == nil {
 		err = n.gc(ctx, node)
@@ -597,7 +598,7 @@ func releasePodNotFound(ctx context.Context, c client.Client, nodeName string, p
 }
 
 // DO NOT assign pod ip if pod already has one
-func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, ipv4Map, ipv6Map map[string]*EniIP, enableEDRMA bool) map[string]*PodRequest {
+func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, ipv4Map, ipv6Map map[string]*EniIP, enableEDRMA bool, node *networkv1beta1.Node) map[string]*PodRequest {
 	pendingPods := lo.PickBy(podsMapper, func(key string, value *PodRequest) bool {
 		if value.RequireIPv4 && value.ipv4Ref == nil {
 			return true
@@ -608,6 +609,9 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 		return value.IPv6 == "" && value.IPv4 == ""
 	})
 
+	if len(pendingPods) > 0 {
+		node.Status.LastModifiedTime = metav1.Now()
+	}
 	unSucceedPods := map[string]*PodRequest{}
 
 	// handle exist pod ip
@@ -1047,6 +1051,9 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 		if inFlight >= createBatchSize {
 			continue
 		}
+
+		node.Status.LastModifiedTime = metav1.Now()
+
 		inFlight++
 		opt := option
 		// start a gr for each eni
@@ -1210,6 +1217,7 @@ func (n *ReconcileNode) adjustPool(ctx context.Context, node *networkv1beta1.Nod
 	}
 
 	if MetaCtx(ctx).LastGCTime.Add(gcPeriod).After(time.Now()) {
+		l.V(4).Info("skip adjustPool", "lastGCTime", MetaCtx(ctx).LastGCTime)
 		return nil
 	}
 
@@ -1226,24 +1234,10 @@ func (n *ReconcileNode) adjustPool(ctx context.Context, node *networkv1beta1.Nod
 
 	MetaCtx(ctx).LastGCTime = time.Now()
 
-	keepN := node.Spec.Pool.MaxPoolSize
-
-	idles := 0
-	for _, eni := range node.Status.NetworkInterfaces {
-		if eni.Status != aliyunClient.ENIStatusInUse {
-			continue
-		}
-		if node.Spec.ENISpec.EnableIPv4 {
-			idles += IdlesWithAvailable(eni.IPv4)
-		} else {
-			idles += IdlesWithAvailable(eni.IPv6)
-		}
-	}
-
-	toDel := idles - keepN
+	toDel := calculateToDel(ctx, node)
 
 	if toDel > 0 {
-		l.Info("to delete ip", "idle", idles, "toDel", toDel)
+		l.Info("to delete ip", "toDel", toDel)
 		sorted := sortNetworkInterface(node)
 
 		for i := len(sorted) - 1; i >= 0; i-- {
@@ -1708,4 +1702,76 @@ func getTagFromImage(image string) string {
 	}
 
 	return "latest"
+}
+
+func calculateToDel(ctx context.Context, node *networkv1beta1.Node) int {
+
+	l := logr.FromContextOrDiscard(ctx)
+	keepN := node.Spec.Pool.MaxPoolSize
+
+	idles := 0
+	for _, eni := range node.Status.NetworkInterfaces {
+		if eni.Status != aliyunClient.ENIStatusInUse {
+			continue
+		}
+		if node.Spec.ENISpec.EnableIPv4 {
+			idles += IdlesWithAvailable(eni.IPv4)
+		} else {
+			idles += IdlesWithAvailable(eni.IPv6)
+		}
+	}
+	toDel := idles - keepN
+
+	if node.Spec.Pool.Reclaim == nil {
+		return toDel
+	}
+
+	after := node.Spec.Pool.Reclaim.After
+	interval := node.Spec.Pool.Reclaim.Interval
+	reclaimBatchSize := node.Spec.Pool.Reclaim.BatchSize
+	jitterFactorStr := node.Spec.Pool.Reclaim.JitterFactor
+
+	if reclaimBatchSize <= 0 {
+		return toDel
+	}
+
+	// check the last pool used time
+	if node.Status.LastModifiedTime.Add(after.Duration).After(time.Now()) {
+		node.Status.NextIdleIPReclaimTime = metav1.Time{}
+
+		l.V(4).Info("pool modified, reset next idle ip reclaim time")
+		return toDel
+	}
+
+	maxFactor := 0.1
+	if jitterFactorStr != "" {
+		jitterFactor, _ := strconv.ParseFloat(jitterFactorStr, 64)
+		if jitterFactor > 0 {
+			maxFactor = jitterFactor
+		}
+	}
+
+	// calculate the reclaim time
+	if node.Status.NextIdleIPReclaimTime.IsZero() {
+		jitteredInterval := wait.Jitter(interval.Duration, maxFactor)
+		node.Status.NextIdleIPReclaimTime = metav1.Time{Time: time.Now().Add(jitteredInterval)}
+		l.V(4).Info("set next idle ip reclaim time", "time", node.Status.NextIdleIPReclaimTime)
+		return toDel
+	}
+
+	if node.Status.NextIdleIPReclaimTime.After(time.Now()) {
+		l.V(4).Info("next idle ip reclaim time not reached", "time", node.Status.NextIdleIPReclaimTime)
+		return toDel
+	}
+	toDel = max(0, toDel)
+
+	// reset the next check time with jitter
+	jitteredInterval := wait.Jitter(interval.Duration, maxFactor)
+	node.Status.NextIdleIPReclaimTime = metav1.Time{Time: time.Now().Add(jitteredInterval)}
+	extraDel := min(reclaimBatchSize, max(0, idles-toDel-node.Spec.Pool.MinPoolSize))
+
+	l.V(4).Info("next idle ip reclaim time reached, increase to del", "extraDel", extraDel)
+	toDel += extraDel
+
+	return toDel
 }

@@ -108,7 +108,7 @@ func main() {
 
 	flag.Parse()
 
-	ctrl.SetLogger(textlogger.NewLogger(textlogger.NewConfig()))
+	ctrl.SetLogger(textlogger.NewLogger(logCfg))
 	log.Info(version.Version)
 
 	err := utilfeature.DefaultMutableFeatureGate.SetFromMap(featureGates)
