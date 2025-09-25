@@ -11,6 +11,7 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/route"
 	"github.com/AliyunContainerService/terway/types/secret"
+	"k8s.io/utils/ptr"
 
 	jsonpatch "github.com/evanphx/json-patch"
 	"k8s.io/apimachinery/pkg/util/json"
@@ -118,6 +119,18 @@ func (c *Config) Populate() {
 	if c.EnablePatchPodIPs == nil {
 		enable := true
 		c.EnablePatchPodIPs = &enable
+	}
+
+	if c.IdleIPReclaimAfter == nil {
+		if c.IdleIPReclaimBatchSize <= 0 {
+			c.IdleIPReclaimBatchSize = 5
+		}
+		if c.IdleIPReclaimInterval == nil {
+			c.IdleIPReclaimInterval = ptr.To("10m")
+		}
+		if c.IdleIPReclaimJitterFactor == nil {
+			c.IdleIPReclaimJitterFactor = ptr.To("0.1")
+		}
 	}
 }
 
