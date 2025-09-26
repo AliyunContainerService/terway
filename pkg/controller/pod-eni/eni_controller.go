@@ -70,11 +70,6 @@ func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &v1beta1.PodENI{})
 
-		err := migrate(ctrlCtx.Context, ctrlCtx.DirectClient)
-		if err != nil {
-			return err
-		}
-
 		r := &ReconcilePodENI{
 			client:          mgr.GetClient(),
 			scheme:          mgr.GetScheme(),
@@ -142,16 +137,17 @@ type Wrapper struct {
 
 // Start the controller
 func (w *Wrapper) Start(ctx context.Context) error {
-	// start the gc process
-	w.r.gc(ctx)
-
-	err := w.ctrl.Start(ctx)
+	// protect by leader
+	err := migrate(ctx, w.r.client)
 	if err != nil {
 		return err
 	}
+	close(common.PodENIPreStartDone)
 
-	<-ctx.Done()
-	return nil
+	// start the gc process
+	w.r.gc(ctx)
+
+	return w.ctrl.Start(ctx)
 }
 
 // NeedLeaderElection need election
@@ -1187,6 +1183,9 @@ func syncNetworkInterfaceCR(ctx context.Context, c client.Client, expect *v1beta
 		// create expect
 		err := c.Create(ctx, expect)
 		if err != nil {
+			if k8sErr.IsAlreadyExists(err) {
+				return nil
+			}
 			return err
 		}
 

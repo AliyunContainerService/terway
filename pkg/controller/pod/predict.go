@@ -17,34 +17,11 @@ limitations under the License.
 package pod
 
 import (
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-type predicateForPodEvent struct {
-	predicate.Funcs
-}
-
-func (p *predicateForPodEvent) Create(e event.CreateEvent) bool {
-	return processPod(e.Object)
-}
-
-func (p *predicateForPodEvent) Update(e event.UpdateEvent) bool {
-	return processPod(e.ObjectNew)
-}
-
-func (p *predicateForPodEvent) Delete(e event.DeleteEvent) bool {
-	return processPod(e.Object)
-}
-
-func (p *predicateForPodEvent) Generic(e event.GenericEvent) bool {
-	return processPod(e.Object)
-}
 
 func processPod(o client.Object) bool {
 	pod, ok := o.(*corev1.Pod)
