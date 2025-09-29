@@ -18,10 +18,13 @@ const (
 	EFLO featuregate.Feature = "EFLO"
 
 	KubeProxyReplacement featuregate.Feature = "KubeProxyReplacement"
+
+	WriteCNIConfFirst featuregate.Feature = "WriteCNIConfFirst"
 )
 
 var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
 	AutoDataPathV2:       {Default: true, PreRelease: featuregate.Alpha},
 	EFLO:                 {Default: true, PreRelease: featuregate.Alpha},
 	KubeProxyReplacement: {Default: false, PreRelease: featuregate.Alpha},
+	WriteCNIConfFirst:    {Default: false, PreRelease: featuregate.Alpha},
 }

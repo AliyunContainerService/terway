@@ -17,9 +17,11 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
+	terwayfeature "github.com/AliyunContainerService/terway/pkg/feature"
 	"github.com/alexflint/go-filemutex"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/AliyunContainerService/terway/pkg/metric"
@@ -166,6 +168,11 @@ func newUnixListener(addr string) (net.Listener, error) {
 }
 
 func ensureCNIConfig() error {
+	if utilfeature.DefaultFeatureGate.Enabled(terwayfeature.WriteCNIConfFirst) {
+		serviceLog.Info("WriteCNIConfFirst is enabled, skip write cni conf")
+		return nil
+	}
+
 	src, err := os.Open(filepath.Join(tmpCNIConfigPath, cinConfFile))
 	if err != nil {
 		return err
