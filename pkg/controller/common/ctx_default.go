@@ -10,3 +10,5 @@ import (
 func WithCtx(ctx context.Context, alloc *v1beta1.Allocation) context.Context {
 	return ctx
 }
+
+var PodENIPreStartDone = make(chan struct{})

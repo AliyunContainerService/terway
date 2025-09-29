@@ -33,6 +33,8 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 	"github.com/AliyunContainerService/terway/types/daemon"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
@@ -43,14 +45,15 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const controllerName = "pod"
@@ -62,16 +65,47 @@ func init() {
 
 		crdMode := controlplane.GetConfig().IPAMType == types.IPAMTypeCRD
 
-		err := builder.ControllerManagedBy(mgr).
-			Named(controllerName).
-			WithOptions(controller.Options{
-				MaxConcurrentReconciles: controlplane.GetConfig().PodMaxConcurrent,
-			}).
-			For(&corev1.Pod{}, builder.WithPredicates(&predicateForPodEvent{})).
-			Watches(&v1beta1.PodENI{}, &handler.EnqueueRequestForObject{}).
-			Complete(NewReconcilePod(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool, crdMode))
+		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
+			Reconciler:              NewReconcilePod(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool, crdMode),
+			MaxConcurrentReconciles: controlplane.GetConfig().PodMaxConcurrent,
+		})
 
-		return err
+		if err != nil {
+			return err
+		}
+
+		// filter pod res
+		err = c.Watch(source.Kind(mgr.GetCache(), &corev1.Pod{}, &handler.TypedEnqueueRequestForObject[*corev1.Pod]{},
+			&predicate.TypedResourceVersionChangedPredicate[*corev1.Pod]{},
+			&predicate.TypedFuncs[*corev1.Pod]{
+				CreateFunc: func(e event.TypedCreateEvent[*corev1.Pod]) bool {
+					return processPod(e.Object)
+				},
+				DeleteFunc: func(e event.TypedDeleteEvent[*corev1.Pod]) bool {
+					return processPod(e.Object)
+				},
+				UpdateFunc: func(e event.TypedUpdateEvent[*corev1.Pod]) bool {
+					return processPod(e.ObjectNew)
+				},
+				GenericFunc: func(e event.TypedGenericEvent[*corev1.Pod]) bool {
+					return processPod(e.Object)
+				},
+			},
+		))
+		if err != nil {
+			return err
+		}
+
+		err = c.Watch(source.Kind(mgr.GetCache(), &v1beta1.PodENI{}, &handler.TypedEnqueueRequestForObject[*v1beta1.PodENI]{},
+			&predicate.TypedResourceVersionChangedPredicate[*v1beta1.PodENI]{},
+		))
+		if err != nil {
+			return err
+		}
+
+		return mgr.Add(&Wrapper{
+			runner: c,
+		})
 	}, true)
 }
 
@@ -92,6 +126,26 @@ type ReconcilePod struct {
 	trunkMode bool // use trunk mode or secondary eni mode
 	// deprecated
 	crdMode bool
+}
+
+type Wrapper struct {
+	runner manager.Runnable
+}
+
+func (w *Wrapper) Start(ctx context.Context) error {
+	log.FromContext(ctx).Info("waiting PodENIPreStartDone")
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-common.PodENIPreStartDone:
+		log.FromContext(ctx).Info("PodENIPreStartDone")
+	}
+
+	return w.runner.Start(ctx)
+}
+
+func (w *Wrapper) NeedLeaderElection() bool {
+	return true
 }
 
 // NewReconcilePod watch pod lifecycle events and sync to podENI resource
