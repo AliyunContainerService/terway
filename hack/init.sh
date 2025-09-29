@@ -17,6 +17,13 @@ terway-cli cni --output /etc/cni/net.d/10-terway.conflist "$EXTRA_FLAGS"
 terway-cli nodeconfig "$EXTRA_FLAGS"
 cat /etc/cni/net.d/10-terway.conflist
 
+# Check if WriteCNIConfFirst is enabled
+if echo "$EXTRA_FLAGS" | grep "WriteCNIConfFirst=true" >/dev/null; then
+  echo "WriteCNIConfFirst is enabled, copy 10-terway.conflist to host"
+  cp /etc/cni/net.d/10-terway.conflist /host/etc/cni/net.d/10-terway.conflist
+  rm -f /host/etc/cni/net.d/10-terway.conf
+fi
+
 node_capabilities=/var/run/eni/node_capabilities
 if [ ! -f "$node_capabilities" ]; then
   echo "Init node capabilities"
