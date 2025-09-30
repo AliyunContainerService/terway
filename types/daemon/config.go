@@ -266,6 +266,11 @@ type PoolConfig struct {
 
 	MaxPoolSize int
 	MinPoolSize int
+
+	ReclaimBatchSize int
+	ReclaimInterval  time.Duration
+	ReclaimAfter     time.Duration
+	ReclaimFactor    float64
 }
 
 type Feat uint8

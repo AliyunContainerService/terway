@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -102,6 +101,14 @@ type Manager struct {
 	maxIdles int
 	total    int
 
+	lastModified     time.Time // pool last modified time(for both Allocate and Release events)
+	reclaimBatchSize int
+	reclaimInterval  time.Duration
+	reclaimAfter     time.Duration
+	reclaimFactor    float64
+
+	nextReclaimTime time.Time
+
 	syncPeriod time.Duration
 
 	node *NodeCondition
@@ -170,6 +177,9 @@ func (m *Manager) Allocate(ctx context.Context, cni *daemon.CNI, req *AllocReque
 	var err error
 	for _, request := range req.ResourceRequests {
 
+		if request.ResourceType() == ResourceTypeLocalIP {
+			m.lastModified = time.Now()
+		}
 		var ch chan *AllocResp
 		for _, ni := range m.networkInterfaces {
 			var tr []Trace
@@ -248,6 +258,7 @@ func (m *Manager) Release(ctx context.Context, cni *daemon.CNI, req *ReleaseRequ
 
 			if ok {
 				if networkResource.ResourceType() == ResourceTypeLocalIP {
+					m.lastModified = time.Now()
 					m.node.UnsetIPExhaustive()
 				}
 				break
@@ -300,7 +311,7 @@ func (m *Manager) syncPool(ctx context.Context) {
 		inuses += inuse
 	}
 
-	toDel := idles - m.maxIdles
+	toDel := m.calculateToDel(idles)
 	if toDel > 0 {
 		mgrLog.Info("sync pool", "toDel", toDel)
 		for _, ni := range m.networkInterfaces {
@@ -355,17 +366,43 @@ func (m *Manager) syncPool(ctx context.Context) {
 	wg.Wait()
 }
 
-func NewManager(minIdles, maxIdles, total int, syncPeriod time.Duration, networkInterfaces []NetworkInterface, selectionPolicy daemon.EniSelectionPolicy, k8s k8s.Kubernetes) *Manager {
+func NewManager(pool *daemon.PoolConfig, syncPeriod time.Duration, networkInterfaces []NetworkInterface, selectionPolicy daemon.EniSelectionPolicy, k8s k8s.Kubernetes) *Manager {
 	var handler NodeConditionHandler
 	if k8s != nil {
 		handler = k8s.PatchNodeIPResCondition
 	}
+
+	var minIdles, maxIdles, total int
+	var (
+		reclaimBatchSize int
+		reclaimInterval  time.Duration
+		reclaimAfter     time.Duration
+		reclaimFactor    float64
+	)
+
+	if pool != nil {
+		minIdles = pool.MinPoolSize
+		maxIdles = pool.MaxPoolSize
+		total = pool.Capacity
+
+		reclaimBatchSize = pool.ReclaimBatchSize
+		reclaimInterval = pool.ReclaimInterval
+		reclaimAfter = pool.ReclaimAfter
+		reclaimFactor = pool.ReclaimFactor
+	}
+
 	return &Manager{
+		RWMutex:           sync.RWMutex{},
 		networkInterfaces: networkInterfaces,
 		selectionPolicy:   selectionPolicy,
 		minIdles:          minIdles,
 		maxIdles:          maxIdles,
 		total:             total,
+		lastModified:      time.Now(), // reset timer
+		reclaimBatchSize:  reclaimBatchSize,
+		reclaimInterval:   reclaimInterval,
+		reclaimAfter:      reclaimAfter,
+		reclaimFactor:     reclaimFactor,
 		syncPeriod:        syncPeriod,
 		node: &NodeCondition{
 			factoryIPExhaustiveTimer: time.NewTimer(0),
@@ -373,4 +410,48 @@ func NewManager(minIdles, maxIdles, total int, syncPeriod time.Duration, network
 			handler:                  handler,
 		},
 	}
+}
+
+func (m *Manager) calculateToDel(idles int) int {
+	toDel := idles - m.maxIdles
+
+	if m.reclaimAfter == 0 || m.reclaimBatchSize == 0 {
+		return toDel
+	}
+
+	if m.lastModified.Add(m.reclaimAfter).After(time.Now()) {
+		m.nextReclaimTime = time.Time{}
+
+		mgrLog.V(4).Info("pool modified, reset next idle ip reclaim time")
+		return toDel
+	}
+
+	maxFactor := 0.1
+	if m.reclaimFactor > 0 {
+		maxFactor = m.reclaimFactor
+	}
+
+	// calculate the reclaim time
+	if m.nextReclaimTime.IsZero() {
+		jitteredInterval := wait.Jitter(m.reclaimInterval, maxFactor)
+		m.nextReclaimTime = time.Now().Add(jitteredInterval)
+		mgrLog.V(4).Info("set next idle ip reclaim time", "time", m.nextReclaimTime)
+		return toDel
+	}
+
+	if m.nextReclaimTime.After(time.Now()) {
+		mgrLog.V(4).Info("next idle ip reclaim time not reached", "time", m.nextReclaimTime)
+		return toDel
+	}
+	toDel = max(0, toDel)
+
+	// reset the next check time with jitter
+	jitteredInterval := wait.Jitter(m.reclaimInterval, maxFactor)
+	m.nextReclaimTime = time.Now().Add(jitteredInterval)
+	extraDel := min(m.reclaimBatchSize, max(0, idles-toDel-m.minIdles))
+
+	mgrLog.V(4).Info("next idle ip reclaim time reached, increase to del", "extraDel", extraDel)
+	toDel += extraDel
+
+	return toDel
 }

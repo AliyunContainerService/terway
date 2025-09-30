@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"strconv"
+	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/k8s"
@@ -165,6 +167,29 @@ func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *client.Limits) 
 	poolConfig.Capacity = capacity
 	poolConfig.MaxENI = maxENI
 	poolConfig.MaxMemberENI = maxMemberENI
+
+	poolConfig.ReclaimBatchSize = cfg.IdleIPReclaimBatchSize
+	if cfg.IdleIPReclaimInterval != nil {
+		interval, err := time.ParseDuration(*cfg.IdleIPReclaimInterval)
+		if err != nil {
+			return nil, err
+		}
+		poolConfig.ReclaimInterval = interval
+	}
+	if cfg.IdleIPReclaimAfter != nil {
+		after, err := time.ParseDuration(*cfg.IdleIPReclaimAfter)
+		if err != nil {
+			return nil, err
+		}
+		poolConfig.ReclaimAfter = after
+	}
+	if cfg.IdleIPReclaimJitterFactor != nil {
+		factor, err := strconv.ParseFloat(*cfg.IdleIPReclaimJitterFactor, 64)
+		if err != nil {
+			return nil, err
+		}
+		poolConfig.ReclaimFactor = factor
+	}
 
 	return poolConfig, nil
 }

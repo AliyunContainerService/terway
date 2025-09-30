@@ -44,10 +44,10 @@ var _ = Describe("Node controller", func() {
 			}, 5*time.Second, 500*time.Millisecond).Should(HaveOccurred())
 
 			_ = k8sClient.Delete(context.Background(), &networkv1beta1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
-				Eventually(func() error {
-					node := &networkv1beta1.Node{}
+			Eventually(func() error {
+				node := &networkv1beta1.Node{}
 				return k8sClient.Get(context.Background(), types.NamespacedName{Name: nodeName}, node)
-				}, 5*time.Second, 500*time.Millisecond).Should(HaveOccurred())
+			}, 5*time.Second, 500*time.Millisecond).Should(HaveOccurred())
 		})
 
 		It("New EFLO node", func() {
@@ -241,7 +241,7 @@ var _ = Describe("Node controller", func() {
 
 			k8sNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName ,
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-dual",
 					},
@@ -272,7 +272,7 @@ var _ = Describe("Node controller", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
-				nodeName: nodeName ,
+				nodeName: nodeName,
 				record:   record.NewFakeRecorder(100),
 			}
 
