@@ -400,7 +400,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 		}
 	}
 
-	eniManager := eni.NewManager(poolConfig.MinPoolSize, poolConfig.MaxPoolSize, poolConfig.Capacity, b.config.GetIPPoolSYncPeriod(), eniList, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), b.service.k8s)
+	eniManager := eni.NewManager(poolConfig, b.config.GetIPPoolSYncPeriod(), eniList, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), b.service.k8s)
 	b.service.eniMgr = eniManager
 	err = eniManager.Run(b.ctx, &b.service.wg, podResources)
 	if err != nil {
@@ -432,7 +432,7 @@ func (b *NetworkServiceBuilder) PostInitForLegacyMode() *NetworkServiceBuilder {
 		}
 		podResources := getPodResources(objList)
 
-		eniManager := eni.NewManager(0, 0, 0, 30*time.Second, eniList, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), b.service.k8s)
+		eniManager := eni.NewManager(nil, 30*time.Second, eniList, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), b.service.k8s)
 		b.service.eniMgr = eniManager
 		err = eniManager.Run(b.ctx, &b.service.wg, podResources)
 		if err != nil {
@@ -466,7 +466,7 @@ func (b *NetworkServiceBuilder) PostInitForCRDV2() *NetworkServiceBuilder {
 		return b
 	}
 	crdv2 := eni.NewCRDV2(b.service.k8s.NodeName(), b.namespace)
-	mgr := eni.NewManager(0, 0, 0, 0, []eni.NetworkInterface{crdv2}, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), nil)
+	mgr := eni.NewManager(nil, 0, []eni.NetworkInterface{crdv2}, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), nil)
 
 	svc := b.RunENIMgr(b.ctx, mgr)
 	go b.service.startGarbageCollectionLoop(b.ctx)
