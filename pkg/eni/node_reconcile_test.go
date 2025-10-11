@@ -241,7 +241,7 @@ var _ = Describe("Node controller", func() {
 
 			k8sNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-dual",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-dual",
 					},
@@ -272,7 +272,7 @@ var _ = Describe("Node controller", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
-				nodeName: nodeName + "-dual",
+				nodeName: nodeName,
 				record:   record.NewFakeRecorder(100),
 			}
 
@@ -281,14 +281,14 @@ var _ = Describe("Node controller", func() {
 			defer devicePluginPatches.Reset()
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-dual"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Add networkv1beta1.node")
 			node := &networkv1beta1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-dual",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-dual",
 					},
@@ -313,11 +313,11 @@ var _ = Describe("Node controller", func() {
 
 			By("Reconciling the created resource")
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-dual"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName + "-dual"}, node)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(node.Spec.ENISpec).NotTo(BeNil())
@@ -342,7 +342,7 @@ var _ = Describe("Node controller", func() {
 
 			k8sNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-erdma",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-erdma",
 					},
@@ -374,7 +374,7 @@ var _ = Describe("Node controller", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
-				nodeName: nodeName + "-erdma",
+				nodeName: nodeName,
 				record:   record.NewFakeRecorder(100),
 			}
 
@@ -383,14 +383,14 @@ var _ = Describe("Node controller", func() {
 			defer devicePluginPatches.Reset()
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-erdma"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Add networkv1beta1.node")
 			node := &networkv1beta1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-erdma",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-erdma",
 					},
@@ -415,11 +415,11 @@ var _ = Describe("Node controller", func() {
 
 			By("Reconciling the created resource")
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-erdma"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName + "-erdma"}, node)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(node.Spec.ENISpec).NotTo(BeNil())
@@ -443,7 +443,7 @@ var _ = Describe("Node controller", func() {
 
 			k8sNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-trunk",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-trunk",
 					},
@@ -475,7 +475,7 @@ var _ = Describe("Node controller", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
-				nodeName: nodeName + "-trunk",
+				nodeName: nodeName,
 				record:   record.NewFakeRecorder(100),
 			}
 
@@ -484,14 +484,14 @@ var _ = Describe("Node controller", func() {
 			defer devicePluginPatches.Reset()
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-trunk"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Add networkv1beta1.node")
 			node := &networkv1beta1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-trunk",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-trunk",
 					},
@@ -516,11 +516,11 @@ var _ = Describe("Node controller", func() {
 
 			By("Reconciling the created resource")
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-trunk"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName + "-trunk"}, node)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(node.Spec.ENISpec).NotTo(BeNil())
@@ -553,7 +553,7 @@ var _ = Describe("Node controller", func() {
 
 			k8sNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-both",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-both",
 					},
@@ -586,7 +586,7 @@ var _ = Describe("Node controller", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
-				nodeName: nodeName + "-both",
+				nodeName: nodeName,
 				record:   record.NewFakeRecorder(100),
 			}
 
@@ -595,14 +595,14 @@ var _ = Describe("Node controller", func() {
 			defer devicePluginPatches.Reset()
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-both"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Add networkv1beta1.node")
 			node := &networkv1beta1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-both",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-both",
 					},
@@ -627,11 +627,11 @@ var _ = Describe("Node controller", func() {
 
 			By("Reconciling the created resource")
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-both"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName + "-both"}, node)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(node.Spec.ENISpec).NotTo(BeNil())
@@ -659,7 +659,7 @@ var _ = Describe("Node controller", func() {
 
 			k8sNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-ipv6",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-ipv6",
 					},
@@ -690,7 +690,7 @@ var _ = Describe("Node controller", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
-				nodeName: nodeName + "-ipv6",
+				nodeName: nodeName,
 				record:   record.NewFakeRecorder(100),
 			}
 
@@ -699,14 +699,14 @@ var _ = Describe("Node controller", func() {
 			defer devicePluginPatches.Reset()
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-ipv6"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Add networkv1beta1.node")
 			node := &networkv1beta1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-ipv6",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-ipv6",
 					},
@@ -731,11 +731,11 @@ var _ = Describe("Node controller", func() {
 
 			By("Reconciling the created resource")
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-ipv6"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName + "-ipv6"}, node)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(node.Spec.ENISpec).NotTo(BeNil())
@@ -751,7 +751,7 @@ var _ = Describe("Node controller", func() {
 
 			k8sNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-unsupported-dual",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-unsupported-dual",
 					},
@@ -782,7 +782,7 @@ var _ = Describe("Node controller", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
-				nodeName: nodeName + "-unsupported-dual",
+				nodeName: nodeName,
 				record:   record.NewFakeRecorder(100),
 			}
 
@@ -791,14 +791,14 @@ var _ = Describe("Node controller", func() {
 			defer devicePluginPatches.Reset()
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-unsupported-dual"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Add networkv1beta1.node")
 			node := &networkv1beta1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName + "-unsupported-dual",
+					Name: nodeName,
 					Labels: map[string]string{
 						"kubernetes.io/hostname": "test-node-unsupported-dual",
 					},
@@ -823,16 +823,327 @@ var _ = Describe("Node controller", func() {
 
 			By("Reconciling the created resource")
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName + "-unsupported-dual"},
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName + "-unsupported-dual"}, node)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(node.Spec.ENISpec).NotTo(BeNil())
 			Expect(node.Spec.ENISpec.EnableIPv4).To(BeTrue())
 			Expect(node.Spec.ENISpec.EnableIPv6).To(BeFalse()) // Should be false due to unsupported dual stack
+		})
+
+		It("New regular node with idle IP reclaim configuration", func() {
+			ctx := context.Background()
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Labels: map[string]string{
+						"kubernetes.io/hostname": "test-node-reclaim",
+					},
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "i-reclaim123",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).Should(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "eni-config",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": `{
+						"vswitches": {"cn-hangzhou-i":["vsw-reclaim1"]},
+						"security_group": "sg-reclaim",
+						"vswitch_selection_policy": "random",
+						"ip_stack": "ipv4",
+						"max_pool_size": 20,
+						"min_pool_size": 5,
+						"ip_pool_sync_period": "30s",
+						"idle_ip_reclaim_after": "5m",
+						"idle_ip_reclaim_interval": "1m",
+						"idle_ip_reclaim_batch_size": 3,
+						"idle_ip_reclaim_jitter_factor": "0.2"
+					}`,
+				}}
+			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+			By("Reconciling the created resource")
+			controllerReconciler := &nodeReconcile{
+				client:   k8sClient,
+				nodeName: nodeName,
+				record:   record.NewFakeRecorder(100),
+			}
+
+			// Patch runERDMADevicePlugin method to avoid starting real device plugin
+			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
+			defer devicePluginPatches.Reset()
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Add networkv1beta1.node")
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Labels: map[string]string{
+						"kubernetes.io/hostname": "test-node-reclaim",
+					},
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "cn-hangzhou",
+						InstanceID:   "i-reclaim123",
+						InstanceType: "ecs.c6.large",
+						ZoneID:       "cn-hangzhou-i",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:           3,
+						IPv4PerAdapter:     10,
+						IPv6PerAdapter:     10,
+						EriQuantity:        2,
+						MemberAdapterLimit: 2,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+
+			By("Reconciling the created resource")
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(node.Spec.ENISpec).NotTo(BeNil())
+			Expect(node.Spec.ENISpec.EnableIPv4).To(BeTrue())
+			Expect(node.Spec.ENISpec.EnableIPv6).To(BeFalse())
+
+			// Verify pool configuration
+			Expect(node.Spec.Pool).NotTo(BeNil())
+			Expect(node.Spec.Pool.MaxPoolSize).To(Equal(20))
+			Expect(node.Spec.Pool.MinPoolSize).To(Equal(5))
+			Expect(node.Spec.Pool.PoolSyncPeriod).To(Equal("30s"))
+
+			// Verify idle IP reclaim configuration
+			Expect(node.Spec.Pool.Reclaim).NotTo(BeNil())
+			Expect(node.Spec.Pool.Reclaim.After).NotTo(BeNil())
+			Expect(node.Spec.Pool.Reclaim.After.Duration).To(Equal(5 * time.Minute))
+			Expect(node.Spec.Pool.Reclaim.Interval).NotTo(BeNil())
+			Expect(node.Spec.Pool.Reclaim.Interval.Duration).To(Equal(1 * time.Minute))
+			Expect(node.Spec.Pool.Reclaim.BatchSize).To(Equal(3))
+			Expect(node.Spec.Pool.Reclaim.JitterFactor).To(Equal("0.2"))
+		})
+
+		It("New EFLO node with idle IP reclaim configuration", func() {
+			ctx := context.Background()
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName + "-eflo-reclaim",
+					Labels: map[string]string{
+						"alibabacloud.com/lingjun-worker": "true",
+					},
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).Should(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "eni-config",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": `{
+						"vswitches": {"cn-hangzhou-i":["vsw-eflo"]},
+						"security_group": "sg-eflo",
+						"vswitch_selection_policy": "ordered",
+						"max_pool_size": 15,
+						"min_pool_size": 3,
+						"ip_pool_sync_period": "60s",
+						"idle_ip_reclaim_after": "10m",
+						"idle_ip_reclaim_interval": "2m",
+						"idle_ip_reclaim_batch_size": 5,
+						"idle_ip_reclaim_jitter_factor": "0.15"
+					}`,
+				}}
+			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+			By("Reconciling the created resource")
+			controllerReconciler := &nodeReconcile{
+				client:   k8sClient,
+				nodeName: nodeName + "-eflo-reclaim",
+				record:   record.NewFakeRecorder(100),
+			}
+
+			// Patch runERDMADevicePlugin method to avoid starting real device plugin
+			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
+			defer devicePluginPatches.Reset()
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName + "-eflo-reclaim"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Add networkv1beta1.node")
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName + "-eflo-reclaim",
+					Labels: map[string]string{
+						"alibabacloud.com/lingjun-worker": "true",
+					},
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "cn-hangzhou",
+						InstanceID:   "i-eflo-reclaim",
+						InstanceType: "ecs",
+						ZoneID:       "cn-hangzhou-i",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+
+			By("Reconciling the created resource")
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName + "-eflo-reclaim"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName + "-eflo-reclaim"}, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(node.Spec.NodeMetadata.RegionID).To(Equal("cn-hangzhou"))
+			Expect(node.Spec.NodeMetadata.InstanceType).To(Equal("ecs"))
+			Expect(node.Spec.NodeMetadata.InstanceID).To(Equal("i-eflo-reclaim"))
+			Expect(node.Spec.NodeMetadata.ZoneID).To(Equal("cn-hangzhou-i"))
+
+			Expect(node.Spec.ENISpec).NotTo(BeNil())
+			Expect(node.Spec.ENISpec.VSwitchOptions).To(Equal([]string{"vsw-eflo"}))
+			Expect(node.Spec.ENISpec.SecurityGroupIDs).To(Equal([]string{"sg-eflo"}))
+			Expect(node.Spec.ENISpec.VSwitchSelectPolicy).To(Equal(networkv1beta1.VSwitchSelectionPolicyMost))
+
+			// Verify pool configuration for EFLO node
+			Expect(node.Spec.Pool).NotTo(BeNil())
+			Expect(node.Spec.Pool.MaxPoolSize).To(Equal(15))
+			Expect(node.Spec.Pool.MinPoolSize).To(Equal(3))
+			Expect(node.Spec.Pool.PoolSyncPeriod).To(Equal("60s"))
+
+			// Verify idle IP reclaim configuration for EFLO node
+			Expect(node.Spec.Pool.Reclaim).NotTo(BeNil())
+			Expect(node.Spec.Pool.Reclaim.After).NotTo(BeNil())
+			Expect(node.Spec.Pool.Reclaim.After.Duration).To(Equal(10 * time.Minute))
+			Expect(node.Spec.Pool.Reclaim.Interval).NotTo(BeNil())
+			Expect(node.Spec.Pool.Reclaim.Interval.Duration).To(Equal(2 * time.Minute))
+			Expect(node.Spec.Pool.Reclaim.BatchSize).To(Equal(5))
+			Expect(node.Spec.Pool.Reclaim.JitterFactor).To(Equal("0.15"))
+		})
+
+		It("New regular node without idle IP reclaim configuration", func() {
+			ctx := context.Background()
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName + "-no-reclaim",
+					Labels: map[string]string{
+						"kubernetes.io/hostname": "test-node-no-reclaim",
+					},
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "i-no-reclaim123",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).Should(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "eni-config",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": `{
+						"vswitches": {"cn-hangzhou-i":["vsw-no-reclaim"]},
+						"security_group": "sg-no-reclaim",
+						"vswitch_selection_policy": "random",
+						"ip_stack": "ipv4",
+						"max_pool_size": 10,
+						"min_pool_size": 2,
+						"ip_pool_sync_period": "30s"
+					}`,
+				}}
+			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+			By("Reconciling the created resource")
+			controllerReconciler := &nodeReconcile{
+				client:   k8sClient,
+				nodeName: nodeName + "-no-reclaim",
+				record:   record.NewFakeRecorder(100),
+			}
+
+			// Patch runERDMADevicePlugin method to avoid starting real device plugin
+			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
+			defer devicePluginPatches.Reset()
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName + "-no-reclaim"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Add networkv1beta1.node")
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName + "-no-reclaim",
+					Labels: map[string]string{
+						"kubernetes.io/hostname": "test-node-no-reclaim",
+					},
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "cn-hangzhou",
+						InstanceID:   "i-no-reclaim123",
+						InstanceType: "ecs.c6.large",
+						ZoneID:       "cn-hangzhou-i",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:           3,
+						IPv4PerAdapter:     10,
+						IPv6PerAdapter:     10,
+						EriQuantity:        2,
+						MemberAdapterLimit: 2,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+
+			By("Reconciling the created resource")
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName + "-no-reclaim"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName + "-no-reclaim"}, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify pool configuration exists
+			Expect(node.Spec.Pool).NotTo(BeNil())
+			Expect(node.Spec.Pool.MaxPoolSize).To(Equal(10))
+			Expect(node.Spec.Pool.MinPoolSize).To(Equal(2))
+			Expect(node.Spec.Pool.PoolSyncPeriod).To(Equal("30s"))
+
+			// Verify idle IP reclaim configuration is not set
+			Expect(node.Spec.Pool.Reclaim).To(BeNil())
 		})
 	})
 })

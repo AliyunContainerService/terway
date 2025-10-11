@@ -154,11 +154,32 @@ spec:
                     type: integer
                   poolSyncPeriod:
                     type: string
+                  reclaim:
+                    properties:
+                      after:
+                        description: |-
+                          After specifies the duration an IP must be idle before it is eligible for reclamation.
+                          Examples: "300s", "5m", "1h"
+                        type: string
+                      batchSize:
+                        description: BatchSize specifies the maximum number of IPs
+                          to reclaim in a single batch.
+                        type: integer
+                      interval:
+                        description: Interval specifies the time interval between
+                          IP reclamation checks.
+                        type: string
+                      jitterFactor:
+                        type: string
+                    type: object
                 type: object
             type: object
           status:
             description: NodeStatus defines the observed state of Node
             properties:
+              lastModifiedTime:
+                format: date-time
+                type: string
               lastSyncOpenAPITime:
                 format: date-time
                 type: string
@@ -270,6 +291,9 @@ spec:
                   - status
                   type: object
                 type: object
+              nextIdleIPReclaimTime:
+                format: date-time
+                type: string
               nextSyncOpenAPITime:
                 format: date-time
                 type: string
