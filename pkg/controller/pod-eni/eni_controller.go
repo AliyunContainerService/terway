@@ -345,7 +345,11 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		}
 
 		// lets update spec first
-		if !cmp.Equal(before.Spec, podENI.Spec, cmpopts.EquateEmpty()) {
+		// the inner slice order may change
+		// missing the trunk id
+		if !cmp.Equal(before.Spec, podENI.Spec, cmpopts.EquateEmpty(), cmpopts.SortSlices(func(a, b v1beta1.Allocation) bool {
+			return a.Interface < b.Interface
+		})) {
 			after := podENI.Status.DeepCopy()
 
 			ll.Info("update podENI spec", "rv", podENI.ResourceVersion)
@@ -357,6 +361,13 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 
 			// the only part update in attach
 			podENI.Status.ENIInfos = after.ENIInfos
+
+			if podENI.Status.TrunkENIID == "" {
+				podENI.Status.TrunkENIID = after.TrunkENIID
+			}
+			if podENI.Status.InstanceID == "" {
+				podENI.Status.InstanceID = after.InstanceID
+			}
 		}
 
 		podENI.Status.Phase = v1beta1.ENIPhaseBind
