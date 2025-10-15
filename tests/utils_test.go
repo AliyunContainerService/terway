@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -16,11 +17,15 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/e2e-framework/klient"
 	"sigs.k8s.io/e2e-framework/klient/k8s"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
+	"sigs.k8s.io/e2e-framework/pkg/features"
+
+	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	terwayTypes "github.com/AliyunContainerService/terway/types"
 )
 
 type Pod struct {
@@ -51,7 +56,6 @@ func (p *Pod) WithLabels(labels map[string]string) *Pod {
 	for k, v := range labels {
 		p.Labels[k] = v
 	}
-
 	return p
 }
 
@@ -66,6 +70,7 @@ func (p *Pod) WithContainer(name, image string, command []string) *Pod {
 	}
 	return p
 }
+
 func (p *Pod) WithNodeAffinity(labels map[string]string) *Pod {
 	var nodeSelectorTerms []corev1.NodeSelectorRequirement
 	for k, v := range labels {
@@ -82,18 +87,60 @@ func (p *Pod) WithNodeAffinity(labels map[string]string) *Pod {
 	if p.Spec.Affinity == nil {
 		p.Spec.Affinity = &corev1.Affinity{}
 	}
-	p.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{
-		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-			NodeSelectorTerms: []corev1.NodeSelectorTerm{
-				{
-					MatchExpressions: nodeSelectorTerms,
-					MatchFields:      nil,
-				},
-			},
-		},
+	if p.Spec.Affinity.NodeAffinity == nil {
+		p.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
+	}
+	if p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
+	}
+	if len(p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
+		p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = []corev1.NodeSelectorTerm{
+			{MatchExpressions: nodeSelectorTerms},
+		}
+	} else {
+		p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions = append(
+			p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions,
+			nodeSelectorTerms...,
+		)
 	}
 	return p
 }
+
+func (p *Pod) WithNodeAffinityExclude(excludeLabels map[string]string) *Pod {
+	var nodeSelectorTerms []corev1.NodeSelectorRequirement
+	for k, v := range excludeLabels {
+		nodeSelectorTerms = append(nodeSelectorTerms, corev1.NodeSelectorRequirement{
+			Key:      k,
+			Operator: corev1.NodeSelectorOpNotIn,
+			Values:   []string{v},
+		})
+	}
+
+	if len(nodeSelectorTerms) == 0 {
+		return p
+	}
+	if p.Spec.Affinity == nil {
+		p.Spec.Affinity = &corev1.Affinity{}
+	}
+	if p.Spec.Affinity.NodeAffinity == nil {
+		p.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
+	}
+	if p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
+	}
+	if len(p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
+		p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = []corev1.NodeSelectorTerm{
+			{MatchExpressions: nodeSelectorTerms},
+		}
+	} else {
+		p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions = append(
+			p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions,
+			nodeSelectorTerms...,
+		)
+	}
+	return p
+}
+
 func (p *Pod) WithPodAffinity(labels map[string]string) *Pod {
 	if p.Spec.Affinity == nil {
 		p.Spec.Affinity = &corev1.Affinity{}
@@ -124,7 +171,6 @@ func (p *Pod) WithPodAntiAffinity(labels map[string]string) *Pod {
 			},
 		},
 	}
-
 	return p
 }
 
@@ -158,7 +204,6 @@ func (p *Pod) WithHealthCheck(port int32) *Pod {
 		SuccessThreshold:    1,
 		FailureThreshold:    3,
 	}
-
 	return p
 }
 
@@ -172,13 +217,61 @@ func (p *Pod) WithHostPort(containerPort, hostPort int32) *Pod {
 		return p
 	}
 
-	// Add hostPort to the first container
 	p.Spec.Containers[0].Ports = append(p.Spec.Containers[0].Ports, corev1.ContainerPort{
 		ContainerPort: containerPort,
 		HostPort:      hostPort,
 		Protocol:      corev1.ProtocolTCP,
 	})
 
+	return p
+}
+
+func (p *Pod) WithAnnotations(annotations map[string]string) *Pod {
+	if p.Annotations == nil {
+		p.Annotations = make(map[string]string)
+	}
+	for k, v := range annotations {
+		p.Annotations[k] = v
+	}
+	return p
+}
+
+func (p *Pod) WithPodNetworking(pnName string) *Pod {
+	if p.Labels == nil {
+		p.Labels = make(map[string]string)
+	}
+	p.Labels["netplan"] = pnName
+	return p
+}
+
+func (p *Pod) WithOwnerReference(ref metav1.OwnerReference) *Pod {
+	p.OwnerReferences = append(p.OwnerReferences, ref)
+	return p
+}
+
+func (p *Pod) WithResourceRequests(resources corev1.ResourceList) *Pod {
+	if len(p.Spec.Containers) == 0 {
+		return p
+	}
+	if p.Spec.Containers[0].Resources.Requests == nil {
+		p.Spec.Containers[0].Resources.Requests = make(corev1.ResourceList)
+	}
+	for k, v := range resources {
+		p.Spec.Containers[0].Resources.Requests[k] = v
+	}
+	return p
+}
+
+func (p *Pod) WithResourceLimits(resources corev1.ResourceList) *Pod {
+	if len(p.Spec.Containers) == 0 {
+		return p
+	}
+	if p.Spec.Containers[0].Resources.Limits == nil {
+		p.Spec.Containers[0].Resources.Limits = make(corev1.ResourceList)
+	}
+	for k, v := range resources {
+		p.Spec.Containers[0].Resources.Limits[k] = v
+	}
 	return p
 }
 
@@ -264,7 +357,6 @@ func (s *NetworkPolicy) WithPolicyType(policyTypes ...networkingv1.PolicyType) *
 	for _, policyType := range policyTypes {
 		s.Spec.PolicyTypes = append(s.Spec.PolicyTypes, policyType)
 	}
-
 	return s
 }
 
@@ -290,22 +382,31 @@ func getIP(pod *corev1.Pod) (v4 netip.Addr, v6 netip.Addr) {
 
 type resourceKey struct{}
 
-func ResourcesFromCtx(ctx context.Context) []client.Object {
-	v, ok := ctx.Value(resourceKey{}).([]client.Object)
+func ResourcesFromCtx(ctx context.Context) []k8s.Object {
+	v, ok := ctx.Value(resourceKey{}).([]k8s.Object)
 	if !ok {
 		return nil
 	}
 	return v
 }
 
-func SaveResources(ctx context.Context, resources ...client.Object) context.Context {
+func SaveResources(ctx context.Context, resources ...k8s.Object) context.Context {
 	prev := ResourcesFromCtx(ctx)
 	prev = append(prev, resources...)
 	return context.WithValue(ctx, resourceKey{}, prev)
 }
 
-// getNodeIPs returns the internal and external IPs of a node
-// ipv6: true returns IPv6 addresses, false returns IPv4 addresses
+type testSuccessKey struct{}
+
+func MarkTestSuccess(ctx context.Context) context.Context {
+	return context.WithValue(ctx, testSuccessKey{}, true)
+}
+
+func IsTestSuccess(ctx context.Context) bool {
+	v, ok := ctx.Value(testSuccessKey{}).(bool)
+	return ok && v
+}
+
 func getNodeIPs(node *corev1.Node, ipv6 bool) (internalIP, externalIP string) {
 	for _, addr := range node.Status.Addresses {
 		ip := net.ParseIP(addr.Address)
@@ -345,4 +446,465 @@ func restartTerway(ctx context.Context, config *envconf.Config) error {
 		wait.WithTimeout(5*time.Minute),
 		wait.WithInterval(5*time.Second))
 	return err
+}
+
+func waitPodsReady(client klient.Client, pods ...*corev1.Pod) error {
+	for _, pod := range pods {
+		err := wait.For(conditions.New(client.Resources()).PodReady(pod),
+			wait.WithTimeout(2*time.Minute),
+			wait.WithInterval(1*time.Second))
+		if err != nil {
+			return fmt.Errorf("wait pod %s/%s ready failed: %w", pod.Namespace, pod.Name, err)
+		}
+	}
+	return nil
+}
+
+type PodNetworking struct {
+	*networkv1beta1.PodNetworking
+}
+
+func NewPodNetworking(name string) *PodNetworking {
+	return &PodNetworking{
+		PodNetworking: &networkv1beta1.PodNetworking{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name,
+			},
+			Spec: networkv1beta1.PodNetworkingSpec{
+				ENIOptions: networkv1beta1.ENIOptions{
+					ENIAttachType: networkv1beta1.ENIOptionTypeDefault,
+				},
+			},
+		},
+	}
+}
+
+func (pn *PodNetworking) WithVSwitches(vswitches []string) *PodNetworking {
+	pn.Spec.VSwitchOptions = vswitches
+	return pn
+}
+
+func (pn *PodNetworking) WithSecurityGroups(sgs []string) *PodNetworking {
+	pn.Spec.SecurityGroupIDs = sgs
+	return pn
+}
+
+func (pn *PodNetworking) WithPodSelector(selector *metav1.LabelSelector) *PodNetworking {
+	pn.Spec.Selector.PodSelector = selector
+	return pn
+}
+
+func (pn *PodNetworking) WithNamespaceSelector(selector *metav1.LabelSelector) *PodNetworking {
+	pn.Spec.Selector.NamespaceSelector = selector
+	return pn
+}
+
+func (pn *PodNetworking) WithAllocationType(allocType networkv1beta1.AllocationType) *PodNetworking {
+	pn.Spec.AllocationType = allocType
+	return pn
+}
+
+func (pn *PodNetworking) WithENIAttachType(attachType networkv1beta1.ENIAttachType) *PodNetworking {
+	pn.Spec.ENIOptions.ENIAttachType = attachType
+	return pn
+}
+
+func WaitPodNetworkingDeleted(name string, client klient.Client) error {
+	pn := networkv1beta1.PodNetworking{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+	}
+	_ = client.Resources().Delete(context.Background(), &pn)
+
+	err := wait.For(conditions.New(client.Resources()).ResourceDeleted(&pn),
+		wait.WithImmediate(),
+		wait.WithInterval(1*time.Second),
+		wait.WithTimeout(30*time.Second),
+	)
+	return err
+}
+
+func WaitPodNetworkingReady(name string, client klient.Client) error {
+	pn := networkv1beta1.PodNetworking{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+	}
+	err := wait.For(conditions.New(client.Resources()).ResourceMatch(&pn, func(object k8s.Object) bool {
+		p := object.(*networkv1beta1.PodNetworking)
+		if len(p.Status.VSwitches) != len(p.Spec.VSwitchOptions) {
+			return false
+		}
+		for _, s := range p.Status.VSwitches {
+			if s.Zone == "" {
+				return false
+			}
+		}
+		return p.Status.Status == networkv1beta1.NetworkingStatusReady
+	}),
+		wait.WithImmediate(),
+		wait.WithInterval(1*time.Second),
+		wait.WithTimeout(30*time.Second),
+	)
+	return err
+}
+
+func ValidatePodHasPodNetworking(pod *corev1.Pod, pnName string) error {
+	if !terwayTypes.PodUseENI(pod) {
+		return fmt.Errorf("pod does not use ENI")
+	}
+	if pod.Annotations[terwayTypes.PodNetworking] != pnName {
+		return fmt.Errorf("expected PodNetworking %s, got %s", pnName, pod.Annotations[terwayTypes.PodNetworking])
+	}
+	return nil
+}
+
+// ValidatePodResourceRequests validates that pod has the correct resource requests based on ENI attach type
+func ValidatePodResourceRequests(pod *corev1.Pod, eniAttachType networkv1beta1.ENIAttachType) error {
+	var expectedResourceName string
+	switch eniAttachType {
+	case networkv1beta1.ENIOptionTypeENI:
+		expectedResourceName = "aliyun/eni"
+	case networkv1beta1.ENIOptionTypeTrunk, networkv1beta1.ENIOptionTypeDefault:
+		expectedResourceName = "aliyun/member-eni"
+	default:
+		return fmt.Errorf("unknown ENI attach type: %s", eniAttachType)
+	}
+
+	if pod.Spec.Containers[0].Resources.Requests == nil {
+		return fmt.Errorf("pod does not have resource requests")
+	}
+
+	if _, exists := pod.Spec.Containers[0].Resources.Requests[corev1.ResourceName(expectedResourceName)]; !exists {
+		return fmt.Errorf("expected resource request for %s", expectedResourceName)
+	}
+
+	return nil
+}
+
+// WaitPodENIReady waits for a PodENI CR to reach Bind phase
+func WaitPodENIReady(ctx context.Context, namespace, name string, client klient.Client) (*networkv1beta1.PodENI, error) {
+	podENI := &networkv1beta1.PodENI{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+	}
+
+	err := wait.For(conditions.New(client.Resources()).ResourceMatch(podENI, func(object k8s.Object) bool {
+		p := object.(*networkv1beta1.PodENI)
+		return p.Status.Phase == networkv1beta1.ENIPhaseBind
+	}),
+		wait.WithImmediate(),
+		wait.WithInterval(1*time.Second),
+		wait.WithTimeout(30*time.Second),
+	)
+
+	if err != nil {
+		return podENI, fmt.Errorf("wait PodENI %s/%s ready failed: %w (current phase: %s, msg: %s)",
+			namespace, name, err, podENI.Status.Phase, podENI.Status.Msg)
+	}
+
+	return podENI, nil
+}
+
+func CreatePodNetworking(ctx context.Context, client klient.Client, pn *networkv1beta1.PodNetworking) error {
+	err := WaitPodNetworkingDeleted(pn.Name, client)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing PodNetworking: %w", err)
+	}
+
+	if err := client.Resources().Create(ctx, pn); err != nil {
+		return fmt.Errorf("failed to create PodNetworking: %w", err)
+	}
+
+	return nil
+}
+
+func CreatePodNetworkingAndWaitReady(ctx context.Context, client klient.Client, pn *networkv1beta1.PodNetworking) error {
+	err := CreatePodNetworking(ctx, client, pn)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing PodNetworking: %w", err)
+	}
+
+	if err := WaitPodNetworkingReady(pn.Name, client); err != nil {
+		return fmt.Errorf("failed waiting for PodNetworking to be ready: %w", err)
+	}
+
+	return nil
+}
+
+// PodNetworkingTestConfig holds configuration for PodNetworking tests
+type PodNetworkingTestConfig struct {
+	PodNetworkingName string
+	ENIAttachType     networkv1beta1.ENIAttachType
+	PodLabels         map[string]string
+	VSwitches         []string
+	SecurityGroups    []string
+	AllocationType    *networkv1beta1.AllocationType
+	CreateServices    bool
+	TestConnectivity  bool
+	ExpectedENIType   *networkv1beta1.ENIType
+}
+
+// DefaultPodNetworkingTestConfig returns a default configuration for PodNetworking tests
+func DefaultPodNetworkingTestConfig() PodNetworkingTestConfig {
+	return PodNetworkingTestConfig{
+		PodNetworkingName: "test-pn",
+		ENIAttachType:     networkv1beta1.ENIOptionTypeTrunk,
+		PodLabels:         map[string]string{"netplan": "test-pn"},
+		CreateServices:    true,
+		TestConnectivity:  true,
+	}
+}
+
+// WithENIAttachType sets the ENI attach type
+func (c PodNetworkingTestConfig) WithENIAttachType(attachType networkv1beta1.ENIAttachType) PodNetworkingTestConfig {
+	c.ENIAttachType = attachType
+	return c
+}
+
+// WithPodLabels sets the pod labels for selector
+func (c PodNetworkingTestConfig) WithPodLabels(labels map[string]string) PodNetworkingTestConfig {
+	c.PodLabels = labels
+	return c
+}
+
+// WithVSwitches sets the custom vSwitches
+func (c PodNetworkingTestConfig) WithVSwitches(vswitches []string) PodNetworkingTestConfig {
+	c.VSwitches = vswitches
+	return c
+}
+
+// WithSecurityGroups sets the custom security groups
+func (c PodNetworkingTestConfig) WithSecurityGroups(sgs []string) PodNetworkingTestConfig {
+	c.SecurityGroups = sgs
+	return c
+}
+
+// WithAllocationType sets the allocation type
+func (c PodNetworkingTestConfig) WithAllocationType(allocType networkv1beta1.AllocationType) PodNetworkingTestConfig {
+	c.AllocationType = &allocType
+	return c
+}
+
+// WithExpectedENIType sets the expected ENI type for validation
+func (c PodNetworkingTestConfig) WithExpectedENIType(eniType networkv1beta1.ENIType) PodNetworkingTestConfig {
+	c.ExpectedENIType = &eniType
+	return c
+}
+
+// WithoutServices disables service creation
+func (c PodNetworkingTestConfig) WithoutServices() PodNetworkingTestConfig {
+	c.CreateServices = false
+	return c
+}
+
+// WithoutConnectivity disables connectivity testing
+func (c PodNetworkingTestConfig) WithoutConnectivity() PodNetworkingTestConfig {
+	c.TestConnectivity = false
+	return c
+}
+
+// PodNetworkingTestSuite represents a complete PodNetworking test suite
+type PodNetworkingTestSuite struct {
+	Config        PodNetworkingTestConfig
+	PodNetworking *networkv1beta1.PodNetworking
+	ServerPod     *corev1.Pod
+	ClientPod     *corev1.Pod
+	Services      []*corev1.Service
+}
+
+// NewPodNetworkingTestSuite creates a new test suite with the given configuration
+func NewPodNetworkingTestSuite(config PodNetworkingTestConfig) *PodNetworkingTestSuite {
+	// Update pod labels to match PodNetworking name if not specified
+	if config.PodLabels == nil {
+		config.PodLabels = map[string]string{"netplan": config.PodNetworkingName}
+	}
+
+	return &PodNetworkingTestSuite{
+		Config: config,
+	}
+}
+
+// Setup creates the PodNetworking and pods
+func (ts *PodNetworkingTestSuite) Setup(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+	// Create PodNetworking
+	pn := NewPodNetworking(ts.Config.PodNetworkingName).
+		WithPodSelector(&metav1.LabelSelector{
+			MatchLabels: ts.Config.PodLabels,
+		}).
+		WithENIAttachType(ts.Config.ENIAttachType)
+
+	if len(ts.Config.VSwitches) > 0 {
+		pn = pn.WithVSwitches(ts.Config.VSwitches)
+	}
+	if len(ts.Config.SecurityGroups) > 0 {
+		pn = pn.WithSecurityGroups(ts.Config.SecurityGroups)
+	}
+	if ts.Config.AllocationType != nil {
+		pn = pn.WithAllocationType(*ts.Config.AllocationType)
+	}
+
+	err := CreatePodNetworkingAndWaitReady(ctx, config.Client(), pn.PodNetworking)
+	if err != nil {
+		t.Fatalf("create PodNetworking failed: %v", err)
+	}
+	ts.PodNetworking = pn.PodNetworking
+
+	// Create server and client pods
+	serverLabels := make(map[string]string)
+	clientLabels := make(map[string]string)
+	for k, v := range ts.Config.PodLabels {
+		serverLabels[k] = v
+		clientLabels[k] = v
+	}
+	serverLabels["app"] = "server"
+	clientLabels["app"] = "client"
+
+	ts.ServerPod = NewPod("server", config.Namespace()).
+		WithLabels(serverLabels).
+		WithContainer("server", nginxImage, nil).Pod
+
+	ts.ClientPod = NewPod("client", config.Namespace()).
+		WithLabels(clientLabels).
+		WithContainer("client", nginxImage, nil).Pod
+
+	err = config.Client().Resources().Create(ctx, ts.ServerPod)
+	if err != nil {
+		t.Fatalf("create server pod failed: %v", err)
+	}
+	err = config.Client().Resources().Create(ctx, ts.ClientPod)
+	if err != nil {
+		t.Fatalf("create client pod failed: %v", err)
+	}
+
+	// Create services if enabled
+	if ts.Config.CreateServices {
+		ts.Services = []*corev1.Service{}
+		for _, stack := range getStack() {
+			svc := NewService(fmt.Sprintf("server-%s", stack), config.Namespace(),
+				map[string]string{"app": "server"}).
+				ExposePort(80, "http").
+				WithIPFamily(stack)
+
+			err = config.Client().Resources().Create(ctx, svc.Service)
+			if err != nil {
+				t.Fatalf("create service failed: %v", err)
+			}
+			ts.Services = append(ts.Services, svc.Service)
+		}
+	}
+
+	// Save resources for cleanup
+	resources := []k8s.Object{ts.PodNetworking, ts.ServerPod, ts.ClientPod}
+	for _, svc := range ts.Services {
+		resources = append(resources, svc)
+	}
+
+	return SaveResources(ctx, resources...)
+}
+
+// ValidatePodNetworking validates that pods use the correct PodNetworking
+func (ts *PodNetworkingTestSuite) ValidatePodNetworking(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+	server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server", Namespace: config.Namespace()}}
+	client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: config.Namespace()}}
+
+	err := waitPodsReady(config.Client(), server, client)
+	if err != nil {
+		t.Fatalf("wait pods ready failed: %v", err)
+	}
+
+	// Validate PodNetworking annotation
+	if err := ValidatePodHasPodNetworking(server, ts.Config.PodNetworkingName); err != nil {
+		t.Fatalf("server pod PodNetworking validation failed: %v", err)
+	}
+	if err := ValidatePodHasPodNetworking(client, ts.Config.PodNetworkingName); err != nil {
+		t.Fatalf("client pod PodNetworking validation failed: %v", err)
+	}
+
+	// Validate resource requests
+	if err := ValidatePodResourceRequests(server, ts.Config.ENIAttachType); err != nil {
+		t.Fatalf("server pod resource requests validation failed: %v", err)
+	}
+	if err := ValidatePodResourceRequests(client, ts.Config.ENIAttachType); err != nil {
+		t.Fatalf("client pod resource requests validation failed: %v", err)
+	}
+
+	t.Logf("✓ Pods are using PodNetworking %s with correct resource requests", ts.Config.PodNetworkingName)
+	return ctx
+}
+
+// ValidatePodENI validates PodENI configuration
+func (ts *PodNetworkingTestSuite) ValidatePodENI(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+	server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server", Namespace: config.Namespace()}}
+	client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: config.Namespace()}}
+
+	// Validate server PodENI
+	serverPodENI, err := WaitPodENIReady(ctx, server.Namespace, server.Name, config.Client())
+	if err != nil {
+		t.Fatalf("server PodENI not ready: %v", err)
+	}
+	if len(serverPodENI.Spec.Allocations) == 0 {
+		t.Fatalf("server PodENI has no allocations")
+	}
+	ts.validatePodENIType(t, serverPodENI, "server")
+
+	// Validate client PodENI
+	clientPodENI, err := WaitPodENIReady(ctx, client.Namespace, client.Name, config.Client())
+	if err != nil {
+		t.Fatalf("client PodENI not ready: %v", err)
+	}
+	if len(clientPodENI.Spec.Allocations) == 0 {
+		t.Fatalf("client PodENI has no allocations")
+	}
+	ts.validatePodENIType(t, clientPodENI, "client")
+
+	return ctx
+}
+
+func (ts *PodNetworkingTestSuite) validatePodENIType(t *testing.T, podENI *networkv1beta1.PodENI, podType string) {
+	eniID := podENI.Spec.Allocations[0].ENI.ID
+	if ts.Config.ExpectedENIType != nil {
+		if eniInfo, ok := podENI.Status.ENIInfos[eniID]; ok {
+			if eniInfo.Type != *ts.Config.ExpectedENIType {
+				t.Errorf("expected ENI type %s, got %s", *ts.Config.ExpectedENIType, eniInfo.Type)
+			} else {
+				t.Logf("✓ %s pod using expected ENI type: %s (allocations: %d)", podType, eniInfo.Type, len(podENI.Spec.Allocations))
+			}
+		} else {
+			t.Logf("✓ %s pod created (allocations: %d, ENI ID: %s)", podType, len(podENI.Spec.Allocations), eniID)
+		}
+	} else {
+		if eniInfo, ok := podENI.Status.ENIInfos[eniID]; ok {
+			t.Logf("✓ %s pod using ENI type: %s (allocations: %d)", podType, eniInfo.Type, len(podENI.Spec.Allocations))
+		} else {
+			t.Logf("✓ %s pod created (allocations: %d, ENI ID: %s)", podType, len(podENI.Spec.Allocations), eniID)
+		}
+	}
+}
+
+// TestConnectivity tests connectivity between pods
+func (ts *PodNetworkingTestSuite) TestConnectivity(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+	if !ts.Config.TestConnectivity {
+		return ctx
+	}
+
+	for _, stack := range getStack() {
+		serviceName := fmt.Sprintf("server-%s", stack)
+		_, err := Pull(config.Client(), config.Namespace(), "client", "client", serviceName, t)
+		if err != nil {
+			t.Errorf("connectivity failed for %s: %v", stack, err)
+		}
+	}
+	return MarkTestSuccess(ctx)
+}
+
+// RunTestSuite runs a complete PodNetworking test suite
+func RunPodNetworkingTestSuite(t *testing.T, config PodNetworkingTestConfig) {
+	suite := NewPodNetworkingTestSuite(config)
+
+	feature := features.New(fmt.Sprintf("PodNetworking/%s", config.PodNetworkingName)).
+		WithLabel("env", "pod-networking").
+		Setup(suite.Setup).
+		Assess("pods should use PodNetworking", suite.ValidatePodNetworking).
+		Assess("pods should have correct PodENI configuration", suite.ValidatePodENI).
+		Assess("connectivity should work", suite.TestConnectivity).
+		Feature()
+
+	testenv.Test(t, feature)
 }
