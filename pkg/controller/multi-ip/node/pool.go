@@ -538,6 +538,7 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	ipv4Map, ipv6Map = buildIPMap(podsMapper, node.Status.NetworkInterfaces)
 	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA, node)
 
+	// do not block the gc process
 	if err == nil {
 		err = n.gc(ctx, node)
 	}
@@ -1143,63 +1144,64 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 			delete(node.Status.NetworkInterfaces, eni.ID)
 		case aliyunClient.ENIStatusInUse:
 			var waitTime time.Duration
-			ips := make([]aliyunClient.IPSet, 0)
+
+			ipv4s := make([]aliyunClient.IPSet, 0)
 			for _, ip := range eni.IPv4 {
 				if ip.Status == networkv1beta1.IPStatusDeleting {
-					ips = append(ips, aliyunClient.IPSet{
+					ipv4s = append(ipv4s, aliyunClient.IPSet{
 						Primary:   false,
 						IPAddress: ip.IP,
 						IPName:    ip.IPName,
 					})
 				}
 			}
-			ips = lo.Subset(ips, 0, uint(batchSize(ctx)))
-			if len(ips) > 0 {
-				err := n.aliyun.UnAssignPrivateIPAddressesV2(ctx, eni.ID, ips)
+			ipv4s = lo.Subset(ipv4s, 0, uint(batchSize(ctx)))
+			if len(ipv4s) > 0 {
+				err := n.aliyun.UnAssignPrivateIPAddressesV2(ctx, eni.ID, ipv4s)
 				if err != nil {
 					continue
 				}
 
 				MetaCtx(ctx).StatusChanged.Store(true)
-
-				lo.ForEach(ips, func(ip aliyunClient.IPSet, _ int) {
-					delete(eni.IPv4, ip.IPAddress)
-				})
 
 				waitTime = 1 * time.Second
 			}
 
-			ips = ips[:0]
+			ipv6s := make([]aliyunClient.IPSet, 0)
 			for _, ip := range eni.IPv6 {
 				if ip.Status == networkv1beta1.IPStatusDeleting {
-					ips = append(ips, aliyunClient.IPSet{
+					ipv6s = append(ipv6s, aliyunClient.IPSet{
 						Primary:   false,
 						IPAddress: ip.IP,
 						IPName:    ip.IPName,
 					})
 				}
 			}
-			ips = lo.Subset(ips, 0, uint(batchSize(ctx)))
-			if len(ips) > 0 {
+			ipv6s = lo.Subset(ipv6s, 0, uint(batchSize(ctx)))
+			if len(ipv6s) > 0 {
 				if waitTime > 0 {
 					time.Sleep(waitTime)
 				}
 
-				err := n.aliyun.UnAssignIpv6AddressesV2(ctx, eni.ID, ips)
+				err := n.aliyun.UnAssignIpv6AddressesV2(ctx, eni.ID, ipv6s)
 				if err != nil {
 					continue
 				}
-				MetaCtx(ctx).StatusChanged.Store(true)
 
-				lo.ForEach(ips, func(ip aliyunClient.IPSet, _ int) {
-					delete(eni.IPv6, ip.IPAddress)
-				})
+				MetaCtx(ctx).StatusChanged.Store(true)
+			}
+
+			err := n.waitIPGone(ctx, eni, ipv4s, ipv6s)
+			if err != nil {
+				log.Error(err, "run gc failed")
+				continue
 			}
 		default:
 			// nb(l1b0k): there is noway to reach here
 			log.Info("unexpected status, skip eni", "eni", eni.ID, "status", eni.Status)
 		}
 	}
+
 	return nil
 }
 
@@ -1774,4 +1776,53 @@ func calculateToDel(ctx context.Context, node *networkv1beta1.Node) int {
 	toDel += extraDel
 
 	return toDel
+}
+
+// waitIPGone checks if IP is removed from ENI, if timeout rely on next GC to do the clean up
+func (n *ReconcileNode) waitIPGone(ctx context.Context, eni *networkv1beta1.Nic, ipv4, ipv6 []aliyunClient.IPSet) error {
+	if len(ipv4) == 0 && len(ipv6) == 0 {
+		return nil
+	}
+
+	return backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.WaitENIIPRemoved), func(ctx context.Context) (bool, error) {
+		var err error
+		var enis []*aliyunClient.NetworkInterface
+		// all eni attached to this instance is taken into account. (exclude member eni)
+		opts := &aliyunClient.DescribeNetworkInterfaceOptions{
+			NetworkInterfaceIDs: &[]string{eni.ID},
+		}
+
+		enis, err = n.aliyun.DescribeNetworkInterfaceV2(ctx, opts)
+		if err != nil {
+			return false, err
+		}
+
+		if len(enis) == 0 {
+			// we assume eni is exist here
+			return false, fmt.Errorf("eni not found, eni: %s", eni.ID)
+		}
+
+		ipv4Set := convertIPSet(enis[0].PrivateIPSets)
+		ipv6Set := convertIPSet(enis[0].IPv6Set)
+
+		unfinished := false
+		lo.ForEach(ipv4, func(ip aliyunClient.IPSet, _ int) {
+			_, found := ipv4Set[ip.IPAddress]
+			if !found {
+				delete(eni.IPv4, ip.IPAddress)
+			} else {
+				unfinished = true
+			}
+		})
+
+		lo.ForEach(ipv6, func(ip aliyunClient.IPSet, _ int) {
+			_, found := ipv6Set[ip.IPAddress]
+			if !found {
+				delete(eni.IPv6, ip.IPAddress)
+			} else {
+				unfinished = true
+			}
+		})
+		return !unfinished, nil
+	})
 }
