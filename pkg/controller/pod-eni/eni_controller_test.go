@@ -7,6 +7,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/controller/status"
+	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
 	"github.com/AliyunContainerService/terway/types"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
@@ -19,66 +20,10 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 var ctx context.Context
-
-// Test helpers and utilities
-func createTestNode(name string) *corev1.Node {
-	return &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-			Labels: map[string]string{
-				"topology.kubernetes.io/region":    "cn-hangzhou",
-				"topology.kubernetes.io/zone":      "cn-hangzhou-a",
-				"node.kubernetes.io/instance-type": "instanceType",
-			},
-		},
-		Spec: corev1.NodeSpec{ProviderID: "cn-hangzhou.i-xxx"},
-	}
-}
-
-func createTestNodeCRD(name string) *networkv1beta1.Node {
-	return &networkv1beta1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: networkv1beta1.NodeSpec{
-			NodeMetadata: networkv1beta1.NodeMetadata{
-				RegionID:     "cn-hangzhou",
-				InstanceType: "instanceType",
-				InstanceID:   "i-xxx",
-				ZoneID:       "cn-hangzhou-a",
-			},
-			ENISpec: &networkv1beta1.ENISpec{
-				VSwitchOptions:      []string{"vsw-xxx"},
-				SecurityGroupIDs:    []string{"sg-xxx"},
-				EnableIPv4:          true,
-				VSwitchSelectPolicy: networkv1beta1.VSwitchSelectionPolicyMost,
-			},
-		},
-	}
-}
-
-func createTestPod(name, namespace, nodeName string) *corev1.Pod {
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
-		Spec: corev1.PodSpec{
-			NodeName: nodeName,
-			Containers: []corev1.Container{
-				{
-					Name:  "pause",
-					Image: "pause",
-				},
-			},
-		},
-	}
-}
 
 func createTestReconciler(openAPI *mocks.OpenAPI, trunkMode, crdMode bool) *ReconcilePodENI {
 	return &ReconcilePodENI{
@@ -145,11 +90,11 @@ var _ = Describe("ENI Controller Tests", func() {
 		}, nil).Maybe()
 
 		// Setup test node
-		testNode = createTestNode(testNodeName)
+		testNode = testutil.CreateTestNode(testNodeName)
 		Expect(k8sClient.Create(ctx, testNode)).Should(Succeed())
 
 		// Setup test node CRD
-		testNodeCRD = createTestNodeCRD(testNodeName)
+		testNodeCRD = testutil.CreateTestNodeCRD(testNodeName)
 		Expect(k8sClient.Create(ctx, testNodeCRD)).Should(Succeed())
 	})
 
@@ -200,7 +145,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			}
 			Expect(k8sClient.Create(ctx, podENI)).Should(Succeed())
 
-			pod := createTestPod("test-delete-routing", "default", testNodeName)
+			pod := testutil.CreateTestPod("test-delete-routing", "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			// Create NetworkInterface CRD for deletion
@@ -237,7 +182,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-initial-state"
 			eniID := "eni-initial"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -261,7 +206,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseInitial,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			eni := &networkv1beta1.NetworkInterface{
@@ -324,7 +269,7 @@ var _ = Describe("ENI Controller Tests", func() {
 		It("should handle empty allocations", func() {
 			podName := "test-empty-allocations"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -339,7 +284,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseInitial,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			r := createTestReconciler(openAPI, false, false)
@@ -357,7 +302,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-binding-state"
 			eniID := "eni-binding"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -382,7 +327,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseBinding,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			eni := &networkv1beta1.NetworkInterface{
@@ -410,7 +355,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-bind-state"
 			eniID := "eni-bind"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -437,7 +382,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					},
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			r := createTestReconciler(openAPI, false, false)
@@ -461,7 +406,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-unbind-state"
 			eniID := "eni-unbind"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -480,7 +425,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseUnbind,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			r := createTestReconciler(openAPI, false, false)
@@ -504,7 +449,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-detaching-state"
 			eniID := "eni-detaching"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -530,7 +475,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					},
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			eni := &networkv1beta1.NetworkInterface{
@@ -542,7 +487,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseBind,
 				},
 			}
-			err = createResource(ctx, k8sClient, eni)
+			err = testutil.CreateResource(ctx, k8sClient, eni)
 			Expect(err).NotTo(HaveOccurred())
 
 			simulateENIStatusTransition(eniID, networkv1beta1.ENIPhaseDetaching, networkv1beta1.ENIPhaseUnbind, 1*time.Second)
@@ -568,7 +513,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-deleting-state"
 			eniID := "eni-deleting"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -587,7 +532,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseDeleting,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			r := createTestReconciler(openAPI, false, false)
@@ -614,7 +559,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-deletion-finalizer"
 			eniID := "eni-deletion-finalizer"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			now := metav1.Now()
@@ -686,7 +631,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					},
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Execute migration
@@ -729,7 +674,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					},
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create NetworkInterface with empty status
@@ -786,7 +731,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					PodLastSeen: metav1.NewTime(time.Now().Add(-10 * time.Minute)), // Expired
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			r := createTestReconciler(openAPI, false, true)
@@ -829,7 +774,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					PodLastSeen: metav1.NewTime(time.Now().Add(-24 * time.Hour)), // Very old
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			r := createTestReconciler(openAPI, false, true)
@@ -852,7 +797,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			eniID := "eni-gc-update-timestamp"
 
 			// Create Pod
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			// Create PodENI with old timestamp
@@ -879,7 +824,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					PodLastSeen: metav1.NewTime(oldTime),
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			r := createTestReconciler(openAPI, false, true)
@@ -907,7 +852,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-trunk-mode"
 			eniID := "eni-trunk-mode"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -931,7 +876,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseInitial,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			eni := &networkv1beta1.NetworkInterface{
@@ -957,7 +902,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-secondary-mode"
 			eniID := "eni-secondary-mode"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -981,7 +926,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseInitial,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			eni := &networkv1beta1.NetworkInterface{
@@ -1047,7 +992,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseInitial,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			r := createTestReconciler(openAPI, false, false)
@@ -1065,7 +1010,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-attach-failure"
 			eniID := "eni-attach-failure"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -1084,7 +1029,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseInitial,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Don't create NetworkInterface - this should cause attachment to fail
@@ -1107,7 +1052,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-fixed-ip"
 			eniID := "eni-fixed-ip"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			pod.ObjectMeta.Labels = map[string]string{"app": "fixed-ip-app"}
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
@@ -1137,7 +1082,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseInitial,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			eni := &networkv1beta1.NetworkInterface{
@@ -1170,7 +1115,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			podName := "test-non-fixed-rebind"
 			eniID := "eni-non-fixed-rebind"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -1192,7 +1137,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseBinding, // Already has status
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			r := createTestReconciler(openAPI, false, false)
@@ -1216,7 +1161,7 @@ var _ = Describe("ENI Controller Tests", func() {
 			eniID1 := "eni-multi-1"
 			eniID2 := "eni-multi-2"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -1240,7 +1185,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseInitial,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create NetworkInterface resources for both ENIs
@@ -1275,6 +1220,235 @@ var _ = Describe("ENI Controller Tests", func() {
 			Expect(updatedPodENI.Spec.Allocations[0].Interface).To(Equal("net1"))
 			Expect(updatedPodENI.Spec.Allocations[1].Interface).To(Equal("net2"))
 		})
+
+		It("should handle slice order changes in multi-ENI allocations without unnecessary updates", func() {
+			podName := "test-multi-eni-order"
+			eniID1 := "eni-order-1"
+			eniID2 := "eni-order-2"
+			eniID3 := "eni-order-3"
+
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+
+			// Create PodENI with allocations in specific order (net3, net1, net2)
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      podName,
+					Namespace: "default",
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							Interface: "net3",
+							ENI:       networkv1beta1.ENI{ID: eniID3, AttachmentOptions: networkv1beta1.AttachmentOptions{Trunk: ptr.To(false)}},
+						},
+						{
+							Interface: "net1",
+							ENI:       networkv1beta1.ENI{ID: eniID1, AttachmentOptions: networkv1beta1.AttachmentOptions{Trunk: ptr.To(false)}},
+						},
+						{
+							Interface: "net2",
+							ENI:       networkv1beta1.ENI{ID: eniID2, AttachmentOptions: networkv1beta1.AttachmentOptions{Trunk: ptr.To(false)}},
+						},
+					},
+				},
+				Status: networkv1beta1.PodENIStatus{
+					Phase: networkv1beta1.ENIPhaseInitial,
+				},
+			}
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create NetworkInterface resources for all ENIs
+			for _, eniID := range []string{eniID1, eniID2, eniID3} {
+				eni := &networkv1beta1.NetworkInterface{
+					ObjectMeta: metav1.ObjectMeta{Name: eniID},
+					Spec: networkv1beta1.NetworkInterfaceSpec{
+						ENI: networkv1beta1.ENI{ID: eniID},
+					},
+				}
+				Expect(k8sClient.Create(ctx, eni)).Should(Succeed())
+				simulateENIStatusTransition(eniID, networkv1beta1.ENIPhaseBinding, networkv1beta1.ENIPhaseBind, 1*time.Second)
+			}
+
+			r := createTestReconciler(openAPI, false, false)
+			result, err := r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: k8stypes.NamespacedName{Name: podName, Namespace: "default"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// Verify allocations are sorted by Interface field
+			updatedPodENI := &networkv1beta1.PodENI{}
+			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: podName, Namespace: "default"}, updatedPodENI)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedPodENI.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)))
+			Expect(len(updatedPodENI.Spec.Allocations)).To(Equal(3))
+
+			// Verify the allocations are NOT modified
+			Expect(updatedPodENI.Spec.Allocations[0].Interface).To(Equal("net3"))
+			Expect(updatedPodENI.Spec.Allocations[1].Interface).To(Equal("net1"))
+			Expect(updatedPodENI.Spec.Allocations[2].Interface).To(Equal("net2"))
+
+			Expect(updatedPodENI.Status.InstanceID).To(Equal("i-xxx"))
+		})
+
+		It("should handle route order changes in multi-ENI allocations", func() {
+			podName := "test-multi-eni-routes"
+			eniID1 := "eni-routes-1"
+			eniID2 := "eni-routes-2"
+
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+
+			// Create PodENI with routes in different orders
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      podName,
+					Namespace: "default",
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							Interface: "net1",
+							ENI:       networkv1beta1.ENI{ID: eniID1, AttachmentOptions: networkv1beta1.AttachmentOptions{Trunk: ptr.To(false)}},
+							IPv4:      "127.0.0.1",
+							ExtraRoutes: []networkv1beta1.Route{
+								{Dst: "192.168.2.0/24"},
+								{Dst: "192.168.1.0/24"},
+								{Dst: "192.168.3.0/24"},
+							},
+						},
+						{
+							Interface: "net2",
+							ENI:       networkv1beta1.ENI{ID: eniID2, AttachmentOptions: networkv1beta1.AttachmentOptions{Trunk: ptr.To(false)}},
+							IPv4:      "127.0.0.2",
+							ExtraRoutes: []networkv1beta1.Route{
+								{Dst: "10.0.2.0/24"},
+								{Dst: "10.0.1.0/24"},
+							},
+						},
+					},
+				},
+				Status: networkv1beta1.PodENIStatus{
+					Phase: networkv1beta1.ENIPhaseInitial,
+				},
+			}
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create NetworkInterface resources
+			for _, eniID := range []string{eniID1, eniID2} {
+				eni := &networkv1beta1.NetworkInterface{
+					ObjectMeta: metav1.ObjectMeta{Name: eniID},
+					Spec: networkv1beta1.NetworkInterfaceSpec{
+						ENI: networkv1beta1.ENI{ID: eniID},
+					},
+				}
+				Expect(k8sClient.Create(ctx, eni)).Should(Succeed())
+				simulateENIStatusTransition(eniID, networkv1beta1.ENIPhaseBinding, networkv1beta1.ENIPhaseBind, 1*time.Second)
+			}
+
+			r := createTestReconciler(openAPI, false, false)
+			result, err := r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: k8stypes.NamespacedName{Name: podName, Namespace: "default"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// Verify the reconciliation completed successfully
+			updatedPodENI := &networkv1beta1.PodENI{}
+			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: podName, Namespace: "default"}, updatedPodENI)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedPodENI.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)))
+
+			// Routes order should not affect the comparison logic
+			Expect(len(updatedPodENI.Spec.Allocations)).To(Equal(2))
+
+			Expect(updatedPodENI.Status.InstanceID).To(Equal("i-xxx"))
+		})
+
+		It("should handle concurrent ENI attachment for multiple allocations", func() {
+			podName := "test-concurrent-attach"
+			eniID1 := "eni-concurrent-1"
+			eniID2 := "eni-concurrent-2"
+			eniID3 := "eni-concurrent-3"
+			eniID4 := "eni-concurrent-4"
+
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+
+			// Create PodENI with multiple allocations
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      podName,
+					Namespace: "default",
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							Interface: "net1",
+							ENI:       networkv1beta1.ENI{ID: eniID1, AttachmentOptions: networkv1beta1.AttachmentOptions{Trunk: ptr.To(false)}},
+						},
+						{
+							Interface: "net2",
+							ENI:       networkv1beta1.ENI{ID: eniID2, AttachmentOptions: networkv1beta1.AttachmentOptions{Trunk: ptr.To(false)}},
+						},
+						{
+							Interface: "net3",
+							ENI:       networkv1beta1.ENI{ID: eniID3, AttachmentOptions: networkv1beta1.AttachmentOptions{Trunk: ptr.To(false)}},
+						},
+						{
+							Interface: "net4",
+							ENI:       networkv1beta1.ENI{ID: eniID4, AttachmentOptions: networkv1beta1.AttachmentOptions{Trunk: ptr.To(false)}},
+						},
+					},
+				},
+				Status: networkv1beta1.PodENIStatus{
+					Phase: networkv1beta1.ENIPhaseInitial,
+				},
+			}
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create NetworkInterface resources for all ENIs
+			for _, eniID := range []string{eniID1, eniID2, eniID3, eniID4} {
+				eni := &networkv1beta1.NetworkInterface{
+					ObjectMeta: metav1.ObjectMeta{Name: eniID},
+					Spec: networkv1beta1.NetworkInterfaceSpec{
+						ENI: networkv1beta1.ENI{ID: eniID},
+					},
+				}
+				Expect(k8sClient.Create(ctx, eni)).Should(Succeed())
+				simulateENIStatusTransition(eniID, networkv1beta1.ENIPhaseBinding, networkv1beta1.ENIPhaseBind, 1*time.Second)
+			}
+
+			r := createTestReconciler(openAPI, false, false)
+			result, err := r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: k8stypes.NamespacedName{Name: podName, Namespace: "default"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// Verify all ENIs are attached and status is updated
+			updatedPodENI := &networkv1beta1.PodENI{}
+			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: podName, Namespace: "default"}, updatedPodENI)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedPodENI.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)))
+			Expect(len(updatedPodENI.Spec.Allocations)).To(Equal(4))
+			Expect(len(updatedPodENI.Status.ENIInfos)).To(Equal(4))
+
+			// Verify all ENIs are in the status
+			for _, eniID := range []string{eniID1, eniID2, eniID3, eniID4} {
+				_, exists := updatedPodENI.Status.ENIInfos[eniID]
+				Expect(exists).To(BeTrue(), "ENI %s should exist in status", eniID)
+			}
+
+			Expect(updatedPodENI.Status.InstanceID).To(Equal("i-xxx"))
+		})
 	})
 
 	// ==============================================================================
@@ -1295,20 +1469,20 @@ var _ = Describe("ENI Controller Tests", func() {
 
 		It("should handle exclusive ENI only mode correctly", func() {
 			// Create node with exclusive ENI only mode
-			exclusiveNode := createTestNode("exclusive-node")
+			exclusiveNode := testutil.CreateTestNode("exclusive-node")
 			exclusiveNode.Labels[types.ExclusiveENIModeLabel] = string(types.ExclusiveENIOnly)
 			Expect(k8sClient.Create(ctx, exclusiveNode)).Should(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, exclusiveNode) }()
 
 			// Create corresponding Node CRD
-			exclusiveNodeCRD := createTestNodeCRD("exclusive-node")
+			exclusiveNodeCRD := testutil.CreateTestNodeCRD("exclusive-node")
 			Expect(k8sClient.Create(ctx, exclusiveNodeCRD)).Should(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, exclusiveNodeCRD) }()
 
 			podName := "test-exclusive-eni"
 			eniID := "eni-exclusive"
 
-			pod := createTestPod(podName, "default", "exclusive-node")
+			pod := testutil.CreateTestPod(podName, "default", "exclusive-node")
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -1332,7 +1506,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseInitial,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			eni := &networkv1beta1.NetworkInterface{
@@ -1358,17 +1532,17 @@ var _ = Describe("ENI Controller Tests", func() {
 
 		It("should reject trunk ENI for eniOnly pods when trunk mode is enabled", func() {
 			// Reset test node for this test
-			testNode = createTestNode(testNodeName)
+			testNode = testutil.CreateTestNode(testNodeName)
 			Expect(k8sClient.Create(ctx, testNode)).Should(Succeed())
 
 			// Reset test node CRD for this test
-			testNodeCRD = createTestNodeCRD(testNodeName)
+			testNodeCRD = testutil.CreateTestNodeCRD(testNodeName)
 			Expect(k8sClient.Create(ctx, testNodeCRD)).Should(Succeed())
 
 			podName := "test-trunk-reject"
 			eniID := "eni-trunk-reject"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -1392,7 +1566,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseInitial,
 				},
 			}
-			err := createResource(ctx, k8sClient, podENI)
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
 			Expect(err).NotTo(HaveOccurred())
 
 			r := createTestReconciler(openAPI, true, false) // trunk mode enabled
@@ -1414,7 +1588,7 @@ var _ = Describe("ENI Controller Tests", func() {
 		It("should always require PodENI in CRD mode", func() {
 			podName := "test-crd-mode"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			r := createTestReconciler(openAPI, false, true) // CRD mode enabled
@@ -1427,7 +1601,7 @@ var _ = Describe("ENI Controller Tests", func() {
 		It("should handle non-CRD mode pod requirements correctly", func() {
 			podName := "test-non-crd-mode"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			r := createTestReconciler(openAPI, false, false) // CRD mode disabled
@@ -1445,20 +1619,20 @@ var _ = Describe("ENI Controller Tests", func() {
 	Context("Complex Error Scenarios", func() {
 		It("should handle node without instance type gracefully", func() {
 			// Create node without instance type label
-			nodeWithoutType := createTestNode("node-no-type")
+			nodeWithoutType := testutil.CreateTestNode("node-no-type")
 			delete(nodeWithoutType.Labels, "node.kubernetes.io/instance-type")
 			Expect(k8sClient.Create(ctx, nodeWithoutType)).Should(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, nodeWithoutType) }()
 
 			// Create corresponding Node CRD
-			nodeWithoutTypeCRD := createTestNodeCRD("node-no-type")
+			nodeWithoutTypeCRD := testutil.CreateTestNodeCRD("node-no-type")
 			Expect(k8sClient.Create(ctx, nodeWithoutTypeCRD)).Should(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, nodeWithoutTypeCRD) }()
 
 			podName := "test-no-instance-type"
 			eniID := "eni-no-instance-type"
 
-			pod := createTestPod(podName, "default", "node-no-type")
+			pod := testutil.CreateTestPod(podName, "default", "node-no-type")
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
 			podENI := &networkv1beta1.PodENI{
@@ -1477,7 +1651,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					Phase: networkv1beta1.ENIPhaseInitial,
 				},
 			}
-			Expect(createResource(ctx, k8sClient, podENI)).Should(Succeed())
+			Expect(testutil.CreateResource(ctx, k8sClient, podENI)).Should(Succeed())
 
 			r := createTestReconciler(openAPI, false, false)
 
@@ -1493,7 +1667,7 @@ var _ = Describe("ENI Controller Tests", func() {
 		It("should handle pod sandbox exited state correctly", func() {
 			podName := "test-sandbox-exited"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			pod.Status.Phase = corev1.PodSucceeded // Pod has completed
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
@@ -1507,7 +1681,7 @@ var _ = Describe("ENI Controller Tests", func() {
 		It("should handle ignored pod labels correctly", func() {
 			podName := "test-ignored-pod"
 
-			pod := createTestPod(podName, "default", testNodeName)
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			pod.Labels = map[string]string{
 				types.IgnoreByTerway: "true",
 			}
@@ -1555,71 +1729,5 @@ var _ = Describe("ENI Controller Tests", func() {
 			Expect(hints).To(BeNil())
 		})
 	})
+
 })
-
-// createResource updates the status of a resource.
-// It first gets a fresh copy of the resource, then deep copies the status, and finally updates it.
-func createResource(ctx context.Context, cli client.Client, obj client.Object) error {
-	// Deep copy the status before updating
-	var statusCopy interface{}
-
-	switch v := obj.(type) {
-	case *networkv1beta1.PodENI:
-		statusCopy = v.Status.DeepCopy()
-
-		err := cli.Create(ctx, obj)
-		if err != nil {
-			return err
-		}
-
-		v.Status = *statusCopy.(*networkv1beta1.PodENIStatus)
-		return cli.Status().Update(ctx, v)
-	case *networkv1beta1.NetworkInterface:
-		statusCopy = v.Status.DeepCopy()
-
-		err := cli.Create(ctx, obj)
-		if err != nil {
-			return err
-		}
-
-		v.Status = *statusCopy.(*networkv1beta1.NetworkInterfaceStatus)
-		return cli.Status().Update(ctx, v)
-	case *networkv1beta1.Node:
-		statusCopy = v.Status.DeepCopy()
-
-		err := cli.Create(ctx, obj)
-		if err != nil {
-			return err
-		}
-
-		v.Status = *statusCopy.(*networkv1beta1.NodeStatus)
-		return cli.Status().Update(ctx, v)
-	case *corev1.Pod:
-		statusCopy = v.Status.DeepCopy()
-
-		err := cli.Create(ctx, obj)
-		if err != nil {
-			return err
-		}
-
-		v.Status = *statusCopy.(*corev1.PodStatus)
-		return cli.Status().Update(ctx, v)
-	case *corev1.Node:
-		statusCopy = v.Status.DeepCopy()
-
-		err := cli.Create(ctx, obj)
-		if err != nil {
-			return err
-		}
-
-		v.Status = *statusCopy.(*corev1.NodeStatus)
-		return cli.Status().Update(ctx, v)
-	default:
-		err := cli.Create(ctx, obj)
-		if err != nil {
-			return err
-		}
-		// For other types, we just try to update the status
-		return cli.Status().Update(ctx, obj)
-	}
-}

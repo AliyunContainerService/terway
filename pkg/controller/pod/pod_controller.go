@@ -547,7 +547,19 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 		}
 		enoAPI, ok := crNode.Annotations[types.ENOApi]
 		if ok {
-			prePodENI.Annotations[types.ENOApi] = enoAPI
+			if prePodENI.Annotations[types.ENOApi] != enoAPI {
+				prePodENI.Annotations[types.ENOApi] = enoAPI
+				changed = true
+			}
+		} else {
+			if _, ok := prePodENI.Annotations[types.ENOApi]; ok {
+				delete(prePodENI.Annotations, types.ENOApi)
+				changed = true
+			}
+		}
+	} else {
+		if _, ok := prePodENI.Annotations[types.ENOApi]; ok {
+			delete(prePodENI.Annotations, types.ENOApi)
 			changed = true
 		}
 	}

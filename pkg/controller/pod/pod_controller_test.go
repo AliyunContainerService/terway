@@ -3,6 +3,7 @@ package pod
 import (
 	"context"
 
+	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -30,6 +31,9 @@ var _ = Describe("Pod controller", func() {
 		openAPI    *mocks.OpenAPI
 		vpcClient  *mocks.VPC
 		switchPool *vswpool.SwitchPool
+
+		testNode    *corev1.Node
+		testNodeCRD *networkv1beta1.Node
 	)
 
 	BeforeEach(func() {
@@ -51,6 +55,11 @@ var _ = Describe("Pod controller", func() {
 			},
 		}
 		_ = k8sClient.Delete(ctx, node)
+
+		// Clean up test node CRD
+		testNodeCRD = &networkv1beta1.Node{}
+		testNodeCRD.Name = nodeName
+		_ = k8sClient.Delete(ctx, testNodeCRD)
 	})
 
 	Context("create normal pod use pod-networks anno", func() {
@@ -1184,6 +1193,360 @@ var _ = Describe("Pod controller", func() {
 			updated := &networkv1beta1.PodENI{}
 			Expect(k8sClient.Get(ctx, key, updated)).Should(Succeed())
 			Expect(updated.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseDeleting)))
+		})
+	})
+
+	Context("eflo node", func() {
+		Context("create fixed ip pod (has prev eni， eflo node)", func() {
+			ctx := context.Background()
+			name := "fixed-ip-pod-prev-eni-eflo"
+			ns := "default"
+			eniID := "eni-4"
+			key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+			request := reconcile.Request{
+				NamespacedName: key,
+			}
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      key.Name,
+					Namespace: key.Namespace,
+					Annotations: map[string]string{
+						types.PodENI:      "true",
+						types.PodNetworks: "{\"podNetworks\":[{\"vSwitchOptions\":[\"vsw-0\",\"vsw-1\",\"vsw-2\"],\"securityGroupIDs\":[\"sg-1\"],\"interface\":\"eth0\",\"eniOptions\":{\"eniType\":\"Default\"},\"vSwitchSelectOptions\":{\"vSwitchSelectionPolicy\":\"ordered\"},\"resourceGroupID\":\"\",\"networkInterfaceTrafficMode\":\"\",\"defaultRoute\":false,\"allocationType\":{\"type\":\"Fixed\",\"releaseStrategy\":\"TTL\",\"releaseAfter\":\"20m\"}}]}",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: nodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "foo",
+							Image: "busybox",
+						},
+					},
+				},
+			}
+
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      key.Name,
+					Namespace: key.Namespace,
+					Labels: map[string]string{
+						types.ENIRelatedNodeName: "pev-node",
+					},
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							AllocationType: networkv1beta1.AllocationType{
+								Type:            networkv1beta1.IPAllocTypeFixed,
+								ReleaseStrategy: networkv1beta1.ReleaseStrategyNever,
+							},
+							ENI: networkv1beta1.ENI{
+								ID:               eniID,
+								MAC:              "mac",
+								Zone:             "zone",
+								VSwitchID:        "vsw-0",
+								ResourceGroupID:  "rg-0",
+								SecurityGroupIDs: []string{"sg-0"},
+								AttachmentOptions: networkv1beta1.AttachmentOptions{
+									Trunk: nil,
+								},
+							},
+							IPv4:         "",
+							IPv6:         "",
+							IPv4CIDR:     "",
+							IPv6CIDR:     "",
+							Interface:    "eth0",
+							DefaultRoute: true,
+							ExtraRoutes:  nil,
+							ExtraConfig:  nil,
+						},
+					},
+				},
+				Status: networkv1beta1.PodENIStatus{
+					ENIInfos: map[string]networkv1beta1.ENIInfo{
+						eniID: {
+							ID:               eniID,
+							Type:             "",
+							Vid:              0,
+							Status:           networkv1beta1.ENIStatusUnBind,
+							NetworkCardIndex: nil,
+						},
+					},
+					Phase: networkv1beta1.ENIPhaseUnbind,
+				},
+			}
+
+			It("Create podENI should succeed", func() {
+				testNode = testutil.CreateEFLONode(nodeName)
+				Expect(testutil.CreateResource(ctx, k8sClient, testNode)).Should(Succeed())
+
+				testNodeCRD = testutil.CreateTestNodeCRD(nodeName)
+				testNodeCRD.Annotations[types.ENOApi] = "ecs-hdeni"
+				Expect(testutil.CreateResource(ctx, k8sClient, testNodeCRD)).Should(Succeed())
+
+				Expect(testutil.CreateResource(ctx, k8sClient, pod)).Should(Succeed())
+				Expect(testutil.CreateResource(ctx, k8sClient, podENI)).Should(Succeed())
+
+				controlplane.SetConfig(&controlplane.Config{})
+
+				r := &ReconcilePod{
+					client:    k8sClient,
+					scheme:    scheme.Scheme,
+					aliyun:    openAPI,
+					swPool:    switchPool,
+					record:    record.NewFakeRecorder(1000),
+					trunkMode: false,
+					crdMode:   false,
+				}
+
+				_, err := r.Reconcile(ctx, request)
+				Expect(err).NotTo(HaveOccurred())
+
+				err = k8sClient.Get(ctx, key, podENI)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(podENI.Labels[types.ENIRelatedNodeName]).Should(BeEquivalentTo(nodeName))
+
+				Expect(podENI.Annotations[types.ENOApi]).Should(BeEquivalentTo(types.APIEcsHDeni))
+			})
+		})
+
+		Context("create fixed ip pod (has prev eni， eflo node hdeno to eno)", func() {
+			ctx := context.Background()
+			name := "fixed-ip-pod-prev-eni-eflo-hdeno"
+			ns := "default"
+			eniID := "eni-4"
+			key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+			request := reconcile.Request{
+				NamespacedName: key,
+			}
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      key.Name,
+					Namespace: key.Namespace,
+					Annotations: map[string]string{
+						types.PodENI:      "true",
+						types.PodNetworks: "{\"podNetworks\":[{\"vSwitchOptions\":[\"vsw-0\",\"vsw-1\",\"vsw-2\"],\"securityGroupIDs\":[\"sg-1\"],\"interface\":\"eth0\",\"eniOptions\":{\"eniType\":\"Default\"},\"vSwitchSelectOptions\":{\"vSwitchSelectionPolicy\":\"ordered\"},\"resourceGroupID\":\"\",\"networkInterfaceTrafficMode\":\"\",\"defaultRoute\":false,\"allocationType\":{\"type\":\"Fixed\",\"releaseStrategy\":\"TTL\",\"releaseAfter\":\"20m\"}}]}",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: nodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "foo",
+							Image: "busybox",
+						},
+					},
+				},
+			}
+
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      key.Name,
+					Namespace: key.Namespace,
+					Labels: map[string]string{
+						types.ENIRelatedNodeName: "pev-node",
+					},
+					Annotations: map[string]string{
+						types.ENOApi: "hdeni",
+					},
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							AllocationType: networkv1beta1.AllocationType{
+								Type:            networkv1beta1.IPAllocTypeFixed,
+								ReleaseStrategy: networkv1beta1.ReleaseStrategyNever,
+							},
+							ENI: networkv1beta1.ENI{
+								ID:               eniID,
+								MAC:              "mac",
+								Zone:             "zone",
+								VSwitchID:        "vsw-0",
+								ResourceGroupID:  "rg-0",
+								SecurityGroupIDs: []string{"sg-0"},
+								AttachmentOptions: networkv1beta1.AttachmentOptions{
+									Trunk: nil,
+								},
+							},
+							IPv4:         "",
+							IPv6:         "",
+							IPv4CIDR:     "",
+							IPv6CIDR:     "",
+							Interface:    "eth0",
+							DefaultRoute: true,
+							ExtraRoutes:  nil,
+							ExtraConfig:  nil,
+						},
+					},
+				},
+				Status: networkv1beta1.PodENIStatus{
+					ENIInfos: map[string]networkv1beta1.ENIInfo{
+						eniID: {
+							ID:               eniID,
+							Type:             "",
+							Vid:              0,
+							Status:           networkv1beta1.ENIStatusUnBind,
+							NetworkCardIndex: nil,
+						},
+					},
+					Phase: networkv1beta1.ENIPhaseUnbind,
+				},
+			}
+
+			It("Create podENI should succeed", func() {
+				testNode = testutil.CreateEFLONode(nodeName)
+				Expect(testutil.CreateResource(ctx, k8sClient, testNode)).Should(Succeed())
+
+				testNodeCRD = testutil.CreateTestNodeCRD(nodeName)
+				Expect(testutil.CreateResource(ctx, k8sClient, testNodeCRD)).Should(Succeed())
+
+				Expect(testutil.CreateResource(ctx, k8sClient, pod)).Should(Succeed())
+				Expect(testutil.CreateResource(ctx, k8sClient, podENI)).Should(Succeed())
+
+				controlplane.SetConfig(&controlplane.Config{})
+
+				r := &ReconcilePod{
+					client:    k8sClient,
+					scheme:    scheme.Scheme,
+					aliyun:    openAPI,
+					swPool:    switchPool,
+					record:    record.NewFakeRecorder(1000),
+					trunkMode: false,
+					crdMode:   false,
+				}
+
+				_, err := r.Reconcile(ctx, request)
+				Expect(err).NotTo(HaveOccurred())
+
+				err = k8sClient.Get(ctx, key, podENI)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(podENI.Labels[types.ENIRelatedNodeName]).Should(BeEquivalentTo(nodeName))
+
+				Expect(podENI.Annotations).Should(Not(HaveKey(types.ENOApi)))
+			})
+		})
+
+		Context("create fixed ip pod (has prev eni， move to ecs node)", func() {
+			ctx := context.Background()
+			name := "fixed-ip-pod-prev-eni-eflo-to-ecs"
+			ns := "default"
+			eniID := "eni-4"
+			key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+			request := reconcile.Request{
+				NamespacedName: key,
+			}
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      key.Name,
+					Namespace: key.Namespace,
+					Annotations: map[string]string{
+						types.PodENI:      "true",
+						types.PodNetworks: "{\"podNetworks\":[{\"vSwitchOptions\":[\"vsw-0\",\"vsw-1\",\"vsw-2\"],\"securityGroupIDs\":[\"sg-1\"],\"interface\":\"eth0\",\"eniOptions\":{\"eniType\":\"Default\"},\"vSwitchSelectOptions\":{\"vSwitchSelectionPolicy\":\"ordered\"},\"resourceGroupID\":\"\",\"networkInterfaceTrafficMode\":\"\",\"defaultRoute\":false,\"allocationType\":{\"type\":\"Fixed\",\"releaseStrategy\":\"TTL\",\"releaseAfter\":\"20m\"}}]}",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: nodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "foo",
+							Image: "busybox",
+						},
+					},
+				},
+			}
+
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      key.Name,
+					Namespace: key.Namespace,
+					Labels: map[string]string{
+						types.ENIRelatedNodeName: "pev-node",
+					},
+					Annotations: map[string]string{
+						types.ENOApi: "ecs-hdeni",
+					},
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							AllocationType: networkv1beta1.AllocationType{
+								Type:            networkv1beta1.IPAllocTypeFixed,
+								ReleaseStrategy: networkv1beta1.ReleaseStrategyNever,
+							},
+							ENI: networkv1beta1.ENI{
+								ID:               eniID,
+								MAC:              "mac",
+								Zone:             "zone",
+								VSwitchID:        "vsw-0",
+								ResourceGroupID:  "rg-0",
+								SecurityGroupIDs: []string{"sg-0"},
+								AttachmentOptions: networkv1beta1.AttachmentOptions{
+									Trunk: nil,
+								},
+							},
+							IPv4:         "",
+							IPv6:         "",
+							IPv4CIDR:     "",
+							IPv6CIDR:     "",
+							Interface:    "eth0",
+							DefaultRoute: true,
+							ExtraRoutes:  nil,
+							ExtraConfig:  nil,
+						},
+					},
+				},
+				Status: networkv1beta1.PodENIStatus{
+					ENIInfos: map[string]networkv1beta1.ENIInfo{
+						eniID: {
+							ID:               eniID,
+							Type:             "",
+							Vid:              0,
+							Status:           networkv1beta1.ENIStatusUnBind,
+							NetworkCardIndex: nil,
+						},
+					},
+					Phase: networkv1beta1.ENIPhaseUnbind,
+				},
+			}
+
+			It("Create podENI should succeed", func() {
+				testNode = testutil.CreateTestNode(nodeName)
+				Expect(testutil.CreateResource(ctx, k8sClient, testNode)).Should(Succeed())
+
+				testNodeCRD = testutil.CreateTestNodeCRD(nodeName)
+				Expect(testutil.CreateResource(ctx, k8sClient, testNodeCRD)).Should(Succeed())
+
+				Expect(testutil.CreateResource(ctx, k8sClient, pod)).Should(Succeed())
+				Expect(testutil.CreateResource(ctx, k8sClient, podENI)).Should(Succeed())
+
+				controlplane.SetConfig(&controlplane.Config{})
+
+				r := &ReconcilePod{
+					client:    k8sClient,
+					scheme:    scheme.Scheme,
+					aliyun:    openAPI,
+					swPool:    switchPool,
+					record:    record.NewFakeRecorder(1000),
+					trunkMode: false,
+					crdMode:   false,
+				}
+
+				_, err := r.Reconcile(ctx, request)
+				Expect(err).NotTo(HaveOccurred())
+
+				err = k8sClient.Get(ctx, key, podENI)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(podENI.Labels[types.ENIRelatedNodeName]).Should(BeEquivalentTo(nodeName))
+
+				Expect(podENI.Annotations).Should(Not(HaveKey(types.ENOApi)))
+			})
 		})
 	})
 })
