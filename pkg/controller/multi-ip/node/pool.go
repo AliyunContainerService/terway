@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel/attribute"
@@ -62,6 +63,8 @@ const (
 
 	ecsBatchSize  = 10
 	efloBatchSize = 1
+
+	EventAllocIPFailed = "AllocIPFailed"
 )
 
 var EventCh = make(chan event.GenericEvent, 1000)
@@ -220,6 +223,10 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		patch := client.MergeFrom(node.DeepCopy())
 		changed := controllerutil.RemoveFinalizer(node, finalizer)
 		n.cache.Delete(request.Name)
+
+		ResourcePoolTotal.Delete(prometheus.Labels{"node": request.Name})
+		SyncOpenAPITotal.Delete(prometheus.Labels{"node": request.Name})
+
 		if changed {
 			err = n.client.Patch(ctx, node, patch)
 		}
@@ -298,14 +305,19 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		}
 	}
 
+	var errorList []error
+
+	// do not block ipam
 	err = n.syncWithAPI(ctx, node)
 	if err != nil {
-		return reconcile.Result{}, err
+		errorList = append(errorList, err)
+		l.Error(err, "syncWithAPI error")
 	}
 
-	syncErr := n.syncPods(ctx, podRequests, node)
-	if syncErr != nil {
-		l.Error(syncErr, "syncPods error")
+	err = n.syncPods(ctx, podRequests, node)
+	if err != nil {
+		errorList = append(errorList, err)
+		l.Error(err, "syncPods error")
 	}
 
 	afterStatus, err := runtime.DefaultUnstructuredConverter.ToUnstructured(node.Status.DeepCopy())
@@ -325,7 +337,7 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, err
 	}
 
-	return reconcile.Result{}, syncErr
+	return reconcile.Result{}, utilerrors.NewAggregate(errorList)
 }
 
 // syncWithAPI will sync all eni from openAPI. Need to re-sync with local pods.
@@ -521,6 +533,7 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	ctx, span := n.tracer.Start(ctx, "syncPods")
 	defer span.End()
 
+	var errList []error
 	l := logf.FromContext(ctx)
 
 	ipv4Map, ipv6Map := buildIPMap(podsMapper, node.Status.NetworkInterfaces)
@@ -533,17 +546,25 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 
 	// 3. if there is no enough ip, try to allocate from api
 	err := n.addIP(ctx, unSucceedPods, node)
-
+	if err != nil {
+		errList = append(errList, err)
+	}
 	// 4. after all is assigned , we can re-allocate ip
 	ipv4Map, ipv6Map = buildIPMap(podsMapper, node.Status.NetworkInterfaces)
 	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA, node)
 
-	// do not block the gc process
-	if err == nil {
-		err = n.gc(ctx, node)
+	// 5. clean up deleting status eni and ip
+	err = n.handleStatus(ctx, node)
+	if err != nil {
+		errList = append(errList, err)
 	}
 
-	return err
+	if utilerrors.NewAggregate(errList) != nil {
+		return utilerrors.NewAggregate(errList)
+	}
+	// 6. pool management sort eni and find the victim
+
+	return n.adjustPool(ctx, node)
 }
 
 // releasePodNotFound release ip if there is no pod found
@@ -783,7 +804,7 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	updateCrCondition(options)
 
 	if err != nil {
-		n.record.Event(node, corev1.EventTypeWarning, "AllocIPFailed", err.Error())
+		n.record.Event(node, corev1.EventTypeWarning, EventAllocIPFailed, err.Error())
 	}
 
 	// the err is kept
@@ -1085,23 +1106,6 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 	wg.Wait()
 
 	return utilerrors.NewAggregate(errs)
-}
-
-// gc follow those steps:
-// 1. clean up deleting status eni and ip
-// 2. mark unwanted eni/ip status to deleting
-func (n *ReconcileNode) gc(ctx context.Context, node *networkv1beta1.Node) error {
-	ctx, span := n.tracer.Start(ctx, "gc")
-	defer span.End()
-
-	// 1. clean up deleting status eni and ip
-	err := n.handleStatus(ctx, node)
-	if err != nil {
-		return err
-	}
-
-	// 2. sort eni and find the victim
-	return n.adjustPool(ctx, node)
 }
 
 func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.Node) error {
