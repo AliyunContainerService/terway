@@ -21,4 +21,14 @@ var (
 		},
 		[]string{"node"},
 	)
+
+	// ReconcileLatency records the latency of different reconcile methods
+	ReconcileLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "controlplane_node_reconcile_latency_ms",
+			Help:    "Latency of node controller reconcile methods in milliseconds",
+			Buckets: []float64{10, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000},
+		},
+		[]string{"method", "node"},
+	)
 )

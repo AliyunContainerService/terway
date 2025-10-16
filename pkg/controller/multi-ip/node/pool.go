@@ -64,7 +64,14 @@ const (
 	ecsBatchSize  = 10
 	efloBatchSize = 1
 
-	EventAllocIPFailed = "AllocIPFailed"
+	// Event reasons
+	EventAllocIPFailed      = "AllocIPFailed"
+	EventSyncOpenAPISuccess = "SyncOpenAPISuccess"
+	EventSyncOpenAPIFailed  = "SyncOpenAPIFailed"
+	EventENICreated         = "ENICreated"
+	EventENICreateFailed    = "ENICreateFailed"
+	EventENIDeleted         = "ENIDeleted"
+	EventENIDeleteFailed    = "ENIDeleteFailed"
 )
 
 var EventCh = make(chan event.GenericEvent, 1000)
@@ -103,6 +110,8 @@ func init() {
 		// metric and tracer
 
 		metrics.Registry.MustRegister(ResourcePoolTotal)
+		metrics.Registry.MustRegister(SyncOpenAPITotal)
+		metrics.Registry.MustRegister(ReconcileLatency)
 		tracer := ctrlCtx.TracerProvider.Tracer(ControllerName)
 
 		ctrl, err := controller.New(ControllerName, mgr, controller.Options{
@@ -226,6 +235,7 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 
 		ResourcePoolTotal.Delete(prometheus.Labels{"node": request.Name})
 		SyncOpenAPITotal.Delete(prometheus.Labels{"node": request.Name})
+		ReconcileLatency.Delete(prometheus.Labels{"node": request.Name})
 
 		if changed {
 			err = n.client.Patch(ctx, node, patch)
@@ -357,6 +367,12 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	ctx, span := n.tracer.Start(ctx, "syncWithAPI")
 	defer span.End()
 
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("syncWithAPI", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
+
 	SyncOpenAPITotal.WithLabelValues(node.Name).Inc()
 
 	var err error
@@ -370,6 +386,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	}
 	enis, err = n.aliyun.DescribeNetworkInterfaceV2(ctx, opts)
 	if err != nil {
+		n.record.Event(node, corev1.EventTypeWarning, EventSyncOpenAPIFailed, fmt.Sprintf("Failed to describe network interfaces: %v", err))
 		return err
 	}
 
@@ -476,6 +493,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	node.Status.LastSyncOpenAPITime = metav1.Now()
 
 	MetaCtx(ctx).NeedSyncOpenAPI.Store(false)
+	n.record.Event(node, corev1.EventTypeNormal, EventSyncOpenAPISuccess, fmt.Sprintf("Successfully synced %d ENIs from OpenAPI", len(enis)))
 	return nil
 }
 
@@ -532,6 +550,12 @@ func (n *ReconcileNode) getPods(ctx context.Context, node *networkv1beta1.Node) 
 func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*PodRequest, node *networkv1beta1.Node) error {
 	ctx, span := n.tracer.Start(ctx, "syncPods")
 	defer span.End()
+
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("syncPods", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
 
 	var errList []error
 	l := logf.FromContext(ctx)
@@ -772,6 +796,12 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*PodRequest, node *networkv1beta1.Node) error {
 	ctx, span := n.tracer.Start(ctx, "addIP")
 	defer span.End()
+
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("addIP", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
 
 	if n.getDegradation() == controlplane.DegradationL0 {
 		logr.FromContextOrDiscard(ctx).Info("degradation to L0, skip addIP")
@@ -1085,7 +1115,7 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 				err = n.createENI(ctx, node, opt)
 			} else {
 				// for exists enis
-				err = n.assignIP(ctx, opt)
+				err = n.assignIP(ctx, node, opt)
 			}
 
 			if err != nil {
@@ -1111,6 +1141,12 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.Node) error {
 	ctx, span := n.tracer.Start(ctx, "handleStatus")
 	defer span.End()
+
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("handleStatus", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
 
 	l := logf.FromContext(ctx).WithName("handleStatus")
 	// 1. clean up deleting status eni and ip
@@ -1138,11 +1174,15 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 			// wait eni detached
 			err := n.aliyun.DeleteNetworkInterfaceV2(ctx, eni.ID)
 			if err != nil {
+				n.record.Event(node, corev1.EventTypeWarning, EventENIDeleteFailed,
+					fmt.Sprintf("Failed to delete ENI %s: %v", eni.ID, err))
 				log.Error(err, "run gc failed")
 				continue
 			}
 			MetaCtx(ctx).StatusChanged.Store(true)
 
+			n.record.Event(node, corev1.EventTypeNormal, EventENIDeleted,
+				fmt.Sprintf("Successfully deleted ENI %s", eni.ID))
 			log.Info("run gc succeed, eni removed", "eni", eni.ID)
 			// remove from status
 			delete(node.Status.NetworkInterfaces, eni.ID)
@@ -1236,6 +1276,12 @@ func (n *ReconcileNode) adjustPool(ctx context.Context, node *networkv1beta1.Nod
 	ctx, span := n.tracer.Start(ctx, "adjustPool")
 	defer span.End()
 
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("adjustPool", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
+
 	ResourcePoolTotal.WithLabelValues(node.Name).Inc()
 
 	MetaCtx(ctx).LastGCTime = time.Now()
@@ -1261,6 +1307,12 @@ func (n *ReconcileNode) adjustPool(ctx context.Context, node *networkv1beta1.Nod
 func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node, opt *eniOptions) error {
 	ctx, span := n.tracer.Start(ctx, "createENI", trace.WithAttributes(attribute.String("eniType", string(opt.eniTypeKey.ENIType))))
 	defer span.End()
+
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("createENI", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
 
 	// for new eni
 	typeOption, ok := EniOptions[opt.eniTypeKey]
@@ -1308,6 +1360,8 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			// block
 			n.vswpool.Block(createOpts.NetworkInterfaceOptions.VSwitchID)
 		}
+		n.record.Event(node, corev1.EventTypeWarning, EventENICreateFailed,
+			fmt.Sprintf("Failed to create ENI type=%s vsw=%s: %v", opt.eniTypeKey.ENIType, vsw.ID, err))
 		return err
 	}
 
@@ -1354,6 +1408,8 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			Backoff:                nil,
 		})
 		if err != nil {
+			n.record.Event(node, corev1.EventTypeWarning, EventENICreateFailed,
+				fmt.Sprintf("Failed to attach ENI %s: %v", result.NetworkInterfaceID, err))
 			return err
 		}
 
@@ -1362,6 +1418,8 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 
 	eni, err := n.aliyun.WaitForNetworkInterfaceV2(ctx, result.NetworkInterfaceID, aliyunClient.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus).Backoff, false)
 	if err != nil {
+		n.record.Event(node, corev1.EventTypeWarning, EventENICreateFailed,
+			fmt.Sprintf("Failed to wait ENI %s ready: %v", result.NetworkInterfaceID, err))
 		return err
 	}
 
@@ -1376,12 +1434,22 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 	MetaCtx(ctx).Mutex.Unlock()
 
 	MetaCtx(ctx).StatusChanged.Store(true)
+
+	n.record.Event(node, corev1.EventTypeNormal, EventENICreated,
+		fmt.Sprintf("Successfully created ENI %s type=%s with %d IPv4 and %d IPv6 addresses",
+			eni.NetworkInterfaceID, opt.eniTypeKey.ENIType, opt.addIPv4N, opt.addIPv6N))
 	return nil
 }
 
-func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
+func (n *ReconcileNode) assignIP(ctx context.Context, node *networkv1beta1.Node, opt *eniOptions) error {
 	ctx, span := n.tracer.Start(ctx, "assignIP", trace.WithAttributes(attribute.String("eni", opt.eniRef.ID), attribute.Int("ipv4", opt.addIPv4N), attribute.Int("ipv6", opt.addIPv6N)))
 	defer span.End()
+
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("assignIP", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
 
 	// nb(l1b0k): ENi does not support assigning both IPv4 and IPv6 simultaneously.
 	if opt.addIPv4N > 0 {
