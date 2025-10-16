@@ -655,9 +655,6 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 		return value.IPv6 == "" && value.IPv4 == ""
 	})
 
-	if len(pendingPods) > 0 {
-		node.Status.LastModifiedTime = metav1.Now()
-	}
 	unSucceedPods := map[string]*PodRequest{}
 
 	// handle exist pod ip
@@ -720,6 +717,7 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 						v.IP.PodID = podID
 						v.IP.PodUID = info.PodUID
 						log.Info("assign ip", "pod", podID, "ip", v.IP.IP, "eni", v.NetworkInterface.ID)
+						node.Status.LastModifiedTime = metav1.Now()
 						break
 					}
 				}
@@ -764,7 +762,7 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 						v.IP.PodID = podID
 						v.IP.PodUID = info.PodUID
 						log.Info("assign ip", "pod", podID, "ip", v.IP.IP, "eni", v.NetworkInterface.ID)
-
+						node.Status.LastModifiedTime = metav1.Now()
 						break
 					}
 				}
