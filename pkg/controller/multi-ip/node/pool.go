@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel/attribute"
@@ -62,6 +63,15 @@ const (
 
 	ecsBatchSize  = 10
 	efloBatchSize = 1
+
+	// Event reasons
+	EventAllocIPFailed      = "AllocIPFailed"
+	EventSyncOpenAPISuccess = "SyncOpenAPISuccess"
+	EventSyncOpenAPIFailed  = "SyncOpenAPIFailed"
+	EventENICreated         = "ENICreated"
+	EventENICreateFailed    = "ENICreateFailed"
+	EventENIDeleted         = "ENIDeleted"
+	EventENIDeleteFailed    = "ENIDeleteFailed"
 )
 
 var EventCh = make(chan event.GenericEvent, 1000)
@@ -100,6 +110,8 @@ func init() {
 		// metric and tracer
 
 		metrics.Registry.MustRegister(ResourcePoolTotal)
+		metrics.Registry.MustRegister(SyncOpenAPITotal)
+		metrics.Registry.MustRegister(ReconcileLatency)
 		tracer := ctrlCtx.TracerProvider.Tracer(ControllerName)
 
 		ctrl, err := controller.New(ControllerName, mgr, controller.Options{
@@ -220,6 +232,11 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		patch := client.MergeFrom(node.DeepCopy())
 		changed := controllerutil.RemoveFinalizer(node, finalizer)
 		n.cache.Delete(request.Name)
+
+		ResourcePoolTotal.Delete(prometheus.Labels{"node": request.Name})
+		SyncOpenAPITotal.Delete(prometheus.Labels{"node": request.Name})
+		ReconcileLatency.Delete(prometheus.Labels{"node": request.Name})
+
 		if changed {
 			err = n.client.Patch(ctx, node, patch)
 		}
@@ -298,14 +315,19 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		}
 	}
 
+	var errorList []error
+
+	// do not block ipam
 	err = n.syncWithAPI(ctx, node)
 	if err != nil {
-		return reconcile.Result{}, err
+		errorList = append(errorList, err)
+		l.Error(err, "syncWithAPI error")
 	}
 
-	syncErr := n.syncPods(ctx, podRequests, node)
-	if syncErr != nil {
-		l.Error(syncErr, "syncPods error")
+	err = n.syncPods(ctx, podRequests, node)
+	if err != nil {
+		errorList = append(errorList, err)
+		l.Error(err, "syncPods error")
 	}
 
 	afterStatus, err := runtime.DefaultUnstructuredConverter.ToUnstructured(node.Status.DeepCopy())
@@ -325,7 +347,7 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, err
 	}
 
-	return reconcile.Result{}, syncErr
+	return reconcile.Result{}, utilerrors.NewAggregate(errorList)
 }
 
 // syncWithAPI will sync all eni from openAPI. Need to re-sync with local pods.
@@ -345,6 +367,12 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	ctx, span := n.tracer.Start(ctx, "syncWithAPI")
 	defer span.End()
 
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("syncWithAPI", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
+
 	SyncOpenAPITotal.WithLabelValues(node.Name).Inc()
 
 	var err error
@@ -358,6 +386,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	}
 	enis, err = n.aliyun.DescribeNetworkInterfaceV2(ctx, opts)
 	if err != nil {
+		n.record.Event(node, corev1.EventTypeWarning, EventSyncOpenAPIFailed, fmt.Sprintf("Failed to describe network interfaces: %v", err))
 		return err
 	}
 
@@ -464,6 +493,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	node.Status.LastSyncOpenAPITime = metav1.Now()
 
 	MetaCtx(ctx).NeedSyncOpenAPI.Store(false)
+	n.record.Event(node, corev1.EventTypeNormal, EventSyncOpenAPISuccess, fmt.Sprintf("Successfully synced %d ENIs from OpenAPI", len(enis)))
 	return nil
 }
 
@@ -521,6 +551,13 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	ctx, span := n.tracer.Start(ctx, "syncPods")
 	defer span.End()
 
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("syncPods", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
+
+	var errList []error
 	l := logf.FromContext(ctx)
 
 	ipv4Map, ipv6Map := buildIPMap(podsMapper, node.Status.NetworkInterfaces)
@@ -533,16 +570,25 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 
 	// 3. if there is no enough ip, try to allocate from api
 	err := n.addIP(ctx, unSucceedPods, node)
-
+	if err != nil {
+		errList = append(errList, err)
+	}
 	// 4. after all is assigned , we can re-allocate ip
 	ipv4Map, ipv6Map = buildIPMap(podsMapper, node.Status.NetworkInterfaces)
 	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA, node)
 
-	if err == nil {
-		err = n.gc(ctx, node)
+	// 5. clean up deleting status eni and ip
+	err = n.handleStatus(ctx, node)
+	if err != nil {
+		errList = append(errList, err)
 	}
 
-	return err
+	if utilerrors.NewAggregate(errList) != nil {
+		return utilerrors.NewAggregate(errList)
+	}
+	// 6. pool management sort eni and find the victim
+
+	return n.adjustPool(ctx, node)
 }
 
 // releasePodNotFound release ip if there is no pod found
@@ -609,9 +655,6 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 		return value.IPv6 == "" && value.IPv4 == ""
 	})
 
-	if len(pendingPods) > 0 {
-		node.Status.LastModifiedTime = metav1.Now()
-	}
 	unSucceedPods := map[string]*PodRequest{}
 
 	// handle exist pod ip
@@ -674,6 +717,7 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 						v.IP.PodID = podID
 						v.IP.PodUID = info.PodUID
 						log.Info("assign ip", "pod", podID, "ip", v.IP.IP, "eni", v.NetworkInterface.ID)
+						node.Status.LastModifiedTime = metav1.Now()
 						break
 					}
 				}
@@ -718,7 +762,7 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 						v.IP.PodID = podID
 						v.IP.PodUID = info.PodUID
 						log.Info("assign ip", "pod", podID, "ip", v.IP.IP, "eni", v.NetworkInterface.ID)
-
+						node.Status.LastModifiedTime = metav1.Now()
 						break
 					}
 				}
@@ -751,6 +795,12 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	ctx, span := n.tracer.Start(ctx, "addIP")
 	defer span.End()
 
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("addIP", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
+
 	if n.getDegradation() == controlplane.DegradationL0 {
 		logr.FromContextOrDiscard(ctx).Info("degradation to L0, skip addIP")
 		return nil
@@ -782,7 +832,7 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	updateCrCondition(options)
 
 	if err != nil {
-		n.record.Event(node, corev1.EventTypeWarning, "AllocIPFailed", err.Error())
+		n.record.Event(node, corev1.EventTypeWarning, EventAllocIPFailed, err.Error())
 	}
 
 	// the err is kept
@@ -1063,7 +1113,7 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 				err = n.createENI(ctx, node, opt)
 			} else {
 				// for exists enis
-				err = n.assignIP(ctx, opt)
+				err = n.assignIP(ctx, node, opt)
 			}
 
 			if err != nil {
@@ -1086,26 +1136,15 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 	return utilerrors.NewAggregate(errs)
 }
 
-// gc follow those steps:
-// 1. clean up deleting status eni and ip
-// 2. mark unwanted eni/ip status to deleting
-func (n *ReconcileNode) gc(ctx context.Context, node *networkv1beta1.Node) error {
-	ctx, span := n.tracer.Start(ctx, "gc")
-	defer span.End()
-
-	// 1. clean up deleting status eni and ip
-	err := n.handleStatus(ctx, node)
-	if err != nil {
-		return err
-	}
-
-	// 2. sort eni and find the victim
-	return n.adjustPool(ctx, node)
-}
-
 func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.Node) error {
 	ctx, span := n.tracer.Start(ctx, "handleStatus")
 	defer span.End()
+
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("handleStatus", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
 
 	l := logf.FromContext(ctx).WithName("handleStatus")
 	// 1. clean up deleting status eni and ip
@@ -1133,73 +1172,78 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 			// wait eni detached
 			err := n.aliyun.DeleteNetworkInterfaceV2(ctx, eni.ID)
 			if err != nil {
+				n.record.Event(node, corev1.EventTypeWarning, EventENIDeleteFailed,
+					fmt.Sprintf("Failed to delete ENI %s: %v", eni.ID, err))
 				log.Error(err, "run gc failed")
 				continue
 			}
 			MetaCtx(ctx).StatusChanged.Store(true)
 
+			n.record.Event(node, corev1.EventTypeNormal, EventENIDeleted,
+				fmt.Sprintf("Successfully deleted ENI %s", eni.ID))
 			log.Info("run gc succeed, eni removed", "eni", eni.ID)
 			// remove from status
 			delete(node.Status.NetworkInterfaces, eni.ID)
 		case aliyunClient.ENIStatusInUse:
 			var waitTime time.Duration
-			ips := make([]aliyunClient.IPSet, 0)
+
+			ipv4s := make([]aliyunClient.IPSet, 0)
 			for _, ip := range eni.IPv4 {
 				if ip.Status == networkv1beta1.IPStatusDeleting {
-					ips = append(ips, aliyunClient.IPSet{
+					ipv4s = append(ipv4s, aliyunClient.IPSet{
 						Primary:   false,
 						IPAddress: ip.IP,
 						IPName:    ip.IPName,
 					})
 				}
 			}
-			ips = lo.Subset(ips, 0, uint(batchSize(ctx)))
-			if len(ips) > 0 {
-				err := n.aliyun.UnAssignPrivateIPAddressesV2(ctx, eni.ID, ips)
+			ipv4s = lo.Subset(ipv4s, 0, uint(batchSize(ctx)))
+			if len(ipv4s) > 0 {
+				err := n.aliyun.UnAssignPrivateIPAddressesV2(ctx, eni.ID, ipv4s)
 				if err != nil {
 					continue
 				}
 
 				MetaCtx(ctx).StatusChanged.Store(true)
-
-				lo.ForEach(ips, func(ip aliyunClient.IPSet, _ int) {
-					delete(eni.IPv4, ip.IPAddress)
-				})
 
 				waitTime = 1 * time.Second
 			}
 
-			ips = ips[:0]
+			ipv6s := make([]aliyunClient.IPSet, 0)
 			for _, ip := range eni.IPv6 {
 				if ip.Status == networkv1beta1.IPStatusDeleting {
-					ips = append(ips, aliyunClient.IPSet{
+					ipv6s = append(ipv6s, aliyunClient.IPSet{
 						Primary:   false,
 						IPAddress: ip.IP,
 						IPName:    ip.IPName,
 					})
 				}
 			}
-			ips = lo.Subset(ips, 0, uint(batchSize(ctx)))
-			if len(ips) > 0 {
+			ipv6s = lo.Subset(ipv6s, 0, uint(batchSize(ctx)))
+			if len(ipv6s) > 0 {
 				if waitTime > 0 {
 					time.Sleep(waitTime)
 				}
 
-				err := n.aliyun.UnAssignIpv6AddressesV2(ctx, eni.ID, ips)
+				err := n.aliyun.UnAssignIpv6AddressesV2(ctx, eni.ID, ipv6s)
 				if err != nil {
 					continue
 				}
-				MetaCtx(ctx).StatusChanged.Store(true)
 
-				lo.ForEach(ips, func(ip aliyunClient.IPSet, _ int) {
-					delete(eni.IPv6, ip.IPAddress)
-				})
+				MetaCtx(ctx).StatusChanged.Store(true)
+			}
+
+			err := n.waitIPGone(ctx, eni, ipv4s, ipv6s)
+			if err != nil {
+				log.Error(err, "run gc failed")
+				continue
 			}
 		default:
 			// nb(l1b0k): there is noway to reach here
 			log.Info("unexpected status, skip eni", "eni", eni.ID, "status", eni.Status)
 		}
 	}
+
 	return nil
 }
 
@@ -1230,6 +1274,12 @@ func (n *ReconcileNode) adjustPool(ctx context.Context, node *networkv1beta1.Nod
 	ctx, span := n.tracer.Start(ctx, "adjustPool")
 	defer span.End()
 
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("adjustPool", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
+
 	ResourcePoolTotal.WithLabelValues(node.Name).Inc()
 
 	MetaCtx(ctx).LastGCTime = time.Now()
@@ -1255,6 +1305,12 @@ func (n *ReconcileNode) adjustPool(ctx context.Context, node *networkv1beta1.Nod
 func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node, opt *eniOptions) error {
 	ctx, span := n.tracer.Start(ctx, "createENI", trace.WithAttributes(attribute.String("eniType", string(opt.eniTypeKey.ENIType))))
 	defer span.End()
+
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("createENI", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
 
 	// for new eni
 	typeOption, ok := EniOptions[opt.eniTypeKey]
@@ -1302,6 +1358,8 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			// block
 			n.vswpool.Block(createOpts.NetworkInterfaceOptions.VSwitchID)
 		}
+		n.record.Event(node, corev1.EventTypeWarning, EventENICreateFailed,
+			fmt.Sprintf("Failed to create ENI type=%s vsw=%s: %v", opt.eniTypeKey.ENIType, vsw.ID, err))
 		return err
 	}
 
@@ -1348,6 +1406,8 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			Backoff:                nil,
 		})
 		if err != nil {
+			n.record.Event(node, corev1.EventTypeWarning, EventENICreateFailed,
+				fmt.Sprintf("Failed to attach ENI %s: %v", result.NetworkInterfaceID, err))
 			return err
 		}
 
@@ -1356,6 +1416,8 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 
 	eni, err := n.aliyun.WaitForNetworkInterfaceV2(ctx, result.NetworkInterfaceID, aliyunClient.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus).Backoff, false)
 	if err != nil {
+		n.record.Event(node, corev1.EventTypeWarning, EventENICreateFailed,
+			fmt.Sprintf("Failed to wait ENI %s ready: %v", result.NetworkInterfaceID, err))
 		return err
 	}
 
@@ -1370,12 +1432,22 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 	MetaCtx(ctx).Mutex.Unlock()
 
 	MetaCtx(ctx).StatusChanged.Store(true)
+
+	n.record.Event(node, corev1.EventTypeNormal, EventENICreated,
+		fmt.Sprintf("Successfully created ENI %s type=%s with %d IPv4 and %d IPv6 addresses",
+			eni.NetworkInterfaceID, opt.eniTypeKey.ENIType, opt.addIPv4N, opt.addIPv6N))
 	return nil
 }
 
-func (n *ReconcileNode) assignIP(ctx context.Context, opt *eniOptions) error {
+func (n *ReconcileNode) assignIP(ctx context.Context, node *networkv1beta1.Node, opt *eniOptions) error {
 	ctx, span := n.tracer.Start(ctx, "assignIP", trace.WithAttributes(attribute.String("eni", opt.eniRef.ID), attribute.Int("ipv4", opt.addIPv4N), attribute.Int("ipv6", opt.addIPv6N)))
 	defer span.End()
+
+	// Record method latency
+	startTime := time.Now()
+	defer func() {
+		ReconcileLatency.WithLabelValues("assignIP", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
+	}()
 
 	// nb(l1b0k): ENi does not support assigning both IPv4 and IPv6 simultaneously.
 	if opt.addIPv4N > 0 {
@@ -1774,4 +1846,53 @@ func calculateToDel(ctx context.Context, node *networkv1beta1.Node) int {
 	toDel += extraDel
 
 	return toDel
+}
+
+// waitIPGone checks if IP is removed from ENI, if timeout rely on next GC to do the clean up
+func (n *ReconcileNode) waitIPGone(ctx context.Context, eni *networkv1beta1.Nic, ipv4, ipv6 []aliyunClient.IPSet) error {
+	if len(ipv4) == 0 && len(ipv6) == 0 {
+		return nil
+	}
+
+	return backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.WaitENIIPRemoved), func(ctx context.Context) (bool, error) {
+		var err error
+		var enis []*aliyunClient.NetworkInterface
+		// all eni attached to this instance is taken into account. (exclude member eni)
+		opts := &aliyunClient.DescribeNetworkInterfaceOptions{
+			NetworkInterfaceIDs: &[]string{eni.ID},
+		}
+
+		enis, err = n.aliyun.DescribeNetworkInterfaceV2(ctx, opts)
+		if err != nil {
+			return false, err
+		}
+
+		if len(enis) == 0 {
+			// we assume eni is exist here
+			return false, fmt.Errorf("eni not found, eni: %s", eni.ID)
+		}
+
+		ipv4Set := convertIPSet(enis[0].PrivateIPSets)
+		ipv6Set := convertIPSet(enis[0].IPv6Set)
+
+		unfinished := false
+		lo.ForEach(ipv4, func(ip aliyunClient.IPSet, _ int) {
+			_, found := ipv4Set[ip.IPAddress]
+			if !found {
+				delete(eni.IPv4, ip.IPAddress)
+			} else {
+				unfinished = true
+			}
+		})
+
+		lo.ForEach(ipv6, func(ip aliyunClient.IPSet, _ int) {
+			_, found := ipv6Set[ip.IPAddress]
+			if !found {
+				delete(eni.IPv6, ip.IPAddress)
+			} else {
+				unfinished = true
+			}
+		})
+		return !unfinished, nil
+	})
 }

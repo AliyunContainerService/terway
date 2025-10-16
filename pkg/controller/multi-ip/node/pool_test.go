@@ -793,7 +793,7 @@ func TestReconcileNode_assignIP(t *testing.T) {
 				aliyun: tt.fields.aliyun,
 				tracer: noop.NewTracerProvider().Tracer(""),
 			}
-			tt.wantErr(t, n.assignIP(tt.args.ctx, tt.args.opt), fmt.Sprintf("assignIP(%v, %v)", tt.args.ctx, tt.args.opt))
+			tt.wantErr(t, n.assignIP(tt.args.ctx, &networkv1beta1.Node{}, tt.args.opt), fmt.Sprintf("assignIP(%v, %v)", tt.args.ctx, tt.args.opt))
 
 			tt.checkFunc(t, tt.args.opt)
 		})
@@ -2500,133 +2500,63 @@ var _ = Describe("Test ReconcileNode", func() {
 			ctx = MetaIntoCtx(ctx)
 			MetaCtx(ctx).NeedSyncOpenAPI.Store(true)
 
-			openAPI.On("GetVPC").Return(vpcClient).Maybe()
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+			// Setup mock API
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+
+			// Setup vSwitch
+			mockHelper.SetupVSwitch("vsw-1", &vpc.VSwitch{
 				VSwitchId:               "vsw-1",
 				ZoneId:                  "zone-1",
 				AvailableIpAddressCount: 10,
 				CidrBlock:               "192.168.0.0/16",
 				Ipv6CidrBlock:           "fd00::/64",
-			}, nil).Maybe()
+			})
+
+			// Setup API to return ENIs: Primary (ignored), 2 Secondary ENIs
 			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
-				{
-					Status:                      "InUse",
-					MacAddress:                  "",
-					NetworkInterfaceID:          "eni-1",
-					VSwitchID:                   "",
-					PrivateIPAddress:            "",
-					PrivateIPSets:               nil,
-					ZoneID:                      "",
-					SecurityGroupIDs:            nil,
-					ResourceGroupID:             "",
-					IPv6Set:                     nil,
-					Tags:                        nil,
-					Type:                        "Primary",
-					InstanceID:                  "",
-					TrunkNetworkInterfaceID:     "",
-					NetworkInterfaceTrafficMode: "",
-					DeviceIndex:                 0,
-					CreationTime:                "",
-				},
-				{
-					Status:                      "InUse",
-					MacAddress:                  "",
-					NetworkInterfaceID:          "eni-2",
-					VSwitchID:                   "vsw-1",
-					PrivateIPAddress:            "",
-					PrivateIPSets:               nil,
-					ZoneID:                      "zone-1",
-					SecurityGroupIDs:            nil,
-					ResourceGroupID:             "",
-					IPv6Set:                     nil,
-					Tags:                        nil,
-					Type:                        "Secondary",
-					InstanceID:                  "",
-					TrunkNetworkInterfaceID:     "",
-					NetworkInterfaceTrafficMode: "",
-					DeviceIndex:                 0,
-					CreationTime:                "",
-				},
-				{
-					Status:             "InUse",
-					MacAddress:         "",
-					NetworkInterfaceID: "eni-3",
-					VSwitchID:          "vsw-1",
-					PrivateIPAddress:   "",
-					PrivateIPSets: []aliyunClient.IPSet{
-						{
-							IPAddress: "192.168.0.1",
-							Primary:   true,
-						},
-						{
-							IPAddress: "192.168.0.2",
-							Primary:   false,
-						},
-					},
-					ZoneID:                      "zone-1",
-					SecurityGroupIDs:            nil,
-					ResourceGroupID:             "",
-					IPv6Set:                     nil,
-					Tags:                        nil,
-					Type:                        "Secondary",
-					InstanceID:                  "",
-					TrunkNetworkInterfaceID:     "",
-					NetworkInterfaceTrafficMode: "",
-					DeviceIndex:                 0,
-					CreationTime:                "",
-				},
+				// Primary ENI - should be filtered out
+				BuildMockENI("eni-1", "Primary", "InUse", "", "", nil, nil),
+				// Secondary ENI without IPs
+				BuildMockENI("eni-2", "Secondary", "InUse", "vsw-1", "zone-1", nil, nil),
+				// Secondary ENI with IPs
+				BuildMockENI("eni-3", "Secondary", "InUse", "vsw-1", "zone-1",
+					[]string{"192.168.0.1", "192.168.0.2"}, nil),
 			}, nil).Maybe()
 
-			node := &networkv1beta1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "foo",
+			// Create node with existing ENIs (eni-3 and eni-4)
+			// eni-4 should be removed as it's not in the API response
+			eni3 := BuildENIWithCustomIPs("eni-3", aliyunClient.ENIStatusInUse,
+				map[string]*networkv1beta1.IP{
+					"192.168.0.1": {IP: "192.168.0.1", Primary: true},
 				},
-				Spec: networkv1beta1.NodeSpec{
-					NodeMetadata: networkv1beta1.NodeMetadata{
-						InstanceID: "test-instance",
-					},
-					ENISpec: &networkv1beta1.ENISpec{},
+				map[string]*networkv1beta1.IP{
+					"fd00::1": {IP: "fd00::1"},
 				},
-				Status: networkv1beta1.NodeStatus{
-					NetworkInterfaces: map[string]*networkv1beta1.Nic{
-						"eni-3": {
-							ID: "eni-3",
-							IPv4: map[string]*networkv1beta1.IP{
-								"192.168.0.1": {
-									IP:      "192.168.0.1",
-									Primary: true,
-								},
-							},
-							IPv6: map[string]*networkv1beta1.IP{
-								"fd00::1": {
-									IP: "fd00::1",
-								},
-							},
-						},
-						"eni-4": {
-							ID: "eni-4",
-							IPv4: map[string]*networkv1beta1.IP{
-								"192.168.0.1": {
-									IP:      "192.168.0.1",
-									Primary: true,
-								},
-							},
-							IPv6: map[string]*networkv1beta1.IP{
-								"fd00::1": {
-									IP: "fd00::1",
-								},
-							},
-						},
-					},
+			)
+			eni4 := BuildENIWithCustomIPs("eni-4", aliyunClient.ENIStatusInUse,
+				map[string]*networkv1beta1.IP{
+					"192.168.0.1": {IP: "192.168.0.1", Primary: true},
 				},
-			}
+				map[string]*networkv1beta1.IP{
+					"fd00::1": {IP: "fd00::1"},
+				},
+			)
 
-			reconciler := &ReconcileNode{
-				aliyun:             openAPI,
-				vswpool:            switchPool,
-				fullSyncNodePeriod: time.Hour,
-				tracer:             noop.NewTracerProvider().Tracer(""),
-			}
+			// Use NodeFactory with existing ENIs
+			node := NewNodeFactory("foo").
+				WithECS().
+				WithInstanceID("test-instance").
+				WithExistingENIs(eni3, eni4).
+				Build()
+
+			// Use ReconcilerBuilder to create reconciler
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithSyncPeriod(time.Hour).
+				WithDefaults().
+				Build()
 
 			By("Syncing network interfaces with API")
 			err := reconciler.syncWithAPI(ctx, node)
@@ -2710,49 +2640,38 @@ var _ = Describe("Test ReconcileNode", func() {
 			ctx := context.TODO()
 			ctx = MetaIntoCtx(ctx)
 
-			node := &networkv1beta1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-node",
-				},
-				Spec: networkv1beta1.NodeSpec{
-					NodeMetadata: networkv1beta1.NodeMetadata{
-						InstanceID: "i-1",
-						ZoneID:     "cn-hangzhou-k",
-					},
-					ENISpec: &networkv1beta1.ENISpec{
-						Tag: map[string]string{
-							"k1": "v1",
-						},
-						VSwitchOptions: []string{"vsw-1"},
-					},
-				},
-			}
+			// Use NodeFactory to create test node
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithInstanceID("i-1").
+				WithZone("cn-hangzhou-k").
+				WithVSwitches("vsw-1").
+				WithTags(map[string]string{"k1": "v1"}).
+				Build()
 
-			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
-				NetworkInterfaceID: "eni-1",
-				MacAddress:         "00:00:00:00:00:01",
-				PrivateIPSets: []aliyunClient.IPSet{
-					{IPAddress: "192.168.0.1", Primary: true},
-				},
-				IPv6Set: []aliyunClient.IPSet{
-					{IPAddress: "fd00::1", Primary: true},
-				},
-			}, nil).Maybe()
+			// Use MockAPIHelper to setup API expectations
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+
+			// Setup the ENI creation flow
+			mockHelper.SetupCreateENI("eni-1", aliyunClient.ENITypeSecondary,
+				WithMacAddress("00:00:00:00:00:01"),
+				WithIPv4("192.168.0.1"),
+				WithIPv6("fd00::1"),
+			)
+
 			ecsClient.On("AttachNetworkInterface", mock.Anything, mock.Anything).Return(nil)
-			openAPI.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-1", aliyunClient.ENIStatusInUse, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
-				Status:             aliyunClient.ENIStatusInUse,
-				NetworkInterfaceID: "eni-1",
-				MacAddress:         "00:00:00:00:00:01",
-				Type:               aliyunClient.ENITypeSecondary,
-				VSwitchID:          "vsw-1",
-				ZoneID:             "cn-hangzhou-k",
-				PrivateIPSets: []aliyunClient.IPSet{
-					{IPAddress: "192.168.0.1", Primary: true},
-				},
-				IPv6Set: []aliyunClient.IPSet{
-					{IPAddress: "fd00::1", Primary: true},
-				},
-			}, nil).Maybe()
+
+			// Build the complete mock ENI with all fields
+			completeENI := BuildMockENI("eni-1", aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusInUse,
+				"vsw-1", "cn-hangzhou-k",
+				[]string{"192.168.0.1"},
+				[]string{"fd00::1"})
+			completeENI.MacAddress = "00:00:00:00:00:01"
+
+			mockHelper.SetupWaitForENI("eni-1", aliyunClient.ENIStatusInUse, completeENI, nil)
+
+			// Setup vSwitch in pool
 			switchPool.Add(&vswpool.Switch{
 				ID:               "vsw-1",
 				Zone:             "cn-hangzhou-k",
@@ -2761,12 +2680,13 @@ var _ = Describe("Test ReconcileNode", func() {
 				IPv6CIDR:         "fd00::/64",
 			})
 
-			reconciler := &ReconcileNode{
-				aliyun:       openAPI,
-				vswpool:      switchPool,
-				tracer:       noop.NewTracerProvider().Tracer(""),
-				eniBatchSize: 10,
-			}
+			// Use ReconcilerBuilder to create reconciler
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithENIBatchSize(10).
+				WithDefaults().
+				Build()
 
 			By("Creating ENI")
 			opt := &eniOptions{
@@ -2791,27 +2711,22 @@ var _ = Describe("Test ReconcileNode", func() {
 			ctx := context.TODO()
 			ctx = MetaIntoCtx(ctx)
 
-			node := &networkv1beta1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-node",
-				},
-				Spec: networkv1beta1.NodeSpec{
-					NodeMetadata: networkv1beta1.NodeMetadata{
-						InstanceID: "i-1",
-						ZoneID:     "cn-hangzhou-k",
-					},
-					ENISpec: &networkv1beta1.ENISpec{
-						Tag: map[string]string{
-							"k1": "v1",
-						},
-						VSwitchOptions: []string{"vsw-1"},
-					},
-				},
-			}
+			// Use NodeFactory to create test node
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithInstanceID("i-1").
+				WithZone("cn-hangzhou-k").
+				WithVSwitches("vsw-1").
+				WithTags(map[string]string{"k1": "v1"}).
+				Build()
 
+			// Setup mock to return error
 			createErr := fmt.Errorf("create eni failed")
-			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything, mock.Anything).Return(nil, createErr).Maybe()
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+			mockHelper.SetupCreateENIWithError(createErr)
 
+			// Setup vSwitch in pool
 			switchPool.Add(&vswpool.Switch{
 				ID:               "vsw-1",
 				Zone:             "cn-hangzhou-k",
@@ -2820,12 +2735,13 @@ var _ = Describe("Test ReconcileNode", func() {
 				IPv6CIDR:         "fd00::/64",
 			})
 
-			reconciler := &ReconcileNode{
-				aliyun:       openAPI,
-				vswpool:      switchPool,
-				tracer:       noop.NewTracerProvider().Tracer(""),
-				eniBatchSize: 10,
-			}
+			// Use ReconcilerBuilder to create reconciler
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithENIBatchSize(10).
+				WithDefaults().
+				Build()
 
 			By("Creating ENI with expected failure")
 			opt := &eniOptions{
@@ -2846,29 +2762,26 @@ var _ = Describe("Test ReconcileNode", func() {
 			ctx := context.TODO()
 			ctx = MetaIntoCtx(ctx)
 
-			node := &networkv1beta1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-node",
-				},
-				Spec: networkv1beta1.NodeSpec{
-					NodeMetadata: networkv1beta1.NodeMetadata{
-						InstanceID: "i-1",
-						ZoneID:     "cn-hangzhou-k",
-					},
-					ENISpec: &networkv1beta1.ENISpec{
-						Tag: map[string]string{
-							"k1": "v1",
-						},
-					},
-				},
-			}
+			// Use NodeFactory to create test node with no vSwitch options
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithInstanceID("i-1").
+				WithZone("cn-hangzhou-k").
+				WithVSwitches(). // Empty vSwitch options
+				WithTags(map[string]string{"k1": "v1"}).
+				Build()
 
-			reconciler := &ReconcileNode{
-				aliyun:       openAPI,
-				vswpool:      switchPool,
-				tracer:       noop.NewTracerProvider().Tracer(""),
-				eniBatchSize: 10,
-			}
+			// Use ReconcilerBuilder to create reconciler
+			// Note: Not adding any vSwitch to switchPool, so GetOne will fail
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithENIBatchSize(10).
+				WithDefaults().
+				Build()
 
 			By("Creating ENI with no available VSwitches")
 			opt := &eniOptions{
@@ -2891,64 +2804,85 @@ var _ = Describe("Test ReconcileNode", func() {
 			ctx := context.TODO()
 			ctx = MetaIntoCtx(ctx)
 
-			node := &networkv1beta1.Node{
-				Status: networkv1beta1.NodeStatus{
-					NetworkInterfaces: map[string]*networkv1beta1.Nic{
-						"eni-1": {
-							ID:     "eni-1",
-							Status: aliyunClient.ENIStatusInUse,
-							IPv4: map[string]*networkv1beta1.IP{
-								"192.168.0.1": {
-									IP:     "192.168.0.1",
-									Status: networkv1beta1.IPStatusDeleting,
-								},
-								"192.168.0.2": {
-									IP:     "192.168.0.2",
-									Status: networkv1beta1.IPStatusValid,
-								},
-							},
-							IPv6: map[string]*networkv1beta1.IP{
-								"fd00::1": {
-									IP:     "fd00::1",
-									Status: networkv1beta1.IPStatusDeleting,
-								},
-								"fd00::2": {
-									IP:     "fd00::2",
-									Status: networkv1beta1.IPStatusValid,
-								},
-							},
-						},
-						"eni-2": {
-							ID:     "eni-2",
-							Status: aliyunClient.ENIStatusDeleting,
-						},
-						"eni-3": {
-							ID:     "eni-3",
-							Status: aliyunClient.ENIStatusDetaching,
-						},
+			// Create ENI-1 with mixed IP statuses (some deleting, some valid)
+			eni1 := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusInUse,
+				map[string]*networkv1beta1.IP{
+					"192.168.0.1": {
+						IP:     "192.168.0.1",
+						Status: networkv1beta1.IPStatusDeleting,
+					},
+					"192.168.0.2": {
+						IP:     "192.168.0.2",
+						Status: networkv1beta1.IPStatusValid,
 					},
 				},
-			}
+				map[string]*networkv1beta1.IP{
+					"fd00::1": {
+						IP:     "fd00::1",
+						Status: networkv1beta1.IPStatusDeleting,
+					},
+					"fd00::2": {
+						IP:     "fd00::2",
+						Status: networkv1beta1.IPStatusValid,
+					},
+				},
+			)
 
-			openAPI.On("UnAssignPrivateIPAddressesV2", mock.Anything, "eni-1", mock.Anything).Return(nil)
-			openAPI.On("UnAssignIpv6AddressesV2", mock.Anything, "eni-1", mock.Anything).Return(nil)
+			// Create ENI-2 and ENI-3 with deleting/detaching status
+			eni2 := BuildENIWithCustomIPs("eni-2", aliyunClient.ENIStatusDeleting, nil, nil)
+			eni3 := BuildENIWithCustomIPs("eni-3", aliyunClient.ENIStatusDetaching, nil, nil)
+
+			// Use NodeFactory with existing ENIs
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithExistingENIs(eni1, eni2, eni3).
+				Build()
+
+			// Setup mocks using MockAPIHelper
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+
+			// Setup IP unassignment for eni-1
+			mockHelper.SetupUnassignIP("eni-1", nil)
+			mockHelper.SetupUnassignIPv6("eni-1", nil)
+
+			// Setup ENI deletion for eni-2
 			ecsClient.On("DetachNetworkInterface", mock.Anything, "eni-2", mock.Anything, mock.Anything).Return(nil)
-			openAPI.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-2", aliyunClient.ENIStatusAvailable, mock.Anything, true).Return(&aliyunClient.NetworkInterface{
-				NetworkInterfaceID: "eni-2",
-				Status:             aliyunClient.ENIStatusAvailable,
-			}, nil)
-			openAPI.On("DeleteNetworkInterfaceV2", mock.Anything, "eni-2").Return(nil)
-			ecsClient.On("DetachNetworkInterface", mock.Anything, "eni-3", mock.Anything, mock.Anything).Return(nil)
-			openAPI.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-3", aliyunClient.ENIStatusAvailable, mock.Anything, true).Return(&aliyunClient.NetworkInterface{
-				NetworkInterfaceID: "eni-3",
-				Status:             aliyunClient.ENIStatusAvailable,
-			}, nil)
-			openAPI.On("DeleteNetworkInterfaceV2", mock.Anything, "eni-3").Return(nil)
+			mockHelper.SetupWaitForENI("eni-2", aliyunClient.ENIStatusAvailable,
+				&aliyunClient.NetworkInterface{
+					NetworkInterfaceID: "eni-2",
+					Status:             aliyunClient.ENIStatusAvailable,
+				}, nil)
+			mockHelper.SetupDeleteENI("eni-2", nil)
 
-			reconciler := &ReconcileNode{
-				aliyun: openAPI,
-				tracer: noop.NewTracerProvider().Tracer(""),
-			}
+			// Setup ENI deletion for eni-3
+			ecsClient.On("DetachNetworkInterface", mock.Anything, "eni-3", mock.Anything, mock.Anything).Return(nil)
+			mockHelper.SetupWaitForENI("eni-3", aliyunClient.ENIStatusAvailable,
+				&aliyunClient.NetworkInterface{
+					NetworkInterfaceID: "eni-3",
+					Status:             aliyunClient.ENIStatusAvailable,
+				}, nil)
+			mockHelper.SetupDeleteENI("eni-3", nil)
+
+			// Setup DescribeNetworkInterface to verify IP removal
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-1",
+					Status:             aliyunClient.ENIStatusInUse,
+					PrivateIPSets: []aliyunClient.IPSet{
+						{IPAddress: "192.168.0.2"},
+					},
+					IPv6Set: []aliyunClient.IPSet{
+						{IPAddress: "fd00::2"},
+					},
+				},
+			}, nil)
+
+			// Use ReconcilerBuilder to create reconciler
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithDefaults().
+				Build()
 
 			By("Processing network interfaces with different statuses")
 			err := reconciler.handleStatus(ctx, node)
@@ -2960,37 +2894,39 @@ var _ = Describe("Test ReconcileNode", func() {
 			Expect(node.Status.NetworkInterfaces).NotTo(HaveKey("eni-3"))
 
 			By("Verifying IP status was handled correctly")
-			eni1 := node.Status.NetworkInterfaces["eni-1"]
-			Expect(eni1.IPv4).To(HaveLen(1))
-			Expect(eni1.IPv4).To(HaveKey("192.168.0.2"))
-			Expect(eni1.IPv4).NotTo(HaveKey("192.168.0.1"))
-			Expect(eni1.IPv6).To(HaveLen(1))
-			Expect(eni1.IPv6).To(HaveKey("fd00::2"))
-			Expect(eni1.IPv6).NotTo(HaveKey("fd00::1"))
+			eni1Result := node.Status.NetworkInterfaces["eni-1"]
+			Expect(eni1Result.IPv4).To(HaveLen(1))
+			Expect(eni1Result.IPv4).To(HaveKey("192.168.0.2"))
+			Expect(eni1Result.IPv4).NotTo(HaveKey("192.168.0.1"))
+			Expect(eni1Result.IPv6).To(HaveLen(1))
+			Expect(eni1Result.IPv6).To(HaveKey("fd00::2"))
+			Expect(eni1Result.IPv6).NotTo(HaveKey("fd00::1"))
 		})
 
 		It("Should handle errors during ENI deletion", func() {
 			ctx := context.TODO()
 			ctx = MetaIntoCtx(ctx)
 
-			node := &networkv1beta1.Node{
-				Status: networkv1beta1.NodeStatus{
-					NetworkInterfaces: map[string]*networkv1beta1.Nic{
-						"eni-1": {
-							ID:     "eni-1",
-							Status: aliyunClient.ENIStatusDeleting,
-						},
-					},
-				},
-			}
+			// Create ENI with deleting status
+			eni1 := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusDeleting, nil, nil)
 
+			// Use NodeFactory with existing ENI
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithExistingENI(eni1).
+				Build()
+
+			// Setup mock to return error on detach
 			detachErr := fmt.Errorf("failed to detach ENI")
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
 			ecsClient.On("DetachNetworkInterface", mock.Anything, "eni-1", mock.Anything, mock.Anything).Return(detachErr)
 
-			reconciler := &ReconcileNode{
-				aliyun: openAPI,
-				tracer: noop.NewTracerProvider().Tracer(""),
-			}
+			// Use ReconcilerBuilder to create reconciler
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithDefaults().
+				Build()
 
 			By("Attempting to process ENI with API error(will retry)")
 			err := reconciler.handleStatus(ctx, node)
@@ -3004,32 +2940,34 @@ var _ = Describe("Test ReconcileNode", func() {
 			ctx := context.TODO()
 			ctx = MetaIntoCtx(ctx)
 
-			node := &networkv1beta1.Node{
-				Status: networkv1beta1.NodeStatus{
-					NetworkInterfaces: map[string]*networkv1beta1.Nic{
-						"eni-1": {
-							ID:     "eni-1",
-							Status: aliyunClient.ENIStatusInUse,
-							IPv4: map[string]*networkv1beta1.IP{
-								"192.168.0.1": {
-									IP:     "192.168.0.1",
-									Status: networkv1beta1.IPStatusDeleting,
-								},
-							},
-							IPv6: map[string]*networkv1beta1.IP{},
-						},
+			// Create ENI with one IPv4 address in deleting status
+			eni1 := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusInUse,
+				map[string]*networkv1beta1.IP{
+					"192.168.0.1": {
+						IP:     "192.168.0.1",
+						Status: networkv1beta1.IPStatusDeleting,
 					},
 				},
-			}
+				map[string]*networkv1beta1.IP{},
+			)
 
+			// Use NodeFactory with existing ENI
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithExistingENI(eni1).
+				Build()
+
+			// Setup mock to return error on IP unassignment
 			ipDeleteErr := fmt.Errorf("failed to unassign private IP")
-			openAPI := mocks.NewOpenAPI(GinkgoT())
-			openAPI.On("UnAssignPrivateIPAddressesV2", mock.Anything, "eni-1", mock.Anything).Return(ipDeleteErr)
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+			mockHelper.SetupUnassignIP("eni-1", ipDeleteErr)
 
-			reconciler := &ReconcileNode{
-				aliyun: openAPI,
-				tracer: noop.NewTracerProvider().Tracer(""),
-			}
+			// Use ReconcilerBuilder to create reconciler
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithDefaults().
+				Build()
 
 			By("Attempting to delete IP with API error(will retry)")
 			err := reconciler.handleStatus(ctx, node)
@@ -3043,16 +2981,20 @@ var _ = Describe("Test ReconcileNode", func() {
 			ctx := context.TODO()
 			ctx = MetaIntoCtx(ctx)
 
-			node := &networkv1beta1.Node{
-				Status: networkv1beta1.NodeStatus{
-					NetworkInterfaces: map[string]*networkv1beta1.Nic{},
-				},
-			}
+			// Use NodeFactory to create node with no existing ENIs
+			node := NewNodeFactory("test-node").
+				WithECS().
+				Build()
 
-			reconciler := &ReconcileNode{
-				aliyun: mocks.NewOpenAPI(GinkgoT()),
-				tracer: noop.NewTracerProvider().Tracer(""),
-			}
+			// Setup mock API helper
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+
+			// Use ReconcilerBuilder to create reconciler
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithDefaults().
+				Build()
 
 			By("Processing node with no network interfaces")
 			err := reconciler.handleStatus(ctx, node)
@@ -3064,10 +3006,11 @@ var _ = Describe("Test ReconcileNode", func() {
 		It("Should not validate an ENI in deleting state", func() {
 			ctx := context.TODO()
 
+			// Create ENI with deleting status
+			eni := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusDeleting, nil, nil)
+
 			option := &eniOptions{
-				eniRef: &networkv1beta1.Nic{
-					Status: aliyunClient.ENIStatusDeleting,
-				},
+				eniRef:     eni,
 				eniTypeKey: secondaryKey,
 			}
 
@@ -3080,31 +3023,33 @@ var _ = Describe("Test ReconcileNode", func() {
 		It("Should validate a ready ENI with available IPs", func() {
 			ctx := context.TODO()
 
-			openAPI := mocks.NewOpenAPI(GinkgoT())
-			vpcClient := mocks.NewVPC(GinkgoT())
-			openAPI.On("GetVPC").Return(vpcClient).Maybe()
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+			// Setup mock API with vSwitch that has available IPs
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+			mockHelper.SetupVSwitch("vsw-1", &vpc.VSwitch{
 				VSwitchId:               "vsw-1",
 				ZoneId:                  "zone-1",
 				AvailableIpAddressCount: 10,
 				CidrBlock:               "192.168.0.0/16",
 				Ipv6CidrBlock:           "fd00::/64",
-			}, nil).Maybe()
+			})
+
+			// Create ENI with InUse status
+			eni := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusInUse, nil, nil)
+			eni.VSwitchID = "vsw-1"
+			eni.NetworkInterfaceType = networkv1beta1.ENITypeSecondary
+			eni.NetworkInterfaceTrafficMode = networkv1beta1.NetworkInterfaceTrafficModeStandard
 
 			option := &eniOptions{
-				eniRef: &networkv1beta1.Nic{
-					VSwitchID:                   "vsw-1",
-					Status:                      aliyunClient.ENIStatusInUse,
-					NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
-					NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-				},
+				eniRef:     eni,
 				eniTypeKey: secondaryKey,
 			}
 
-			reconciler := &ReconcileNode{
-				aliyun:  openAPI,
-				vswpool: switchPool,
-			}
+			// Use ReconcilerBuilder to create reconciler
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				Build()
 
 			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
 			Expect(result).To(BeTrue())
@@ -3113,15 +3058,17 @@ var _ = Describe("Test ReconcileNode", func() {
 		It("Should not validate an ENI with mismatched type", func() {
 			ctx := context.TODO()
 
+			// Create ENI with secondary type
+			eni := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusInUse, nil, nil)
+
 			option := &eniOptions{
-				eniRef: &networkv1beta1.Nic{
-					Status: aliyunClient.ENIStatusInUse,
-				},
+				eniRef:     eni,
 				eniTypeKey: secondaryKey,
 			}
 
 			reconciler := &ReconcileNode{}
 
+			// Try to validate with trunk type filter (should fail)
 			result := reconciler.validateENI(ctx, option, []eniTypeKey{trunkKey})
 			Expect(result).To(BeFalse())
 		})
@@ -3129,6 +3076,7 @@ var _ = Describe("Test ReconcileNode", func() {
 		It("Should validate an option without associated ENI", func() {
 			ctx := context.TODO()
 
+			// Option without ENI reference (for new ENI creation)
 			option := &eniOptions{
 				eniRef:     nil,
 				eniTypeKey: secondaryKey,
@@ -3143,29 +3091,33 @@ var _ = Describe("Test ReconcileNode", func() {
 		It("Should not validate an ENI without available IPs", func() {
 			ctx := context.TODO()
 
-			openAPI.On("GetVPC").Return(vpcClient).Maybe()
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+			// Setup mock API with vSwitch that has NO available IPs
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+			mockHelper.SetupVSwitch("vsw-1", &vpc.VSwitch{
 				VSwitchId:               "vsw-1",
 				ZoneId:                  "zone-1",
-				AvailableIpAddressCount: 0,
+				AvailableIpAddressCount: 0, // No available IPs
 				CidrBlock:               "192.168.0.0/16",
 				Ipv6CidrBlock:           "fd00::/64",
-			}, nil).Maybe()
+			})
+
+			// Create ENI with InUse status
+			eni := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusInUse, nil, nil)
+			eni.VSwitchID = "vsw-1"
+			eni.NetworkInterfaceType = networkv1beta1.ENITypeSecondary
+			eni.NetworkInterfaceTrafficMode = networkv1beta1.NetworkInterfaceTrafficModeStandard
 
 			option := &eniOptions{
-				eniRef: &networkv1beta1.Nic{
-					VSwitchID:                   "vsw-1",
-					Status:                      aliyunClient.ENIStatusInUse,
-					NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
-					NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-				},
+				eniRef:     eni,
 				eniTypeKey: secondaryKey,
 			}
 
-			reconciler := &ReconcileNode{
-				aliyun:  openAPI,
-				vswpool: switchPool,
-			}
+			// Use ReconcilerBuilder to create reconciler
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				Build()
 
 			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
 			Expect(result).To(BeFalse())
@@ -3174,28 +3126,31 @@ var _ = Describe("Test ReconcileNode", func() {
 		It("Should not validate an ENI with unavailable vSwitch information", func() {
 			ctx := context.TODO()
 
+			// Create new vSwitch pool for this test
 			vsw, err := vswpool.NewSwitchPool(100, "10m")
 			Expect(err).NotTo(HaveOccurred())
 
-			openAPI := mocks.NewOpenAPI(GinkgoT())
-			vpcClient := mocks.NewVPC(GinkgoT())
-			openAPI.On("GetVPC").Return(vpcClient).Maybe()
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-not-exist").Return(nil, fmt.Errorf("vSwitch not found")).Maybe()
+			// Setup mock API to return error when looking up vSwitch
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+			mockHelper.SetupVSwitchWithError("vsw-not-exist", fmt.Errorf("vSwitch not found"))
+
+			// Create ENI referencing non-existent vSwitch
+			eni := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusInUse, nil, nil)
+			eni.VSwitchID = "vsw-not-exist"
+			eni.NetworkInterfaceType = networkv1beta1.ENITypeSecondary
+			eni.NetworkInterfaceTrafficMode = networkv1beta1.NetworkInterfaceTrafficModeStandard
 
 			option := &eniOptions{
-				eniRef: &networkv1beta1.Nic{
-					VSwitchID:                   "vsw-not-exist",
-					Status:                      aliyunClient.ENIStatusInUse,
-					NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
-					NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-				},
+				eniRef:     eni,
 				eniTypeKey: secondaryKey,
 			}
 
-			reconciler := &ReconcileNode{
-				aliyun:  openAPI,
-				vswpool: vsw,
-			}
+			// Use ReconcilerBuilder with the new vSwitch pool
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(vsw).
+				Build()
 
 			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
 			Expect(result).To(BeFalse())
