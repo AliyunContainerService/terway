@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
@@ -21,20 +22,28 @@ func NewBackoffManager() *BackoffManager {
 	return &BackoffManager{}
 }
 
-func (b *BackoffManager) Get(key string, bo wait.Backoff) (time.Duration, error) {
+func (b *BackoffManager) Get(key string, bo backoff.ExtendedBackoff) (time.Duration, error) {
 	v, err, _ := b.single.Do(key, func() (interface{}, error) {
 
-		vv, _ := b.store.LoadOrStore(key, &ResourceBackoff{
-			Bo: bo,
+		vv, loaded := b.store.LoadOrStore(key, &ResourceBackoff{
+			Bo: bo.Backoff,
 		})
 		actual := vv.(*ResourceBackoff)
 
+		// If this is the first time (!loaded) and we have an initial delay, return it
+		if !loaded && bo.InitialDelay > 0 {
+			actual.NextTS = time.Now().Add(bo.InitialDelay)
+			return bo.InitialDelay, nil
+		}
+
+		// Check if we need to wait before next retry
 		du := time.Until(actual.NextTS)
 		if du > 0 {
 			// don't do backoff, as the executing is too soon
 			return du, nil
 		}
 
+		// Execute the next backoff step
 		if actual.Bo.Steps > 0 {
 			next := actual.Bo.Step()
 			actual.NextTS = time.Now().Add(next)

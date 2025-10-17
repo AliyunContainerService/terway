@@ -174,10 +174,11 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 				}
 				fallthrough
 			case aliyunClient.LENIStatusExecuting, aliyunClient.LENIStatusAttaching, aliyunClient.LENIStatusDetaching:
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitLENIStatus).Backoff)
+				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitLENIStatus))
 				if err != nil {
 					return reconcile.Result{}, err
 				}
+				logr.FromContextOrDiscard(ctx).Info("waiting for network interface backoff", "du", du, "id", networkInterface.Name)
 				return reconcile.Result{RequeueAfter: du}, nil
 			case aliyunClient.LENIStatusCreateFailed:
 				// release this eni, this status should be on first create
@@ -216,7 +217,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 
 			if len(resp) != 1 || resp[0].Status != aliyunClient.ENIStatusInUse {
 				// wait next time
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus).Backoff)
+				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus))
 				if err != nil {
 					return reconcile.Result{}, err
 				}
@@ -323,7 +324,7 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 					}
 					fallthrough
 				case aliyunClient.LENIStatusExecuting, aliyunClient.LENIStatusDetaching:
-					du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitLENIStatus).Backoff)
+					du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitLENIStatus))
 					if err != nil {
 						return reconcile.Result{}, err
 					}
@@ -366,7 +367,7 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 
 			if len(enis) > 0 && enis[0].Status != aliyunClient.ENIStatusAvailable {
 				// wait next time
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus).Backoff)
+				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus))
 				if err != nil {
 					return reconcile.Result{}, err
 				}
