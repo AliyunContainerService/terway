@@ -1696,6 +1696,108 @@ var _ = Describe("ENI Controller Tests", func() {
 	})
 
 	// ==============================================================================
+	// ECS HIGH DENSITY TESTS
+	// ==============================================================================
+
+	Context("ECS High Density Mode", func() {
+		BeforeEach(func() {
+			// Clean up the default test node
+			if testNode != nil {
+				_ = k8sClient.Delete(ctx, testNode)
+			}
+			// Clean up the default test node CRD
+			if testNodeCRD != nil {
+				_ = k8sClient.Delete(ctx, testNodeCRD)
+			}
+		})
+
+		It("should handle ecsHighDensity with vid = 0 correctly", func() {
+			// Create node with ecsHighDensity support
+			highDensityNode := testutil.CreateTestNode("high-density-node")
+			highDensityNode.Labels["node.kubernetes.io/instance-type"] = "instanceType" // High density instance type
+			highDensityNode.Labels["alibabacloud.com/lingjun-worker"] = "true"
+			Expect(k8sClient.Create(ctx, highDensityNode)).Should(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, highDensityNode) }()
+
+			// Create corresponding Node CRD
+			highDensityNodeCRD := testutil.CreateTestNodeCRD("high-density-node")
+			highDensityNodeCRD.Labels["alibabacloud.com/lingjun-worker"] = "true"
+			highDensityNodeCRD.Annotations[types.ENOApi] = types.APIEcsHDeni
+			Expect(k8sClient.Create(ctx, highDensityNodeCRD)).Should(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, highDensityNodeCRD) }()
+
+			podName := "test-high-density-vid-zero"
+			eniID := "eni-high-density-vid-zero"
+
+			pod := testutil.CreateTestPod(podName, "default", "high-density-node")
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      podName,
+					Namespace: "default",
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							ENI: networkv1beta1.ENI{
+								ID: eniID,
+								AttachmentOptions: networkv1beta1.AttachmentOptions{
+									Trunk: ptr.To(false),
+								},
+							},
+						},
+					},
+				},
+				Status: networkv1beta1.PodENIStatus{
+					Phase: networkv1beta1.ENIPhaseInitial,
+				},
+			}
+			err := testutil.CreateResource(ctx, k8sClient, podENI)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create NetworkInterface with vid = 0
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: eniID},
+				Spec: networkv1beta1.NetworkInterfaceSpec{
+					ENI: networkv1beta1.ENI{ID: eniID},
+				},
+				Status: networkv1beta1.NetworkInterfaceStatus{
+					Phase: networkv1beta1.ENIPhaseBind,
+					ENIInfo: networkv1beta1.ENIInfo{
+						ID:   eniID,
+						Type: networkv1beta1.ENITypeSecondary,
+						Vid:  0, // vid = 0 should be allowed in ecsHighDensity mode
+					},
+				},
+			}
+			err = testutil.CreateResource(ctx, k8sClient, eni)
+			Expect(err).NotTo(HaveOccurred())
+
+			r := createTestReconciler(openAPI, false, false)
+			result, err := r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: k8stypes.NamespacedName{Name: podName, Namespace: "default"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// Verify that vid = 0 is handled correctly in ecsHighDensity mode
+			updatedPodENI := &networkv1beta1.PodENI{}
+			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: podName, Namespace: "default"}, updatedPodENI)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedPodENI.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseBind)))
+
+			// Check that vfID is set to vid value (0) and vid is reset to 0
+			eniInfo, exists := updatedPodENI.Status.ENIInfos[eniID]
+			Expect(exists).To(BeTrue())
+			Expect(eniInfo.Vid).To(Equal(0))
+			Expect(eniInfo.VfID).NotTo(BeNil())
+			Expect(*eniInfo.VfID).To(Equal(uint32(0)))
+		})
+	})
+
+	// ==============================================================================
 	// NUMA HINTS TESTS
 	// ==============================================================================
 
