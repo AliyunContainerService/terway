@@ -777,7 +777,7 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 			vid := eni.Status.ENIInfo.Vid
 			vfID := eni.Status.ENIInfo.VfID
 
-			if ecsHighDensity && vid > 0 { // ensure >0
+			if ecsHighDensity && vid >= 0 { // allow >=0
 				vfID = ptr.To(uint32(vid))
 				vid = 0
 			}
