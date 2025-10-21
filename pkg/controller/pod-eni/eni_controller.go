@@ -30,6 +30,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -128,6 +129,7 @@ type ReconcilePodENI struct {
 	crdMode bool
 
 	nodeStatusCache *status.Cache[status.NodeStatus]
+	nodeStatusGroup singleflight.Group
 }
 
 type Wrapper struct {
@@ -1036,55 +1038,38 @@ func (m *ReconcilePodENI) injectNodeStatus(ctx context.Context, namespace, name 
 		return ctx
 	}
 
-	node := &corev1.Node{}
-	if err := m.client.Get(ctx, k8stypes.NamespacedName{
-		Name: pod.Spec.NodeName,
-	}, node); err != nil {
-		if !k8sErr.IsNotFound(err) {
-			l.Error(err, "failed to get node")
-		}
-		l.V(4).Info("ignore inject node status, node not found")
-		return ctx
-	}
+	nodeName := pod.Spec.NodeName
 
-	// do a quick check
-	nodeStatus, ok := m.nodeStatusCache.Get(node.Name)
+	nodeStatus, ok := m.nodeStatusCache.Get(nodeName)
 	if !ok {
-		instanceType := node.Labels["node.kubernetes.io/instance-type"]
-		if instanceType == "" {
-			l.Info("ignore inject node status, node instanceType not found")
-			return ctx
-		}
-
-		// TODO: after we enable node controller by default , we can modify this
-		if !utils.ISLinJunNode(node.Labels) {
-			limits, err := aliyunClient.GetLimitProvider().GetLimit(m.aliyun.GetECS(), instanceType)
-			if err != nil {
-				l.Error(err, "failed to get instance type limit")
-				return ctx
+		v, err, _ := m.nodeStatusGroup.Do(nodeName, func() (interface{}, error) {
+			nodeStatus, ok := m.nodeStatusCache.Get(nodeName)
+			if ok {
+				return nodeStatus, nil
 			}
 
-			nodeStatus = status.NewNodeStatus(len(limits.NetworkCards))
+			networkCardsCount := m.getNetworkCardsCount(ctx, nodeName)
+			if networkCardsCount < 0 {
+				return nil, fmt.Errorf("network cards count is not initialized")
+			}
 
-			if len(limits.NetworkCards) >= 2 {
-				// a new node ,we need to build the eni index from cache.
+			nodeStatus = status.NewNodeStatus(networkCardsCount)
+
+			if networkCardsCount >= 2 {
 				podENIs := &v1beta1.PodENIList{}
-				err = m.client.List(ctx, podENIs, &client.ListOptions{
+				err := m.client.List(ctx, podENIs, &client.ListOptions{
 					LabelSelector: labels.SelectorFromSet(map[string]string{
-						"name": node.Name,
+						"name": nodeName,
 					}),
 				})
 				if err != nil {
-					l.Error(err, "failed to list podeni")
-					return ctx
+					return nil, fmt.Errorf("failed to list podeni, %w", err)
 				}
 
 				lo.ForEach(podENIs.Items, func(item v1beta1.PodENI, index int) {
-					// for existing podENI
 					if item.Status.Phase != v1beta1.ENIPhaseBind {
 						return
 					}
-					// possible pod has multi eni
 					for _, eni := range item.Status.ENIInfos {
 						eniIndex := 0
 						if eni.NetworkCardIndex != nil {
@@ -1094,16 +1079,50 @@ func (m *ReconcilePodENI) injectNodeStatus(ctx context.Context, namespace, name 
 					}
 				})
 			}
-		} else {
-			nodeStatus = status.NewNodeStatus(1)
+
+			nodeStatus, _ = m.nodeStatusCache.LoadOrStore(nodeName, nodeStatus)
+			return nodeStatus, nil
+		})
+
+		if err != nil {
+			l.Error(err, "failed to inject node status")
+			return ctx
 		}
 
-		nodeStatus, _ = m.nodeStatusCache.LoadOrStore(node.Name, nodeStatus)
+		nodeStatus = v.(*status.NodeStatus)
 	}
 
-	l.V(4).Info("inject node status", "node", node.Name, "nodeStatus", nodeStatus)
+	l.V(4).Info("inject node status", "node", nodeName, "nodeStatus", nodeStatus)
 
 	return status.WithMeta(ctx, nodeStatus)
+}
+
+func (m *ReconcilePodENI) getNetworkCardsCount(ctx context.Context, nodeName string) int {
+	l := log.FromContext(ctx)
+
+	crdNode := &v1beta1.Node{}
+	if err := m.client.Get(ctx, k8stypes.NamespacedName{
+		Name: nodeName,
+	}, crdNode); err != nil {
+		if !k8sErr.IsNotFound(err) {
+			l.Error(err, "failed to get crd node")
+		}
+		l.V(4).Info("crd node not found, ignored")
+		return 0
+	}
+	if !crdNode.DeletionTimestamp.IsZero() {
+		return -1
+	}
+
+	if utils.ISLinJunNode(crdNode.Labels) {
+		return 0
+	}
+
+	if crdNode.Spec.NodeCap.NetworkCardsCount == nil {
+		return -1
+	}
+
+	return *crdNode.Spec.NodeCap.NetworkCardsCount
 }
 
 // migrate create podENI, related networkInterface cr

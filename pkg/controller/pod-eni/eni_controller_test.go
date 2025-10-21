@@ -17,9 +17,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -1829,6 +1831,299 @@ var _ = Describe("ENI Controller Tests", func() {
 
 			hints := podNumaHints(annotations)
 			Expect(hints).To(BeNil())
+		})
+	})
+
+	// ==============================================================================
+	// INJECT NODE STATUS TESTS
+	// ==============================================================================
+
+	Context("InjectNodeStatus", func() {
+		var r *ReconcilePodENI
+
+		BeforeEach(func() {
+			r = createTestReconciler(openAPI, false, false)
+		})
+
+		Context("when NetworkCards count is 0", func() {
+			It("should handle LinJun node correctly", func() {
+				nodeName := "linjun-node"
+				podName := "test-pod-linjun"
+
+				linjunNode := testutil.CreateEFLONode(nodeName)
+				Expect(k8sClient.Create(ctx, linjunNode)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, linjunNode)
+				}()
+
+				linjunNodeCRD := testutil.CreateTestNodeCRD(nodeName)
+				linjunNodeCRD.Labels = map[string]string{
+					"alibabacloud.com/lingjun-worker": "true",
+				}
+				linjunNodeCRD.Spec.NodeCap.NetworkCardsCount = ptr.To(0)
+				Expect(k8sClient.Create(ctx, linjunNodeCRD)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, linjunNodeCRD)
+				}()
+
+				pod := testutil.CreateTestPod(podName, "default", nodeName)
+				Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, pod)
+				}()
+
+				resultCtx := r.injectNodeStatus(ctx, "default", podName)
+				nodeStatus, ok := status.MetaCtx[status.NodeStatus](resultCtx)
+				Expect(ok).To(BeTrue())
+				Expect(nodeStatus).NotTo(BeNil())
+				Expect(nodeStatus.NetworkCards).To(HaveLen(0))
+			})
+
+			It("should create empty NodeStatus when node CRD not found", func() {
+				nodeName := "non-existent-node"
+				podName := "test-pod-no-node"
+
+				nonExistentNode := testutil.CreateTestNode(nodeName)
+				Expect(k8sClient.Create(ctx, nonExistentNode)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, nonExistentNode)
+				}()
+
+				pod := testutil.CreateTestPod(podName, "default", nodeName)
+				Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, pod)
+				}()
+
+				resultCtx := r.injectNodeStatus(ctx, "default", podName)
+				nodeStatus, ok := status.MetaCtx[status.NodeStatus](resultCtx)
+				Expect(ok).To(BeTrue())
+				Expect(nodeStatus).NotTo(BeNil())
+				Expect(nodeStatus.NetworkCards).To(HaveLen(0))
+			})
+		})
+
+		Context("when NetworkCards count is 2", func() {
+			It("should balance ENIs across network cards", func() {
+				nodeName := "multi-card-node"
+				networkCardsCount := 2
+
+				multiCardNode := testutil.CreateTestNode(nodeName)
+				Expect(k8sClient.Create(ctx, multiCardNode)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, multiCardNode)
+				}()
+
+				multiCardNodeCRD := testutil.CreateTestNodeCRD(nodeName)
+				multiCardNodeCRD.Spec.NodeCap.NetworkCardsCount = ptr.To(networkCardsCount)
+				Expect(k8sClient.Create(ctx, multiCardNodeCRD)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, multiCardNodeCRD)
+				}()
+
+				podENI1 := &networkv1beta1.PodENI{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-podeni-1",
+						Namespace: "default",
+						Labels:    map[string]string{"name": nodeName},
+					},
+					Spec: networkv1beta1.PodENISpec{
+						Allocations: []networkv1beta1.Allocation{{ENI: networkv1beta1.ENI{ID: "eni-card-0"}}},
+					},
+					Status: networkv1beta1.PodENIStatus{
+						Phase: networkv1beta1.ENIPhaseBind,
+						ENIInfos: map[string]networkv1beta1.ENIInfo{
+							"eni-card-0": {ID: "eni-card-0", NetworkCardIndex: ptr.To(0)},
+						},
+					},
+				}
+				Expect(testutil.CreateResource(ctx, k8sClient, podENI1)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, podENI1)
+				}()
+
+				podENI2 := &networkv1beta1.PodENI{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-podeni-2",
+						Namespace: "default",
+						Labels:    map[string]string{"name": nodeName},
+					},
+					Spec: networkv1beta1.PodENISpec{
+						Allocations: []networkv1beta1.Allocation{{ENI: networkv1beta1.ENI{ID: "eni-card-1"}}},
+					},
+					Status: networkv1beta1.PodENIStatus{
+						Phase: networkv1beta1.ENIPhaseBind,
+						ENIInfos: map[string]networkv1beta1.ENIInfo{
+							"eni-card-1": {ID: "eni-card-1", NetworkCardIndex: ptr.To(1)},
+						},
+					},
+				}
+				Expect(testutil.CreateResource(ctx, k8sClient, podENI2)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, podENI2)
+				}()
+
+				podENI3 := &networkv1beta1.PodENI{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-podeni-3",
+						Namespace: "default",
+						Labels:    map[string]string{"name": nodeName},
+					},
+					Spec: networkv1beta1.PodENISpec{
+						Allocations: []networkv1beta1.Allocation{{ENI: networkv1beta1.ENI{ID: "eni-card-0-2"}}},
+					},
+					Status: networkv1beta1.PodENIStatus{
+						Phase: networkv1beta1.ENIPhaseBind,
+						ENIInfos: map[string]networkv1beta1.ENIInfo{
+							"eni-card-0-2": {ID: "eni-card-0-2", NetworkCardIndex: ptr.To(0)},
+						},
+					},
+				}
+				Expect(testutil.CreateResource(ctx, k8sClient, podENI3)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, podENI3)
+				}()
+
+				pod := testutil.CreateTestPod("test-pod-multicard", "default", nodeName)
+				Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, pod)
+				}()
+
+				Eventually(func() bool {
+					var podENIList networkv1beta1.PodENIList
+					err := k8sClient.List(ctx, &podENIList, &client.ListOptions{
+						LabelSelector: labels.SelectorFromSet(map[string]string{"name": nodeName}),
+					})
+					return err == nil && len(podENIList.Items) == 3
+				}, time.Second*5, time.Millisecond*100).Should(BeTrue())
+
+				resultCtx := r.injectNodeStatus(ctx, "default", "test-pod-multicard")
+				nodeStatus, ok := status.MetaCtx[status.NodeStatus](resultCtx)
+				Expect(ok).To(BeTrue())
+				Expect(nodeStatus).NotTo(BeNil())
+				Expect(nodeStatus.NetworkCards).To(HaveLen(networkCardsCount))
+
+				Expect(nodeStatus.NetworkCards[0].NetworkInterfaces).To(HaveLen(2))
+				Expect(nodeStatus.NetworkCards[1].NetworkInterfaces).To(HaveLen(1))
+				Expect(nodeStatus.NetworkCards[0].NetworkInterfaces.Has(status.NetworkInterfaceID("eni-card-0"))).To(BeTrue())
+				Expect(nodeStatus.NetworkCards[0].NetworkInterfaces.Has(status.NetworkInterfaceID("eni-card-0-2"))).To(BeTrue())
+				Expect(nodeStatus.NetworkCards[1].NetworkInterfaces.Has(status.NetworkInterfaceID("eni-card-1"))).To(BeTrue())
+			})
+
+			It("should handle concurrent requests with singleflight", func() {
+				nodeName := "concurrent-test-node"
+				networkCardsCount := 2
+
+				concurrentNode := testutil.CreateTestNode(nodeName)
+				Expect(k8sClient.Create(ctx, concurrentNode)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, concurrentNode)
+				}()
+
+				concurrentNodeCRD := testutil.CreateTestNodeCRD(nodeName)
+				concurrentNodeCRD.Spec.NodeCap.NetworkCardsCount = ptr.To(networkCardsCount)
+				Expect(k8sClient.Create(ctx, concurrentNodeCRD)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, concurrentNodeCRD)
+				}()
+
+				pods := []string{"concurrent-pod-1", "concurrent-pod-2", "concurrent-pod-3"}
+				for _, podName := range pods {
+					pod := testutil.CreateTestPod(podName, "default", nodeName)
+					Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+					defer func(p *corev1.Pod) {
+						_ = k8sClient.Delete(ctx, p)
+					}(pod)
+				}
+
+				done := make(chan bool, 3)
+				for _, podName := range pods {
+					go func(name string) {
+						resultCtx := r.injectNodeStatus(ctx, "default", name)
+						nodeStatus, ok := status.MetaCtx[status.NodeStatus](resultCtx)
+						Expect(ok).To(BeTrue())
+						Expect(nodeStatus).NotTo(BeNil())
+						Expect(nodeStatus.NetworkCards).To(HaveLen(networkCardsCount))
+						done <- true
+					}(podName)
+				}
+
+				for i := 0; i < 3; i++ {
+					select {
+					case <-done:
+					case <-time.After(5 * time.Second):
+						Fail("concurrent injectNodeStatus timed out")
+					}
+				}
+
+				nodeStatus, ok := r.nodeStatusCache.Get(nodeName)
+				Expect(ok).To(BeTrue())
+				Expect(nodeStatus).NotTo(BeNil())
+				Expect(nodeStatus.NetworkCards).To(HaveLen(networkCardsCount))
+			})
+		})
+
+		Context("error handling", func() {
+			It("should return original context when pod not found", func() {
+				resultCtx := r.injectNodeStatus(ctx, "default", "non-existent-pod")
+				Expect(resultCtx).To(Equal(ctx))
+			})
+
+			It("should return original context when node is being deleted", func() {
+				nodeName := "deleting-node"
+				podName := "test-pod-deleting"
+
+				deletingNode := testutil.CreateTestNode(nodeName)
+				Expect(k8sClient.Create(ctx, deletingNode)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, deletingNode)
+				}()
+
+				now := metav1.Now()
+				deletingNodeCRD := testutil.CreateTestNodeCRD(nodeName)
+				deletingNodeCRD.DeletionTimestamp = &now
+				Expect(k8sClient.Create(ctx, deletingNodeCRD)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, deletingNodeCRD)
+				}()
+
+				pod := testutil.CreateTestPod(podName, "default", nodeName)
+				Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, pod)
+				}()
+
+				resultCtx := r.injectNodeStatus(ctx, "default", podName)
+				Expect(resultCtx).To(Equal(ctx))
+			})
+
+			It("should return original context when NetworkCardsCount is nil", func() {
+				nodeName := "nil-cards-node"
+				podName := "test-pod-nil-cards"
+
+				nilCardsNode := testutil.CreateTestNode(nodeName)
+				Expect(k8sClient.Create(ctx, nilCardsNode)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, nilCardsNode)
+				}()
+
+				nilCardsNodeCRD := testutil.CreateTestNodeCRD(nodeName)
+				nilCardsNodeCRD.Spec.NodeCap.NetworkCardsCount = nil
+				Expect(k8sClient.Create(ctx, nilCardsNodeCRD)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, nilCardsNodeCRD)
+				}()
+
+				pod := testutil.CreateTestPod(podName, "default", nodeName)
+				Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, pod)
+				}()
+
+				resultCtx := r.injectNodeStatus(ctx, "default", podName)
+				Expect(resultCtx).To(Equal(ctx))
+			})
 		})
 	})
 

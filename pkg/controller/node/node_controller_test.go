@@ -27,21 +27,23 @@ import (
 	"github.com/stretchr/testify/mock"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	cc "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
+	terwayTypes "github.com/AliyunContainerService/terway/types"
 )
 
 var _ = Describe("Node Controller", func() {
 	var (
+		ctx        context.Context
 		openAPI    *mocks.OpenAPI
 		vpcClient  *mocks.VPC
 		ecsClient  *mocks.ECS
@@ -49,6 +51,7 @@ var _ = Describe("Node Controller", func() {
 	)
 
 	BeforeEach(func() {
+		ctx = context.Background()
 		openAPI = mocks.NewOpenAPI(GinkgoT())
 		vpcClient = mocks.NewVPC(GinkgoT())
 		ecsClient = mocks.NewECS(GinkgoT())
@@ -59,750 +62,459 @@ var _ = Describe("Node Controller", func() {
 		openAPI.On("GetEFLO").Return(efloClient).Maybe()
 	})
 
-	Context("ECS node", func() {
-		const resourceName = "test-resource"
-
-		ctx := context.Background()
-
-		typeNamespacedName := types.NamespacedName{
-			Name: resourceName,
+	// Helper function to create reconciler
+	createReconciler := func(centralizedIPAM, supportEFLO bool) *ReconcileNode {
+		return &ReconcileNode{
+			client:          k8sClient,
+			scheme:          k8sClient.Scheme(),
+			aliyun:          openAPI,
+			record:          record.NewFakeRecorder(1000),
+			centralizedIPAM: centralizedIPAM,
+			supportEFLO:     supportEFLO,
 		}
+	}
+
+	// Helper function to cleanup resources
+	cleanupNode := func(ctx context.Context, nodeName string) {
+		_ = k8sClient.Delete(ctx, &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+		})
+
+		crNode := &networkv1beta1.Node{}
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, crNode)
+		if err == nil {
+			patch := cc.MergeFrom(crNode.DeepCopy())
+			controllerutil.RemoveFinalizer(crNode, finalizer)
+			_ = k8sClient.Patch(ctx, crNode, patch)
+
+			_ = k8sClient.Delete(ctx, &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+			})
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, &networkv1beta1.Node{})
+				return k8sErr.IsNotFound(err)
+			}, 5*time.Second, 500*time.Millisecond).Should(BeTrue())
+		}
+	}
+
+	// Helper to verify NetworkCardsCount
+	verifyNetworkCardsCount := func(ctx context.Context, nodeName string, expectedCount int) {
+		resource := &networkv1beta1.Node{}
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, resource)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resource.Spec.NodeCap.NetworkCardsCount).NotTo(BeNil())
+		Expect(*resource.Spec.NodeCap.NetworkCardsCount).To(Equal(expectedCount))
+	}
+
+	Context("ECS Node", func() {
+		const nodeName = "test-ecs-node"
 
 		BeforeEach(func() {
-			By("create a k8s node")
-			k8sNode := &corev1.Node{}
-			err := k8sClient.Get(ctx, typeNamespacedName, k8sNode)
-			if err != nil && k8sErr.IsNotFound(err) {
-				resource := &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: resourceName,
-						Labels: map[string]string{
-							"node.kubernetes.io/instance-type": "instanceType",
-							"topology.kubernetes.io/zone":      "z1",
-							"topology.kubernetes.io/region":    "region",
-						},
-					},
-					Spec: corev1.NodeSpec{
-						ProviderID: "xx.xx",
-					},
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
 			ecsClient.On("DescribeInstanceTypes", mock.Anything, mock.Anything).Return([]ecs.InstanceType{
 				{
 					EniTotalQuantity:            5,
 					EniQuantity:                 4,
-					InstanceTypeId:              "instanceType",
+					InstanceTypeId:              "ecs.g7.large",
 					EniTrunkSupported:           true,
 					EniPrivateIpAddressQuantity: 10,
+					NetworkCards: ecs.NetworkCards{
+						NetworkCardInfo: []ecs.NetworkCardInfo{
+							{NetworkCardIndex: 0},
+							{NetworkCardIndex: 1},
+						},
+					},
 				},
 			}, nil).Maybe()
-
 		})
 
 		AfterEach(func() {
-			err := k8sClient.Delete(ctx, &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-			})
-			if err != nil {
-				Expect(err).To(BeNil())
-			}
-
-			crNode := &networkv1beta1.Node{}
-
-			err = k8sClient.Get(ctx, typeNamespacedName, crNode)
-			if err != nil && k8sErr.IsNotFound(err) {
-				return
-			}
-			if err != nil {
-				Expect(err).To(BeNil())
-			}
-
-			patch := cc.MergeFrom(crNode.DeepCopy())
-			controllerutil.RemoveFinalizer(crNode, finalizer)
-
-			err = k8sClient.Patch(ctx, crNode, patch)
-			if err != nil {
-				Expect(err).To(BeNil())
-			}
-
-			_ = k8sClient.Delete(ctx, &networkv1beta1.Node{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-			})
-			Eventually(func() bool {
-				crNode := &networkv1beta1.Node{}
-				err := k8sClient.Get(context.TODO(), typeNamespacedName, crNode)
-				return k8sErr.IsNotFound(err)
-			}, 5*time.Second, 500*time.Millisecond).Should(BeTrue())
+			cleanupNode(ctx, nodeName)
 		})
 
-		It("should successfully create cr", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &ReconcileNode{
-				client:          k8sClient,
-				scheme:          k8sClient.Scheme(),
-				aliyun:          openAPI,
-				record:          record.NewFakeRecorder(1000),
-				centralizedIPAM: true,
-			}
+		Context("Shared ENI Mode (Default)", func() {
+			It("should create Node CR with correct NetworkCardsCount", func() {
+				k8sNode := testutil.CreateTestNode(nodeName)
+				k8sNode.Labels["node.kubernetes.io/instance-type"] = "ecs.g7.large"
+				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
+				reconciler := createReconciler(true, false)
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: nodeName},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				resource := &networkv1beta1.Node{}
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, resource)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(resource.Labels["name"]).To(Equal(nodeName))
+				verifyNetworkCardsCount(ctx, nodeName, 2)
 			})
-			Expect(err).NotTo(HaveOccurred())
-
-			resource := &networkv1beta1.Node{}
-			err = k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(resource.Labels["name"]).To(Equal(resourceName))
 		})
 
-		It("should successfully create cr", func() {
-			resource := &networkv1beta1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceName,
-				},
-				Spec: networkv1beta1.NodeSpec{
-					NodeMetadata: networkv1beta1.NodeMetadata{
-						RegionID:     "foo",
-						InstanceType: "foo",
-						InstanceID:   "foo",
-						ZoneID:       "foo",
-					},
-					NodeCap: networkv1beta1.NodeCap{},
-					ENISpec: &networkv1beta1.ENISpec{
-						Tag:                 nil,
-						TagFilter:           nil,
-						VSwitchOptions:      []string{"foo"},
-						SecurityGroupIDs:    []string{"foo"},
-						ResourceGroupID:     "",
-						EnableIPv4:          true,
-						EnableIPv6:          false,
-						EnableERDMA:         false,
-						EnableTrunk:         true,
-						VSwitchSelectPolicy: "ordered",
-					},
-					Pool: nil,
-					Flavor: []networkv1beta1.Flavor{
-						{
-							NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
-							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-							Count:                       2,
-						},
-					},
-				},
-			}
+		Context("Exclusive ENI Mode", func() {
+			It("should create Node CR with NetworkCardsCount and correct allocatable resources", func() {
+				k8sNode := testutil.CreateTestNode(nodeName)
+				k8sNode.Labels["node.kubernetes.io/instance-type"] = "ecs.g7.large"
+				k8sNode.Labels["k8s.aliyun.com/exclusive-mode-eni-type"] = "eniOnly"
+				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
-			By("create cr")
-			err := k8sClient.Create(ctx, resource)
-			Expect(err).NotTo(HaveOccurred())
-
-			update := resource.DeepCopy()
-			_, err = controllerutil.CreateOrPatch(ctx, k8sClient, update, func() error {
-				update.Status = networkv1beta1.NodeStatus{
-					NextSyncOpenAPITime: metav1.Time{},
-					LastSyncOpenAPITime: metav1.Time{},
-					NetworkInterfaces: map[string]*networkv1beta1.Nic{
-						"eni-1": {
-							ID:                          "eni-1",
-							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
-							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-							SecurityGroupIDs:            []string{"ff"},
-							Status:                      "InUse",
-							IPv4: map[string]*networkv1beta1.IP{
-								"192.168.0.1": {
-									IP:     "192.168.0.1",
-									Status: "Valid",
-								},
-							},
-						},
-					},
-				}
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Reconciling the created resource")
-			controllerReconciler := &ReconcileNode{
-				client:          k8sClient,
-				scheme:          k8sClient.Scheme(),
-				aliyun:          openAPI,
-				centralizedIPAM: true,
-			}
-
-			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			k8sNode := &corev1.Node{}
-			err = k8sClient.Get(ctx, typeNamespacedName, k8sNode)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sNode.Annotations["k8s.aliyun.com/trunk-on"]).To(Equal("eni-1"))
-			Expect(k8sNode.Annotations["k8s.aliyun.com/max-available-ip"]).To(Equal("20"))
-		})
-
-		It("should successfully create cr", func() {
-			resource := &networkv1beta1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceName,
-				},
-				Spec: networkv1beta1.NodeSpec{
-					NodeMetadata: networkv1beta1.NodeMetadata{
-						RegionID:     "foo",
-						InstanceType: "foo",
-						InstanceID:   "foo",
-						ZoneID:       "foo",
-					},
-					NodeCap: networkv1beta1.NodeCap{},
-					ENISpec: &networkv1beta1.ENISpec{
-						Tag:                 nil,
-						TagFilter:           nil,
-						VSwitchOptions:      []string{"foo"},
-						SecurityGroupIDs:    []string{"foo"},
-						ResourceGroupID:     "",
-						EnableIPv4:          true,
-						EnableIPv6:          false,
-						EnableERDMA:         false,
-						EnableTrunk:         true,
-						VSwitchSelectPolicy: "ordered",
-					},
-					Pool: nil,
-					Flavor: []networkv1beta1.Flavor{
-						{
-							NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
-							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-							Count:                       2,
-						},
-						{
-							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
-							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-							Count:                       1,
-						},
-					},
-				},
-			}
-
-			By("create cr")
-			err := k8sClient.Create(ctx, resource)
-			Expect(err).NotTo(HaveOccurred())
-
-			update := resource.DeepCopy()
-			_, err = controllerutil.CreateOrPatch(ctx, k8sClient, update, func() error {
-				update.Status = networkv1beta1.NodeStatus{
-					NextSyncOpenAPITime: metav1.Time{},
-					LastSyncOpenAPITime: metav1.Time{},
-					NetworkInterfaces: map[string]*networkv1beta1.Nic{
-						"eni-1": {
-							ID:                          "eni-1",
-							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
-							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-							SecurityGroupIDs:            []string{"ff"},
-							Status:                      "InUse",
-							IPv4: map[string]*networkv1beta1.IP{
-								"192.168.0.1": {
-									IP:     "192.168.0.1",
-									Status: "Valid",
-								},
-							}},
-					},
-				}
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Reconciling the created resource")
-			controllerReconciler := &ReconcileNode{
-				client:          k8sClient,
-				scheme:          k8sClient.Scheme(),
-				aliyun:          openAPI,
-				record:          record.NewFakeRecorder(1000),
-				centralizedIPAM: true,
-			}
-
-			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			k8sNode := &corev1.Node{}
-			err = k8sClient.Get(ctx, typeNamespacedName, k8sNode)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sNode.Annotations["k8s.aliyun.com/trunk-on"]).To(Equal("eni-1"))
-			Expect(k8sNode.Annotations["k8s.aliyun.com/max-available-ip"]).To(Equal("30"))
-		})
-	})
-
-	Context("EFLO node", func() {
-		const resourceName = "test-resource"
-
-		ctx := context.Background()
-
-		typeNamespacedName := types.NamespacedName{
-			Name: resourceName,
-		}
-
-		BeforeEach(func() {
-		})
-
-		AfterEach(func() {
-			err := k8sClient.Delete(ctx, &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-			})
-			if err != nil {
-				Expect(err).To(BeNil())
-			}
-
-			crNode := &networkv1beta1.Node{}
-
-			err = k8sClient.Get(ctx, typeNamespacedName, crNode)
-			if err != nil && k8sErr.IsNotFound(err) {
-				return
-			}
-			if err != nil {
-				Expect(err).To(BeNil())
-			}
-
-			patch := cc.MergeFrom(crNode.DeepCopy())
-			controllerutil.RemoveFinalizer(crNode, finalizer)
-
-			err = k8sClient.Patch(ctx, crNode, patch)
-			if err != nil {
-				Expect(err).To(BeNil())
-			}
-
-			_ = k8sClient.Delete(ctx, &networkv1beta1.Node{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-			})
-			Eventually(func() bool {
-				crNode := &networkv1beta1.Node{}
-				err := k8sClient.Get(context.TODO(), typeNamespacedName, crNode)
-				return k8sErr.IsNotFound(err)
-			}, 5*time.Second, 500*time.Millisecond).Should(BeTrue())
-		})
-
-		It("new eflo node (eno)", func() {
-			By("Reconciling the created resource")
-
-			k8sNode := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceName,
-					Labels: map[string]string{
-						"alibabacloud.com/lingjun-worker":  "true",
-						"node.kubernetes.io/instance-type": "instanceType",
-						"topology.kubernetes.io/region":    "regionID",
-						"topology.kubernetes.io/zone":      "zoneID",
-					},
-				},
-
-				Spec: corev1.NodeSpec{
-					ProviderID: "instanceID",
-				},
-			}
-			Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
-
-			efloClient.On("GetNodeInfoForPod", mock.Anything, "instanceID").Return(&eflo.Content{
-				LeniQuota:   20,
-				LniSipQuota: 10,
-			}, nil).Maybe()
-			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{}, nil).Maybe()
-
-			controllerReconciler := &ReconcileNode{
-				client:          k8sClient,
-				scheme:          k8sClient.Scheme(),
-				aliyun:          openAPI,
-				record:          record.NewFakeRecorder(1000),
-				supportEFLO:     true,
-				centralizedIPAM: false,
-			}
-
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			resource := &networkv1beta1.Node{}
-			err = k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(resource.Labels["name"]).To(Equal(resourceName))
-			Expect(resource.Labels["alibabacloud.com/lingjun-worker"]).To(Equal("true"))
-
-			Expect(resource.Spec.NodeCap.Adapters, 20)
-			Expect(resource.Spec.NodeCap.TotalAdapters, 20)
-			Expect(resource.Spec.NodeCap.IPv4PerAdapter, 10)
-		})
-
-		It("node with ecs standard eni", func() {
-			By("Creating k8s node")
-
-			// Create new k8sNode with correct labels
-			k8sNode := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceName,
-					Labels: map[string]string{
-						"alibabacloud.com/lingjun-worker":        "true",
-						"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
-						"node.kubernetes.io/instance-type":       "instanceType",
-						"topology.kubernetes.io/region":          "regionID",
-						"topology.kubernetes.io/zone":            "zoneID",
-					},
-					Annotations: make(map[string]string),
-				},
-				Spec: corev1.NodeSpec{
-					ProviderID: "instanceID",
-				},
-			}
-			err := k8sClient.Create(ctx, k8sNode)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Mock EFLOController responses
-			efloController := mocks.NewEFLOControl(GinkgoT())
-			//efloController.On("GetNodeInfoForPod", mock.Anything, mock.Anything).Return(*eflo.Content{})
-			openAPI.On("GetEFLOController").Return(efloController).Maybe()
-
-			// Mock DescribeNode response
-			efloController.On("DescribeNode", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeResponse{
-				NodeType: "test-machine-type-normal",
-			}, nil).Maybe()
-
-			// Mock DescribeNodeType response for GetLimit
-			efloController.On("DescribeNodeType", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeTypeResponse{
-				EniQuantity:                 4,
-				EniPrivateIpAddressQuantity: 10,
-				EniHighDenseQuantity:        8,
-			}, nil).Maybe()
-
-			// Mock DescribeNetworkInterfaceV2 for hasPrimaryENI method (though not called in this test)
-			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
-				{
-					NetworkInterfaceID: "eni-test",
-					Type:               aliyunClient.ENITypePrimary,
-				},
-			}, nil).Maybe()
-
-			controllerReconciler := &ReconcileNode{
-				client:          k8sClient,
-				scheme:          k8sClient.Scheme(),
-				aliyun:          openAPI,
-				record:          record.NewFakeRecorder(1000),
-				supportEFLO:     true,
-				centralizedIPAM: true,
-			}
-
-			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-
-			resource := &networkv1beta1.Node{}
-			err = k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Verify EFLO node configuration
-			Expect(resource.Spec.NodeCap.Adapters).To(Equal(4))
-			Expect(resource.Spec.NodeCap.TotalAdapters).To(Equal(4))
-			Expect(resource.Spec.NodeCap.IPv4PerAdapter).To(Equal(10))
-			Expect(resource.Annotations["k8s.aliyun.com/eno-api"]).To(Equal("ecs"))
-
-			// Verify the label is preserved
-			Expect(resource.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]).To(Equal("eniOnly"))
-		})
-
-		It("node with ecs high density eni", func() {
-			By("Creating k8s node")
-
-			// Create new k8sNode with correct labels and annotations
-			k8sNode := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceName,
-					Labels: map[string]string{
-						"alibabacloud.com/lingjun-worker":        "true",
-						"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
-						"node.kubernetes.io/instance-type":       "instanceType",
-						"topology.kubernetes.io/region":          "regionID",
-						"topology.kubernetes.io/zone":            "zoneID",
-					},
-				},
-				Spec: corev1.NodeSpec{
-					ProviderID: "instanceID",
-				},
-			}
-			err := k8sClient.Create(ctx, k8sNode)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Mock EFLOController responses
-			efloController := mocks.NewEFLOControl(GinkgoT())
-			openAPI.On("GetEFLOController").Return(efloController).Maybe()
-
-			// Mock DescribeNode response
-			efloController.On("DescribeNode", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeResponse{
-				NodeType: "test-machine-type-hd",
-			}, nil).Maybe()
-
-			// Mock DescribeNodeType response for GetLimit with high density support
-			efloController.On("DescribeNodeType", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeTypeResponse{
-				EniQuantity:                 1, // Low adapter count to trigger high density
-				EniPrivateIpAddressQuantity: 10,
-				EniHighDenseQuantity:        8,
-			}, nil).Maybe()
-
-			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
-				{
-					NetworkInterfaceID: "eni-test",
-					Type:               aliyunClient.ENITypePrimary,
-				},
-			}, nil).Maybe()
-
-			controllerReconciler := &ReconcileNode{
-				client:          k8sClient,
-				scheme:          k8sClient.Scheme(),
-				aliyun:          openAPI,
-				record:          record.NewFakeRecorder(1000),
-				supportEFLO:     true,
-				centralizedIPAM: false,
-			}
-
-			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			resource := &networkv1beta1.Node{}
-			err = k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Verify high density configuration is applied
-			Expect(resource.Spec.NodeCap.Adapters).To(Equal(8))
-			Expect(resource.Spec.NodeCap.TotalAdapters).To(Equal(8))
-			Expect(resource.Annotations["k8s.aliyun.com/eno-api"]).To(Equal("ecs-hdeni"))
-		})
-
-		It("should reject LinJunNetworkWorkKey without exclusive ENI mode", func() {
-			By("Testing LinJunNetworkWorkKey without exclusive ENI mode should fail")
-
-			// Create new k8sNode with LinJunNetworkWorkKey label but without exclusive ENI mode
-			k8sNode := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceName,
-					Labels: map[string]string{
-						"alibabacloud.com/lingjun-worker": "true",
-						// Note: not setting exclusive ENI mode
-						"node.kubernetes.io/instance-type": "instanceType",
-						"topology.kubernetes.io/region":    "regionID",
-						"topology.kubernetes.io/zone":      "zoneID",
-					},
-					Annotations: make(map[string]string),
-				},
-				Spec: corev1.NodeSpec{
-					ProviderID: "instanceID",
-				},
-			}
-			err := k8sClient.Create(ctx, k8sNode)
-			Expect(err).NotTo(HaveOccurred())
-
-			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
-				{
-					NetworkInterfaceID: "eni-test",
-					Type:               aliyunClient.ENITypePrimary,
-				},
-			}, nil).Maybe()
-
-			controllerReconciler := &ReconcileNode{
-				client:          k8sClient,
-				scheme:          k8sClient.Scheme(),
-				aliyun:          openAPI,
-				record:          record.NewFakeRecorder(1000),
-				supportEFLO:     true,
-				centralizedIPAM: true,
-			}
-
-			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("exclusive ENI mode must be enabled for EFLO nodes"))
-		})
-
-	})
-
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
-
-		ctx := context.Background()
-
-		typeNamespacedName := types.NamespacedName{
-			Name: resourceName,
-		}
-
-		BeforeEach(func() {
-			By("create a k8s node")
-			k8sNode := &corev1.Node{}
-			err := k8sClient.Get(ctx, typeNamespacedName, k8sNode)
-			if err != nil && k8sErr.IsNotFound(err) {
-				resource := &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: resourceName,
-						Labels: map[string]string{
-							"node.kubernetes.io/instance-type":       "instanceType",
-							"topology.kubernetes.io/zone":            "z1",
-							"topology.kubernetes.io/region":          "region",
-							"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
-						},
-					},
-					Spec: corev1.NodeSpec{
-						ProviderID: "xx.xx",
+				resource := testutil.CreateTestNodeCRD(nodeName)
+				resource.Spec.ENISpec.EnableTrunk = false
+				resource.Spec.Flavor = []networkv1beta1.Flavor{
+					{
+						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+						Count:                       2,
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
-		})
 
-		AfterEach(func() {
-			err := k8sClient.Delete(ctx, &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-			})
-			if err != nil {
-				Expect(err).To(BeNil())
-			}
-
-			crNode := &networkv1beta1.Node{}
-
-			err = k8sClient.Get(ctx, typeNamespacedName, crNode)
-			if err != nil && k8sErr.IsNotFound(err) {
-				return
-			}
-			if err != nil {
-				Expect(err).To(BeNil())
-			}
-
-			patch := cc.MergeFrom(crNode.DeepCopy())
-			controllerutil.RemoveFinalizer(crNode, finalizer)
-
-			err = k8sClient.Patch(ctx, crNode, patch)
-			if err != nil {
-				Expect(err).To(BeNil())
-			}
-
-			_ = k8sClient.Delete(ctx, &networkv1beta1.Node{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-			})
-			Eventually(func() bool {
-				crNode := &networkv1beta1.Node{}
-				err := k8sClient.Get(context.TODO(), typeNamespacedName, crNode)
-				return k8sErr.IsNotFound(err)
-			}, 5*time.Second, 500*time.Millisecond).Should(BeTrue())
-		})
-
-		It("should successfully create cr", func() {
-			By("empty node")
-			controllerReconciler := &ReconcileNode{
-				client:          k8sClient,
-				scheme:          k8sClient.Scheme(),
-				aliyun:          openAPI,
-				record:          record.NewFakeRecorder(1000),
-				centralizedIPAM: true,
-			}
-
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			resource := &networkv1beta1.Node{}
-			err = k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(resource.Labels["name"]).To(Equal(resourceName))
-		})
-
-		It("should successfully create cr", func() {
-			resource := &networkv1beta1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceName,
-				},
-				Spec: networkv1beta1.NodeSpec{
-					NodeMetadata: networkv1beta1.NodeMetadata{
-						RegionID:     "foo",
-						InstanceType: "foo",
-						InstanceID:   "foo",
-						ZoneID:       "foo",
-					},
-					NodeCap: networkv1beta1.NodeCap{},
-					ENISpec: &networkv1beta1.ENISpec{
-						Tag:                 nil,
-						TagFilter:           nil,
-						VSwitchOptions:      []string{"foo"},
-						SecurityGroupIDs:    []string{"foo"},
-						ResourceGroupID:     "",
-						EnableIPv4:          true,
-						EnableIPv6:          false,
-						EnableERDMA:         false,
-						EnableTrunk:         true,
-						VSwitchSelectPolicy: "ordered",
-					},
-					Pool: nil,
-					Flavor: []networkv1beta1.Flavor{
-						{
-							NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
-							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-							Count:                       2,
-						},
-					},
-				},
-			}
-
-			By("create cr")
-			err := k8sClient.Create(ctx, resource)
-			Expect(err).NotTo(HaveOccurred())
-
-			update := resource.DeepCopy()
-			_, err = controllerutil.CreateOrPatch(ctx, k8sClient, update, func() error {
-				update.Status = networkv1beta1.NodeStatus{
-					NextSyncOpenAPITime: metav1.Time{},
-					LastSyncOpenAPITime: metav1.Time{},
+				resource.Status = networkv1beta1.NodeStatus{
 					NetworkInterfaces: map[string]*networkv1beta1.Nic{
 						"eni-1": {
 							ID:                          "eni-1",
-							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
+							NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
 							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-							SecurityGroupIDs:            []string{"ff"},
 							Status:                      "InUse",
 							IPv4: map[string]*networkv1beta1.IP{
-								"192.168.0.1": {
-									IP:     "192.168.0.1",
-									Status: "Valid",
-								},
+								"192.168.0.1": {IP: "192.168.0.1", Status: "Valid"},
 							},
 						},
 					},
 				}
-				return nil
+				Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
+
+				reconciler := createReconciler(true, false)
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: nodeName},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				verifyNetworkCardsCount(ctx, nodeName, 2)
+
+				k8sNode = &corev1.Node{}
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, k8sNode)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(k8sNode.Annotations["k8s.aliyun.com/trunk-on"]).To(Equal(""))
+				Expect(k8sNode.Annotations["k8s.aliyun.com/max-available-ip"]).To(Equal("2"))
+
+				quantity := k8sNode.Status.Allocatable["aliyun/eni"]
+				Expect(quantity.Value()).To(Equal(int64(2)))
+
+				_, ok := k8sNode.Status.Allocatable["aliyun/member-eni"]
+				Expect(ok).To(BeFalse())
 			})
-			Expect(err).NotTo(HaveOccurred())
+		})
 
-			By("Reconciling the created resource")
-			controllerReconciler := &ReconcileNode{
-				client:          k8sClient,
-				scheme:          k8sClient.Scheme(),
-				aliyun:          openAPI,
-				centralizedIPAM: true,
-			}
+		Context("Trunk ENI Mode", func() {
+			It("should set trunk annotation and calculate max-available-ip correctly", func() {
+				k8sNode := testutil.CreateTestNode(nodeName)
+				k8sNode.Labels["node.kubernetes.io/instance-type"] = "ecs.g7.large"
+				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
-			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
+				resource := testutil.CreateTestNodeCRD(nodeName)
+				resource.Spec.ENISpec.EnableTrunk = true
+				resource.Spec.Flavor = []networkv1beta1.Flavor{
+					{
+						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+						Count:                       2,
+					},
+				}
+				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+				resource.Status = networkv1beta1.NodeStatus{
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
+						"eni-trunk": {
+							ID:                          "eni-trunk",
+							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
+							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+							Status:                      "InUse",
+							IPv4: map[string]*networkv1beta1.IP{
+								"192.168.0.1": {IP: "192.168.0.1", Status: "Valid"},
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
+
+				reconciler := createReconciler(true, false)
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: nodeName},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				verifyNetworkCardsCount(ctx, nodeName, 2)
+
+				k8sNode = &corev1.Node{}
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, k8sNode)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(k8sNode.Annotations["k8s.aliyun.com/trunk-on"]).To(Equal("eni-trunk"))
+				Expect(k8sNode.Annotations["k8s.aliyun.com/max-available-ip"]).To(Equal("20"))
 			})
-			Expect(err).NotTo(HaveOccurred())
 
-			k8sNode := &corev1.Node{}
-			err = k8sClient.Get(ctx, typeNamespacedName, k8sNode)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sNode.Annotations["k8s.aliyun.com/trunk-on"]).To(Equal(""))
-			Expect(k8sNode.Annotations["k8s.aliyun.com/max-available-ip"]).To(Equal("2"))
+			It("should handle multiple flavors with trunk", func() {
+				k8sNode := testutil.CreateTestNode(nodeName)
+				k8sNode.Labels["node.kubernetes.io/instance-type"] = "ecs.g7.large"
+				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
-			quantity := k8sNode.Status.Allocatable["aliyun/eni"]
-			quantity.Value()
-			Expect(quantity.Value()).To(Equal(int64(2)))
+				resource := testutil.CreateTestNodeCRD(nodeName)
+				resource.Spec.ENISpec.EnableTrunk = true
+				resource.Spec.Flavor = []networkv1beta1.Flavor{
+					{
+						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+						Count:                       2,
+					},
+					{
+						NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+						Count:                       1,
+					},
+				}
+				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			_, ok := k8sNode.Status.Allocatable["aliyun/member-eni"]
-			Expect(ok).To(BeFalse())
+				resource.Status = networkv1beta1.NodeStatus{
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
+						"eni-trunk": {
+							ID:                          "eni-trunk",
+							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
+							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+							Status:                      "InUse",
+							IPv4: map[string]*networkv1beta1.IP{
+								"192.168.0.1": {IP: "192.168.0.1", Status: "Valid"},
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
+
+				reconciler := createReconciler(true, false)
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: nodeName},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				verifyNetworkCardsCount(ctx, nodeName, 2)
+
+				k8sNode = &corev1.Node{}
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, k8sNode)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(k8sNode.Annotations["k8s.aliyun.com/trunk-on"]).To(Equal("eni-trunk"))
+				Expect(k8sNode.Annotations["k8s.aliyun.com/max-available-ip"]).To(Equal("30"))
+			})
+		})
+	})
+
+	Context("EFLO Node (LingJun)", func() {
+		Context("Standard LENI (without exclusive ENI)", func() {
+			It("should create EFLO node with NetworkCardsCount=0 for standard LENI", func() {
+				nodeName := "test-eflo-node-leni"
+				defer cleanupNode(ctx, nodeName)
+
+				k8sNode := testutil.CreateEFLONode(nodeName)
+				k8sNode.Labels["node.kubernetes.io/instance-type"] = "eflo.instance"
+				k8sNode.Spec.ProviderID = "instanceID-leni"
+				k8sNode.Labels["topology.kubernetes.io/region"] = "regionID"
+				k8sNode.Labels["topology.kubernetes.io/zone"] = "zoneID"
+				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
+
+				efloClient.On("GetNodeInfoForPod", mock.Anything, "instanceID-leni").Return(&eflo.Content{
+					LeniQuota:    20,
+					LeniSipQuota: 10,
+					HdeniQuota:   0,
+				}, nil)
+				openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{}, nil)
+
+				reconciler := createReconciler(false, true)
+				// First reconcile to create the Node CRD
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: nodeName},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				// Second reconcile to update NodeCap
+				_, err = reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: nodeName},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				resource := &networkv1beta1.Node{}
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, resource)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(resource.Labels["name"]).To(Equal(nodeName))
+				Expect(resource.Labels["alibabacloud.com/lingjun-worker"]).To(Equal("true"))
+
+				// Print debug info
+				GinkgoWriter.Printf("NodeCap: %+v\n", resource.Spec.NodeCap)
+				GinkgoWriter.Printf("Metadata: %+v\n", resource.Spec.NodeMetadata)
+
+				Expect(resource.Spec.NodeCap.Adapters).To(Equal(20))
+				Expect(resource.Spec.NodeCap.TotalAdapters).To(Equal(20))
+				Expect(resource.Spec.NodeCap.IPv4PerAdapter).To(Equal(10))
+				verifyNetworkCardsCount(ctx, nodeName, 0)
+			})
+		})
+
+		Context("ECS Standard ENI (APIEcs)", func() {
+			It("should create EFLO node with ECS API and NetworkCardsCount=0", func() {
+				nodeName := "test-eflo-node-ecs"
+				defer cleanupNode(ctx, nodeName)
+
+				k8sNode := testutil.CreateEFLONode(nodeName)
+				k8sNode.Labels["k8s.aliyun.com/exclusive-mode-eni-type"] = "eniOnly"
+				k8sNode.Labels["node.kubernetes.io/instance-type"] = "eflo.instance"
+				k8sNode.Spec.ProviderID = "instanceID-ecs"
+				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
+
+				efloController := mocks.NewEFLOControl(GinkgoT())
+				openAPI.On("GetEFLOController").Return(efloController).Maybe()
+
+				efloController.On("DescribeNode", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeResponse{
+					NodeType: "test-machine-type-normal",
+				}, nil).Maybe()
+
+				efloController.On("DescribeNodeType", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeTypeResponse{
+					EniQuantity:                 4,
+					EniPrivateIpAddressQuantity: 10,
+					EniHighDenseQuantity:        8,
+				}, nil).Maybe()
+
+				openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+					{
+						NetworkInterfaceID: "eni-test",
+						Type:               aliyunClient.ENITypePrimary,
+					},
+				}, nil).Maybe()
+
+				reconciler := createReconciler(true, true)
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: nodeName},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				resource := &networkv1beta1.Node{}
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, resource)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(resource.Spec.NodeCap.Adapters).To(Equal(4))
+				Expect(resource.Spec.NodeCap.TotalAdapters).To(Equal(4))
+				Expect(resource.Spec.NodeCap.IPv4PerAdapter).To(Equal(10))
+				Expect(resource.Annotations[terwayTypes.ENOApi]).To(Equal(terwayTypes.APIEcs))
+				Expect(resource.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]).To(Equal("eniOnly"))
+				verifyNetworkCardsCount(ctx, nodeName, 0)
+			})
+		})
+
+		Context("ECS High Density ENI (APIEcsHDeni)", func() {
+			It("should create EFLO node with high density ECS API and NetworkCardsCount=0", func() {
+				nodeName := "test-eflo-node-ecs-hd"
+				defer cleanupNode(ctx, nodeName)
+
+				k8sNode := testutil.CreateEFLONode(nodeName)
+				k8sNode.Labels["k8s.aliyun.com/exclusive-mode-eni-type"] = "eniOnly"
+				k8sNode.Labels["node.kubernetes.io/instance-type"] = "eflo.instance"
+				k8sNode.Spec.ProviderID = "instanceID-ecs-hd"
+				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
+
+				efloController := mocks.NewEFLOControl(GinkgoT())
+				openAPI.On("GetEFLOController").Return(efloController).Maybe()
+
+				efloController.On("DescribeNode", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeResponse{
+					NodeType: "test-machine-type-hd",
+				}, nil).Maybe()
+
+				efloController.On("DescribeNodeType", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeTypeResponse{
+					EniQuantity:                 1,
+					EniPrivateIpAddressQuantity: 10,
+					EniHighDenseQuantity:        8,
+				}, nil).Maybe()
+
+				openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+					{
+						NetworkInterfaceID: "eni-test",
+						Type:               aliyunClient.ENITypePrimary,
+					},
+				}, nil).Maybe()
+
+				reconciler := createReconciler(false, true)
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: nodeName},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				resource := &networkv1beta1.Node{}
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, resource)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(resource.Spec.NodeCap.Adapters).To(Equal(8))
+				Expect(resource.Spec.NodeCap.TotalAdapters).To(Equal(8))
+				Expect(resource.Annotations[terwayTypes.ENOApi]).To(Equal(terwayTypes.APIEcsHDeni))
+				verifyNetworkCardsCount(ctx, nodeName, 0)
+			})
+		})
+
+		Context("ENO High Density (APIEnoHDeni) - Fallback", func() {
+			It("should fallback to ENO high density when LeniQuota is low", func() {
+				nodeName := "test-eflo-node-eno-hd"
+				defer cleanupNode(ctx, nodeName)
+
+				k8sNode := testutil.CreateEFLONode(nodeName)
+				k8sNode.Labels["k8s.aliyun.com/exclusive-mode-eni-type"] = "eniOnly"
+				k8sNode.Labels["node.kubernetes.io/instance-type"] = "eflo.instance"
+				k8sNode.Spec.ProviderID = "instanceID-eno-hd"
+				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
+
+				efloClient.On("GetNodeInfoForPod", mock.Anything, "instanceID-eno-hd").Return(&eflo.Content{
+					LeniQuota:   1,
+					LniSipQuota: 10,
+					HdeniQuota:  16,
+				}, nil).Maybe()
+				openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{}, nil).Maybe()
+
+				reconciler := createReconciler(true, true)
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: nodeName},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				resource := &networkv1beta1.Node{}
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, resource)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(resource.Spec.NodeCap.Adapters).To(Equal(16))
+				Expect(resource.Spec.NodeCap.TotalAdapters).To(Equal(16))
+				Expect(resource.Annotations[terwayTypes.ENOApi]).To(Equal(terwayTypes.APIEnoHDeni))
+				Expect(resource.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]).To(Equal("eniOnly"))
+				verifyNetworkCardsCount(ctx, nodeName, 0)
+			})
+		})
+
+		Context("Error Cases", func() {
+			It("should reject EFLO node without exclusive ENI mode", func() {
+				nodeName := "test-eflo-node-error"
+				defer cleanupNode(ctx, nodeName)
+
+				k8sNode := testutil.CreateEFLONode(nodeName)
+				k8sNode.Labels["node.kubernetes.io/instance-type"] = "eflo.instance"
+				k8sNode.Spec.ProviderID = "instanceID-error"
+				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
+
+				openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+					{
+						NetworkInterfaceID: "eni-test",
+						Type:               aliyunClient.ENITypePrimary,
+					},
+				}, nil).Maybe()
+
+				reconciler := createReconciler(true, true)
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: nodeName},
+				})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("exclusive ENI mode must be enabled for EFLO nodes"))
+			})
 		})
 	})
 })
