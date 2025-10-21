@@ -934,6 +934,157 @@ func Test_getPodNetworkRequests(t *testing.T) {
 			want1:   []string{"zone-b"},
 			wantErr: assert.NoError,
 		},
+		{
+			name: "returns error when pod networkings have different ENI attach types",
+			args: args{
+				ctx: context.Background(),
+				client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+					&v1beta1.PodNetworking{
+						ObjectMeta: metav1.ObjectMeta{Name: "network-1"},
+						Spec: v1beta1.PodNetworkingSpec{
+							ENIOptions: v1beta1.ENIOptions{
+								ENIAttachType: v1beta1.ENIOptionTypeDefault,
+							},
+							AllocationType: v1beta1.AllocationType{
+								Type: v1beta1.IPAllocTypeElastic,
+							},
+							Selector:         v1beta1.Selector{},
+							SecurityGroupIDs: []string{"sg-1"},
+							VSwitchOptions:   []string{"vsw-a"},
+							VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+								VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyRandom,
+							}},
+						Status: v1beta1.PodNetworkingStatus{
+							Status: v1beta1.NetworkingStatusReady,
+							VSwitches: []v1beta1.VSwitch{
+								{Zone: "zone-a", ID: "vsw-a"},
+							},
+						},
+					},
+					&v1beta1.PodNetworking{
+						ObjectMeta: metav1.ObjectMeta{Name: "network-2"},
+						Spec: v1beta1.PodNetworkingSpec{
+							ENIOptions: v1beta1.ENIOptions{
+								ENIAttachType: v1beta1.ENIOptionTypeENI, // Different from network-1
+							},
+							AllocationType: v1beta1.AllocationType{
+								Type: v1beta1.IPAllocTypeElastic,
+							},
+							Selector:         v1beta1.Selector{},
+							SecurityGroupIDs: []string{"sg-1"},
+							VSwitchOptions:   []string{"vsw-b"},
+							VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+								VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyRandom,
+							}},
+						Status: v1beta1.PodNetworkingStatus{
+							Status: v1beta1.NetworkingStatusReady,
+							VSwitches: []v1beta1.VSwitch{
+								{Zone: "zone-b", ID: "vsw-b"},
+							},
+						},
+					},
+				).Build(),
+				anno: map[string]string{
+					"k8s.aliyun.com/pod-networks-request": `[{"network": "network-1"}, {"network": "network-2"}]`,
+				},
+			},
+			want:    nil,
+			want1:   nil,
+			wantErr: assert.Error,
+		},
+		{
+			name: "allows multiple pod networkings with same ENI attach type",
+			args: args{
+				ctx: context.Background(),
+				client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+					&v1beta1.PodNetworking{
+						ObjectMeta: metav1.ObjectMeta{Name: "network-1"},
+						Spec: v1beta1.PodNetworkingSpec{
+							ENIOptions: v1beta1.ENIOptions{
+								ENIAttachType: v1beta1.ENIOptionTypeENI,
+							},
+							AllocationType: v1beta1.AllocationType{
+								Type: v1beta1.IPAllocTypeElastic,
+							},
+							Selector:         v1beta1.Selector{},
+							SecurityGroupIDs: []string{"sg-1"},
+							VSwitchOptions:   []string{"vsw-a"},
+							VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+								VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyRandom,
+							}},
+						Status: v1beta1.PodNetworkingStatus{
+							Status: v1beta1.NetworkingStatusReady,
+							VSwitches: []v1beta1.VSwitch{
+								{Zone: "zone-a", ID: "vsw-a"},
+								{Zone: "zone-b", ID: "vsw-b"}, // Add common zone
+							},
+						},
+					},
+					&v1beta1.PodNetworking{
+						ObjectMeta: metav1.ObjectMeta{Name: "network-2"},
+						Spec: v1beta1.PodNetworkingSpec{
+							ENIOptions: v1beta1.ENIOptions{
+								ENIAttachType: v1beta1.ENIOptionTypeENI, // Same as network-1
+							},
+							AllocationType: v1beta1.AllocationType{
+								Type: v1beta1.IPAllocTypeElastic,
+							},
+							Selector:         v1beta1.Selector{},
+							SecurityGroupIDs: []string{"sg-1"},
+							VSwitchOptions:   []string{"vsw-b"},
+							VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+								VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyRandom,
+							}},
+						Status: v1beta1.PodNetworkingStatus{
+							Status: v1beta1.NetworkingStatusReady,
+							VSwitches: []v1beta1.VSwitch{
+								{Zone: "zone-a", ID: "vsw-a"}, // Add common zone
+								{Zone: "zone-b", ID: "vsw-b"},
+							},
+						},
+					},
+				).Build(),
+				anno: map[string]string{
+					"k8s.aliyun.com/pod-networks-request": `[{"network": "network-1"}, {"network": "network-2"}]`,
+				},
+			},
+			want: []controlplane.PodNetworks{
+				{
+					Interface:        "eth0",
+					VSwitchOptions:   []string{"vsw-a"},
+					SecurityGroupIDs: []string{"sg-1"},
+					ENIOptions: v1beta1.ENIOptions{
+						ENIAttachType: v1beta1.ENIOptionTypeENI,
+					},
+					VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+						VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyRandom,
+					},
+					AllocationType: &v1beta1.AllocationType{
+						Type:            v1beta1.IPAllocTypeElastic,
+						ReleaseStrategy: "",
+						ReleaseAfter:    "",
+					},
+				},
+				{
+					Interface:        "eth0",
+					VSwitchOptions:   []string{"vsw-b"},
+					SecurityGroupIDs: []string{"sg-1"},
+					ENIOptions: v1beta1.ENIOptions{
+						ENIAttachType: v1beta1.ENIOptionTypeENI,
+					},
+					VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+						VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyRandom,
+					},
+					AllocationType: &v1beta1.AllocationType{
+						Type:            v1beta1.IPAllocTypeElastic,
+						ReleaseStrategy: "",
+						ReleaseAfter:    "",
+					},
+				},
+			},
+			want1:   []string{"zone-a", "zone-b"},
+			wantErr: assert.NoError,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

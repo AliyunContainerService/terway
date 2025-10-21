@@ -477,6 +477,8 @@ func getPodNetworkRequests(ctx context.Context, client client.Client, anno map[s
 
 	unioned := sets.NewString()
 	// if present convert to the PodNetworksAnnotation
+
+	prevENIAttachType := ""
 	podNetworks := make([]controlplane.PodNetworks, 0, len(reqs))
 	for index, req := range reqs {
 		podNetworking := &v1beta1.PodNetworking{}
@@ -516,6 +518,15 @@ func getPodNetworkRequests(ctx context.Context, client client.Client, anno map[s
 		if req.Routes != nil {
 			parsed.ExtraRoutes = req.Routes
 		}
+
+		if prevENIAttachType == "" {
+			prevENIAttachType = string(podNetworking.Spec.ENIOptions.ENIAttachType)
+		} else {
+			if prevENIAttachType != string(podNetworking.Spec.ENIOptions.ENIAttachType) {
+				return nil, nil, fmt.Errorf("pod networking %s has different eni attach type", req.Network)
+			}
+		}
+
 		podNetworks = append(podNetworks, parsed)
 	}
 
