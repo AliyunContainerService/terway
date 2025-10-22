@@ -284,33 +284,33 @@ func TestISVKNode(t *testing.T) {
 	})
 }
 
-// TestISLinJunNode tests the ISLinJunNode function
-func TestISLinJunNode(t *testing.T) {
-	// Test case 1: Node with LinJun annotation should return true
-	t.Run("Node with LinJun annotation", func(t *testing.T) {
+// TestISLingJunNode tests the ISLingJunNode function
+func TestISLingJunNode(t *testing.T) {
+	// Test case 1: Node with LingJun annotation should return true
+	t.Run("Node with LingJun annotation", func(t *testing.T) {
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "test-linjun-node",
+				Name: "test-lingjun-node",
 				Labels: map[string]string{
 					"alibabacloud.com/lingjun-worker": "true",
 				},
 			},
 		}
 
-		result := ISLinJunNode(node.Labels)
-		require.True(t, result, "Expected true for node with LinJun annotation, got false")
+		result := ISLingJunNode(node.Labels)
+		require.True(t, result, "Expected true for node with LingJun annotation, got false")
 	})
 
-	// Test case 2: Node without LinJun annotation should return false
-	t.Run("Node without LinJun annotation", func(t *testing.T) {
+	// Test case 2: Node without LingJun annotation should return false
+	t.Run("Node without LingJun annotation", func(t *testing.T) {
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-normal-node",
 			},
 		}
 
-		result := ISLinJunNode(node.Labels)
-		require.False(t, result, "Expected false for node without LinJun annotation, got true")
+		result := ISLingJunNode(node.Labels)
+		require.False(t, result, "Expected false for node without LingJun annotation, got true")
 	})
 }
 

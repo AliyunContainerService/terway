@@ -285,7 +285,7 @@ func (m *ReconcilePod) podCreate(ctx context.Context, pod *corev1.Pod) (reconcil
 		},
 	}
 
-	if utils.ISLinJunNode(node.Labels) {
+	if utils.ISLingJunNode(node.Labels) {
 		crNode := &v1beta1.Node{}
 		err = m.client.Get(ctx, k8stypes.NamespacedName{Name: node.Name}, crNode)
 		if err != nil {
@@ -539,7 +539,7 @@ func (m *ReconcilePod) reConfig(ctx context.Context, pod *corev1.Pod, prePodENI 
 		changed = true
 	}
 
-	if utils.ISLinJunNode(node.Labels) {
+	if utils.ISLingJunNode(node.Labels) {
 		crNode := &v1beta1.Node{}
 		err := m.client.Get(ctx, k8stypes.NamespacedName{Name: node.Name}, crNode)
 		if err != nil {

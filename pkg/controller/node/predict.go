@@ -73,7 +73,7 @@ func (p *predicateForNodeEvent) predicateNode(o client.Object) bool {
 		return false
 	}
 
-	if !p.supportEFLO && utils.ISLinJunNode(node.Labels) {
+	if !p.supportEFLO && utils.ISLingJunNode(node.Labels) {
 		return false
 	}
 

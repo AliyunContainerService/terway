@@ -1849,25 +1849,25 @@ var _ = Describe("ENI Controller Tests", func() {
 		})
 
 		Context("when NetworkCards count is 0", func() {
-			It("should handle LinJun node correctly", func() {
-				nodeName := "linjun-node"
-				podName := "test-pod-linjun"
+			It("should handle LingJun node correctly", func() {
+				nodeName := "lingjun-node"
+				podName := "test-pod-lingjun"
 
-				linjunNode := testutil.NewK8sNodeBuilder(nodeName).
+				lingjunNode := testutil.NewK8sNodeBuilder(nodeName).
 					WithEFLO().
 					Build()
-				Expect(k8sClient.Create(ctx, linjunNode)).Should(Succeed())
+				Expect(k8sClient.Create(ctx, lingjunNode)).Should(Succeed())
 				defer func() {
-					_ = k8sClient.Delete(ctx, linjunNode)
+					_ = k8sClient.Delete(ctx, lingjunNode)
 				}()
 
-				linjunNodeCRD := testutil.NewNodeCRDBuilder(nodeName).
+				lingjunNodeCRD := testutil.NewNodeCRDBuilder(nodeName).
 					WithEFLO().
 					WithNetworkCardsCount(0).
 					Build()
-				Expect(k8sClient.Create(ctx, linjunNodeCRD)).Should(Succeed())
+				Expect(k8sClient.Create(ctx, lingjunNodeCRD)).Should(Succeed())
 				defer func() {
-					_ = k8sClient.Delete(ctx, linjunNodeCRD)
+					_ = k8sClient.Delete(ctx, lingjunNodeCRD)
 				}()
 
 				pod := testutil.CreateTestPod(podName, "default", nodeName)

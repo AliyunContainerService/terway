@@ -254,7 +254,7 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{}, nil
 	}
 
-	if utils.ISLinJunNode(node.Labels) {
+	if utils.ISLingJunNode(node.Labels) {
 		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
 	} else {
 		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIECS)

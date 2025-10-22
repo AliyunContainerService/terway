@@ -147,7 +147,7 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 			r.record.Event(k8sNode, "Warning", "ConfigError", err.Error())
 		}
 	}()
-	if utils.ISLinJunNode(k8sNode.Labels) {
+	if utils.ISLingJunNode(k8sNode.Labels) {
 		if !r.supportEFLO {
 			return reconcile.Result{}, nil
 		}
@@ -392,7 +392,7 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		node.Annotations = make(map[string]string)
 	}
 	node.Labels["name"] = k8sNode.Name
-	node.Labels[types.LinJunNodeLabelKey] = "true"
+	node.Labels[types.LingJunNodeLabelKey] = "true"
 
 	prev := node.Labels[types.ExclusiveENIModeLabel]
 	if prev == "" {

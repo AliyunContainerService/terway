@@ -711,7 +711,7 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 	}
 
 	var ecsHighDensity bool
-	if utils.ISLinJunNode(node.Labels) {
+	if utils.ISLingJunNode(node.Labels) {
 		crNode := &v1beta1.Node{}
 		err := m.client.Get(ctx, k8stypes.NamespacedName{Name: nodeName}, crNode)
 		if err != nil {
@@ -1114,7 +1114,7 @@ func (m *ReconcilePodENI) getNetworkCardsCount(ctx context.Context, nodeName str
 		return -1
 	}
 
-	if utils.ISLinJunNode(crdNode.Labels) {
+	if utils.ISLingJunNode(crdNode.Labels) {
 		return 0
 	}
 

@@ -48,8 +48,8 @@ func ISVKNode(n *corev1.Node) bool {
 	return n.Labels["type"] == "virtual-kubelet"
 }
 
-func ISLinJunNode(lb map[string]string) bool {
-	return lb[types.LinJunNodeLabelKey] == "true"
+func ISLingJunNode(lb map[string]string) bool {
+	return lb[types.LingJunNodeLabelKey] == "true"
 }
 
 // PodSandboxExited pod sandbox is exited
