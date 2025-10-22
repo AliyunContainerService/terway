@@ -202,7 +202,7 @@ func main() {
 
 	if !cfg.DisableWebhook {
 		mgr.GetWebhookServer().Register("/mutating", webhook.MutatingHook(mgr.GetClient(), cfg))
-		mgr.GetWebhookServer().Register("/validate", webhook.ValidateHook())
+		mgr.GetWebhookServer().Register("/validate", webhook.ValidateHook(cfg))
 	}
 
 	vSwitchCtrl, err := vswitch.NewSwitchPool(cfg.VSwitchPoolSize, cfg.VSwitchCacheTTL)

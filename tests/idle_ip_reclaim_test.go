@@ -562,6 +562,12 @@ func waitForIdleIPCount(ctx context.Context, config *envconf.Config, t *testing.
 
 		allNodesReady := true
 		for _, node := range nodes.Items {
+			// Skip nodes that should be excluded from idle IP checks (Lingjun and exclusive ENI nodes)
+			if ShouldExcludeNodeForIdleIPCheck(&node) {
+				t.Logf("[%s] Skipping node %s (excluded from idle IP checks)", phase, node.Name)
+				continue
+			}
+
 			idleCount := countIdleIPs(&node)
 			if idleCount < minIdleCount {
 				t.Logf("[%s] Node %s has %d idle IPs (waiting for >= %d)",

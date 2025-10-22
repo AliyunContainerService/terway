@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/types/controlplane"
 
 	"k8s.io/apimachinery/pkg/util/json"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -17,7 +18,7 @@ import (
 var validateLog = ctrl.Log.WithName("validate-webhook")
 
 // ValidateHook ValidateHook
-func ValidateHook() *webhook.Admission {
+func ValidateHook(config *controlplane.Config) *webhook.Admission {
 	return &webhook.Admission{
 		Handler: admission.HandlerFunc(func(ctx context.Context, req webhook.AdmissionRequest) webhook.AdmissionResponse {
 			validateLog.Info("obj in", "kind", req.Kind.Kind, "name", req.Name, "res", req.Resource.String())
@@ -35,7 +36,7 @@ func ValidateHook() *webhook.Admission {
 			l := log.WithName(podNetworking.Name)
 			l.Info("checking podNetworking")
 
-			if podNetworking.Spec.Selector.PodSelector == nil && podNetworking.Spec.Selector.NamespaceSelector == nil {
+			if !*config.EnableWebhookInjectResource && podNetworking.Spec.Selector.PodSelector == nil && podNetworking.Spec.Selector.NamespaceSelector == nil {
 				switch podNetworking.Spec.ENIOptions.ENIAttachType {
 				case "", v1beta1.ENIOptionTypeDefault:
 				default:

@@ -131,6 +131,16 @@ func CreateResource(ctx context.Context, cli client.Client, obj client.Object) e
 
 		v.Status = *statusCopy.(*corev1.NodeStatus)
 		return cli.Status().Update(ctx, v)
+	case *networkv1beta1.PodNetworking:
+		statusCopy = v.Status.DeepCopy()
+
+		err := cli.Create(ctx, obj)
+		if err != nil {
+			return err
+		}
+
+		v.Status = *statusCopy.(*networkv1beta1.PodNetworkingStatus)
+		return cli.Status().Update(ctx, v)
 	default:
 		err := cli.Create(ctx, obj)
 		if err != nil {

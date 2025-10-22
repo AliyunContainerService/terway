@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,7 @@ import (
 
 	"github.com/samber/lo"
 	"golang.org/x/mod/semver"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/e2e-framework/klient/k8s/resources"
 
 	"go.uber.org/atomic"
 	appsv1 "k8s.io/api/apps/v1"
@@ -103,6 +104,7 @@ func TestMain(m *testing.M) {
 
 	testenv = env.NewWithConfig(envCfg)
 	testenv.Setup(
+		cleanupNamespaces,
 		envfuncs.CreateNamespace(envCfg.Namespace()),
 		patchNamespace,
 		checkENIConfig,
@@ -128,14 +130,20 @@ func TestMain(m *testing.M) {
 				t.Logf("%s/%s, Event: %s %s, Time:%s\n", printEvent.InvolvedObject.Kind, printEvent.InvolvedObject.Name, printEvent.Reason, printEvent.Message, printEvent.LastTimestamp)
 			}
 		}
-		lo.ForEach(ResourcesFromCtx(ctx), func(item client.Object, index int) {
-			_ = config.Client().Resources().Delete(ctx, item)
-			err := wait.For(conditions.New(config.Client().Resources()).ResourceDeleted(item),
-				wait.WithInterval(1*time.Second), wait.WithImmediate(), wait.WithTimeout(1*time.Minute))
-			if err != nil {
-				t.Fatal("failed waiting for pods to be deleted", err)
-			}
-		})
+
+		if IsTestSuccess(ctx) {
+			t.Log("Test succeeded, cleaning up resources")
+			lo.ForEach(ResourcesFromCtx(ctx), func(item k8s.Object, index int) {
+				_ = config.Client().Resources().Delete(ctx, item)
+				err := wait.For(conditions.New(config.Client().Resources()).ResourceDeleted(item),
+					wait.WithInterval(1*time.Second), wait.WithImmediate(), wait.WithTimeout(1*time.Minute))
+				if err != nil {
+					t.Fatal("failed waiting for pods to be deleted", err)
+				}
+			})
+		} else {
+			t.Log("Test did not succeed, keeping resources for debugging")
+		}
 		return ctx, nil
 	})
 
@@ -216,6 +224,43 @@ func checkENIConfig(ctx context.Context, config *envconf.Config) (context.Contex
 	return ctx, nil
 }
 
+func cleanupNamespaces(ctx context.Context, config *envconf.Config) (context.Context, error) {
+	// List all namespaces with the terway-e2e label
+	nsList := &corev1.NamespaceList{}
+	labelSelector := "k8s.aliyun.com/terway-e2e=true"
+	err := config.Client().Resources().List(ctx, nsList, resources.WithLabelSelector(labelSelector))
+	if err != nil {
+		return ctx, fmt.Errorf("failed to list namespaces with terway-e2e label: %v", err)
+	}
+
+	// Delete each namespace found
+	for _, ns := range nsList.Items {
+		// Skip kube-system and other system namespaces
+		if ns.Name == "kube-system" || ns.Name == "default" || strings.HasPrefix(ns.Name, "kube-") {
+			continue
+		}
+
+		// Use fmt.Printf for logging during setup (before test starts)
+		fmt.Printf("Cleaning up namespace: %s\n", ns.Name)
+		err = config.Client().Resources().Delete(ctx, &ns)
+		if err != nil {
+			fmt.Printf("Warning: failed to delete namespace %s: %v\n", ns.Name, err)
+			continue
+		}
+
+		// Wait for namespace deletion
+		err = wait.For(conditions.New(config.Client().Resources()).ResourceDeleted(&ns),
+			wait.WithTimeout(2*time.Minute), wait.WithInterval(5*time.Second))
+		if err != nil {
+			fmt.Printf("Warning: namespace %s deletion did not complete: %v\n", ns.Name, err)
+		} else {
+			fmt.Printf("Successfully deleted namespace: %s\n", ns.Name)
+		}
+	}
+
+	return ctx, nil
+}
+
 func patchNamespace(ctx context.Context, config *envconf.Config) (context.Context, error) {
 	ns := &corev1.Namespace{}
 	err := config.Client().Resources().Get(ctx, config.Namespace(), "", ns)
@@ -225,7 +270,8 @@ func patchNamespace(ctx context.Context, config *envconf.Config) (context.Contex
 	mergePatch, _ := json.Marshal(map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"labels": map[string]interface{}{
-				"node-local-dns-injection": "enabled",
+				"node-local-dns-injection":  "enabled",
+				"k8s.aliyun.com/terway-e2e": "true",
 			},
 		},
 	})

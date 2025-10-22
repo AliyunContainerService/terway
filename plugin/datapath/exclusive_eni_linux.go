@@ -415,7 +415,7 @@ func (r *ExclusiveENI) Setup(ctx context.Context, cfg *types.SetupConfig, netNS 
 		return fmt.Errorf("error set container link/address/route, %w", err)
 	}
 
-	if cfg.DisableCreatePeer {
+	if cfg.DisableCreatePeer || cfg.ContainerIfName != "eth0" {
 		return nil
 	}
 
