@@ -134,8 +134,9 @@ var _ = Describe("Node Controller", func() {
 
 		Context("Shared ENI Mode (Default)", func() {
 			It("should create Node CR with correct NetworkCardsCount", func() {
-				k8sNode := testutil.CreateTestNode(nodeName)
-				k8sNode.Labels["node.kubernetes.io/instance-type"] = "ecs.g7.large"
+				k8sNode := testutil.NewK8sNodeBuilder(nodeName).
+					WithInstanceType("ecs.g7.large").
+					Build()
 				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
 				reconciler := createReconciler(true, false)
@@ -154,20 +155,20 @@ var _ = Describe("Node Controller", func() {
 
 		Context("Exclusive ENI Mode", func() {
 			It("should create Node CR with NetworkCardsCount and correct allocatable resources", func() {
-				k8sNode := testutil.CreateTestNode(nodeName)
-				k8sNode.Labels["node.kubernetes.io/instance-type"] = "ecs.g7.large"
-				k8sNode.Labels["k8s.aliyun.com/exclusive-mode-eni-type"] = "eniOnly"
+				k8sNode := testutil.NewK8sNodeBuilder(nodeName).
+					WithInstanceType("ecs.g7.large").
+					WithExclusiveENIMode().
+					Build()
 				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
-				resource := testutil.CreateTestNodeCRD(nodeName)
-				resource.Spec.ENISpec.EnableTrunk = false
-				resource.Spec.Flavor = []networkv1beta1.Flavor{
-					{
+				resource := testutil.NewNodeCRDBuilder(nodeName).
+					WithEnableTrunk(false).
+					WithFlavor(networkv1beta1.Flavor{
 						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
 						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
 						Count:                       2,
-					},
-				}
+					}).
+					Build()
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 				resource.Status = networkv1beta1.NodeStatus{
@@ -209,19 +210,19 @@ var _ = Describe("Node Controller", func() {
 
 		Context("Trunk ENI Mode", func() {
 			It("should set trunk annotation and calculate max-available-ip correctly", func() {
-				k8sNode := testutil.CreateTestNode(nodeName)
-				k8sNode.Labels["node.kubernetes.io/instance-type"] = "ecs.g7.large"
+				k8sNode := testutil.NewK8sNodeBuilder(nodeName).
+					WithInstanceType("ecs.g7.large").
+					Build()
 				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
-				resource := testutil.CreateTestNodeCRD(nodeName)
-				resource.Spec.ENISpec.EnableTrunk = true
-				resource.Spec.Flavor = []networkv1beta1.Flavor{
-					{
+				resource := testutil.NewNodeCRDBuilder(nodeName).
+					WithEnableTrunk(true).
+					WithFlavor(networkv1beta1.Flavor{
 						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
 						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
 						Count:                       2,
-					},
-				}
+					}).
+					Build()
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 				resource.Status = networkv1beta1.NodeStatus{
@@ -255,24 +256,26 @@ var _ = Describe("Node Controller", func() {
 			})
 
 			It("should handle multiple flavors with trunk", func() {
-				k8sNode := testutil.CreateTestNode(nodeName)
-				k8sNode.Labels["node.kubernetes.io/instance-type"] = "ecs.g7.large"
+				k8sNode := testutil.NewK8sNodeBuilder(nodeName).
+					WithInstanceType("ecs.g7.large").
+					Build()
 				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
-				resource := testutil.CreateTestNodeCRD(nodeName)
-				resource.Spec.ENISpec.EnableTrunk = true
-				resource.Spec.Flavor = []networkv1beta1.Flavor{
-					{
-						NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
-						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-						Count:                       2,
-					},
-					{
-						NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
-						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-						Count:                       1,
-					},
-				}
+				resource := testutil.NewNodeCRDBuilder(nodeName).
+					WithEnableTrunk(true).
+					WithFlavor(
+						networkv1beta1.Flavor{
+							NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+							Count:                       2,
+						},
+						networkv1beta1.Flavor{
+							NetworkInterfaceType:        networkv1beta1.ENITypeTrunk,
+							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+							Count:                       1,
+						},
+					).
+					Build()
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 				resource.Status = networkv1beta1.NodeStatus{
@@ -313,11 +316,13 @@ var _ = Describe("Node Controller", func() {
 				nodeName := "test-eflo-node-leni"
 				defer cleanupNode(ctx, nodeName)
 
-				k8sNode := testutil.CreateEFLONode(nodeName)
-				k8sNode.Labels["node.kubernetes.io/instance-type"] = "eflo.instance"
-				k8sNode.Spec.ProviderID = "instanceID-leni"
-				k8sNode.Labels["topology.kubernetes.io/region"] = "regionID"
-				k8sNode.Labels["topology.kubernetes.io/zone"] = "zoneID"
+				k8sNode := testutil.NewK8sNodeBuilder(nodeName).
+					WithEFLO().
+					WithInstanceType("eflo.instance").
+					WithProviderID("instanceID-leni").
+					WithRegion("regionID").
+					WithZone("zoneID").
+					Build()
 				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
 				efloClient.On("GetNodeInfoForPod", mock.Anything, "instanceID-leni").Return(&eflo.Content{
@@ -362,10 +367,12 @@ var _ = Describe("Node Controller", func() {
 				nodeName := "test-eflo-node-ecs"
 				defer cleanupNode(ctx, nodeName)
 
-				k8sNode := testutil.CreateEFLONode(nodeName)
-				k8sNode.Labels["k8s.aliyun.com/exclusive-mode-eni-type"] = "eniOnly"
-				k8sNode.Labels["node.kubernetes.io/instance-type"] = "eflo.instance"
-				k8sNode.Spec.ProviderID = "instanceID-ecs"
+				k8sNode := testutil.NewK8sNodeBuilder(nodeName).
+					WithEFLO().
+					WithExclusiveENIMode().
+					WithInstanceType("eflo.instance").
+					WithProviderID("instanceID-ecs").
+					Build()
 				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
 				efloController := mocks.NewEFLOControl(GinkgoT())
@@ -412,10 +419,12 @@ var _ = Describe("Node Controller", func() {
 				nodeName := "test-eflo-node-ecs-hd"
 				defer cleanupNode(ctx, nodeName)
 
-				k8sNode := testutil.CreateEFLONode(nodeName)
-				k8sNode.Labels["k8s.aliyun.com/exclusive-mode-eni-type"] = "eniOnly"
-				k8sNode.Labels["node.kubernetes.io/instance-type"] = "eflo.instance"
-				k8sNode.Spec.ProviderID = "instanceID-ecs-hd"
+				k8sNode := testutil.NewK8sNodeBuilder(nodeName).
+					WithEFLO().
+					WithExclusiveENIMode().
+					WithInstanceType("eflo.instance").
+					WithProviderID("instanceID-ecs-hd").
+					Build()
 				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
 				efloController := mocks.NewEFLOControl(GinkgoT())
@@ -460,10 +469,12 @@ var _ = Describe("Node Controller", func() {
 				nodeName := "test-eflo-node-eno-hd"
 				defer cleanupNode(ctx, nodeName)
 
-				k8sNode := testutil.CreateEFLONode(nodeName)
-				k8sNode.Labels["k8s.aliyun.com/exclusive-mode-eni-type"] = "eniOnly"
-				k8sNode.Labels["node.kubernetes.io/instance-type"] = "eflo.instance"
-				k8sNode.Spec.ProviderID = "instanceID-eno-hd"
+				k8sNode := testutil.NewK8sNodeBuilder(nodeName).
+					WithEFLO().
+					WithExclusiveENIMode().
+					WithInstanceType("eflo.instance").
+					WithProviderID("instanceID-eno-hd").
+					Build()
 				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
 				efloClient.On("GetNodeInfoForPod", mock.Anything, "instanceID-eno-hd").Return(&eflo.Content{
@@ -496,9 +507,11 @@ var _ = Describe("Node Controller", func() {
 				nodeName := "test-eflo-node-error"
 				defer cleanupNode(ctx, nodeName)
 
-				k8sNode := testutil.CreateEFLONode(nodeName)
-				k8sNode.Labels["node.kubernetes.io/instance-type"] = "eflo.instance"
-				k8sNode.Spec.ProviderID = "instanceID-error"
+				k8sNode := testutil.NewK8sNodeBuilder(nodeName).
+					WithEFLO().
+					WithInstanceType("eflo.instance").
+					WithProviderID("instanceID-error").
+					Build()
 				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
 
 				openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{

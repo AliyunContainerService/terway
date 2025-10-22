@@ -1279,11 +1279,14 @@ var _ = Describe("Pod controller", func() {
 			}
 
 			It("Create podENI should succeed", func() {
-				testNode = testutil.CreateEFLONode(nodeName)
+				testNode = testutil.NewK8sNodeBuilder(nodeName).
+					WithEFLO().
+					Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNode)).Should(Succeed())
 
-				testNodeCRD = testutil.CreateTestNodeCRD(nodeName)
-				testNodeCRD.Annotations[types.ENOApi] = "ecs-hdeni"
+				testNodeCRD = testutil.NewNodeCRDBuilder(nodeName).
+					WithAnnotation(types.ENOApi, "ecs-hdeni").
+					Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNodeCRD)).Should(Succeed())
 
 				Expect(testutil.CreateResource(ctx, k8sClient, pod)).Should(Succeed())
@@ -1398,10 +1401,12 @@ var _ = Describe("Pod controller", func() {
 			}
 
 			It("Create podENI should succeed", func() {
-				testNode = testutil.CreateEFLONode(nodeName)
+				testNode = testutil.NewK8sNodeBuilder(nodeName).
+					WithEFLO().
+					Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNode)).Should(Succeed())
 
-				testNodeCRD = testutil.CreateTestNodeCRD(nodeName)
+				testNodeCRD = testutil.NewNodeCRDBuilder(nodeName).Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNodeCRD)).Should(Succeed())
 
 				Expect(testutil.CreateResource(ctx, k8sClient, pod)).Should(Succeed())
@@ -1516,10 +1521,10 @@ var _ = Describe("Pod controller", func() {
 			}
 
 			It("Create podENI should succeed", func() {
-				testNode = testutil.CreateTestNode(nodeName)
+				testNode = testutil.NewK8sNodeBuilder(nodeName).Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNode)).Should(Succeed())
 
-				testNodeCRD = testutil.CreateTestNodeCRD(nodeName)
+				testNodeCRD = testutil.NewNodeCRDBuilder(nodeName).Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNodeCRD)).Should(Succeed())
 
 				Expect(testutil.CreateResource(ctx, k8sClient, pod)).Should(Succeed())
