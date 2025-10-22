@@ -60,15 +60,21 @@ type NodeMetadata struct {
 }
 
 type NodeCap struct {
-	Adapters              int `json:"adapters,omitempty"`
-	EriQuantity           int `json:"eriQuantity,omitempty"`
-	TotalAdapters         int `json:"totalAdapters,omitempty"`
-	IPv4PerAdapter        int `json:"ipv4PerAdapter,omitempty"`
-	IPv6PerAdapter        int `json:"ipv6PerAdapter,omitempty"`
-	MemberAdapterLimit    int `json:"memberAdapterLimit,omitempty"`
-	MaxMemberAdapterLimit int `json:"maxMemberAdapterLimit,omitempty"`
-	InstanceBandwidthRx   int `json:"instanceBandwidthRx,omitempty"`
-	InstanceBandwidthTx   int `json:"instanceBandwidthTx,omitempty"`
+	Adapters              int           `json:"adapters,omitempty"`
+	EriQuantity           int           `json:"eriQuantity,omitempty"`
+	TotalAdapters         int           `json:"totalAdapters,omitempty"`
+	IPv4PerAdapter        int           `json:"ipv4PerAdapter,omitempty"`
+	IPv6PerAdapter        int           `json:"ipv6PerAdapter,omitempty"`
+	MemberAdapterLimit    int           `json:"memberAdapterLimit,omitempty"`
+	MaxMemberAdapterLimit int           `json:"maxMemberAdapterLimit,omitempty"`
+	InstanceBandwidthRx   int           `json:"instanceBandwidthRx,omitempty"`
+	InstanceBandwidthTx   int           `json:"instanceBandwidthTx,omitempty"`
+	NetworkCards          []NetworkCard `json:"networkCards,omitempty"`
+	NetworkCardsCount     *int          `json:"networkCardsCount,omitempty"`
+}
+
+type NetworkCard struct {
+	Index int `json:"index,omitempty"`
 }
 
 type ENISpec struct {

@@ -183,10 +183,7 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 		return err
 	}
 
-	if node.Spec.NodeMetadata.InstanceType != nodeInfo.InstanceType ||
-		node.Spec.NodeMetadata.InstanceID != nodeInfo.InstanceID ||
-		node.Spec.NodeMetadata.ZoneID != nodeInfo.ZoneID ||
-		node.Spec.NodeMetadata.RegionID != nodeInfo.RegionID {
+	if needUpdate(node, nodeInfo) {
 
 		node.Spec.NodeMetadata = networkv1beta1.NodeMetadata{
 			InstanceType: nodeInfo.InstanceType,
@@ -210,7 +207,14 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 			MemberAdapterLimit:    limit.MemberAdapterLimit,
 			IPv4PerAdapter:        limit.IPv4PerAdapter,
 			MaxMemberAdapterLimit: limit.MaxMemberAdapterLimit,
+			NetworkCards: lo.Map(limit.NetworkCards, func(item aliyunClient.NetworkCard, index int) networkv1beta1.NetworkCard {
+				return networkv1beta1.NetworkCard{
+					Index: item.Index,
+				}
+			}),
 		}
+
+		node.Spec.NodeCap.NetworkCardsCount = ptr.To(len(node.Spec.NodeCap.NetworkCards))
 	}
 
 	update := node.DeepCopy()
@@ -403,15 +407,15 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		return reconcile.Result{}, err
 	}
 
-	if node.Spec.NodeMetadata.InstanceID != nodeInfo.InstanceID ||
-		node.Spec.NodeMetadata.InstanceType != nodeInfo.InstanceType ||
-		node.Spec.NodeMetadata.ZoneID != nodeInfo.ZoneID ||
-		node.Spec.NodeMetadata.RegionID != nodeInfo.RegionID {
+	if needUpdate(node, nodeInfo) {
 
 		node.Spec.NodeMetadata.InstanceID = nodeInfo.InstanceID
 		node.Spec.NodeMetadata.InstanceType = nodeInfo.InstanceType
 		node.Spec.NodeMetadata.ZoneID = nodeInfo.ZoneID
 		node.Spec.NodeMetadata.RegionID = nodeInfo.RegionID
+
+		node.Spec.NodeCap.NetworkCardsCount = ptr.To(0)
+		node.Spec.NodeCap.NetworkCards = nil
 
 		isEni, err := r.hasPrimaryENI(ctx, node.Spec.NodeMetadata.InstanceID)
 		if err != nil {
@@ -531,4 +535,12 @@ func (r *ReconcileNode) delete(ctx context.Context, request reconcile.Request) (
 
 	l.Info("delete node finished")
 	return reconcile.Result{}, err
+}
+
+func needUpdate(node *networkv1beta1.Node, nodeInfo *common.NodeInfo) bool {
+	return node.Spec.NodeMetadata.InstanceType != nodeInfo.InstanceType ||
+		node.Spec.NodeMetadata.InstanceID != nodeInfo.InstanceID ||
+		node.Spec.NodeMetadata.ZoneID != nodeInfo.ZoneID ||
+		node.Spec.NodeMetadata.RegionID != nodeInfo.RegionID ||
+		node.Spec.NodeCap.NetworkCardsCount == nil
 }

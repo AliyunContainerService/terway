@@ -125,6 +125,15 @@ spec:
                     type: integer
                   memberAdapterLimit:
                     type: integer
+                  networkCards:
+                    items:
+                      properties:
+                        index:
+                          type: integer
+                      type: object
+                    type: array
+                  networkCardsCount:
+                    type: integer
                   totalAdapters:
                     type: integer
                 type: object
