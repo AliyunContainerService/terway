@@ -60,7 +60,7 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		}
 		return reconcile.Result{}, err
 	}
-	if utils.ISLinJunNode(k8sNode.Labels) {
+	if utils.ISLingJunNode(k8sNode.Labels) {
 		return r.handleEFLO(ctx, k8sNode, node)
 	}
 

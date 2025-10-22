@@ -79,7 +79,7 @@ const (
 
 	ExclusiveENIModeLabel = LabelPrefix + "exclusive-mode-eni-type"
 
-	LinJunNodeLabelKey = "alibabacloud.com/lingjun-worker"
+	LingJunNodeLabelKey = "alibabacloud.com/lingjun-worker"
 )
 
 // FinalizerPodENI finalizer for podENI resource

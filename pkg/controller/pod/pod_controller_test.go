@@ -882,11 +882,11 @@ var _ = Describe("Pod controller", func() {
 		})
 	})
 
-	Context("create pod on linjun node", func() {
+	Context("create pod on lingjun node", func() {
 		ctx := context.Background()
-		name := "linjun-pod"
+		name := "lingjun-pod"
 		ns := "default"
-		eniID := "eni-linjun"
+		eniID := "eni-lingjun"
 		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
 		request := reconcile.Request{
 			NamespacedName: key,
@@ -1008,7 +1008,7 @@ var _ = Describe("Pod controller", func() {
 		})
 
 		It("PodENI should be created with ENOApi annotation", func() {
-			// Verify that the PodENI has the ENOApi annotation set to APIEcsHDeni for LinJun nodes
+			// Verify that the PodENI has the ENOApi annotation set to APIEcsHDeni for LingJun nodes
 			Expect(podENI.Annotations[types.ENOApi]).Should(BeEquivalentTo(types.APIEcsHDeni))
 		})
 	})
@@ -1279,11 +1279,14 @@ var _ = Describe("Pod controller", func() {
 			}
 
 			It("Create podENI should succeed", func() {
-				testNode = testutil.CreateEFLONode(nodeName)
+				testNode = testutil.NewK8sNodeBuilder(nodeName).
+					WithEFLO().
+					Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNode)).Should(Succeed())
 
-				testNodeCRD = testutil.CreateTestNodeCRD(nodeName)
-				testNodeCRD.Annotations[types.ENOApi] = "ecs-hdeni"
+				testNodeCRD = testutil.NewNodeCRDBuilder(nodeName).
+					WithAnnotation(types.ENOApi, "ecs-hdeni").
+					Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNodeCRD)).Should(Succeed())
 
 				Expect(testutil.CreateResource(ctx, k8sClient, pod)).Should(Succeed())
@@ -1398,10 +1401,12 @@ var _ = Describe("Pod controller", func() {
 			}
 
 			It("Create podENI should succeed", func() {
-				testNode = testutil.CreateEFLONode(nodeName)
+				testNode = testutil.NewK8sNodeBuilder(nodeName).
+					WithEFLO().
+					Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNode)).Should(Succeed())
 
-				testNodeCRD = testutil.CreateTestNodeCRD(nodeName)
+				testNodeCRD = testutil.NewNodeCRDBuilder(nodeName).Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNodeCRD)).Should(Succeed())
 
 				Expect(testutil.CreateResource(ctx, k8sClient, pod)).Should(Succeed())
@@ -1516,10 +1521,10 @@ var _ = Describe("Pod controller", func() {
 			}
 
 			It("Create podENI should succeed", func() {
-				testNode = testutil.CreateTestNode(nodeName)
+				testNode = testutil.NewK8sNodeBuilder(nodeName).Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNode)).Should(Succeed())
 
-				testNodeCRD = testutil.CreateTestNodeCRD(nodeName)
+				testNodeCRD = testutil.NewNodeCRDBuilder(nodeName).Build()
 				Expect(testutil.CreateResource(ctx, k8sClient, testNodeCRD)).Should(Succeed())
 
 				Expect(testutil.CreateResource(ctx, k8sClient, pod)).Should(Succeed())

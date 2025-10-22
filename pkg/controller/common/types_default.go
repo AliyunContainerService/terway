@@ -29,7 +29,7 @@ import (
 func NewNodeInfo(node *corev1.Node) (*NodeInfo, error) {
 	res := &NodeInfo{NodeName: node.Name}
 
-	if utils.ISLinJunNode(node.Labels) {
+	if utils.ISLingJunNode(node.Labels) {
 		res.InstanceID = node.Spec.ProviderID
 	} else {
 		ids := strings.Split(node.Spec.ProviderID, ".")

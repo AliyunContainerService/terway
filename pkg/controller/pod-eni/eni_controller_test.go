@@ -92,11 +92,11 @@ var _ = Describe("ENI Controller Tests", func() {
 		}, nil).Maybe()
 
 		// Setup test node
-		testNode = testutil.CreateTestNode(testNodeName)
+		testNode = testutil.NewK8sNodeBuilder(testNodeName).Build()
 		Expect(k8sClient.Create(ctx, testNode)).Should(Succeed())
 
 		// Setup test node CRD
-		testNodeCRD = testutil.CreateTestNodeCRD(testNodeName)
+		testNodeCRD = testutil.NewNodeCRDBuilder(testNodeName).Build()
 		Expect(k8sClient.Create(ctx, testNodeCRD)).Should(Succeed())
 	})
 
@@ -1471,13 +1471,14 @@ var _ = Describe("ENI Controller Tests", func() {
 
 		It("should handle exclusive ENI only mode correctly", func() {
 			// Create node with exclusive ENI only mode
-			exclusiveNode := testutil.CreateTestNode("exclusive-node")
-			exclusiveNode.Labels[types.ExclusiveENIModeLabel] = string(types.ExclusiveENIOnly)
+			exclusiveNode := testutil.NewK8sNodeBuilder("exclusive-node").
+				WithLabel(types.ExclusiveENIModeLabel, string(types.ExclusiveENIOnly)).
+				Build()
 			Expect(k8sClient.Create(ctx, exclusiveNode)).Should(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, exclusiveNode) }()
 
 			// Create corresponding Node CRD
-			exclusiveNodeCRD := testutil.CreateTestNodeCRD("exclusive-node")
+			exclusiveNodeCRD := testutil.NewNodeCRDBuilder("exclusive-node").Build()
 			Expect(k8sClient.Create(ctx, exclusiveNodeCRD)).Should(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, exclusiveNodeCRD) }()
 
@@ -1534,11 +1535,11 @@ var _ = Describe("ENI Controller Tests", func() {
 
 		It("should reject trunk ENI for eniOnly pods when trunk mode is enabled", func() {
 			// Reset test node for this test
-			testNode = testutil.CreateTestNode(testNodeName)
+			testNode = testutil.NewK8sNodeBuilder(testNodeName).Build()
 			Expect(k8sClient.Create(ctx, testNode)).Should(Succeed())
 
 			// Reset test node CRD for this test
-			testNodeCRD = testutil.CreateTestNodeCRD(testNodeName)
+			testNodeCRD = testutil.NewNodeCRDBuilder(testNodeName).Build()
 			Expect(k8sClient.Create(ctx, testNodeCRD)).Should(Succeed())
 
 			podName := "test-trunk-reject"
@@ -1621,13 +1622,13 @@ var _ = Describe("ENI Controller Tests", func() {
 	Context("Complex Error Scenarios", func() {
 		It("should handle node without instance type gracefully", func() {
 			// Create node without instance type label
-			nodeWithoutType := testutil.CreateTestNode("node-no-type")
+			nodeWithoutType := testutil.NewK8sNodeBuilder("node-no-type").Build()
 			delete(nodeWithoutType.Labels, "node.kubernetes.io/instance-type")
 			Expect(k8sClient.Create(ctx, nodeWithoutType)).Should(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, nodeWithoutType) }()
 
 			// Create corresponding Node CRD
-			nodeWithoutTypeCRD := testutil.CreateTestNodeCRD("node-no-type")
+			nodeWithoutTypeCRD := testutil.NewNodeCRDBuilder("node-no-type").Build()
 			Expect(k8sClient.Create(ctx, nodeWithoutTypeCRD)).Should(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, nodeWithoutTypeCRD) }()
 
@@ -1715,16 +1716,18 @@ var _ = Describe("ENI Controller Tests", func() {
 
 		It("should handle ecsHighDensity with vid = 0 correctly", func() {
 			// Create node with ecsHighDensity support
-			highDensityNode := testutil.CreateTestNode("high-density-node")
-			highDensityNode.Labels["node.kubernetes.io/instance-type"] = "instanceType" // High density instance type
-			highDensityNode.Labels["alibabacloud.com/lingjun-worker"] = "true"
+			highDensityNode := testutil.NewK8sNodeBuilder("high-density-node").
+				WithInstanceType("instanceType").
+				WithEFLO().
+				Build()
 			Expect(k8sClient.Create(ctx, highDensityNode)).Should(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, highDensityNode) }()
 
 			// Create corresponding Node CRD
-			highDensityNodeCRD := testutil.CreateTestNodeCRD("high-density-node")
-			highDensityNodeCRD.Labels["alibabacloud.com/lingjun-worker"] = "true"
-			highDensityNodeCRD.Annotations[types.ENOApi] = types.APIEcsHDeni
+			highDensityNodeCRD := testutil.NewNodeCRDBuilder("high-density-node").
+				WithEFLO().
+				WithAnnotation(types.ENOApi, types.APIEcsHDeni).
+				Build()
 			Expect(k8sClient.Create(ctx, highDensityNodeCRD)).Should(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, highDensityNodeCRD) }()
 
@@ -1846,24 +1849,25 @@ var _ = Describe("ENI Controller Tests", func() {
 		})
 
 		Context("when NetworkCards count is 0", func() {
-			It("should handle LinJun node correctly", func() {
-				nodeName := "linjun-node"
-				podName := "test-pod-linjun"
+			It("should handle LingJun node correctly", func() {
+				nodeName := "lingjun-node"
+				podName := "test-pod-lingjun"
 
-				linjunNode := testutil.CreateEFLONode(nodeName)
-				Expect(k8sClient.Create(ctx, linjunNode)).Should(Succeed())
+				lingjunNode := testutil.NewK8sNodeBuilder(nodeName).
+					WithEFLO().
+					Build()
+				Expect(k8sClient.Create(ctx, lingjunNode)).Should(Succeed())
 				defer func() {
-					_ = k8sClient.Delete(ctx, linjunNode)
+					_ = k8sClient.Delete(ctx, lingjunNode)
 				}()
 
-				linjunNodeCRD := testutil.CreateTestNodeCRD(nodeName)
-				linjunNodeCRD.Labels = map[string]string{
-					"alibabacloud.com/lingjun-worker": "true",
-				}
-				linjunNodeCRD.Spec.NodeCap.NetworkCardsCount = ptr.To(0)
-				Expect(k8sClient.Create(ctx, linjunNodeCRD)).Should(Succeed())
+				lingjunNodeCRD := testutil.NewNodeCRDBuilder(nodeName).
+					WithEFLO().
+					WithNetworkCardsCount(0).
+					Build()
+				Expect(k8sClient.Create(ctx, lingjunNodeCRD)).Should(Succeed())
 				defer func() {
-					_ = k8sClient.Delete(ctx, linjunNodeCRD)
+					_ = k8sClient.Delete(ctx, lingjunNodeCRD)
 				}()
 
 				pod := testutil.CreateTestPod(podName, "default", nodeName)
@@ -1883,7 +1887,7 @@ var _ = Describe("ENI Controller Tests", func() {
 				nodeName := "non-existent-node"
 				podName := "test-pod-no-node"
 
-				nonExistentNode := testutil.CreateTestNode(nodeName)
+				nonExistentNode := testutil.NewK8sNodeBuilder(nodeName).Build()
 				Expect(k8sClient.Create(ctx, nonExistentNode)).Should(Succeed())
 				defer func() {
 					_ = k8sClient.Delete(ctx, nonExistentNode)
@@ -1908,14 +1912,15 @@ var _ = Describe("ENI Controller Tests", func() {
 				nodeName := "multi-card-node"
 				networkCardsCount := 2
 
-				multiCardNode := testutil.CreateTestNode(nodeName)
+				multiCardNode := testutil.NewK8sNodeBuilder(nodeName).Build()
 				Expect(k8sClient.Create(ctx, multiCardNode)).Should(Succeed())
 				defer func() {
 					_ = k8sClient.Delete(ctx, multiCardNode)
 				}()
 
-				multiCardNodeCRD := testutil.CreateTestNodeCRD(nodeName)
-				multiCardNodeCRD.Spec.NodeCap.NetworkCardsCount = ptr.To(networkCardsCount)
+				multiCardNodeCRD := testutil.NewNodeCRDBuilder(nodeName).
+					WithNetworkCardsCount(networkCardsCount).
+					Build()
 				Expect(k8sClient.Create(ctx, multiCardNodeCRD)).Should(Succeed())
 				defer func() {
 					_ = k8sClient.Delete(ctx, multiCardNodeCRD)
@@ -2015,14 +2020,15 @@ var _ = Describe("ENI Controller Tests", func() {
 				nodeName := "concurrent-test-node"
 				networkCardsCount := 2
 
-				concurrentNode := testutil.CreateTestNode(nodeName)
+				concurrentNode := testutil.NewK8sNodeBuilder(nodeName).Build()
 				Expect(k8sClient.Create(ctx, concurrentNode)).Should(Succeed())
 				defer func() {
 					_ = k8sClient.Delete(ctx, concurrentNode)
 				}()
 
-				concurrentNodeCRD := testutil.CreateTestNodeCRD(nodeName)
-				concurrentNodeCRD.Spec.NodeCap.NetworkCardsCount = ptr.To(networkCardsCount)
+				concurrentNodeCRD := testutil.NewNodeCRDBuilder(nodeName).
+					WithNetworkCardsCount(networkCardsCount).
+					Build()
 				Expect(k8sClient.Create(ctx, concurrentNodeCRD)).Should(Succeed())
 				defer func() {
 					_ = k8sClient.Delete(ctx, concurrentNodeCRD)
@@ -2074,14 +2080,14 @@ var _ = Describe("ENI Controller Tests", func() {
 				nodeName := "deleting-node"
 				podName := "test-pod-deleting"
 
-				deletingNode := testutil.CreateTestNode(nodeName)
+				deletingNode := testutil.NewK8sNodeBuilder(nodeName).Build()
 				Expect(k8sClient.Create(ctx, deletingNode)).Should(Succeed())
 				defer func() {
 					_ = k8sClient.Delete(ctx, deletingNode)
 				}()
 
 				now := metav1.Now()
-				deletingNodeCRD := testutil.CreateTestNodeCRD(nodeName)
+				deletingNodeCRD := testutil.NewNodeCRDBuilder(nodeName).Build()
 				deletingNodeCRD.DeletionTimestamp = &now
 				Expect(k8sClient.Create(ctx, deletingNodeCRD)).Should(Succeed())
 				defer func() {
@@ -2102,13 +2108,13 @@ var _ = Describe("ENI Controller Tests", func() {
 				nodeName := "nil-cards-node"
 				podName := "test-pod-nil-cards"
 
-				nilCardsNode := testutil.CreateTestNode(nodeName)
+				nilCardsNode := testutil.NewK8sNodeBuilder(nodeName).Build()
 				Expect(k8sClient.Create(ctx, nilCardsNode)).Should(Succeed())
 				defer func() {
 					_ = k8sClient.Delete(ctx, nilCardsNode)
 				}()
 
-				nilCardsNodeCRD := testutil.CreateTestNodeCRD(nodeName)
+				nilCardsNodeCRD := testutil.NewNodeCRDBuilder(nodeName).Build()
 				nilCardsNodeCRD.Spec.NodeCap.NetworkCardsCount = nil
 				Expect(k8sClient.Create(ctx, nilCardsNodeCRD)).Should(Succeed())
 				defer func() {

@@ -170,7 +170,7 @@ var _ = Describe("Test eflo api", func() {
 				Expect(err).NotTo(HaveOccurred())
 			}()
 
-			By("attach to linjun node")
+			By("attach to lingjun node")
 			err = openAPI.GetECS().AttachNetworkInterface(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
 				NetworkInterfaceID:     &eni.NetworkInterfaceID,
 				InstanceID:             &instanceID,

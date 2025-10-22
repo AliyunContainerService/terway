@@ -124,8 +124,8 @@ func (b *NetworkServiceBuilder) InitK8S() *NetworkServiceBuilder {
 		b.service.ipamType = types.IPAMTypeCRD
 	}
 
-	if utils.ISLinJunNode(b.service.k8s.Node().Labels) {
-		serviceLog.Info("linjun node detected")
+	if utils.ISLingJunNode(b.service.k8s.Node().Labels) {
+		serviceLog.Info("lingjun node detected")
 		b.eflo = true
 	}
 	return b
