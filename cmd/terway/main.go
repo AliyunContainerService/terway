@@ -11,8 +11,6 @@ import (
 	cliflag "k8s.io/component-base/cli/flag"
 	"k8s.io/klog/v2/textlogger"
 
-	_ "go.uber.org/automaxprocs"
-
 	"github.com/AliyunContainerService/terway/daemon"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/version"
