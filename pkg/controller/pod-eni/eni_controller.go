@@ -80,7 +80,7 @@ func init() {
 			crdMode:         controlplane.GetConfig().IPAMType == types.IPAMTypeCRD,
 			nodeStatusCache: ctrlCtx.NodeStatusCache,
 		}
-		c, err := controller.NewUnmanaged(controllerName, mgr, controller.Options{
+		c, err := controller.NewUnmanaged(controllerName, controller.Options{
 			Reconciler:              r,
 			MaxConcurrentReconciles: controlplane.GetConfig().PodENIMaxConcurrent,
 		})
