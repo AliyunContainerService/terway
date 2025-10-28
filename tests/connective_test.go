@@ -325,15 +325,17 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 				}
 
 				for _, stack := range getStack() {
+					t.Logf("Testing %s: client should be able to access server (normal traffic, no policy applied)", stack)
 					_, err = Pull(config.Client(), client.Namespace, client.Name, "client", "server-"+stack, t)
 					if err != nil {
-						t.Error(err)
+						t.Errorf("Expected: client can access server (%s), but failed: %v", stack, err)
 						t.FailNow()
 					}
 
+					t.Logf("Testing %s: client should NOT be able to access server-deny-ingress (ingress policy denies traffic to deny-ingress pods)", stack)
 					_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", "server-deny-ingress-"+stack, t)
 					if err != nil {
-						t.Error(err)
+						t.Errorf("Expected: client cannot access server-deny-ingress (%s), but connection succeeded: %v", stack, err)
 						t.FailNow()
 					}
 				}
@@ -396,15 +398,17 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 				}
 
 				for _, stack := range getStack() {
+					t.Logf("Testing %s: client-other should be able to access server-other (normal traffic, no policy applied)", stack)
 					_, err = Pull(config.Client(), client.Namespace, client.Name, "client", "server-"+stack, t)
 					if err != nil {
-						t.Error(err)
+						t.Errorf("Expected: client-other can access server-other (%s), but failed: %v", stack, err)
 						t.FailNow()
 					}
 
+					t.Logf("Testing %s: client-other should NOT be able to access server-deny-ingress-other (ingress policy denies traffic to deny-ingress-other pods)", stack)
 					_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", "server-deny-ingress-"+stack, t)
 					if err != nil {
-						t.Error(err)
+						t.Errorf("Expected: client-other cannot access server-deny-ingress-other (%s), but connection succeeded: %v", stack, err)
 						t.FailNow()
 					}
 				}
@@ -448,7 +452,7 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 				ctx = SaveResources(ctx, objs...)
 				return ctx
 			}).
-			Assess("Check ingress policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			Assess("Check egress policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: config.Namespace()}}
 				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server", Namespace: config.Namespace()}}
 				err := waitPodsReady(config.Client(), client, server)
@@ -458,9 +462,10 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 				}
 
 				for _, stack := range getStack() {
+					t.Logf("Testing %s: client should NOT be able to access server (egress policy denies all outbound traffic from client)", stack)
 					_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", "server-"+stack, t)
 					if err != nil {
-						t.Error(err)
+						t.Errorf("Expected: client cannot access server (%s), but connection succeeded: %v", stack, err)
 						t.FailNow()
 					}
 				}
@@ -504,7 +509,7 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 				ctx = SaveResources(ctx, objs...)
 				return ctx
 			}).
-			Assess("Check ingress policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			Assess("Check egress policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: config.Namespace()}}
 				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server", Namespace: config.Namespace()}}
 				err := waitPodsReady(config.Client(), client, server)
@@ -514,9 +519,10 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 				}
 
 				for _, stack := range getStack() {
+					t.Logf("Testing %s: client should NOT be able to access server (egress policy denies all outbound traffic from client)", stack)
 					_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", "server-"+stack, t)
 					if err != nil {
-						t.Error(err)
+						t.Errorf("Expected: client cannot access server (%s), but connection succeeded: %v", stack, err)
 						t.FailNow()
 					}
 				}
