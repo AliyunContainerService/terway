@@ -419,7 +419,7 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 				var objs []k8s.Object
 
-				policy := NewNetworkPolicy("deny-ingress", config.Namespace()).
+				policy := NewNetworkPolicy("deny-egress", config.Namespace()).
 					WithPolicyType(networkingv1.PolicyTypeEgress).
 					WithPodSelector(map[string]string{"app": "client"})
 
@@ -476,7 +476,7 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 				var objs []k8s.Object
 
-				policy := NewNetworkPolicy("deny-ingress", config.Namespace()).
+				policy := NewNetworkPolicy("deny-egress", config.Namespace()).
 					WithPolicyType(networkingv1.PolicyTypeEgress).
 					WithPodSelector(map[string]string{"app": "client"})
 
