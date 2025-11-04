@@ -218,8 +218,7 @@ func (r *ReconcileNode) createOrUpdate(ctx context.Context, k8sNode *corev1.Node
 	}
 
 	update := node.DeepCopy()
-	_, err = controllerutil.CreateOrPatch(ctx, r.client, update, func() error {
-		update.Status = node.Status
+	_, err = controllerutil.CreateOrUpdate(ctx, r.client, update, func() error {
 		update.Spec = node.Spec
 		update.Labels = node.Labels
 		return nil
@@ -487,8 +486,7 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	}
 
 	update := node.DeepCopy()
-	_, err = controllerutil.CreateOrPatch(ctx, r.client, update, func() error {
-		update.Status = node.Status
+	_, err = controllerutil.CreateOrUpdate(ctx, r.client, update, func() error {
 		update.Spec = node.Spec
 		update.Labels = node.Labels
 		update.Annotations = node.Annotations
