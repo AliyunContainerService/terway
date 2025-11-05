@@ -72,7 +72,9 @@ func (a *ECSService) CreateNetworkInterface(ctx context.Context, opts ...CreateN
 	})
 
 	if err != nil {
-		rollBackFunc()
+		if !apiErr.ErrorCodeIs(err, apiErr.ErrIdempotentFailed) {
+			rollBackFunc()
+		}
 		return nil, err
 	}
 
@@ -315,7 +317,9 @@ func (a *ECSService) AssignPrivateIPAddress(ctx context.Context, opts ...AssignP
 		return true, nil
 	})
 	if err != nil {
-		rollBackFunc()
+		if !apiErr.ErrorCodeIs(err, apiErr.ErrIdempotentFailed) {
+			rollBackFunc()
+		}
 		return nil, err
 	}
 
@@ -410,7 +414,9 @@ func (a *ECSService) AssignIpv6Addresses(ctx context.Context, opts ...AssignIPv6
 		return true, nil
 	})
 	if err != nil {
-		rollBackFunc()
+		if !apiErr.ErrorCodeIs(err, apiErr.ErrIdempotentFailed) {
+			rollBackFunc()
+		}
 		return nil, err
 	}
 

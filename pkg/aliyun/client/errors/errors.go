@@ -54,6 +54,8 @@ const (
 
 	ErrOperationConflict = "Operation.Conflict"
 
+	ErrIdempotentFailed = "IdempotentFailed"
+
 	ErrEfloPrivateIPQuotaExecuted = 1013
 	ErrEfloResourceNotFound       = 1011
 )
