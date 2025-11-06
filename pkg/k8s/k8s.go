@@ -532,10 +532,11 @@ func podNetworkType(daemonMode string, pod *corev1.Pod) string {
 
 func convertPod(daemonMode string, enableErdma bool, statefulWorkloadKindSet sets.Set[string], pod *corev1.Pod) *daemon.PodInfo {
 	pi := &daemon.PodInfo{
-		Name:      pod.Name,
-		Namespace: pod.Namespace,
-		PodIPs:    types.IPSet{},
-		PodUID:    string(pod.UID),
+		Name:       pod.Name,
+		Namespace:  pod.Namespace,
+		PodIPs:     types.IPSet{},
+		PodUID:     string(pod.UID),
+		CreateTime: pod.CreationTimestamp.Time,
 	}
 
 	pi.PodNetworkType = podNetworkType(daemonMode, pod)
