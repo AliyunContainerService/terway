@@ -255,7 +255,14 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 	}
 
 	if utils.ISLingJunNode(node.Labels) {
-		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
+		backend := aliyunClient.BackendAPIEFLO
+		switch node.Annotations[types.ENOApi] {
+		case types.APIEcs:
+			backend = aliyunClient.BackendAPIECS
+		case types.APIEcsHDeni, types.APIEnoHDeni:
+			return reconcile.Result{}, fmt.Errorf("not support high dense %s", node.Annotations[types.ENOApi])
+		}
+		ctx = aliyunClient.SetBackendAPI(ctx, backend)
 	} else {
 		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIECS)
 	}
