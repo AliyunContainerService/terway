@@ -108,7 +108,9 @@ func (a *ECSService) AssignPrivateIPAddress2(ctx context.Context, opts ...Assign
 		return true, nil
 	})
 	if err != nil {
-		rollBackFunc()
+		if !apiErr.ErrorCodeIs(err, apiErr.ErrIdempotentFailed) {
+			rollBackFunc()
+		}
 		return nil, err
 	}
 
@@ -209,7 +211,9 @@ func (a *ECSService) AssignIpv6Addresses2(ctx context.Context, opts ...AssignIPv
 		return true, nil
 	})
 	if err != nil {
-		rollBackFunc()
+		if !apiErr.ErrorCodeIs(err, apiErr.ErrIdempotentFailed) {
+			rollBackFunc()
+		}
 		return nil, err
 	}
 

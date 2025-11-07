@@ -58,7 +58,7 @@ func (a *EFLOService) CreateElasticNetworkInterfaceV2(ctx context.Context, opts 
 		return nil, err
 	}
 	defer func() {
-		if err != nil {
+		if err != nil && !apiErr.ErrorCodeIs(err, apiErr.ErrIdempotentFailed) {
 			rollBackFunc()
 		}
 	}()
@@ -239,7 +239,9 @@ func (a *EFLOService) AssignLeniPrivateIPAddress2(ctx context.Context, opts ...A
 		return true, nil
 	})
 	if err != nil {
-		rollBackFunc()
+		if !apiErr.ErrorCodeIs(err, apiErr.ErrIdempotentFailed) {
+			rollBackFunc()
+		}
 		return nil, err
 	}
 
