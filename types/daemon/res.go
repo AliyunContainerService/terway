@@ -39,6 +39,7 @@ type PodInfo struct {
 	PodUID          string
 	NetworkPriority string
 	ERdma           bool
+	CreateTime      time.Time // pod creation timestamp
 }
 
 // ExtraEipInfo store extra eip info

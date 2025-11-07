@@ -565,6 +565,11 @@ func (n *networkService) gcPods(ctx context.Context) error {
 
 		podID := utils.PodInfoKey(podRes.PodInfo.Namespace, podRes.PodInfo.Name)
 		if _, ok := exist[podID]; ok {
+			// Skip syncing rules for pods created within the last 2 minutes
+			if !podRes.PodInfo.CreateTime.IsZero() && time.Since(podRes.PodInfo.CreateTime) < 2*time.Minute {
+				serviceLog.V(4).Info("skip syncing rule for newly created pod", "pod", podID, "createTime", podRes.PodInfo.CreateTime)
+				continue
+			}
 			err = ruleSync(ctx, podRes)
 			if err != nil {
 				serviceLog.Error(err, "error sync pod rule")
