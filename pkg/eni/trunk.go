@@ -24,7 +24,7 @@ func NewTrunk(client client.Client, local *Local) *Trunk {
 	return &Trunk{
 		trunkENI: local.eni,
 		local:    local,
-		remote:   NewRemote(client, local.eni),
+		remote:   NewRemote(client, local.eni, nil),
 	}
 }
 

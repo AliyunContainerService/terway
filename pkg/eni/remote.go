@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -110,12 +111,14 @@ var _ NetworkInterface = &Remote{}
 type Remote struct {
 	trunkENI *daemon.ENI // for nil , this is not a trunk
 	client   client.Client
+	notifier *Notifier
 }
 
-func NewRemote(client client.Client, trunkENI *daemon.ENI) *Remote {
+func NewRemote(client client.Client, trunkENI *daemon.ENI, notifier *Notifier) *Remote {
 	return &Remote{
 		trunkENI: trunkENI,
 		client:   client,
+		notifier: notifier,
 	}
 }
 
@@ -135,82 +138,170 @@ func (r *Remote) Allocate(ctx context.Context, cni *daemon.CNI, request Resource
 	resp := make(chan *AllocResp)
 
 	go func() {
-		l := logf.FromContext(ctx)
+		l := logf.FromContext(ctx, "ipam", "remote")
+		defer close(resp)
 
-		var podENI *podENITypes.PodENI
-		var err, innerErr error
-		err = backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.WaitPodENIStatus), func(ctx context.Context) (bool, error) {
-			podENI, innerErr = getPodENI(ctx, r.client, cni.PodNamespace, cni.PodName)
-			if innerErr != nil {
-				innerErr = &types.Error{
-					Code: types.ErrPodENINotReady,
-					Msg:  "Get PodENI error",
-					R:    innerErr,
-				}
-				return false, nil
-			}
-			if !podENI.DeletionTimestamp.IsZero() {
-				innerErr = &types.Error{
-					Code: types.ErrPodENINotReady,
-					Msg:  "DeletionTimestamp is not zero",
-				}
-				return false, nil
-			}
-			if podENI.Status.Phase != podENITypes.ENIPhaseBind {
-				innerErr = &types.Error{
-					Code: types.ErrPodENINotReady,
-					Msg:  fmt.Sprintf("PodENI Phase is %s", podENI.Status.Phase),
-				}
-				return false, nil
-			}
-			if cni.PodUID != "" {
-				if podENI.Annotations[types.PodUID] != cni.PodUID {
-					return false, nil
-				}
-			}
-			if r.trunkENI != nil && podENI.Status.TrunkENIID != r.trunkENI.ID {
-				innerErr = &types.Error{
-					Code: types.ErrPodENINotReady,
-					Msg:  fmt.Sprintf("PodENI used a different trunk %s", podENI.Status.TrunkENIID),
-				}
-				return false, innerErr
-			}
-
-			if len(podENI.Spec.Allocations) == 0 {
-				innerErr = &types.Error{
-					Code: types.ErrPodENINotReady,
-					Msg:  "PodENI has empty allocations",
-				}
-				return false, innerErr
-			}
-			return true, nil
-		})
-
-		var networkResources NetworkResources
-		if podENI != nil {
-			remote := &RemoteIPResource{
-				podENI: *podENI,
-			}
-			if r.trunkENI != nil {
-				remote.trunkENI = *r.trunkENI
-			}
-			l.Info("get pod eni success", "uid", podENI.UID)
-
-			networkResources = append(networkResources, remote)
-
-			metric.ResourcePoolAllocated.WithLabelValues(metric.ResourcePoolTypeRemote).Inc()
+		if r.notifier == nil {
+			l.Info("notifier is nil, falling back to backoff polling")
+			r.allocateWithBackoff(ctx, cni, resp, l)
+			return
 		}
 
-		select {
-		case <-ctx.Done():
-		case resp <- &AllocResp{
-			Err:            err,
-			NetworkConfigs: networkResources,
-		}:
+		ch := r.notifier.Subscribe()
+		defer r.notifier.Unsubscribe(ch)
+
+		if allocResp, success := r.tryAllocatePodENI(ctx, cni, l); success {
+			resp <- allocResp
+			return
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				l.Info("context cancelled, allocation failed")
+				return
+			case <-ch:
+				l.V(2).Info("received PodENI change notification, trying to allocate")
+				if allocResp, success := r.tryAllocatePodENI(ctx, cni, l); success {
+					resp <- allocResp
+					return
+				}
+			}
 		}
 	}()
 
 	return resp, nil
+}
+
+func (r *Remote) tryAllocatePodENI(ctx context.Context, cni *daemon.CNI, l logr.Logger) (*AllocResp, bool) {
+	podENI, innerErr := getPodENI(ctx, r.client, cni.PodNamespace, cni.PodName)
+	if innerErr != nil {
+		l.V(2).Info("failed to get PodENI", "error", innerErr)
+		return nil, false
+	}
+
+	if !podENI.DeletionTimestamp.IsZero() {
+		l.V(2).Info("PodENI is being deleted")
+		return nil, false
+	}
+
+	if podENI.Status.Phase != podENITypes.ENIPhaseBind {
+		l.V(2).Info("PodENI is not in Bind phase", "phase", podENI.Status.Phase)
+		return nil, false
+	}
+
+	if cni.PodUID != "" && podENI.Annotations[types.PodUID] != cni.PodUID {
+		l.V(2).Info("PodENI UID mismatch", "expected", cni.PodUID, "actual", podENI.Annotations[types.PodUID])
+		return nil, false
+	}
+
+	if r.trunkENI != nil && podENI.Status.TrunkENIID != r.trunkENI.ID {
+		l.Error(fmt.Errorf("trunk mismatch"), "PodENI used a different trunk", "expected", r.trunkENI.ID, "actual", podENI.Status.TrunkENIID)
+		return &AllocResp{
+			Err: &types.Error{
+				Code: types.ErrPodENINotReady,
+				Msg:  fmt.Sprintf("PodENI used a different trunk %s", podENI.Status.TrunkENIID),
+			},
+		}, true
+	}
+
+	if len(podENI.Spec.Allocations) == 0 {
+		l.Error(fmt.Errorf("empty allocations"), "PodENI has empty allocations")
+		return &AllocResp{
+			Err: &types.Error{
+				Code: types.ErrPodENINotReady,
+				Msg:  "PodENI has empty allocations",
+			},
+		}, true
+	}
+
+	remote := &RemoteIPResource{
+		podENI: *podENI,
+	}
+	if r.trunkENI != nil {
+		remote.trunkENI = *r.trunkENI
+	}
+	l.Info("get pod eni success", "uid", podENI.UID)
+
+	metric.ResourcePoolAllocated.WithLabelValues(metric.ResourcePoolTypeRemote).Inc()
+
+	return &AllocResp{
+		NetworkConfigs: NetworkResources{remote},
+	}, true
+}
+
+func (r *Remote) allocateWithBackoff(ctx context.Context, cni *daemon.CNI, resp chan *AllocResp, l logr.Logger) {
+	var podENI *podENITypes.PodENI
+	var err, innerErr error
+	err = backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.WaitPodENIStatus), func(ctx context.Context) (bool, error) {
+		podENI, innerErr = getPodENI(ctx, r.client, cni.PodNamespace, cni.PodName)
+		if innerErr != nil {
+			innerErr = &types.Error{
+				Code: types.ErrPodENINotReady,
+				Msg:  "Get PodENI error",
+				R:    innerErr,
+			}
+			return false, nil
+		}
+		if !podENI.DeletionTimestamp.IsZero() {
+			innerErr = &types.Error{
+				Code: types.ErrPodENINotReady,
+				Msg:  "DeletionTimestamp is not zero",
+			}
+			return false, nil
+		}
+		if podENI.Status.Phase != podENITypes.ENIPhaseBind {
+			innerErr = &types.Error{
+				Code: types.ErrPodENINotReady,
+				Msg:  fmt.Sprintf("PodENI Phase is %s", podENI.Status.Phase),
+			}
+			return false, nil
+		}
+		if cni.PodUID != "" {
+			if podENI.Annotations[types.PodUID] != cni.PodUID {
+				return false, nil
+			}
+		}
+		if r.trunkENI != nil && podENI.Status.TrunkENIID != r.trunkENI.ID {
+			innerErr = &types.Error{
+				Code: types.ErrPodENINotReady,
+				Msg:  fmt.Sprintf("PodENI used a different trunk %s", podENI.Status.TrunkENIID),
+			}
+			return false, innerErr
+		}
+
+		if len(podENI.Spec.Allocations) == 0 {
+			innerErr = &types.Error{
+				Code: types.ErrPodENINotReady,
+				Msg:  "PodENI has empty allocations",
+			}
+			return false, innerErr
+		}
+		return true, nil
+	})
+
+	var networkResources NetworkResources
+	if podENI != nil {
+		remote := &RemoteIPResource{
+			podENI: *podENI,
+		}
+		if r.trunkENI != nil {
+			remote.trunkENI = *r.trunkENI
+		}
+		l.Info("get pod eni success", "uid", podENI.UID)
+
+		networkResources = append(networkResources, remote)
+
+		metric.ResourcePoolAllocated.WithLabelValues(metric.ResourcePoolTypeRemote).Inc()
+	}
+
+	select {
+	case <-ctx.Done():
+	case resp <- &AllocResp{
+		Err:            err,
+		NetworkConfigs: networkResources,
+	}:
+	}
 }
 
 func (r *Remote) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) (bool, error) {
