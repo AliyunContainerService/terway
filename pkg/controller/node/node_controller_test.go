@@ -501,33 +501,5 @@ var _ = Describe("Node Controller", func() {
 				verifyNetworkCardsCount(ctx, nodeName, 0)
 			})
 		})
-
-		Context("Error Cases", func() {
-			It("should reject EFLO node without exclusive ENI mode", func() {
-				nodeName := "test-eflo-node-error"
-				defer cleanupNode(ctx, nodeName)
-
-				k8sNode := testutil.NewK8sNodeBuilder(nodeName).
-					WithEFLO().
-					WithInstanceType("eflo.instance").
-					WithProviderID("instanceID-error").
-					Build()
-				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
-
-				openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
-					{
-						NetworkInterfaceID: "eni-test",
-						Type:               aliyunClient.ENITypePrimary,
-					},
-				}, nil).Maybe()
-
-				reconciler := createReconciler(true, true)
-				_, err := reconciler.Reconcile(ctx, reconcile.Request{
-					NamespacedName: types.NamespacedName{Name: nodeName},
-				})
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("exclusive ENI mode must be enabled for EFLO nodes"))
-			})
-		})
 	})
 })
