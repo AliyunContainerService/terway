@@ -44,7 +44,7 @@ type MultiNetworkConfig struct {
 // NewMultiNetworkConfig creates a default multi-network test configuration
 func NewMultiNetworkConfig() *MultiNetworkConfig {
 	config := &MultiNetworkConfig{
-		NodeTypes:         []NodeType{NodeTypeNormal, NodeTypeExclusiveENI},
+		NodeTypes:         []NodeType{NodeTypeECSSharedENI, NodeTypeECSExclusiveENI, NodeTypeLingjunSharedENI, NodeTypeLingjunExclusiveENI},
 		EnableDefaultMode: true, // Always test default mode
 	}
 
@@ -133,7 +133,7 @@ func createMultiNetworkTestFeature(testName string, nodeType NodeType, mode stri
 
 			// Create primary PodNetworking (always use default config)
 			pn1 := NewPodNetworking(pnPrimary)
-			if nodeType == NodeTypeExclusiveENI {
+			if nodeType == NodeTypeECSExclusiveENI || nodeType == NodeTypeLingjunExclusiveENI {
 				pn1 = pn1.WithENIAttachType(networkv1beta1.ENIOptionTypeENI)
 			}
 			err = CreatePodNetworkingAndWaitReady(ctx, config.Client(), pn1.PodNetworking)
@@ -145,7 +145,7 @@ func createMultiNetworkTestFeature(testName string, nodeType NodeType, mode stri
 
 			// Create secondary PodNetworking based on mode
 			pn2 := NewPodNetworking(pnSecondary)
-			if nodeType == NodeTypeExclusiveENI {
+			if nodeType == NodeTypeECSExclusiveENI || nodeType == NodeTypeLingjunExclusiveENI {
 				pn2 = pn2.WithENIAttachType(networkv1beta1.ENIOptionTypeENI)
 			}
 			if mode == "custom" {
