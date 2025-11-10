@@ -365,7 +365,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 	var eniList []eni.NetworkInterface
 
 	if b.daemonMode == daemon.ModeENIOnly {
-		eniList = append(eniList, eni.NewRemote(b.service.k8s.GetClient(), nil))
+		eniList = append(eniList, eni.NewRemote(b.service.k8s.GetClient(), nil, nil))
 	} else {
 		var (
 			normalENICount int
@@ -423,7 +423,7 @@ func (b *NetworkServiceBuilder) PostInitForLegacyMode() *NetworkServiceBuilder {
 
 	if b.eflo {
 		var eniList []eni.NetworkInterface
-		eniList = append(eniList, eni.NewRemote(b.service.k8s.GetClient(), nil))
+		eniList = append(eniList, eni.NewRemote(b.service.k8s.GetClient(), nil, nil))
 
 		objList, err := b.service.resourceDB.List()
 		if err != nil {

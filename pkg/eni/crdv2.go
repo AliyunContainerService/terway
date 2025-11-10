@@ -13,6 +13,7 @@ import (
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
@@ -58,7 +59,8 @@ type CRDV2 struct {
 	deletedPods   map[string]*networkv1beta1.RuntimePodStatus
 	cacheSyncedCh chan struct{}
 
-	notifier *Notifier
+	notifier       *Notifier
+	podENINotifier *Notifier
 }
 
 func NewCRDV2(nodeName, namespace string) *CRDV2 {
@@ -86,6 +88,12 @@ func newCRDV2(restConfig *rest.Config, nodeName, namespace string) *CRDV2 {
 				&corev1.Node{}: {
 					Field: fields.SelectorFromSet(map[string]string{
 						"metadata.name": nodeName,
+					}),
+					Transform: nil,
+				},
+				&networkv1beta1.PodENI{}: {
+					Label: labels.SelectorFromSet(map[string]string{
+						types.ENIRelatedNodeName: nodeName,
 					}),
 					Transform: nil,
 				},
@@ -150,13 +158,14 @@ func newCRDV2(restConfig *rest.Config, nodeName, namespace string) *CRDV2 {
 	}
 
 	return &CRDV2{
-		scheme:        mgr.GetScheme(),
-		mgr:           mgr,
-		client:        mgr.GetClient(),
-		nodeName:      nodeName,
-		deletedPods:   make(map[string]*networkv1beta1.RuntimePodStatus),
-		cacheSyncedCh: cacheSyncedCh,
-		notifier:      NewNotifier(),
+		scheme:         mgr.GetScheme(),
+		mgr:            mgr,
+		client:         mgr.GetClient(),
+		nodeName:       nodeName,
+		deletedPods:    make(map[string]*networkv1beta1.RuntimePodStatus),
+		cacheSyncedCh:  cacheSyncedCh,
+		notifier:       NewNotifier(),
+		podENINotifier: NewNotifier(),
 	}
 }
 
@@ -194,6 +203,26 @@ func (r *CRDV2) Run(ctx context.Context, podResources []daemon.PodResources, wg 
 				return
 			}
 			r.notifier.Notify()
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	podENIInformer, err := r.mgr.GetCache().GetInformer(ctx, &networkv1beta1.PodENI{})
+	if err != nil {
+		return err
+	}
+
+	_, err = podENIInformer.AddEventHandler(&toolscache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			r.podENINotifier.Notify()
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			newPodENI := newObj.(*networkv1beta1.PodENI)
+			if newPodENI.Status.Phase == networkv1beta1.ENIPhaseBind {
+				r.podENINotifier.Notify()
+			}
 		},
 	})
 	if err != nil {
@@ -398,7 +427,8 @@ func (r *CRDV2) tryAllocateIP(ctx context.Context, cni *daemon.CNI, l logr.Logge
 
 func (r *CRDV2) remote(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace) {
 	remote := &Remote{
-		client: r.client,
+		client:   r.client,
+		notifier: r.podENINotifier,
 	}
 	trunk, err := r.getTrunkENI(ctx)
 	if err != nil {
