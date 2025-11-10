@@ -69,6 +69,17 @@ func createConnectivityTest(testName string, nodeType NodeType, label string) fe
 				server = server.WithNodeAffinityExclude(nodeAffinityExclude)
 			}
 
+			// Add tolerations for Lingjun nodes
+			if nodeType == NodeTypeLingjun {
+				server = server.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
+			}
+
 			err = config.Client().Resources().Create(ctx, server.Pod)
 			if err != nil {
 				t.Fatalf("create server pod failed, %v", err)
@@ -86,6 +97,17 @@ func createConnectivityTest(testName string, nodeType NodeType, label string) fe
 			}
 			if len(nodeAffinityExclude) > 0 {
 				client = client.WithNodeAffinityExclude(nodeAffinityExclude)
+			}
+
+			// Add tolerations for Lingjun nodes
+			if nodeType == NodeTypeLingjun {
+				client = client.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
 			}
 
 			err = config.Client().Resources().Create(ctx, client.Pod)
@@ -199,6 +221,17 @@ func createCrossNodeTest(nodeType NodeType) features.Feature {
 				server = server.WithNodeAffinityExclude(nodeAffinityExclude)
 			}
 
+			// Add tolerations for Lingjun nodes
+			if nodeType == NodeTypeLingjun {
+				server = server.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
+			}
+
 			err = config.Client().Resources().Create(ctx, server.Pod)
 			if err != nil {
 				t.Fatalf("create server pod failed, %v", err)
@@ -215,6 +248,17 @@ func createCrossNodeTest(nodeType NodeType) features.Feature {
 			}
 			if len(nodeAffinityExclude) > 0 {
 				client = client.WithNodeAffinityExclude(nodeAffinityExclude)
+			}
+
+			// Add tolerations for Lingjun nodes
+			if nodeType == NodeTypeLingjun {
+				client = client.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
 			}
 
 			err = config.Client().Resources().Create(ctx, client.Pod)
@@ -338,6 +382,17 @@ func createCrossZoneTest(nodeType NodeType) features.Feature {
 				server = server.WithNodeAffinityExclude(nodeAffinityExclude)
 			}
 
+			// Add tolerations for Lingjun nodes
+			if nodeType == NodeTypeLingjun {
+				server = server.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
+			}
+
 			err = config.Client().Resources().Create(ctx, server.Pod)
 			if err != nil {
 				t.Fatalf("create server pod failed, %v", err)
@@ -354,6 +409,17 @@ func createCrossZoneTest(nodeType NodeType) features.Feature {
 			}
 			if len(nodeAffinityExclude) > 0 {
 				client = client.WithNodeAffinityExclude(nodeAffinityExclude)
+			}
+
+			// Add tolerations for Lingjun nodes
+			if nodeType == NodeTypeLingjun {
+				client = client.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
 			}
 
 			err = config.Client().Resources().Create(ctx, client.Pod)
