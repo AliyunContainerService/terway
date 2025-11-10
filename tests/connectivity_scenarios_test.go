@@ -14,22 +14,26 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/features"
 )
 
-// TestConnectivity_AllNodeTypes tests basic connectivity across all available node types
-// Note: Trunk and Exclusive ENI mode tests are in trunk_test.go and exclusive_eni_test.go respectively
+// TestConnectivity_AllNodeTypes tests basic connectivity across all available node types and ENI modes
+// Tests all combinations: ECS/Lingjun nodes × Shared/Exclusive ENI modes
 func TestConnectivity_AllNodeTypes(t *testing.T) {
 	var feats []features.Feature
 
-	// Test normal nodes
-	normalFeature := createConnectivityTest("Connectivity/NormalNode", NodeTypeNormal, "normal")
-	feats = append(feats, normalFeature)
+	// Test ECS nodes with shared ENI mode
+	ecsSharedFeature := createConnectivityTest("Connectivity/ECS-SharedENI", NodeTypeECSSharedENI, "ecs-shared")
+	feats = append(feats, ecsSharedFeature)
 
-	// Test exclusive ENI nodes (basic connectivity only, not exclusive ENI mode)
-	exclusiveENIFeature := createConnectivityTest("Connectivity/ExclusiveENINode", NodeTypeExclusiveENI, "exclusive-eni")
-	feats = append(feats, exclusiveENIFeature)
+	// Test ECS nodes with exclusive ENI mode
+	ecsExclusiveFeature := createConnectivityTest("Connectivity/ECS-ExclusiveENI", NodeTypeECSExclusiveENI, "ecs-exclusive")
+	feats = append(feats, ecsExclusiveFeature)
 
-	// Test Lingjun nodes
-	lingjunFeature := createConnectivityTest("Connectivity/LingjunNode", NodeTypeLingjun, "lingjun")
-	feats = append(feats, lingjunFeature)
+	// Test Lingjun nodes with shared ENI mode
+	lingjunSharedFeature := createConnectivityTest("Connectivity/Lingjun-SharedENI", NodeTypeLingjunSharedENI, "lingjun-shared")
+	feats = append(feats, lingjunSharedFeature)
+
+	// Test Lingjun nodes with exclusive ENI mode
+	lingjunExclusiveFeature := createConnectivityTest("Connectivity/Lingjun-ExclusiveENI", NodeTypeLingjunExclusiveENI, "lingjun-exclusive")
+	feats = append(feats, lingjunExclusiveFeature)
 
 	testenv.Test(t, feats...)
 }
@@ -69,6 +73,17 @@ func createConnectivityTest(testName string, nodeType NodeType, label string) fe
 				server = server.WithNodeAffinityExclude(nodeAffinityExclude)
 			}
 
+			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
+			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
+				server = server.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
+			}
+
 			err = config.Client().Resources().Create(ctx, server.Pod)
 			if err != nil {
 				t.Fatalf("create server pod failed, %v", err)
@@ -86,6 +101,17 @@ func createConnectivityTest(testName string, nodeType NodeType, label string) fe
 			}
 			if len(nodeAffinityExclude) > 0 {
 				client = client.WithNodeAffinityExclude(nodeAffinityExclude)
+			}
+
+			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
+			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
+				client = client.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
 			}
 
 			err = config.Client().Resources().Create(ctx, client.Pod)
@@ -159,7 +185,7 @@ func createConnectivityTest(testName string, nodeType NodeType, label string) fe
 func TestConnectivity_CrossNode(t *testing.T) {
 	var feats []features.Feature
 
-	for _, nodeType := range []NodeType{NodeTypeNormal, NodeTypeExclusiveENI, NodeTypeLingjun} {
+	for _, nodeType := range []NodeType{NodeTypeECSSharedENI, NodeTypeECSExclusiveENI, NodeTypeLingjunSharedENI, NodeTypeLingjunExclusiveENI} {
 		feat := createCrossNodeTest(nodeType)
 		feats = append(feats, feat)
 	}
@@ -199,6 +225,17 @@ func createCrossNodeTest(nodeType NodeType) features.Feature {
 				server = server.WithNodeAffinityExclude(nodeAffinityExclude)
 			}
 
+			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
+			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
+				server = server.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
+			}
+
 			err = config.Client().Resources().Create(ctx, server.Pod)
 			if err != nil {
 				t.Fatalf("create server pod failed, %v", err)
@@ -215,6 +252,17 @@ func createCrossNodeTest(nodeType NodeType) features.Feature {
 			}
 			if len(nodeAffinityExclude) > 0 {
 				client = client.WithNodeAffinityExclude(nodeAffinityExclude)
+			}
+
+			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
+			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
+				client = client.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
 			}
 
 			err = config.Client().Resources().Create(ctx, client.Pod)
@@ -274,7 +322,7 @@ func createCrossNodeTest(nodeType NodeType) features.Feature {
 func TestConnectivity_CrossZone(t *testing.T) {
 	var feats []features.Feature
 
-	for _, nodeType := range []NodeType{NodeTypeNormal, NodeTypeExclusiveENI, NodeTypeLingjun} {
+	for _, nodeType := range []NodeType{NodeTypeECSSharedENI, NodeTypeECSExclusiveENI, NodeTypeLingjunSharedENI, NodeTypeLingjunExclusiveENI} {
 		feat := createCrossZoneTest(nodeType)
 		feats = append(feats, feat)
 	}
@@ -338,6 +386,17 @@ func createCrossZoneTest(nodeType NodeType) features.Feature {
 				server = server.WithNodeAffinityExclude(nodeAffinityExclude)
 			}
 
+			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
+			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
+				server = server.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
+			}
+
 			err = config.Client().Resources().Create(ctx, server.Pod)
 			if err != nil {
 				t.Fatalf("create server pod failed, %v", err)
@@ -354,6 +413,17 @@ func createCrossZoneTest(nodeType NodeType) features.Feature {
 			}
 			if len(nodeAffinityExclude) > 0 {
 				client = client.WithNodeAffinityExclude(nodeAffinityExclude)
+			}
+
+			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
+			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
+				client = client.WithTolerations([]corev1.Toleration{
+					{
+						Key:      "node-role.alibabacloud.com/lingjun",
+						Operator: corev1.TolerationOpExists,
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				})
 			}
 
 			err = config.Client().Resources().Create(ctx, client.Pod)

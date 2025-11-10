@@ -275,6 +275,11 @@ func (p *Pod) WithResourceLimits(resources corev1.ResourceList) *Pod {
 	return p
 }
 
+func (p *Pod) WithTolerations(tolerations []corev1.Toleration) *Pod {
+	p.Spec.Tolerations = append(p.Spec.Tolerations, tolerations...)
+	return p
+}
+
 type Service struct {
 	*corev1.Service
 }

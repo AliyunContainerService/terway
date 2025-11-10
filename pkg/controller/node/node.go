@@ -426,10 +426,6 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 				NodeID: &node.Spec.NodeMetadata.InstanceID,
 			}
 
-			if types.NodeExclusiveENIMode(node.Labels) != types.ExclusiveENIOnly {
-				return reconcile.Result{}, fmt.Errorf("exclusive ENI mode must be enabled for EFLO nodes")
-			}
-
 			resp, err := r.aliyun.GetEFLOController().DescribeNode(ctx, describeNodeReq)
 			if err != nil {
 				return reconcile.Result{}, err
@@ -448,6 +444,11 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 			if (node.Spec.NodeCap.Adapters <= 1 &&
 				limit.HighDenseQuantity > 0) ||
 				k8sNode.Annotations[types.ENOApi] == types.APIEcsHDeni { // check k8s config
+
+				if types.NodeExclusiveENIMode(node.Labels) != types.ExclusiveENIOnly {
+					return reconcile.Result{}, fmt.Errorf("exclusive ENI mode must be enabled for EFLO nodes")
+				}
+
 				node.Spec.NodeCap.Adapters = limit.HighDenseQuantity
 				node.Spec.NodeCap.TotalAdapters = limit.HighDenseQuantity
 

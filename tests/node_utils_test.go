@@ -17,45 +17,48 @@ import (
 type NodeType string
 
 const (
-	NodeTypeNormal       NodeType = "normal"
-	NodeTypeExclusiveENI NodeType = "exclusive-eni"
-	NodeTypeLingjun      NodeType = "lingjun"
+	NodeTypeECSSharedENI       NodeType = "ecs-shared-eni"
+	NodeTypeECSExclusiveENI    NodeType = "ecs-exclusive-eni"
+	NodeTypeLingjunSharedENI   NodeType = "lingjun-shared-eni"
+	NodeTypeLingjunExclusiveENI NodeType = "lingjun-exclusive-eni"
 )
 
 // NodeTypeInfo contains information about available node types in the cluster
 type NodeTypeInfo struct {
-	NormalNodes       []corev1.Node
-	ExclusiveENINodes []corev1.Node
-	LingjunNodes      []corev1.Node
-	AllNodes          []corev1.Node
+	ECSSharedENINodes         []corev1.Node
+	ECSExclusiveENINodes      []corev1.Node
+	LingjunSharedENINodes     []corev1.Node
+	LingjunExclusiveENINodes  []corev1.Node
+	AllNodes                  []corev1.Node
 }
 
 // HasTrunkNodes checks if the cluster has nodes that support trunk mode
 func (n *NodeTypeInfo) HasTrunkNodes() bool {
-	// Normal nodes and exclusive ENI nodes support trunk mode
-	// Lingjun nodes do NOT support trunk mode
-	return len(n.NormalNodes) > 0 || len(n.ExclusiveENINodes) > 0
+	// ECS nodes support trunk mode, Lingjun nodes do NOT support trunk mode
+	return len(n.ECSSharedENINodes) > 0 || len(n.ECSExclusiveENINodes) > 0
 }
 
 // HasExclusiveENINodes checks if the cluster has exclusive ENI nodes
 func (n *NodeTypeInfo) HasExclusiveENINodes() bool {
-	return len(n.ExclusiveENINodes) > 0
+	return len(n.ECSExclusiveENINodes) > 0 || len(n.LingjunExclusiveENINodes) > 0
 }
 
 // HasLingjunNodes checks if the cluster has Lingjun nodes
 func (n *NodeTypeInfo) HasLingjunNodes() bool {
-	return len(n.LingjunNodes) > 0
+	return len(n.LingjunSharedENINodes) > 0 || len(n.LingjunExclusiveENINodes) > 0
 }
 
 // GetNodesByType returns nodes of a specific type
 func (n *NodeTypeInfo) GetNodesByType(nodeType NodeType) []corev1.Node {
 	switch nodeType {
-	case NodeTypeNormal:
-		return n.NormalNodes
-	case NodeTypeExclusiveENI:
-		return n.ExclusiveENINodes
-	case NodeTypeLingjun:
-		return n.LingjunNodes
+	case NodeTypeECSSharedENI:
+		return n.ECSSharedENINodes
+	case NodeTypeECSExclusiveENI:
+		return n.ECSExclusiveENINodes
+	case NodeTypeLingjunSharedENI:
+		return n.LingjunSharedENINodes
+	case NodeTypeLingjunExclusiveENI:
+		return n.LingjunExclusiveENINodes
 	default:
 		return []corev1.Node{}
 	}
@@ -76,12 +79,14 @@ func DiscoverNodeTypes(ctx context.Context, client klient.Client) (*NodeTypeInfo
 	for _, node := range nodes.Items {
 		nodeType := classifyNode(node)
 		switch nodeType {
-		case NodeTypeNormal:
-			info.NormalNodes = append(info.NormalNodes, node)
-		case NodeTypeExclusiveENI:
-			info.ExclusiveENINodes = append(info.ExclusiveENINodes, node)
-		case NodeTypeLingjun:
-			info.LingjunNodes = append(info.LingjunNodes, node)
+		case NodeTypeECSSharedENI:
+			info.ECSSharedENINodes = append(info.ECSSharedENINodes, node)
+		case NodeTypeECSExclusiveENI:
+			info.ECSExclusiveENINodes = append(info.ECSExclusiveENINodes, node)
+		case NodeTypeLingjunSharedENI:
+			info.LingjunSharedENINodes = append(info.LingjunSharedENINodes, node)
+		case NodeTypeLingjunExclusiveENI:
+			info.LingjunExclusiveENINodes = append(info.LingjunExclusiveENINodes, node)
 		}
 	}
 
@@ -90,18 +95,23 @@ func DiscoverNodeTypes(ctx context.Context, client klient.Client) (*NodeTypeInfo
 
 // classifyNode determines the type of a node based on its labels and resources
 func classifyNode(node corev1.Node) NodeType {
-	// Check if it's a Lingjun node first
+	// Check if it's a Lingjun exclusive ENI node first (both Lingjun and exclusive ENI)
+	if isLingjunNode(node) && isExclusiveENINode(node) {
+		return NodeTypeLingjunExclusiveENI
+	}
+
+	// Check if it's a Lingjun shared ENI node
 	if isLingjunNode(node) {
-		return NodeTypeLingjun
+		return NodeTypeLingjunSharedENI
 	}
 
-	// Check if it's an exclusive ENI node
+	// Check if it's an ECS exclusive ENI node
 	if isExclusiveENINode(node) {
-		return NodeTypeExclusiveENI
+		return NodeTypeECSExclusiveENI
 	}
 
-	// Default to normal node
-	return NodeTypeNormal
+	// Default to ECS shared ENI node
+	return NodeTypeECSSharedENI
 }
 
 // isLingjunNode checks if a node is a Lingjun node
@@ -119,12 +129,19 @@ func isExclusiveENINode(node corev1.Node) bool {
 // GetNodeAffinityForType returns node affinity labels for scheduling pods to specific node types
 func GetNodeAffinityForType(nodeType NodeType) map[string]string {
 	switch nodeType {
-	case NodeTypeLingjun:
+	case NodeTypeECSSharedENI:
+		return map[string]string{}
+	case NodeTypeECSExclusiveENI:
+		return map[string]string{
+			"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
+		}
+	case NodeTypeLingjunSharedENI:
 		return map[string]string{
 			"alibabacloud.com/lingjun-worker": "true",
 		}
-	case NodeTypeExclusiveENI:
+	case NodeTypeLingjunExclusiveENI:
 		return map[string]string{
+			"alibabacloud.com/lingjun-worker":        "true",
 			"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
 		}
 	default:
@@ -135,12 +152,25 @@ func GetNodeAffinityForType(nodeType NodeType) map[string]string {
 // GetNodeAffinityExcludeForType returns node affinity exclusion labels for specific node types
 func GetNodeAffinityExcludeForType(nodeType NodeType) map[string]string {
 	switch nodeType {
-	case NodeTypeNormal:
-		// For normal nodes, exclude Lingjun and exclusive ENI nodes
+	case NodeTypeECSSharedENI:
+		// For ECS shared ENI nodes, exclude all Lingjun nodes and ECS exclusive ENI nodes
 		return map[string]string{
 			"alibabacloud.com/lingjun-worker":        "true",
 			"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
 		}
+	case NodeTypeECSExclusiveENI:
+		// For ECS exclusive ENI nodes, exclude all Lingjun nodes
+		return map[string]string{
+			"alibabacloud.com/lingjun-worker": "true",
+		}
+	case NodeTypeLingjunSharedENI:
+		// For Lingjun shared ENI nodes, exclude exclusive ENI nodes
+		return map[string]string{
+			"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
+		}
+	case NodeTypeLingjunExclusiveENI:
+		// For Lingjun exclusive ENI nodes, no exclusions needed (already precisely matched)
+		return map[string]string{}
 	default:
 		return map[string]string{}
 	}
@@ -208,11 +238,11 @@ func ValidateNodeTypeRequirements(nodeInfo *NodeTypeInfo, requiredTypes []NodeTy
 func (n *NodeTypeInfo) GetSupportedNodeTypesForTrunk() []NodeType {
 	var supported []NodeType
 
-	if len(n.NormalNodes) > 0 {
-		supported = append(supported, NodeTypeNormal)
+	if len(n.ECSSharedENINodes) > 0 {
+		supported = append(supported, NodeTypeECSSharedENI)
 	}
-	if len(n.ExclusiveENINodes) > 0 {
-		supported = append(supported, NodeTypeExclusiveENI)
+	if len(n.ECSExclusiveENINodes) > 0 {
+		supported = append(supported, NodeTypeECSExclusiveENI)
 	}
 	// Lingjun nodes do NOT support trunk mode
 
@@ -223,22 +253,25 @@ func (n *NodeTypeInfo) GetSupportedNodeTypesForTrunk() []NodeType {
 func (n *NodeTypeInfo) GetSupportedNodeTypesForExclusiveENI() []NodeType {
 	var supported []NodeType
 
-	// Check normal nodes for aliyun/eni resource
-	for _, node := range n.NormalNodes {
+	// Check ECS shared ENI nodes for aliyun/eni resource
+	for _, node := range n.ECSSharedENINodes {
 		if CheckNodeSupportsExclusiveENI(node) {
-			supported = append(supported, NodeTypeNormal)
+			supported = append(supported, NodeTypeECSSharedENI)
 			break
 		}
 	}
 
-	// Check exclusive ENI nodes
-	if len(n.ExclusiveENINodes) > 0 {
-		supported = append(supported, NodeTypeExclusiveENI)
+	// Check ECS exclusive ENI nodes
+	if len(n.ECSExclusiveENINodes) > 0 {
+		supported = append(supported, NodeTypeECSExclusiveENI)
 	}
 
 	// Lingjun nodes support exclusive ENI but don't expose aliyun/eni resource
-	if len(n.LingjunNodes) > 0 {
-		supported = append(supported, NodeTypeLingjun)
+	if len(n.LingjunSharedENINodes) > 0 {
+		supported = append(supported, NodeTypeLingjunSharedENI)
+	}
+	if len(n.LingjunExclusiveENINodes) > 0 {
+		supported = append(supported, NodeTypeLingjunExclusiveENI)
 	}
 
 	return supported
@@ -249,11 +282,11 @@ func (n *NodeTypeInfo) GetSupportedNodeTypesForMultiNetwork() []NodeType {
 	var supported []NodeType
 
 	// Multi-network does not support Lingjun nodes
-	if len(n.NormalNodes) > 0 {
-		supported = append(supported, NodeTypeNormal)
+	if len(n.ECSSharedENINodes) > 0 {
+		supported = append(supported, NodeTypeECSSharedENI)
 	}
-	if len(n.ExclusiveENINodes) > 0 {
-		supported = append(supported, NodeTypeExclusiveENI)
+	if len(n.ECSExclusiveENINodes) > 0 {
+		supported = append(supported, NodeTypeECSExclusiveENI)
 	}
 
 	return supported

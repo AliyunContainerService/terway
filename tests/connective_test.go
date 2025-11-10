@@ -39,7 +39,7 @@ type PodConfig struct {
 // generatePodConfigs generates pod configurations with proper node affinity to avoid exclusive ENI nodes
 func generatePodConfigs(testName string) []PodConfig {
 	// Get node affinity exclude labels to avoid scheduling on exclusive ENI nodes
-	nodeAffinityExclude := GetNodeAffinityExcludeForType(NodeTypeNormal)
+	nodeAffinityExclude := GetNodeAffinityExcludeForType(NodeTypeECSSharedENI)
 
 	var mutateConfig []PodConfig
 	if affinityLabel == "" {
