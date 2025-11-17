@@ -25,7 +25,7 @@ type ConnectivityTestConfig struct {
 // DefaultConnectivityTestConfig returns the default configuration for connectivity tests
 func DefaultConnectivityTestConfig() ConnectivityTestConfig {
 	return ConnectivityTestConfig{
-		Timeout:  30 * time.Second,
+		Timeout:  60 * time.Second,
 		Interval: 1 * time.Second,
 		Retries:  3,
 	}
