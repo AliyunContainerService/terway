@@ -41,12 +41,11 @@ var (
 )
 
 var (
-	regionID           string
-	testIPv4           bool
-	testIPv6           bool
-	testNetworkPolicy  bool
-	testTrunk          bool
-	testPodLevelConfig bool
+	regionID          string
+	testIPv4          bool
+	testIPv6          bool
+	testNetworkPolicy bool
+	testTrunk         bool
 
 	ipvlan bool
 
@@ -66,8 +65,7 @@ var (
 
 	nginxImage string
 
-	defaultPodNetworkingName string
-	affinityLabel            string
+	affinityLabel string
 
 	eniConfig *Config
 )
@@ -80,7 +78,6 @@ func init() {
 	flag.StringVar(&securityGroupIDs, "security-group-ids", "", "extra securityGroupIDs")
 	flag.StringVar(&affinityLabel, "label", "", "node affinity, format as key:value")
 	flag.BoolVar(&testTrunk, "enable-trunk", true, "enable trunk test")
-	defaultPodNetworkingName = "default-pn"
 }
 
 func TestMain(m *testing.M) {
@@ -207,11 +204,8 @@ func checkENIConfig(ctx context.Context, config *envconf.Config) (context.Contex
 	}
 	if !cfg.EnableENITrunking {
 		testTrunk = false
-		testPodLevelConfig = true
 	}
-	if cfg.IPAMType == "crd" {
-		testPodLevelConfig = true
-	}
+
 	if cfg.IPStack == "" || cfg.IPStack == "ipv4" || cfg.IPStack == "dual" {
 		testIPv4 = true
 	}

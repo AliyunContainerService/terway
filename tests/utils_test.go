@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"golang.org/x/mod/semver"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -912,4 +915,131 @@ func RunPodNetworkingTestSuite(t *testing.T, config PodNetworkingTestConfig) {
 		Feature()
 
 	testenv.Test(t, feature)
+}
+
+// Version check functions for test requirements
+
+var (
+	terwayDSNameOnce sync.Once
+	terwayDSName     string
+)
+
+// GetTerwayDaemonSetName returns the terway daemonset name in the cluster.
+// It caches the result since the component name is cluster-wide and won't change.
+// Returns one of: "terway-eniip", "terway-eni", "terway"
+func GetTerwayDaemonSetName(ctx context.Context, config *envconf.Config) (string, error) {
+	var err error
+	terwayDSNameOnce.Do(func() {
+		ds := &appsv1.DaemonSetList{}
+		listErr := config.Client().Resources().WithNamespace("kube-system").List(ctx, ds)
+		if listErr != nil {
+			err = fmt.Errorf("failed to list daemonsets: %w", listErr)
+			return
+		}
+		for _, d := range ds.Items {
+			switch d.Name {
+			case "terway-eniip", "terway-eni", "terway":
+				terwayDSName = d.Name
+				return
+			}
+		}
+		err = fmt.Errorf("terway daemonset not found")
+	})
+	if err != nil {
+		return "", err
+	}
+	return terwayDSName, nil
+}
+
+// GetTerwayVersion retrieves the terway version by reading the first init container's image tag from the daemonset.
+// Returns the version in semantic version format (e.g., "v1.16.1").
+// This function does not use cache and retrieves the version in real-time.
+func GetTerwayVersion(ctx context.Context, config *envconf.Config) (string, error) {
+	dsName, err := GetTerwayDaemonSetName(ctx, config)
+	if err != nil {
+		return "", err
+	}
+
+	ds := &appsv1.DaemonSet{}
+	err = config.Client().Resources().Get(ctx, dsName, "kube-system", ds)
+	if err != nil {
+		return "", fmt.Errorf("failed to get daemonset %s: %w", dsName, err)
+	}
+
+	// Get version from the first init container's image tag
+	if len(ds.Spec.Template.Spec.InitContainers) == 0 {
+		return "", fmt.Errorf("no init containers found in daemonset %s", dsName)
+	}
+
+	image := ds.Spec.Template.Spec.InitContainers[0].Image
+	parts := strings.Split(image, ":")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("invalid image format: %s", image)
+	}
+
+	version := parts[len(parts)-1]
+
+	// Validate semantic version format
+	if !semver.IsValid(version) {
+		return "", fmt.Errorf("invalid semantic version: %s", version)
+	}
+
+	return version, nil
+}
+
+// GetK8sVersion retrieves the Kubernetes cluster version from a node.
+// Returns the version in semantic version format (e.g., "v1.24.0").
+// This function does not use cache and retrieves the version in real-time.
+func GetK8sVersion(ctx context.Context, config *envconf.Config) (string, error) {
+	nodes := &corev1.NodeList{}
+	err := config.Client().Resources().List(ctx, nodes)
+	if err != nil {
+		return "", fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	if len(nodes.Items) == 0 {
+		return "", fmt.Errorf("no nodes found in cluster")
+	}
+
+	// Get version from the first node
+	version := nodes.Items[0].Status.NodeInfo.KubeletVersion
+
+	// Ensure version starts with 'v' for semantic versioning
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
+
+	// Validate semantic version format
+	if !semver.IsValid(version) {
+		return "", fmt.Errorf("invalid semantic version: %s", version)
+	}
+
+	return version, nil
+}
+
+// CheckTerwayDaemonSetName checks if the terway daemonset name matches the expected name.
+// dsName should be one of: "terway-eniip", "terway-eni", "terway"
+func CheckTerwayDaemonSetName(ctx context.Context, config *envconf.Config, expectedName string) (bool, error) {
+	actualName, err := GetTerwayDaemonSetName(ctx, config)
+	if err != nil {
+		return false, err
+	}
+	return actualName == expectedName, nil
+}
+
+// CheckTerwayVersion checks if the current terway version is greater than or equal to the required version.
+// requiredVersion can be with or without 'v' prefix, e.g., "v1.16.1" or "1.16.1"
+func CheckTerwayVersion(ctx context.Context, config *envconf.Config, requiredVersion string) (bool, error) {
+	currentVersion, err := GetTerwayVersion(ctx, config)
+	if err != nil {
+		return false, err
+	}
+
+	if !semver.IsValid(requiredVersion) {
+		return false, fmt.Errorf("invalid version format: %s", requiredVersion)
+	}
+
+	// semver.Compare returns: -1 if v < w, 0 if v == w, +1 if v > w
+	// We check if current >= required (i.e., compare >= 0)
+	return semver.Compare(currentVersion, requiredVersion) >= 0, nil
 }

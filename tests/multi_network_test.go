@@ -66,6 +66,12 @@ func (c *MultiNetworkConfig) HasCustomConfig() bool {
 
 // TestMultiNetwork tests multi-network functionality across different node types
 func TestMultiNetwork(t *testing.T) {
+	// Check terway daemonset name is terway-eniip
+	if terway != "terway-eniip" {
+		t.Logf("TestMultiNetwork requires terway-eniip daemonset, current: %s, skipping", terway)
+		return
+	}
+
 	config := NewMultiNetworkConfig()
 
 	// Test scenarios: default mode (if enabled) + custom mode (if config available)
@@ -120,6 +126,16 @@ func createMultiNetworkTestFeature(testName string, nodeType NodeType, mode stri
 	return features.New(testName).
 		WithLabel("env", "multi-network").
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		// Check terway version >= v1.16.1
+		versionOK, err := CheckTerwayVersion(ctx, config, "v1.16.1")
+		if err != nil {
+			t.Fatalf("failed to check terway version: %v", err)
+		}
+		if !versionOK {
+			terwayVersion, _ := GetTerwayVersion(ctx, config)
+			t.Skipf("TestMultiNetwork requires terway version >= v1.16.1, current version: %s", terwayVersion)
+		}
+
 			// Check if required node type is available
 			nodeInfo, err := DiscoverNodeTypes(context.Background(), config.Client())
 			if err != nil {
