@@ -274,15 +274,10 @@ func generateVeth1Cfg(cfg *types.SetupConfig, link netlink.Link, peerMAC net.Har
 }
 
 func generateHostSlaveCfg(cfg *types.SetupConfig, link netlink.Link) *nic.Conf {
-	var addrs []*netlink.Addr
 	var routes []*netlink.Route
 	var sysctl map[string][]string
 
 	if cfg.ContainerIPNet.IPv4 != nil {
-		addrs = append(addrs, &netlink.Addr{
-			IPNet: LinkIPNet,
-		})
-
 		// add route to container
 		routes = append(routes, &netlink.Route{
 			LinkIndex: link.Attrs().Index,
@@ -291,10 +286,6 @@ func generateHostSlaveCfg(cfg *types.SetupConfig, link netlink.Link) *nic.Conf {
 		})
 	}
 	if cfg.ContainerIPNet.IPv6 != nil {
-		addrs = append(addrs, &netlink.Addr{
-			IPNet: LinkIPNetv6,
-		})
-
 		routes = append(routes, &netlink.Route{
 			LinkIndex: link.Attrs().Index,
 			Scope:     netlink.SCOPE_LINK,
@@ -306,7 +297,6 @@ func generateHostSlaveCfg(cfg *types.SetupConfig, link netlink.Link) *nic.Conf {
 	contCfg := &nic.Conf{
 		IfName: cfg.HostVETHName,
 		MTU:    cfg.MTU,
-		Addrs:  addrs,
 		Routes: routes,
 		SysCtl: sysctl,
 	}

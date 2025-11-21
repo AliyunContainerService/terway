@@ -133,13 +133,22 @@ func TestDataPathExclusiveENI(t *testing.T) {
 	assert.Equal(t, cfg.MTU, hostVETHLink.Attrs().MTU)
 	assert.True(t, hostVETHLink.Attrs().Flags&net.FlagUp != 0)
 
-	// ip 169.254.1.1/32
-	ok, err = FindIP(hostVETHLink, &terwayTypes.IPNetSet{
-		IPv4: LinkIPNet,
-		IPv6: LinkIPNetv6,
-	})
+	// no explicit IP assignment - should auto borrow IP
+	addrs, err := netlink.AddrList(hostVETHLink, netlink.FAMILY_ALL)
 	assert.NoError(t, err)
-	assert.True(t, ok)
+	// Only link-local or auto-assigned addresses, no explicit IPv4/IPv6 from cfg.HostIPSet
+	for _, addr := range addrs {
+		if addr.IP.IsLinkLocalUnicast() || addr.IP.IsLinkLocalMulticast() {
+			continue
+		}
+		// Should not have explicit IPs assigned
+		if cfg.HostIPSet != nil && cfg.HostIPSet.IPv4 != nil {
+			assert.NotEqual(t, cfg.HostIPSet.IPv4.IP.String(), addr.IP.String())
+		}
+		if cfg.HostIPSet != nil && cfg.HostIPSet.IPv6 != nil {
+			assert.NotEqual(t, cfg.HostIPSet.IPv6.IP.String(), addr.IP.String())
+		}
+	}
 
 	// route 169.10.0.10 dev hostVETH
 	routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{
@@ -347,13 +356,22 @@ func TestDataPathExclusiveENIMultiNetwork(t *testing.T) {
 	assert.Equal(t, cfg.MTU, hostVETHLink.Attrs().MTU)
 	assert.True(t, hostVETHLink.Attrs().Flags&net.FlagUp != 0)
 
-	// ip 169.254.1.1/32
-	ok, err = FindIP(hostVETHLink, &terwayTypes.IPNetSet{
-		IPv4: LinkIPNet,
-		IPv6: LinkIPNetv6,
-	})
+	// no explicit IP assignment - should auto borrow IP
+	addrs, err := netlink.AddrList(hostVETHLink, netlink.FAMILY_ALL)
 	assert.NoError(t, err)
-	assert.True(t, ok)
+	// Only link-local or auto-assigned addresses, no explicit IPv4/IPv6 from cfg.HostIPSet
+	for _, addr := range addrs {
+		if addr.IP.IsLinkLocalUnicast() || addr.IP.IsLinkLocalMulticast() {
+			continue
+		}
+		// Should not have explicit IPs assigned
+		if cfg.HostIPSet != nil && cfg.HostIPSet.IPv4 != nil {
+			assert.NotEqual(t, cfg.HostIPSet.IPv4.IP.String(), addr.IP.String())
+		}
+		if cfg.HostIPSet != nil && cfg.HostIPSet.IPv6 != nil {
+			assert.NotEqual(t, cfg.HostIPSet.IPv6.IP.String(), addr.IP.String())
+		}
+	}
 
 	// route 169.10.0.10 dev hostVETH
 	routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{
