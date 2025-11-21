@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Tue, 18 Nov 2025 12:53:57 +0800
+Subject: bpf: fix hairpin
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ bpf/bpf_lxc.c            | 19 ++++++++++++++++++-
+ pkg/endpoint/endpoint.go |  4 ++++
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index 30cc8f6c19..3586ff73f6 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -1158,12 +1158,29 @@ ct_recreate4:
+ 			}
+ #endif /* ENABLE_HOST_ROUTING || ENABLE_ROUTING */
+ 			policy_clear_mark(ctx);
++
++#ifdef DATAPATH_IPVLAN
++		if (hairpin_flow) {
++			/* In ipvlan mode, the hairpin packet must be redirected back to
++			 * the ingress of the interface, otherwise it will leak out to
++			 * the host stack via the master device.
++			 *
++			 * We must perform L3 processing (MAC rewrite, TTL decrement)
++			 * before redirecting, as we are bypassing ipv4_local_delivery.
++			 */
++			ret = ipv4_l3(ctx, ETH_HLEN, (__u8 *)&ep->node_mac, (__u8 *)&ep->mac, ip4);
++			if (ret != CTX_ACT_OK)
++				return ret;
++			return ctx_redirect(ctx, ep->ifindex, BPF_F_INGRESS);
++		}
++#endif
++
+ 			/* If the packet is from L7 LB it is coming from the host */
+ 			return ipv4_local_delivery(ctx, ETH_HLEN, SECLABEL_IPV4,
+ 						   MARK_MAGIC_IDENTITY, ip4,
+ 						   ep, METRIC_EGRESS, from_l7lb,
+ 						   false, 0);
+-		}
++			}
+ 	}
+ 
+ #ifdef ENABLE_EGRESS_GATEWAY_COMMON
+diff --git a/pkg/endpoint/endpoint.go b/pkg/endpoint/endpoint.go
+index 20005f82db..82bf6eb76e 100644
+--- a/pkg/endpoint/endpoint.go
++++ b/pkg/endpoint/endpoint.go
+@@ -2675,6 +2675,10 @@ func (e *Endpoint) SetDefaultConfiguration() {
+ 		return
+ 	}
+ 	e.setDefaultPolicyConfig()
++
++	if e.DatapathConfiguration.DisableSipVerification {
++		e.Options.SetValidated(option.SourceIPVerification, option.OptionDisabled)
++	}
+ }
+ 
+ func (e *Endpoint) setDefaultPolicyConfig() {
+-- 
+2.50.1 (Apple Git-155)
+
