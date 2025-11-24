@@ -793,7 +793,19 @@ func TestReconcileNode_assignIP(t *testing.T) {
 				aliyun: tt.fields.aliyun,
 				tracer: noop.NewTracerProvider().Tracer(""),
 			}
-			tt.wantErr(t, n.assignIP(tt.args.ctx, &networkv1beta1.Node{}, tt.args.opt), fmt.Sprintf("assignIP(%v, %v)", tt.args.ctx, tt.args.opt))
+			tt.wantErr(t, n.assignIP(tt.args.ctx, &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeCap: networkv1beta1.NodeCap{
+						IPv4PerAdapter: 10,
+						IPv6PerAdapter: 10,
+					},
+					ENISpec: &networkv1beta1.ENISpec{
+						VSwitchOptions: []string{"vsw-1"},
+						EnableIPv4:     true,
+						EnableIPv6:     true,
+					},
+				},
+			}, tt.args.opt), fmt.Sprintf("assignIP(%v, %v)", tt.args.ctx, tt.args.opt))
 
 			tt.checkFunc(t, tt.args.opt)
 		})
@@ -3418,3 +3430,350 @@ var _ = Describe("Test ReconcileNode", func() {
 		})
 	})
 })
+
+func TestInitializeWarmUp(t *testing.T) {
+	tests := []struct {
+		name            string
+		node            *networkv1beta1.Node
+		expectTarget    int
+		expectCount     int
+		expectCompleted bool
+	}{
+		{
+			name: "New node with warm-up configured",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						WarmUpSize: 10,
+					},
+				},
+				Status: networkv1beta1.NodeStatus{},
+			},
+			expectTarget:    10,
+			expectCount:     0,
+			expectCompleted: false,
+		},
+		{
+			name: "Node without warm-up configured",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						WarmUpSize: 0,
+					},
+				},
+				Status: networkv1beta1.NodeStatus{},
+			},
+			expectTarget:    0,
+			expectCount:     0,
+			expectCompleted: true,
+		},
+		{
+			name: "Existing node with warm-up already initialized",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						WarmUpSize: 10,
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         5,
+					WarmUpAllocatedCount: 3,
+					WarmUpCompleted:      false,
+				},
+			},
+			expectTarget:    5,
+			expectCount:     3,
+			expectCompleted: false,
+		},
+		{
+			name: "Existing node already completed",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						WarmUpSize: 10,
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					WarmUpCompleted: true,
+				},
+			},
+			expectTarget:    0,
+			expectCount:     0,
+			expectCompleted: true,
+		},
+		{
+			name: "Node with nil pool spec",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: nil,
+				},
+				Status: networkv1beta1.NodeStatus{},
+			},
+			expectTarget:    0,
+			expectCount:     0,
+			expectCompleted: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reconciler := &ReconcileNode{}
+			reconciler.initializeWarmUp(tt.node)
+
+			assert.Equal(t, tt.expectTarget, tt.node.Status.WarmUpTarget)
+			assert.Equal(t, tt.expectCount, tt.node.Status.WarmUpAllocatedCount)
+			assert.Equal(t, tt.expectCompleted, tt.node.Status.WarmUpCompleted)
+		})
+	}
+}
+
+func TestShouldPerformWarmUp(t *testing.T) {
+	tests := []struct {
+		name     string
+		node     *networkv1beta1.Node
+		expected bool
+	}{
+		{
+			name: "Warm-up not completed and target set",
+			node: &networkv1beta1.Node{
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:    10,
+					WarmUpCompleted: false,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "Warm-up completed",
+			node: &networkv1beta1.Node{
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:    10,
+					WarmUpCompleted: true,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "No warm-up target set",
+			node: &networkv1beta1.Node{
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:    0,
+					WarmUpCompleted: false,
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reconciler := &ReconcileNode{}
+			result := reconciler.shouldPerformWarmUp(tt.node)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestCalculateWarmUpDemand(t *testing.T) {
+	tests := []struct {
+		name     string
+		node     *networkv1beta1.Node
+		expected int
+	}{
+		{
+			name: "Need more IPs for warm-up",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 10,
+					},
+					ENISpec: &networkv1beta1.ENISpec{
+						EnableIPv4: true,
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         15,
+					WarmUpAllocatedCount: 3,
+					WarmUpCompleted:      false,
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
+						"eni-1": {
+							Status: aliyunClient.ENIStatusInUse,
+							IPv4: map[string]*networkv1beta1.IP{
+								"10.0.0.1": {Primary: true, Status: networkv1beta1.IPStatusValid},
+								"10.0.0.2": {Primary: false, Status: networkv1beta1.IPStatusValid},
+								"10.0.0.3": {Primary: false, Status: networkv1beta1.IPStatusValid},
+							},
+						},
+					},
+				},
+			},
+			expected: 15, // remaining=15-3=12, currentTotal=3, min(3+12, 30)=15
+		},
+		{
+			name: "Partial warmup progress",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 10,
+					},
+					ENISpec: &networkv1beta1.ENISpec{
+						EnableIPv4: true,
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         10,
+					WarmUpAllocatedCount: 8,
+					WarmUpCompleted:      false,
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
+						"eni-1": {
+							Status: aliyunClient.ENIStatusInUse,
+							IPv4: map[string]*networkv1beta1.IP{
+								"10.0.0.1": {Primary: true, Status: networkv1beta1.IPStatusValid},
+								"10.0.0.2": {Primary: false, Status: networkv1beta1.IPStatusValid},
+								"10.0.0.3": {Primary: false, Status: networkv1beta1.IPStatusValid},
+								"10.0.0.4": {Primary: false, Status: networkv1beta1.IPStatusValid},
+								"10.0.0.5": {Primary: false, Status: networkv1beta1.IPStatusValid},
+								"10.0.0.6": {Primary: false, Status: networkv1beta1.IPStatusValid},
+								"10.0.0.7": {Primary: false, Status: networkv1beta1.IPStatusValid},
+							},
+						},
+					},
+				},
+			},
+			expected: 9, // remaining=10-8=2, currentTotal=7, min(7+2, 30)=9
+		},
+		{
+			name: "Warm-up target already reached by WarmUpAllocatedCount",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 10,
+					},
+					ENISpec: &networkv1beta1.ENISpec{
+						EnableIPv4: true,
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         5,
+					WarmUpAllocatedCount: 5,
+					WarmUpCompleted:      false,
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
+						"eni-1": {
+							Status: aliyunClient.ENIStatusInUse,
+							IPv4: map[string]*networkv1beta1.IP{
+								"10.0.0.1": {Primary: true, Status: networkv1beta1.IPStatusValid},
+								"10.0.0.2": {Primary: false, Status: networkv1beta1.IPStatusValid},
+								"10.0.0.3": {Primary: false, Status: networkv1beta1.IPStatusValid},
+							},
+						},
+					},
+				},
+			},
+			expected: 0, // remaining=5-5=0, return 0
+		},
+		{
+			name: "Warm-up completed",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 10,
+					},
+					ENISpec: &networkv1beta1.ENISpec{
+						EnableIPv4: true,
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         10,
+					WarmUpAllocatedCount: 10,
+					WarmUpCompleted:      true,
+					NetworkInterfaces:    map[string]*networkv1beta1.Nic{},
+				},
+			},
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reconciler := &ReconcileNode{}
+			result := reconciler.calculateWarmUpDemand(tt.node)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestCheckWarmUpCompletion(t *testing.T) {
+	tests := []struct {
+		name            string
+		node            *networkv1beta1.Node
+		expectCompleted bool
+	}{
+		{
+			name: "Allocated count reaches target",
+			node: &networkv1beta1.Node{
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         10,
+					WarmUpAllocatedCount: 10,
+					WarmUpCompleted:      false,
+				},
+			},
+			expectCompleted: true,
+		},
+		{
+			name: "Allocated count exceeds target",
+			node: &networkv1beta1.Node{
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         10,
+					WarmUpAllocatedCount: 15,
+					WarmUpCompleted:      false,
+				},
+			},
+			expectCompleted: true,
+		},
+		{
+			name: "Allocated count below target",
+			node: &networkv1beta1.Node{
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         10,
+					WarmUpAllocatedCount: 5,
+					WarmUpCompleted:      false,
+				},
+			},
+			expectCompleted: false,
+		},
+		{
+			name: "Already completed",
+			node: &networkv1beta1.Node{
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         10,
+					WarmUpAllocatedCount: 5,
+					WarmUpCompleted:      true,
+				},
+			},
+			expectCompleted: true,
+		},
+		{
+			name: "No warm-up target",
+			node: &networkv1beta1.Node{
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         0,
+					WarmUpAllocatedCount: 5,
+					WarmUpCompleted:      false,
+				},
+			},
+			expectCompleted: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reconciler := &ReconcileNode{}
+			reconciler.checkWarmUpCompletion(tt.node)
+			assert.Equal(t, tt.expectCompleted, tt.node.Status.WarmUpCompleted)
+		})
+	}
+}

@@ -181,6 +181,9 @@ spec:
                       jitterFactor:
                         type: string
                     type: object
+                  warmUpSize:
+                    minimum: 0
+                    type: integer
                 type: object
             type: object
           status:
@@ -308,6 +311,12 @@ spec:
               nextSyncOpenAPITime:
                 format: date-time
                 type: string
+              warmUpAllocatedCount:
+                type: integer
+              warmUpCompleted:
+                type: boolean
+              warmUpTarget:
+                type: integer
             type: object
         type: object
     served: true

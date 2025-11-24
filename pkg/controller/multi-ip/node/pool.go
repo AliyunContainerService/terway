@@ -324,6 +324,9 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 
 	var errorList []error
 
+	// initialize warm-up if needed (for new nodes or existing nodes without warm-up status)
+	n.initializeWarmUp(node)
+
 	// do not block ipam
 	err = n.syncWithAPI(ctx, node)
 	if err != nil {
@@ -590,10 +593,13 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 		errList = append(errList, err)
 	}
 
+	// 6. check and mark warm-up completion
+	n.checkWarmUpCompletion(node)
+
 	if utilerrors.NewAggregate(errList) != nil {
 		return utilerrors.NewAggregate(errList)
 	}
-	// 6. pool management sort eni and find the victim
+	// 7. pool management sort eni and find the victim
 
 	return n.adjustPool(ctx, node)
 }
@@ -826,8 +832,17 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	// before create eni , we need to check the quota
 	options := getEniOptions(node)
 
+	// Calculate total demand including warm-up
+	totalDemand := len(normalPods) + node.Spec.Pool.MinPoolSize
+	if n.shouldPerformWarmUp(node) {
+		warmUpDemand := n.calculateWarmUpDemand(node)
+		totalDemand = max(totalDemand, warmUpDemand)
+
+		logr.FromContextOrDiscard(ctx).Info("warm up", "warmUpDemand", warmUpDemand, "totalDemand", totalDemand)
+	}
+
 	// handle trunk/secondary eni
-	assignEniWithOptions(ctx, node, len(normalPods)+node.Spec.Pool.MinPoolSize, options, func(option *eniOptions) bool {
+	assignEniWithOptions(ctx, node, totalDemand, options, func(option *eniOptions) bool {
 		return n.validateENI(ctx, option, []eniTypeKey{secondaryKey, trunkKey})
 	})
 	assignEniWithOptions(ctx, node, len(rdmaPods), options, func(option *eniOptions) bool {
@@ -1439,6 +1454,11 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 	MetaCtx(ctx).Mutex.Lock()
 	node.Status.NetworkInterfaces[eni.NetworkInterfaceID] = networkInterface
 	// if changed , but we update failed , that case ,need to sync openAPI...
+
+	// Track OpenAPI allocations for warm-up
+	if !node.Status.WarmUpCompleted && node.Status.WarmUpTarget > 0 {
+		node.Status.WarmUpAllocatedCount += max(len(networkInterface.IPv4), len(networkInterface.IPv6))
+	}
 	MetaCtx(ctx).Mutex.Unlock()
 
 	MetaCtx(ctx).StatusChanged.Store(true)
@@ -1491,6 +1511,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, node *networkv1beta1.Node,
 					})
 				}
 			})
+
 			MetaCtx(ctx).Mutex.Unlock()
 
 			return err
@@ -1505,6 +1526,12 @@ func (n *ReconcileNode) assignIP(ctx context.Context, node *networkv1beta1.Node,
 					Status: networkv1beta1.IPStatusValid,
 				})
 			}
+
+			// Track OpenAPI allocations for warm-up
+			if !node.Status.WarmUpCompleted && node.Status.WarmUpTarget > 0 {
+				node.Status.WarmUpAllocatedCount += len(result)
+			}
+
 			MetaCtx(ctx).Mutex.Unlock()
 		}
 	}
@@ -1538,6 +1565,7 @@ func (n *ReconcileNode) assignIP(ctx context.Context, node *networkv1beta1.Node,
 					})
 				}
 			})
+
 			MetaCtx(ctx).Mutex.Unlock()
 
 			return err
@@ -1552,6 +1580,11 @@ func (n *ReconcileNode) assignIP(ctx context.Context, node *networkv1beta1.Node,
 					IP:     ip.IPAddress,
 					Status: networkv1beta1.IPStatusValid,
 				})
+			}
+
+			// Track OpenAPI allocations for warm-up
+			if !node.Spec.ENISpec.EnableIPv4 && !node.Status.WarmUpCompleted && node.Status.WarmUpTarget > 0 {
+				node.Status.WarmUpAllocatedCount += len(result)
 			}
 			MetaCtx(ctx).Mutex.Unlock()
 		}
@@ -1905,4 +1938,87 @@ func (n *ReconcileNode) waitIPGone(ctx context.Context, eni *networkv1beta1.Nic,
 		})
 		return !unfinished, nil
 	})
+}
+
+// initializeWarmUp initializes warm-up status for nodes
+// For new nodes with warm-up configured: set up tracking
+// For existing nodes without warm-up config or already initialized: mark as completed
+func (n *ReconcileNode) initializeWarmUp(node *networkv1beta1.Node) {
+	if node.Spec.Pool == nil {
+		return
+	}
+
+	warmUpSize := node.Spec.Pool.WarmUpSize
+
+	// For existing nodes that already have warm-up status initialized, do nothing
+	if node.Status.WarmUpTarget > 0 || node.Status.WarmUpCompleted {
+		return
+	}
+
+	// If no warm-up configured, mark as completed immediately
+	if warmUpSize <= 0 {
+		node.Status.WarmUpCompleted = true
+		return
+	}
+
+	// New node with warm-up configured
+	node.Status.WarmUpTarget = warmUpSize
+	node.Status.WarmUpAllocatedCount = 0
+	node.Status.WarmUpCompleted = false
+}
+
+// shouldPerformWarmUp checks if warm-up should be performed
+func (n *ReconcileNode) shouldPerformWarmUp(node *networkv1beta1.Node) bool {
+	if node.Status.WarmUpCompleted {
+		return false
+	}
+	if node.Status.WarmUpTarget <= 0 {
+		return false
+	}
+	return true
+}
+
+// calculateWarmUpDemand calculates the total IP demand for warm-up
+// Warmup progress is tracked via WarmUpAllocatedCount, not by counting current IPs
+// Returns total demand (currentIPs + remaining) for assignEniWithOptions
+func (n *ReconcileNode) calculateWarmUpDemand(node *networkv1beta1.Node) int {
+	if !n.shouldPerformWarmUp(node) {
+		return 0
+	}
+
+	// Calculate remaining IPs to allocate based on WarmUpAllocatedCount
+	remaining := node.Status.WarmUpTarget - node.Status.WarmUpAllocatedCount
+	if remaining <= 0 {
+		return 0
+	}
+
+	// Count current IPs to calculate total demand for assignEniWithOptions
+	// (assignEniWithOptions expects total and subtracts existing IPs internally)
+	currentTotal := 0
+	for _, eni := range node.Status.NetworkInterfaces {
+		if eni.Status != aliyunClient.ENIStatusInUse {
+			continue
+		}
+		if node.Spec.ENISpec.EnableIPv4 {
+			currentTotal += len(getAllocatable(eni.IPv4))
+		} else if node.Spec.ENISpec.EnableIPv6 {
+			currentTotal += len(getAllocatable(eni.IPv6))
+		}
+	}
+
+	return currentTotal + remaining
+}
+
+// checkWarmUpCompletion checks if warm-up has been completed and marks it
+func (n *ReconcileNode) checkWarmUpCompletion(node *networkv1beta1.Node) {
+	if node.Status.WarmUpCompleted {
+		return
+	}
+	if node.Status.WarmUpTarget <= 0 {
+		return
+	}
+
+	if node.Status.WarmUpAllocatedCount >= node.Status.WarmUpTarget {
+		node.Status.WarmUpCompleted = true
+	}
 }
