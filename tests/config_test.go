@@ -24,6 +24,25 @@ func TestIPPool(t *testing.T) {
 				t.Skipf("skip ipam type not crd")
 			}
 
+			// Check terway daemonset name is terway-eniip
+			isTerwayENIIP, err := CheckTerwayDaemonSetName(ctx, config, "terway-eniip")
+			if err != nil {
+				t.Fatalf("failed to check terway daemonset name: %v", err)
+			}
+			if !isTerwayENIIP {
+				t.Skipf("TestIPPool requires terway-eniip daemonset")
+			}
+
+		// Check terway version >= v1.16.1
+		versionOK, err := CheckTerwayVersion(ctx, config, "v1.16.1")
+		if err != nil {
+			t.Fatalf("failed to check terway version: %v", err)
+		}
+		if !versionOK {
+			terwayVersion, _ := GetTerwayVersion(ctx, config)
+			t.Skipf("TestIPPool requires terway version >= v1.16.1, current version: %s", terwayVersion)
+		}
+
 			return ctx
 		}).
 		Assess("step 1: test release all idles", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {

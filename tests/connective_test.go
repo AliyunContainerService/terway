@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -219,6 +220,13 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 		t.Log("Skip networkPolicy tests")
 		return
 	}
+
+	// Check terway daemonset name is terway-eniip (no version requirement)
+	if terway != "terway-eniip" {
+		t.Logf("TestNormal_NetworkPolicy requires terway-eniip daemonset, current: %s, skipping", terway)
+		return
+	}
+
 	var feats []features.Feature
 
 	mutateConfig := generatePodConfigs("NetworkPolicy")
@@ -539,6 +547,12 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 }
 
 func TestNormal_HostPort(t *testing.T) {
+	// Check terway daemonset name is terway-eniip
+	if terway != "terway-eniip" {
+		t.Logf("TestNormal_HostPort requires terway-eniip daemonset, current: %s, skipping", terway)
+		return
+	}
+
 	var feats []features.Feature
 
 	mutateConfig := generatePodConfigs("HostPort")
@@ -556,6 +570,28 @@ func TestNormal_HostPort(t *testing.T) {
 		// Case 1: Node access node IP + port
 		hostPortNodeIP := features.New(fmt.Sprintf("HostPort/NodeIP-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+				// Check terway version >= v1.15.0
+				versionOK, err := CheckTerwayVersion(ctx, config, "v1.15.0")
+				if err != nil {
+					t.Fatalf("failed to check terway version: %v", err)
+				}
+				if !versionOK {
+					terwayVersion, _ := GetTerwayVersion(ctx, config)
+					t.Skipf("TestNormal_HostPort requires terway version >= v1.15.0, current version: %s", terwayVersion)
+				}
+
+				// Check k8s version >= v1.34.0
+				k8sVersion, err := GetK8sVersion(ctx, config)
+				if err != nil {
+					t.Fatalf("failed to get k8s version: %v", err)
+				}
+				if !semver.IsValid(k8sVersion) {
+					t.Fatalf("invalid k8s version: %s", k8sVersion)
+				}
+				if semver.Compare(k8sVersion, "v1.34.0") < 0 {
+					t.Skipf("TestNormal_HostPort requires k8s version >= v1.34.0, current version: %s", k8sVersion)
+				}
+
 				var objs []k8s.Object
 
 				// Create server pod with hostPort
@@ -564,7 +600,7 @@ func TestNormal_HostPort(t *testing.T) {
 					WithContainer("server", nginxImage, nil).
 					WithHostPort(80, 8080))
 
-				err := config.Client().Resources().Create(ctx, server.Pod)
+				err = config.Client().Resources().Create(ctx, server.Pod)
 				if err != nil {
 					t.Error(err)
 					t.FailNow()
@@ -643,6 +679,28 @@ func TestNormal_HostPort(t *testing.T) {
 		// Case 2: Node access node external IP + port
 		hostPortExternalIP := features.New(fmt.Sprintf("HostPort/ExternalIP-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+				// Check terway version >= v1.15.0
+				versionOK, err := CheckTerwayVersion(ctx, config, "v1.15.0")
+				if err != nil {
+					t.Fatalf("failed to check terway version: %v", err)
+				}
+				if !versionOK {
+					terwayVersion, _ := GetTerwayVersion(ctx, config)
+					t.Skipf("TestNormal_HostPort requires terway version >= v1.15.0, current version: %s", terwayVersion)
+				}
+
+				// Check k8s version >= v1.34.0
+				k8sVersion, err := GetK8sVersion(ctx, config)
+				if err != nil {
+					t.Fatalf("failed to get k8s version: %v", err)
+				}
+				if !semver.IsValid(k8sVersion) {
+					t.Fatalf("invalid k8s version: %s", k8sVersion)
+				}
+				if semver.Compare(k8sVersion, "v1.34.0") < 0 {
+					t.Skipf("TestNormal_HostPort requires k8s version >= v1.34.0, current version: %s", k8sVersion)
+				}
+
 				var objs []k8s.Object
 
 				// Create server pod with hostPort on different port
@@ -651,7 +709,7 @@ func TestNormal_HostPort(t *testing.T) {
 					WithContainer("server", nginxImage, nil).
 					WithHostPort(80, 8081))
 
-				err := config.Client().Resources().Create(ctx, server.Pod)
+				err = config.Client().Resources().Create(ctx, server.Pod)
 				if err != nil {
 					t.Error(err)
 					t.FailNow()
