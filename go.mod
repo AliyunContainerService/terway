@@ -21,7 +21,7 @@ require (
 	github.com/coreos/go-iptables v0.6.0
 	github.com/evanphx/json-patch v5.6.0+incompatible
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/go-logr/logr v1.4.2
+	github.com/go-logr/logr v1.4.3
 	github.com/go-playground/mold/v4 v4.2.0
 	github.com/go-playground/validator/v10 v10.11.1
 	github.com/google/go-cmp v0.7.0
