@@ -126,15 +126,15 @@ func createMultiNetworkTestFeature(testName string, nodeType NodeType, mode stri
 	return features.New(testName).
 		WithLabel("env", "multi-network").
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-		// Check terway version >= v1.16.1
-		versionOK, err := CheckTerwayVersion(ctx, config, "v1.16.1")
-		if err != nil {
-			t.Fatalf("failed to check terway version: %v", err)
-		}
-		if !versionOK {
-			terwayVersion, _ := GetTerwayVersion(ctx, config)
-			t.Skipf("TestMultiNetwork requires terway version >= v1.16.1, current version: %s", terwayVersion)
-		}
+			// Check terway version >= v1.16.1
+			versionOK, err := CheckTerwayVersion(ctx, config, "v1.16.1")
+			if err != nil {
+				t.Fatalf("failed to check terway version: %v", err)
+			}
+			if !versionOK {
+				terwayVersion, _ := GetTerwayVersion(ctx, config)
+				t.Skipf("TestMultiNetwork requires terway version >= v1.16.1, current version: %s", terwayVersion)
+			}
 
 			// Check if required node type is available
 			nodeInfo, err := DiscoverNodeTypes(context.Background(), config.Client())
@@ -145,6 +145,11 @@ func createMultiNetworkTestFeature(testName string, nodeType NodeType, mode stri
 			requiredNodes := nodeInfo.GetNodesByType(nodeType)
 			if len(requiredNodes) == 0 {
 				t.Skipf("No nodes of type %s available", nodeType)
+			}
+
+			switch nodeType {
+			case NodeTypeLingjunSharedENI, NodeTypeLingjunExclusiveENI:
+				t.Skipf("Lingjun nodes are not supported yet")
 			}
 
 			// Create primary PodNetworking (always use default config)

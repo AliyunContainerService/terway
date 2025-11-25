@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/e2e-framework/klient"
 )
 
@@ -17,19 +17,19 @@ import (
 type NodeType string
 
 const (
-	NodeTypeECSSharedENI       NodeType = "ecs-shared-eni"
-	NodeTypeECSExclusiveENI    NodeType = "ecs-exclusive-eni"
-	NodeTypeLingjunSharedENI   NodeType = "lingjun-shared-eni"
+	NodeTypeECSSharedENI        NodeType = "ecs-shared-eni"
+	NodeTypeECSExclusiveENI     NodeType = "ecs-exclusive-eni"
+	NodeTypeLingjunSharedENI    NodeType = "lingjun-shared-eni"
 	NodeTypeLingjunExclusiveENI NodeType = "lingjun-exclusive-eni"
 )
 
 // NodeTypeInfo contains information about available node types in the cluster
 type NodeTypeInfo struct {
-	ECSSharedENINodes         []corev1.Node
-	ECSExclusiveENINodes      []corev1.Node
-	LingjunSharedENINodes     []corev1.Node
-	LingjunExclusiveENINodes  []corev1.Node
-	AllNodes                  []corev1.Node
+	ECSSharedENINodes        []corev1.Node
+	ECSExclusiveENINodes     []corev1.Node
+	LingjunSharedENINodes    []corev1.Node
+	LingjunExclusiveENINodes []corev1.Node
+	AllNodes                 []corev1.Node
 }
 
 // HasTrunkNodes checks if the cluster has nodes that support trunk mode
@@ -96,17 +96,17 @@ func DiscoverNodeTypes(ctx context.Context, client klient.Client) (*NodeTypeInfo
 // classifyNode determines the type of a node based on its labels and resources
 func classifyNode(node corev1.Node) NodeType {
 	// Check if it's a Lingjun exclusive ENI node first (both Lingjun and exclusive ENI)
-	if isLingjunNode(node) && isExclusiveENINode(node) {
+	if isLingjunNode(&node) && isExclusiveENINode(&node) {
 		return NodeTypeLingjunExclusiveENI
 	}
 
 	// Check if it's a Lingjun shared ENI node
-	if isLingjunNode(node) {
+	if isLingjunNode(&node) {
 		return NodeTypeLingjunSharedENI
 	}
 
 	// Check if it's an ECS exclusive ENI node
-	if isExclusiveENINode(node) {
+	if isExclusiveENINode(&node) {
 		return NodeTypeECSExclusiveENI
 	}
 
@@ -115,15 +115,13 @@ func classifyNode(node corev1.Node) NodeType {
 }
 
 // isLingjunNode checks if a node is a Lingjun node
-func isLingjunNode(node corev1.Node) bool {
-	value, exists := node.Labels["alibabacloud.com/lingjun-worker"]
-	return exists && value == "true"
+func isLingjunNode(node metav1.Object) bool {
+	return node.GetLabels()["alibabacloud.com/lingjun-worker"] == "true"
 }
 
 // isExclusiveENINode checks if a node is configured for exclusive ENI mode
-func isExclusiveENINode(node corev1.Node) bool {
-	value, exists := node.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]
-	return exists && value == "eniOnly"
+func isExclusiveENINode(node metav1.Object) bool {
+	return node.GetLabels()["k8s.aliyun.com/exclusive-mode-eni-type"] == "eniOnly"
 }
 
 // GetNodeAffinityForType returns node affinity labels for scheduling pods to specific node types
@@ -181,29 +179,6 @@ func CheckNodeSupportsExclusiveENI(node corev1.Node) bool {
 	// Check if the node has aliyun/eni resource
 	r := node.Status.Allocatable.Name("aliyun/eni", resource.DecimalSI)
 	return r != nil && !r.IsZero()
-}
-
-// CheckNodeSupportsTrunk checks if a node supports trunk mode
-func CheckNodeSupportsTrunk(node corev1.Node) bool {
-	// Lingjun nodes do not support trunk mode
-	if isLingjunNode(node) {
-		return false
-	}
-	// All other nodes support trunk mode
-	return true
-}
-
-// ShouldExcludeNodeForIdleIPCheck checks if a node should be excluded from idle IP count checks
-func ShouldExcludeNodeForIdleIPCheck(node *networkv1beta1.Node) bool {
-	// Exclude Lingjun nodes
-	if val, ok := node.Labels["alibabacloud.com/lingjun-worker"]; ok && val == "true" {
-		return true
-	}
-	// Exclude exclusive ENI nodes
-	if val, ok := node.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]; ok && val == "eniOnly" {
-		return true
-	}
-	return false
 }
 
 // GetRandomNodeOfType returns a random node of the specified type
