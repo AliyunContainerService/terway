@@ -227,6 +227,7 @@ spec:
                               address.
                             enum:
                             - Valid
+                            - Invalid
                             - Deleting
                             type: string
                         required:
@@ -257,6 +258,7 @@ spec:
                               address.
                             enum:
                             - Valid
+                            - Invalid
                             - Deleting
                             type: string
                         required:

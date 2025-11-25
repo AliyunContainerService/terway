@@ -168,8 +168,19 @@ func mergeIPMap(log logr.Logger, remote, current map[string]*networkv1beta1.IP) 
 	for k := range current {
 		_, ok := remote[k]
 		if !ok {
-			log.Info("sync eni with remote, delete ip from local", "ip", k)
-			delete(current, k)
+			ip := current[k]
+			if ip.Primary {
+				log.Error(nil, "primary ip not in remote, but can not delete it", "ip", k)
+				continue
+			}
+
+			if ip.PodID != "" {
+				ip.Status = networkv1beta1.IPStatusInvalid
+				log.Info("ip not in remote,but in use mark as invalid", "ip", k)
+			} else {
+				log.Info("sync eni with remote, delete ip from local", "ip", k)
+				delete(current, k)
+			}
 		}
 	}
 

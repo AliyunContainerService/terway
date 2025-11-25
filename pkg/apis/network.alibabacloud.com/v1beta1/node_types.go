@@ -30,11 +30,12 @@ const (
 )
 
 // IPStatus representing the status of an IP address.
-// +kubebuilder:validation:Enum=Valid;Deleting
+// +kubebuilder:validation:Enum=Valid;Invalid;Deleting
 type IPStatus string
 
 const (
 	IPStatusValid    IPStatus = "Valid"
+	IPStatusInvalid  IPStatus = "Invalid"
 	IPStatusDeleting IPStatus = "Deleting"
 )
 

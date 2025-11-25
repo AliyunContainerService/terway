@@ -646,6 +646,9 @@ func releasePodNotFound(ctx context.Context, c client.Client, nodeName string, p
 			l.Info("pod released", "pod", v.IP.PodID, "ip", v.IP.IP)
 			v.IP.PodID = ""
 			v.IP.PodUID = ""
+			if v.IP.Status == networkv1beta1.IPStatusInvalid && !v.IP.Primary {
+				v.IP.Status = networkv1beta1.IPStatusDeleting
+			}
 		}
 	}
 }

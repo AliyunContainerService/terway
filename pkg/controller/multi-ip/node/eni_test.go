@@ -227,6 +227,75 @@ func Test_mergeIPMap(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "eflo ip not found in temote but in use",
+			args: args{
+				log: logr.Discard(),
+				remote: map[string]*networkv1beta1.IP{
+					"ipName": {
+						IP:     "",
+						IPName: "ipName",
+						Status: networkv1beta1.IPStatusDeleting,
+					},
+					"ipName2": {
+						IP:     "127.0.0.1",
+						IPName: "ipName2",
+						Status: networkv1beta1.IPStatusValid,
+					},
+				},
+				current: map[string]*networkv1beta1.IP{
+					"1": {
+						IP:     "1",
+						PodID:  "foo",
+						PodUID: "bar",
+						Status: networkv1beta1.IPStatusValid,
+					},
+				},
+			},
+			expect: map[string]*networkv1beta1.IP{
+				"ipName": {
+					IP:     "",
+					IPName: "ipName",
+					Status: networkv1beta1.IPStatusDeleting,
+				},
+				"ipName2": {
+					IP:     "127.0.0.1",
+					IPName: "ipName2",
+					Status: networkv1beta1.IPStatusValid,
+				},
+				"1": {
+					IP:     "1",
+					PodID:  "foo",
+					PodUID: "bar",
+					Status: networkv1beta1.IPStatusInvalid,
+				},
+			},
+		},
+		{
+			name: "primary case",
+			args: args{
+				log: logr.Discard(),
+				remote: map[string]*networkv1beta1.IP{
+					// somehow primary ip is not in remote
+				},
+				current: map[string]*networkv1beta1.IP{
+					"ipName": {
+						IP:      "",
+						IPName:  "ipName",
+						Primary: true,
+						Status:  networkv1beta1.IPStatusValid,
+					},
+				},
+			},
+			expect: map[string]*networkv1beta1.IP{
+				"ipName": {
+					IP:      "",
+					IPName:  "ipName",
+					Primary: true,
+					Status:  networkv1beta1.IPStatusValid,
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
