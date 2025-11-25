@@ -1,6 +1,7 @@
 package deviceplugin
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/apimachinery/pkg/util/wait"
