@@ -266,3 +266,23 @@ func (n *NodeTypeInfo) GetSupportedNodeTypesForMultiNetwork() []NodeType {
 
 	return supported
 }
+
+// HasNoKubeProxyLabel checks if any node has the no-kube-proxy label
+// indicating kube-proxy replacement is enabled (Datapath V2)
+func (n *NodeTypeInfo) HasNoKubeProxyLabel() bool {
+	for _, node := range n.AllNodes {
+		if node.Labels["k8s.aliyun.com/no-kube-proxy"] == "true" {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckNoKubeProxyLabel checks if the cluster has nodes with kube-proxy replacement enabled
+func CheckNoKubeProxyLabel(ctx context.Context, client klient.Client) (bool, error) {
+	nodeInfo, err := DiscoverNodeTypes(ctx, client)
+	if err != nil {
+		return false, err
+	}
+	return nodeInfo.HasNoKubeProxyLabel(), nil
+}

@@ -546,6 +546,12 @@ func TestNormal_NetworkPolicy(t *testing.T) {
 	}
 }
 
+// hostPortTestState stores state for HostPort test configuration and restoration
+type hostPortTestState struct {
+	backup     *ENIConfigBackup
+	configured bool
+}
+
 func TestNormal_HostPort(t *testing.T) {
 	// Check terway daemonset name is terway-eniip
 	if terway != "terway-eniip" {
@@ -554,6 +560,7 @@ func TestNormal_HostPort(t *testing.T) {
 	}
 
 	var feats []features.Feature
+	state := &hostPortTestState{}
 
 	mutateConfig := generatePodConfigs("HostPort")
 	if mutateConfig == nil {
@@ -590,6 +597,45 @@ func TestNormal_HostPort(t *testing.T) {
 				}
 				if semver.Compare(k8sVersion, "v1.34.0") < 0 {
 					t.Skipf("TestNormal_HostPort requires k8s version >= v1.34.0, current version: %s", k8sVersion)
+				}
+
+				// Check if nodes have no-kube-proxy label (kube-proxy replacement / Datapath V2)
+				hasNoKubeProxy, err := CheckNoKubeProxyLabel(ctx, config.Client())
+				if err != nil {
+					t.Fatalf("failed to check no-kube-proxy label: %v", err)
+				}
+
+				if hasNoKubeProxy {
+					t.Log("Node has k8s.aliyun.com/no-kube-proxy=true label, HostPort can be tested directly")
+				} else {
+					t.Log("Node does not have k8s.aliyun.com/no-kube-proxy=true label, configuring CNI chain with portmap plugin")
+
+					// Backup current eni-config
+					state.backup, err = BackupENIConfig(ctx, config)
+					if err != nil {
+						t.Fatalf("failed to backup eni-config: %v", err)
+					}
+
+					// Check if Datapath V2 is enabled
+					isDatapathV2, err := IsDatapathV2Enabled(ctx, config)
+					if err != nil {
+						t.Fatalf("failed to check datapath v2: %v", err)
+					}
+
+					// Configure CNI chain with portmap plugin
+					err = ConfigureHostPortCNIChain(ctx, config, isDatapathV2)
+					if err != nil {
+						t.Fatalf("failed to configure CNI chain for HostPort: %v", err)
+					}
+
+					// Restart terway to apply new configuration
+					err = restartTerway(ctx, config)
+					if err != nil {
+						t.Fatalf("failed to restart terway: %v", err)
+					}
+
+					state.configured = true
+					t.Log("CNI chain configured with portmap plugin and terway restarted")
 				}
 
 				var objs []k8s.Object
@@ -701,6 +747,76 @@ func TestNormal_HostPort(t *testing.T) {
 					t.Skipf("TestNormal_HostPort requires k8s version >= v1.34.0, current version: %s", k8sVersion)
 				}
 
+				// Check if any node has external IP before running the test
+				nodes := &corev1.NodeList{}
+				err = config.Client().Resources().List(ctx, nodes)
+				if err != nil {
+					t.Fatalf("failed to list nodes: %v", err)
+				}
+
+				hasExternalIP := false
+				for _, node := range nodes.Items {
+					for _, stack := range getStack() {
+						isIPv6 := stack == "ipv6"
+						_, externalIP := getNodeIPs(&node, isIPv6)
+						if externalIP != "" {
+							hasExternalIP = true
+							break
+						}
+					}
+					if hasExternalIP {
+						break
+					}
+				}
+
+				if !hasExternalIP {
+					t.Skipf("No node has external IP, skipping HostPort/ExternalIP test")
+				}
+
+				// Check if nodes have no-kube-proxy label (kube-proxy replacement / Datapath V2)
+				hasNoKubeProxy, err := CheckNoKubeProxyLabel(ctx, config.Client())
+				if err != nil {
+					t.Fatalf("failed to check no-kube-proxy label: %v", err)
+				}
+
+				if hasNoKubeProxy {
+					t.Log("Node has k8s.aliyun.com/no-kube-proxy=true label, HostPort can be tested directly")
+				} else {
+					// Only configure if not already configured by the first test case
+					if !state.configured {
+						t.Log("Node does not have k8s.aliyun.com/no-kube-proxy=true label, configuring CNI chain with portmap plugin")
+
+						// Backup current eni-config
+						state.backup, err = BackupENIConfig(ctx, config)
+						if err != nil {
+							t.Fatalf("failed to backup eni-config: %v", err)
+						}
+
+						// Check if Datapath V2 is enabled
+						isDatapathV2, err := IsDatapathV2Enabled(ctx, config)
+						if err != nil {
+							t.Fatalf("failed to check datapath v2: %v", err)
+						}
+
+						// Configure CNI chain with portmap plugin
+						err = ConfigureHostPortCNIChain(ctx, config, isDatapathV2)
+						if err != nil {
+							t.Fatalf("failed to configure CNI chain for HostPort: %v", err)
+						}
+
+						// Restart terway to apply new configuration
+						err = restartTerway(ctx, config)
+						if err != nil {
+							t.Fatalf("failed to restart terway: %v", err)
+						}
+
+						state.configured = true
+						t.Log("CNI chain configured with portmap plugin and terway restarted")
+					} else {
+						t.Log("CNI chain already configured with portmap plugin from previous test case")
+					}
+				}
+
 				var objs []k8s.Object
 
 				// Create server pod with hostPort on different port
@@ -783,12 +899,34 @@ func TestNormal_HostPort(t *testing.T) {
 
 				return MarkTestSuccess(ctx)
 			}).
+			Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+				// Restore eni-config if we configured it (do this in the last feature's teardown)
+				if state.configured && state.backup != nil {
+					err := RestoreENIConfig(ctx, config, state.backup)
+					if err != nil {
+						t.Logf("Warning: failed to restore eni-config: %v", err)
+					} else {
+						t.Log("Restored original eni-config")
+						// Restart terway to apply restored configuration
+						err = restartTerway(ctx, config)
+						if err != nil {
+							t.Logf("Warning: failed to restart terway after restoration: %v", err)
+						} else {
+							t.Log("Terway restarted with restored configuration")
+						}
+					}
+					state.configured = false
+					state.backup = nil
+				}
+				return ctx
+			}).
 			Feature()
 
 		feats = append(feats, hostPortNodeIP, hostPortExternalIP)
 	}
 
 	testenv.Test(t, feats...)
+
 	if t.Failed() {
 		isFailed.Store(true)
 	}
