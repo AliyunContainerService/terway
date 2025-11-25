@@ -286,3 +286,60 @@ func CheckNoKubeProxyLabel(ctx context.Context, client klient.Client) (bool, err
 	}
 	return nodeInfo.HasNoKubeProxyLabel(), nil
 }
+
+// ENIResourceInfo contains information about ENI resources across all nodes
+type ENIResourceInfo struct {
+	// TotalExclusiveENI is the total allocatable aliyun/eni resources across all nodes
+	TotalExclusiveENI int64
+	// TotalMemberENI is the total allocatable aliyun/member-eni resources across all nodes
+	TotalMemberENI int64
+	// NodesWithExclusiveENI contains nodes that have aliyun/eni > 0
+	NodesWithExclusiveENI []corev1.Node
+	// NodesWithMemberENI contains nodes that have aliyun/member-eni > 0
+	NodesWithMemberENI []corev1.Node
+}
+
+// HasExclusiveENIResource returns true if any node has aliyun/eni resource
+func (e *ENIResourceInfo) HasExclusiveENIResource() bool {
+	return e.TotalExclusiveENI > 0
+}
+
+// HasMemberENIResource returns true if any node has aliyun/member-eni resource
+func (e *ENIResourceInfo) HasMemberENIResource() bool {
+	return e.TotalMemberENI > 0
+}
+
+// DiscoverENIResources discovers ENI resources across all nodes in the cluster
+func DiscoverENIResources(ctx context.Context, client klient.Client) (*ENIResourceInfo, error) {
+	nodes := &corev1.NodeList{}
+	err := client.Resources().List(ctx, nodes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	info := &ENIResourceInfo{}
+
+	for _, node := range nodes.Items {
+		// Check aliyun/eni resource (exclusive ENI mode)
+		exclusiveENI := node.Status.Allocatable.Name("aliyun/eni", resource.DecimalSI)
+		if exclusiveENI != nil && !exclusiveENI.IsZero() {
+			info.TotalExclusiveENI += exclusiveENI.Value()
+			info.NodesWithExclusiveENI = append(info.NodesWithExclusiveENI, node)
+		}
+
+		// Check aliyun/member-eni resource (trunk mode)
+		memberENI := node.Status.Allocatable.Name("aliyun/member-eni", resource.DecimalSI)
+		if memberENI != nil && !memberENI.IsZero() {
+			info.TotalMemberENI += memberENI.Value()
+			info.NodesWithMemberENI = append(info.NodesWithMemberENI, node)
+		}
+	}
+
+	return info, nil
+}
+
+// CheckENIResourcesForPodNetworking checks if the cluster has sufficient ENI resources
+// for PodNetworking tests. Returns true if at least one of the resources is available.
+func CheckENIResourcesForPodNetworking(ctx context.Context, client klient.Client) (*ENIResourceInfo, error) {
+	return DiscoverENIResources(ctx, client)
+}

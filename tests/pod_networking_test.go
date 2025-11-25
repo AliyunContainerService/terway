@@ -4,6 +4,8 @@ package tests
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,8 +21,34 @@ import (
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 )
 
+// checkENIResourcesBeforeTest checks if the cluster has sufficient ENI resources for PodNetworking tests
+func checkENIResourcesBeforeTest(t *testing.T) *ENIResourceInfo {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("failed to get home directory: %v", err)
+	}
+	cfg := envconf.NewWithKubeConfig(filepath.Join(home, ".kube", "config"))
+
+	ctx := context.Background()
+	eniInfo, err := CheckENIResourcesForPodNetworking(ctx, cfg.Client())
+	if err != nil {
+		t.Fatalf("failed to check ENI resources: %v", err)
+	}
+
+	t.Logf("ENI Resources - Exclusive ENI (aliyun/eni): %d, Member ENI (aliyun/member-eni): %d",
+		eniInfo.TotalExclusiveENI, eniInfo.TotalMemberENI)
+
+	return eniInfo
+}
+
 // TestPodNetworking_TrunkMode tests Trunk ENI attach type
 func TestPodNetworking_TrunkMode(t *testing.T) {
+	// Check if cluster has aliyun/member-eni resource for trunk mode
+	eniInfo := checkENIResourcesBeforeTest(t)
+	if !eniInfo.HasMemberENIResource() {
+		t.Skipf("TestPodNetworking_TrunkMode requires aliyun/member-eni resource, but no nodes have it (total: %d)", eniInfo.TotalMemberENI)
+	}
+
 	config := DefaultPodNetworkingTestConfig().
 		WithENIAttachType(networkv1beta1.ENIOptionTypeTrunk).
 		WithExpectedENIType(networkv1beta1.ENITypeMember)
@@ -30,6 +58,12 @@ func TestPodNetworking_TrunkMode(t *testing.T) {
 
 // TestPodNetworking_ExclusiveENIMode tests Exclusive ENI attach type
 func TestPodNetworking_ExclusiveENIMode(t *testing.T) {
+	// Check if cluster has aliyun/eni resource for exclusive mode
+	eniInfo := checkENIResourcesBeforeTest(t)
+	if !eniInfo.HasExclusiveENIResource() {
+		t.Skipf("TestPodNetworking_ExclusiveENIMode requires aliyun/eni resource, but no nodes have it (total: %d)", eniInfo.TotalExclusiveENI)
+	}
+
 	config := DefaultPodNetworkingTestConfig().
 		WithENIAttachType(networkv1beta1.ENIOptionTypeENI).
 		WithExpectedENIType(networkv1beta1.ENITypeSecondary)
@@ -39,6 +73,13 @@ func TestPodNetworking_ExclusiveENIMode(t *testing.T) {
 
 // TestPodNetworking_DefaultMode tests Default ENI attach type (auto-selection)
 func TestPodNetworking_DefaultMode(t *testing.T) {
+	// Check if cluster has any ENI resources (either exclusive or member)
+	eniInfo := checkENIResourcesBeforeTest(t)
+	if !eniInfo.HasExclusiveENIResource() && !eniInfo.HasMemberENIResource() {
+		t.Skipf("TestPodNetworking_DefaultMode requires either aliyun/eni or aliyun/member-eni resource, but no nodes have them (exclusive: %d, member: %d)",
+			eniInfo.TotalExclusiveENI, eniInfo.TotalMemberENI)
+	}
+
 	config := DefaultPodNetworkingTestConfig().
 		WithENIAttachType(networkv1beta1.ENIOptionTypeDefault)
 	// No expected ENI type for default mode as it auto-selects
@@ -48,6 +89,12 @@ func TestPodNetworking_DefaultMode(t *testing.T) {
 
 // TestPodNetworking_PodSelector tests pod selector matching
 func TestPodNetworking_PodSelector(t *testing.T) {
+	// Check if cluster has aliyun/member-eni resource for trunk mode
+	eniInfo := checkENIResourcesBeforeTest(t)
+	if !eniInfo.HasMemberENIResource() {
+		t.Skipf("TestPodNetworking_PodSelector requires aliyun/member-eni resource, but no nodes have it (total: %d)", eniInfo.TotalMemberENI)
+	}
+
 	pnName := "pod-selector-pn"
 
 	feature := features.New("PodNetworking/PodSelector").
@@ -142,6 +189,12 @@ func TestPodNetworking_PodSelector(t *testing.T) {
 
 // TestPodNetworking_NamespaceSelector tests namespace selector matching
 func TestPodNetworking_NamespaceSelector(t *testing.T) {
+	// Check if cluster has aliyun/member-eni resource for trunk mode
+	eniInfo := checkENIResourcesBeforeTest(t)
+	if !eniInfo.HasMemberENIResource() {
+		t.Skipf("TestPodNetworking_NamespaceSelector requires aliyun/member-eni resource, but no nodes have it (total: %d)", eniInfo.TotalMemberENI)
+	}
+
 	pnName := "namespace-selector-pn"
 	matchingNs := "matching-namespace"
 	nonMatchingNs := "non-matching-namespace"
@@ -258,6 +311,12 @@ func TestPodNetworking_NamespaceSelector(t *testing.T) {
 
 // TestPodNetworking_FixedIP tests fixed IP allocation
 func TestPodNetworking_FixedIP(t *testing.T) {
+	// Check if cluster has aliyun/member-eni resource for trunk mode
+	eniInfo := checkENIResourcesBeforeTest(t)
+	if !eniInfo.HasMemberENIResource() {
+		t.Skipf("TestPodNetworking_FixedIP requires aliyun/member-eni resource, but no nodes have it (total: %d)", eniInfo.TotalMemberENI)
+	}
+
 	pnName := "fixed-ip-pn"
 	podName := "fixed-ip-pod"
 
@@ -370,6 +429,12 @@ func TestPodNetworking_FixedIP(t *testing.T) {
 
 // TestPodNetworking_VSwitchAndSG_Default tests using cluster default vSwitch and security groups
 func TestPodNetworking_VSwitchAndSG_Default(t *testing.T) {
+	// Check if cluster has aliyun/member-eni resource for trunk mode
+	eniInfo := checkENIResourcesBeforeTest(t)
+	if !eniInfo.HasMemberENIResource() {
+		t.Skipf("TestPodNetworking_VSwitchAndSG_Default requires aliyun/member-eni resource, but no nodes have it (total: %d)", eniInfo.TotalMemberENI)
+	}
+
 	config := DefaultPodNetworkingTestConfig().
 		WithENIAttachType(networkv1beta1.ENIOptionTypeTrunk).
 		WithoutConnectivity() // This test focuses on vSwitch validation, not connectivity
@@ -382,6 +447,12 @@ func TestPodNetworking_VSwitchAndSG_Custom(t *testing.T) {
 	// Skip if no custom vSwitch and security group provided
 	if vSwitchIDs == "" || securityGroupIDs == "" {
 		t.Skip("Skip custom vSwitch/SG test: vSwitchIDs and securityGroupIDs are required")
+	}
+
+	// Check if cluster has aliyun/member-eni resource for trunk mode
+	eniInfo := checkENIResourcesBeforeTest(t)
+	if !eniInfo.HasMemberENIResource() {
+		t.Skipf("TestPodNetworking_VSwitchAndSG_Custom requires aliyun/member-eni resource, but no nodes have it (total: %d)", eniInfo.TotalMemberENI)
 	}
 
 	customVSwitchIDs := strings.Split(vSwitchIDs, ",")
