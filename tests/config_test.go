@@ -24,6 +24,15 @@ func TestIPPool(t *testing.T) {
 				t.Skipf("skip ipam type not crd")
 			}
 
+			// Check if all nodes are exclusive ENI or Lingjun nodes, skip pool test in this case
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("failed to discover node types: %v", err)
+			}
+			if len(nodeInfo.ECSSharedENINodes) == 0 && len(nodeInfo.LingjunSharedENINodes) == 0 {
+				t.Skipf("TestIPPool requires shared ENI nodes, all nodes are exclusive ENI or Lingjun nodes")
+			}
+
 			// Check terway daemonset name is terway-eniip
 			isTerwayENIIP, err := CheckTerwayDaemonSetName(ctx, config, "terway-eniip")
 			if err != nil {
@@ -33,15 +42,15 @@ func TestIPPool(t *testing.T) {
 				t.Skipf("TestIPPool requires terway-eniip daemonset")
 			}
 
-		// Check terway version >= v1.16.1
-		versionOK, err := CheckTerwayVersion(ctx, config, "v1.16.1")
-		if err != nil {
-			t.Fatalf("failed to check terway version: %v", err)
-		}
-		if !versionOK {
-			terwayVersion, _ := GetTerwayVersion(ctx, config)
-			t.Skipf("TestIPPool requires terway version >= v1.16.1, current version: %s", terwayVersion)
-		}
+			// Check terway version >= v1.16.1
+			versionOK, err := CheckTerwayVersion(ctx, config, "v1.16.1")
+			if err != nil {
+				t.Fatalf("failed to check terway version: %v", err)
+			}
+			if !versionOK {
+				terwayVersion, _ := GetTerwayVersion(ctx, config)
+				t.Skipf("TestIPPool requires terway version >= v1.16.1, current version: %s", terwayVersion)
+			}
 
 			return ctx
 		}).
@@ -89,6 +98,9 @@ func TestIPPool(t *testing.T) {
 					return false, err
 				}
 				for _, node := range nodes.Items {
+					if isExclusiveENINode(&node) {
+						continue
+					}
 					idle := 0
 					for _, eni := range node.Status.NetworkInterfaces {
 						if eni.Status != aliyunClient.ENIStatusInUse {
@@ -162,6 +174,9 @@ func TestIPPool(t *testing.T) {
 					return false, err
 				}
 				for _, node := range nodes.Items {
+					if isExclusiveENINode(&node) {
+						continue
+					}
 					idle := 0
 					for _, eni := range node.Status.NetworkInterfaces {
 						if eni.Status != aliyunClient.ENIStatusInUse {
@@ -232,6 +247,9 @@ func TestIPPool(t *testing.T) {
 					t.Fatalf("failed to get node cr: %v", err)
 				}
 				for _, node := range nodes.Items {
+					if isExclusiveENINode(&node) {
+						continue
+					}
 					idle := 0
 					for _, eni := range node.Status.NetworkInterfaces {
 						if eni.Status != aliyunClient.ENIStatusInUse {

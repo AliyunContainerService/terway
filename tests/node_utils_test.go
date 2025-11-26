@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/e2e-framework/klient"
 )
 
@@ -17,19 +17,19 @@ import (
 type NodeType string
 
 const (
-	NodeTypeECSSharedENI       NodeType = "ecs-shared-eni"
-	NodeTypeECSExclusiveENI    NodeType = "ecs-exclusive-eni"
-	NodeTypeLingjunSharedENI   NodeType = "lingjun-shared-eni"
+	NodeTypeECSSharedENI        NodeType = "ecs-shared-eni"
+	NodeTypeECSExclusiveENI     NodeType = "ecs-exclusive-eni"
+	NodeTypeLingjunSharedENI    NodeType = "lingjun-shared-eni"
 	NodeTypeLingjunExclusiveENI NodeType = "lingjun-exclusive-eni"
 )
 
 // NodeTypeInfo contains information about available node types in the cluster
 type NodeTypeInfo struct {
-	ECSSharedENINodes         []corev1.Node
-	ECSExclusiveENINodes      []corev1.Node
-	LingjunSharedENINodes     []corev1.Node
-	LingjunExclusiveENINodes  []corev1.Node
-	AllNodes                  []corev1.Node
+	ECSSharedENINodes        []corev1.Node
+	ECSExclusiveENINodes     []corev1.Node
+	LingjunSharedENINodes    []corev1.Node
+	LingjunExclusiveENINodes []corev1.Node
+	AllNodes                 []corev1.Node
 }
 
 // HasTrunkNodes checks if the cluster has nodes that support trunk mode
@@ -96,17 +96,17 @@ func DiscoverNodeTypes(ctx context.Context, client klient.Client) (*NodeTypeInfo
 // classifyNode determines the type of a node based on its labels and resources
 func classifyNode(node corev1.Node) NodeType {
 	// Check if it's a Lingjun exclusive ENI node first (both Lingjun and exclusive ENI)
-	if isLingjunNode(node) && isExclusiveENINode(node) {
+	if isLingjunNode(&node) && isExclusiveENINode(&node) {
 		return NodeTypeLingjunExclusiveENI
 	}
 
 	// Check if it's a Lingjun shared ENI node
-	if isLingjunNode(node) {
+	if isLingjunNode(&node) {
 		return NodeTypeLingjunSharedENI
 	}
 
 	// Check if it's an ECS exclusive ENI node
-	if isExclusiveENINode(node) {
+	if isExclusiveENINode(&node) {
 		return NodeTypeECSExclusiveENI
 	}
 
@@ -115,15 +115,13 @@ func classifyNode(node corev1.Node) NodeType {
 }
 
 // isLingjunNode checks if a node is a Lingjun node
-func isLingjunNode(node corev1.Node) bool {
-	value, exists := node.Labels["alibabacloud.com/lingjun-worker"]
-	return exists && value == "true"
+func isLingjunNode(node metav1.Object) bool {
+	return node.GetLabels()["alibabacloud.com/lingjun-worker"] == "true"
 }
 
 // isExclusiveENINode checks if a node is configured for exclusive ENI mode
-func isExclusiveENINode(node corev1.Node) bool {
-	value, exists := node.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]
-	return exists && value == "eniOnly"
+func isExclusiveENINode(node metav1.Object) bool {
+	return node.GetLabels()["k8s.aliyun.com/exclusive-mode-eni-type"] == "eniOnly"
 }
 
 // GetNodeAffinityForType returns node affinity labels for scheduling pods to specific node types
@@ -181,29 +179,6 @@ func CheckNodeSupportsExclusiveENI(node corev1.Node) bool {
 	// Check if the node has aliyun/eni resource
 	r := node.Status.Allocatable.Name("aliyun/eni", resource.DecimalSI)
 	return r != nil && !r.IsZero()
-}
-
-// CheckNodeSupportsTrunk checks if a node supports trunk mode
-func CheckNodeSupportsTrunk(node corev1.Node) bool {
-	// Lingjun nodes do not support trunk mode
-	if isLingjunNode(node) {
-		return false
-	}
-	// All other nodes support trunk mode
-	return true
-}
-
-// ShouldExcludeNodeForIdleIPCheck checks if a node should be excluded from idle IP count checks
-func ShouldExcludeNodeForIdleIPCheck(node *networkv1beta1.Node) bool {
-	// Exclude Lingjun nodes
-	if val, ok := node.Labels["alibabacloud.com/lingjun-worker"]; ok && val == "true" {
-		return true
-	}
-	// Exclude exclusive ENI nodes
-	if val, ok := node.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]; ok && val == "eniOnly" {
-		return true
-	}
-	return false
 }
 
 // GetRandomNodeOfType returns a random node of the specified type
@@ -290,4 +265,81 @@ func (n *NodeTypeInfo) GetSupportedNodeTypesForMultiNetwork() []NodeType {
 	}
 
 	return supported
+}
+
+// HasNoKubeProxyLabel checks if any node has the no-kube-proxy label
+// indicating kube-proxy replacement is enabled (Datapath V2)
+func (n *NodeTypeInfo) HasNoKubeProxyLabel() bool {
+	for _, node := range n.AllNodes {
+		if node.Labels["k8s.aliyun.com/no-kube-proxy"] == "true" {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckNoKubeProxyLabel checks if the cluster has nodes with kube-proxy replacement enabled
+func CheckNoKubeProxyLabel(ctx context.Context, client klient.Client) (bool, error) {
+	nodeInfo, err := DiscoverNodeTypes(ctx, client)
+	if err != nil {
+		return false, err
+	}
+	return nodeInfo.HasNoKubeProxyLabel(), nil
+}
+
+// ENIResourceInfo contains information about ENI resources across all nodes
+type ENIResourceInfo struct {
+	// TotalExclusiveENI is the total allocatable aliyun/eni resources across all nodes
+	TotalExclusiveENI int64
+	// TotalMemberENI is the total allocatable aliyun/member-eni resources across all nodes
+	TotalMemberENI int64
+	// NodesWithExclusiveENI contains nodes that have aliyun/eni > 0
+	NodesWithExclusiveENI []corev1.Node
+	// NodesWithMemberENI contains nodes that have aliyun/member-eni > 0
+	NodesWithMemberENI []corev1.Node
+}
+
+// HasExclusiveENIResource returns true if any node has aliyun/eni resource
+func (e *ENIResourceInfo) HasExclusiveENIResource() bool {
+	return e.TotalExclusiveENI > 0
+}
+
+// HasMemberENIResource returns true if any node has aliyun/member-eni resource
+func (e *ENIResourceInfo) HasMemberENIResource() bool {
+	return e.TotalMemberENI > 0
+}
+
+// DiscoverENIResources discovers ENI resources across all nodes in the cluster
+func DiscoverENIResources(ctx context.Context, client klient.Client) (*ENIResourceInfo, error) {
+	nodes := &corev1.NodeList{}
+	err := client.Resources().List(ctx, nodes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	info := &ENIResourceInfo{}
+
+	for _, node := range nodes.Items {
+		// Check aliyun/eni resource (exclusive ENI mode)
+		exclusiveENI := node.Status.Allocatable.Name("aliyun/eni", resource.DecimalSI)
+		if exclusiveENI != nil && !exclusiveENI.IsZero() {
+			info.TotalExclusiveENI += exclusiveENI.Value()
+			info.NodesWithExclusiveENI = append(info.NodesWithExclusiveENI, node)
+		}
+
+		// Check aliyun/member-eni resource (trunk mode)
+		memberENI := node.Status.Allocatable.Name("aliyun/member-eni", resource.DecimalSI)
+		if memberENI != nil && !memberENI.IsZero() {
+			info.TotalMemberENI += memberENI.Value()
+			info.NodesWithMemberENI = append(info.NodesWithMemberENI, node)
+		}
+	}
+
+	return info, nil
+}
+
+// CheckENIResourcesForPodNetworking checks if the cluster has sufficient ENI resources
+// for PodNetworking tests. Returns true if at least one of the resources is available.
+func CheckENIResourcesForPodNetworking(ctx context.Context, client klient.Client) (*ENIResourceInfo, error) {
+	return DiscoverENIResources(ctx, client)
 }

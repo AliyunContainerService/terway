@@ -4,6 +4,7 @@ package tests
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/netip"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jeffail/gabs/v2"
 	"golang.org/x/mod/semver"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -1042,4 +1044,140 @@ func CheckTerwayVersion(ctx context.Context, config *envconf.Config, requiredVer
 	// semver.Compare returns: -1 if v < w, 0 if v == w, +1 if v > w
 	// We check if current >= required (i.e., compare >= 0)
 	return semver.Compare(currentVersion, requiredVersion) >= 0, nil
+}
+
+// ENIConfigBackup stores the backup of eni-config for restoration
+type ENIConfigBackup struct {
+	TerwayConf     string
+	TerwayConfList string
+	HasConfList    bool
+}
+
+// BackupENIConfig backs up the current eni-config ConfigMap
+func BackupENIConfig(ctx context.Context, config *envconf.Config) (*ENIConfigBackup, error) {
+	cm := &corev1.ConfigMap{}
+	err := config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get eni-config: %w", err)
+	}
+
+	backup := &ENIConfigBackup{
+		TerwayConf: cm.Data["10-terway.conf"],
+	}
+
+	if confList, ok := cm.Data["10-terway.conflist"]; ok {
+		backup.TerwayConfList = confList
+		backup.HasConfList = true
+	}
+
+	return backup, nil
+}
+
+// RestoreENIConfig restores the eni-config ConfigMap from backup
+func RestoreENIConfig(ctx context.Context, config *envconf.Config, backup *ENIConfigBackup) error {
+	cm := &corev1.ConfigMap{}
+	err := config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
+	if err != nil {
+		return fmt.Errorf("failed to get eni-config: %w", err)
+	}
+
+	cm.Data["10-terway.conf"] = backup.TerwayConf
+
+	if backup.HasConfList {
+		cm.Data["10-terway.conflist"] = backup.TerwayConfList
+	} else {
+		delete(cm.Data, "10-terway.conflist")
+	}
+
+	err = config.Client().Resources().Update(ctx, cm)
+	if err != nil {
+		return fmt.Errorf("failed to update eni-config: %w", err)
+	}
+
+	return nil
+}
+
+// ConfigureHostPortCNIChain configures the CNI chain with portmap plugin for HostPort support
+// isDatapathV2 indicates whether the cluster is using Datapath V2 (kube-proxy replacement)
+func ConfigureHostPortCNIChain(ctx context.Context, config *envconf.Config, isDatapathV2 bool) error {
+	cm := &corev1.ConfigMap{}
+	err := config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
+	if err != nil {
+		return fmt.Errorf("failed to get eni-config: %w", err)
+	}
+
+	// Parse existing 10-terway.conf to build the conflist
+	existingConf := cm.Data["10-terway.conf"]
+	terwayJSON, err := gabs.ParseJSON([]byte(existingConf))
+	if err != nil {
+		return fmt.Errorf("failed to parse 10-terway.conf: %w", err)
+	}
+
+	// Enable symmetric_routing in terway config
+	_, err = terwayJSON.Set(true, "symmetric_routing")
+	if err != nil {
+		return fmt.Errorf("failed to set symmetric_routing: %w", err)
+	}
+
+	// Build portmap plugin config
+	portmapConfig := map[string]interface{}{
+		"type":         "portmap",
+		"capabilities": map[string]bool{"portMappings": true},
+	}
+
+	// For Datapath V2, add masqAll option
+	if isDatapathV2 {
+		portmapConfig["externalSetMarkChain"] = "KUBE-MARK-MASQ"
+		portmapConfig["masqAll"] = true
+	} else {
+		portmapConfig["externalSetMarkChain"] = "KUBE-MARK-MASQ"
+	}
+
+	// Build the conflist structure
+	confList := map[string]interface{}{
+		"cniVersion": "0.4.0",
+		"name":       "terway",
+		"plugins": []interface{}{
+			terwayJSON.Data(),
+			portmapConfig,
+		},
+	}
+
+	confListBytes, err := json.MarshalIndent(confList, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal conflist: %w", err)
+	}
+
+	// Update ConfigMap
+	cm.Data["10-terway.conflist"] = string(confListBytes)
+
+	err = config.Client().Resources().Update(ctx, cm)
+	if err != nil {
+		return fmt.Errorf("failed to update eni-config: %w", err)
+	}
+
+	return nil
+}
+
+// IsDatapathV2Enabled checks if the cluster is using Datapath V2 by checking the CNI config
+func IsDatapathV2Enabled(ctx context.Context, config *envconf.Config) (bool, error) {
+	cm := &corev1.ConfigMap{}
+	err := config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
+	if err != nil {
+		return false, fmt.Errorf("failed to get eni-config: %w", err)
+	}
+
+	// Check in 10-terway.conf
+	if strings.Contains(cm.Data["10-terway.conf"], "datapathv2") {
+		return true, nil
+	}
+
+	// Check in 10-terway.conflist if exists
+	if confList, ok := cm.Data["10-terway.conflist"]; ok {
+		if strings.Contains(confList, "datapathv2") {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

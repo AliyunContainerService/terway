@@ -90,15 +90,15 @@ func TestIdleIPReclaimPolicy(t *testing.T) {
 				t.Skipf("TestIdleIPReclaimPolicy requires terway-eniip daemonset")
 			}
 
-		// Check terway version >= v1.16.1
-		versionOK, err := CheckTerwayVersion(ctx, config, "v1.16.1")
-		if err != nil {
-			t.Fatalf("failed to check terway version: %v", err)
-		}
-		if !versionOK {
-			terwayVersion, _ := GetTerwayVersion(ctx, config)
-			t.Skipf("TestIdleIPReclaimPolicy requires terway version >= v1.16.1, current version: %s", terwayVersion)
-		}
+			// Check terway version >= v1.16.1
+			versionOK, err := CheckTerwayVersion(ctx, config, "v1.16.1")
+			if err != nil {
+				t.Fatalf("failed to check terway version: %v", err)
+			}
+			if !versionOK {
+				terwayVersion, _ := GetTerwayVersion(ctx, config)
+				t.Skipf("TestIdleIPReclaimPolicy requires terway version >= v1.16.1, current version: %s", terwayVersion)
+			}
 
 			// Cleanup pool configuration before tests
 			err = cleanupPoolConfig(ctx, t, config)
@@ -232,6 +232,10 @@ func TestIdleIPReclaimPolicy(t *testing.T) {
 
 				allNodesOk := true
 				for _, node := range nodes.Items {
+					if isExclusiveENINode(&node) {
+						continue
+					}
+
 					idleCount := countIdleIPs(&node)
 					// After reclaim, idle IPs should be between min_pool_size and max_pool_size
 					// Due to batch processing, it might not reach exactly min_pool_size
@@ -366,6 +370,9 @@ func TestIdleIPReclaimPolicy(t *testing.T) {
 			}
 
 			for _, node := range nodes.Items {
+				if isExclusiveENINode(&node) {
+					continue
+				}
 				idleCount := countIdleIPs(&node)
 				t.Logf("Node %s: idle IPs = %d", node.Name, idleCount)
 				if idleCount < 5 {
@@ -582,7 +589,7 @@ func waitForIdleIPCount(ctx context.Context, config *envconf.Config, t *testing.
 		allNodesReady := true
 		for _, node := range nodes.Items {
 			// Skip nodes that should be excluded from idle IP checks (Lingjun and exclusive ENI nodes)
-			if ShouldExcludeNodeForIdleIPCheck(&node) {
+			if isExclusiveENINode(&node) {
 				t.Logf("[%s] Skipping node %s (excluded from idle IP checks)", phase, node.Name)
 				continue
 			}
