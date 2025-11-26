@@ -479,6 +479,9 @@ func NewPodNetworking(name string) *PodNetworking {
 		PodNetworking: &networkv1beta1.PodNetworking{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: name,
+				Labels: map[string]string{
+					"k8s.aliyun.com/terway-e2e": "true",
+				},
 			},
 			Spec: networkv1beta1.PodNetworkingSpec{
 				ENIOptions: networkv1beta1.ENIOptions{
@@ -1031,6 +1034,7 @@ func CheckTerwayDaemonSetName(ctx context.Context, config *envconf.Config, expec
 
 // CheckTerwayVersion checks if the current terway version is greater than or equal to the required version.
 // requiredVersion can be with or without 'v' prefix, e.g., "v1.16.1" or "1.16.1"
+// Deprecated: Use RequireTerwayVersion instead, which uses the cached version from startup.
 func CheckTerwayVersion(ctx context.Context, config *envconf.Config, requiredVersion string) (bool, error) {
 	currentVersion, err := GetTerwayVersion(ctx, config)
 	if err != nil {
@@ -1044,6 +1048,61 @@ func CheckTerwayVersion(ctx context.Context, config *envconf.Config, requiredVer
 	// semver.Compare returns: -1 if v < w, 0 if v == w, +1 if v > w
 	// We check if current >= required (i.e., compare >= 0)
 	return semver.Compare(currentVersion, requiredVersion) >= 0, nil
+}
+
+// RequireTerwayVersion checks if the cached terway version meets the minimum requirement.
+// This uses the version obtained at test startup, avoiding repeated API calls.
+// Returns true if version check passes, false otherwise.
+// If version is invalid or empty, returns false.
+func RequireTerwayVersion(requiredVersion string) bool {
+	if terwayVersion == "" {
+		return false
+	}
+
+	if !semver.IsValid(terwayVersion) {
+		return false
+	}
+
+	if !semver.IsValid(requiredVersion) {
+		return false
+	}
+
+	return semver.Compare(terwayVersion, requiredVersion) >= 0
+}
+
+// RequireK8sVersion checks if the cached k8s version meets the minimum requirement.
+// This uses the version obtained at test startup, avoiding repeated API calls.
+// Returns true if version check passes, false otherwise.
+// If version is invalid or empty, returns false.
+func RequireK8sVersion(requiredVersion string) bool {
+	if k8sVersion == "" {
+		return false
+	}
+
+	if !semver.IsValid(k8sVersion) {
+		return false
+	}
+
+	if !semver.IsValid(requiredVersion) {
+		return false
+	}
+
+	return semver.Compare(k8sVersion, requiredVersion) >= 0
+}
+
+// GetCachedTerwayVersion returns the cached terway version obtained at startup.
+func GetCachedTerwayVersion() string {
+	return terwayVersion
+}
+
+// GetCachedK8sVersion returns the cached k8s version obtained at startup.
+func GetCachedK8sVersion() string {
+	return k8sVersion
+}
+
+// GetCachedTerwayDaemonSetName returns the cached terway daemonset name obtained at startup.
+func GetCachedTerwayDaemonSetName() string {
+	return terway
 }
 
 // ENIConfigBackup stores the backup of eni-config for restoration

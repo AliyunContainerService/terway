@@ -26,6 +26,7 @@ The warm-up size can be configured through the `eni-config` ConfigMap:
 **Important**: The `ip_warm_up_size` is independent of `min_pool_size` and `max_pool_size`. It can be set to a value larger or smaller than the pool size limits.
 
 However, setting `ip_warm_up_size` larger than `max_pool_size` is **not recommended** because:
+
 - The warm-up process will allocate IPs up to `ip_warm_up_size`
 - After warm-up completes, the pool management and idle IP reclaim policy will release excess IPs to maintain the pool within `min_pool_size` and `max_pool_size` boundaries
 - This results in unnecessary IP allocation and deallocation, wasting resources and API calls
@@ -42,6 +43,7 @@ However, setting `ip_warm_up_size` larger than `max_pool_size` is **not recommen
 ```
 
 In this example:
+
 - On node startup, 15 IPs will be pre-allocated (warm-up)
 - The pool will maintain between 5-20 IPs during normal operation
 - Since `ip_warm_up_size` (15) is within the pool size range (5-20), all pre-allocated IPs will be retained
@@ -58,6 +60,7 @@ In this example:
 ```
 
 In this example:
+
 - On node startup, 20 IPs will be pre-allocated (warm-up)
 - After warm-up completes, 10 IPs will be released because `max_pool_size` is only 10
 - This causes unnecessary IP churn and API calls
@@ -94,4 +97,3 @@ status:
 - Warm-up only runs once per node lifecycle (when the node first joins the cluster)
 - If a node already has warm-up status initialized, changing `ip_warm_up_size` will not affect the ongoing warm-up
 - Warm-up progress is tracked independently of actual IP usage, ensuring consistent behavior even if IPs are allocated/deallocated during warm-up
-
