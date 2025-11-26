@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -578,25 +577,13 @@ func TestNormal_HostPort(t *testing.T) {
 		hostPortNodeIP := features.New(fmt.Sprintf("HostPort/NodeIP-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 				// Check terway version >= v1.15.0
-				versionOK, err := CheckTerwayVersion(ctx, config, "v1.15.0")
-				if err != nil {
-					t.Fatalf("failed to check terway version: %v", err)
-				}
-				if !versionOK {
-					terwayVersion, _ := GetTerwayVersion(ctx, config)
-					t.Skipf("TestNormal_HostPort requires terway version >= v1.15.0, current version: %s", terwayVersion)
+				if !RequireTerwayVersion("v1.15.0") {
+					t.Skipf("TestNormal_HostPort requires terway version >= v1.15.0, current version: %s", GetCachedTerwayVersion())
 				}
 
 				// Check k8s version >= v1.34.0
-				k8sVersion, err := GetK8sVersion(ctx, config)
-				if err != nil {
-					t.Fatalf("failed to get k8s version: %v", err)
-				}
-				if !semver.IsValid(k8sVersion) {
-					t.Fatalf("invalid k8s version: %s", k8sVersion)
-				}
-				if semver.Compare(k8sVersion, "v1.34.0") < 0 {
-					t.Skipf("TestNormal_HostPort requires k8s version >= v1.34.0, current version: %s", k8sVersion)
+				if !RequireK8sVersion("v1.34.0") {
+					t.Skipf("TestNormal_HostPort requires k8s version >= v1.34.0, current version: %s", GetCachedK8sVersion())
 				}
 
 				// Check if nodes have no-kube-proxy label (kube-proxy replacement / Datapath V2)
@@ -726,30 +713,18 @@ func TestNormal_HostPort(t *testing.T) {
 		hostPortExternalIP := features.New(fmt.Sprintf("HostPort/ExternalIP-%s", name)).
 			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 				// Check terway version >= v1.15.0
-				versionOK, err := CheckTerwayVersion(ctx, config, "v1.15.0")
-				if err != nil {
-					t.Fatalf("failed to check terway version: %v", err)
-				}
-				if !versionOK {
-					terwayVersion, _ := GetTerwayVersion(ctx, config)
-					t.Skipf("TestNormal_HostPort requires terway version >= v1.15.0, current version: %s", terwayVersion)
+				if !RequireTerwayVersion("v1.15.0") {
+					t.Skipf("TestNormal_HostPort requires terway version >= v1.15.0, current version: %s", GetCachedTerwayVersion())
 				}
 
 				// Check k8s version >= v1.34.0
-				k8sVersion, err := GetK8sVersion(ctx, config)
-				if err != nil {
-					t.Fatalf("failed to get k8s version: %v", err)
-				}
-				if !semver.IsValid(k8sVersion) {
-					t.Fatalf("invalid k8s version: %s", k8sVersion)
-				}
-				if semver.Compare(k8sVersion, "v1.34.0") < 0 {
-					t.Skipf("TestNormal_HostPort requires k8s version >= v1.34.0, current version: %s", k8sVersion)
+				if !RequireK8sVersion("v1.34.0") {
+					t.Skipf("TestNormal_HostPort requires k8s version >= v1.34.0, current version: %s", GetCachedK8sVersion())
 				}
 
 				// Check if any node has external IP before running the test
 				nodes := &corev1.NodeList{}
-				err = config.Client().Resources().List(ctx, nodes)
+				err := config.Client().Resources().List(ctx, nodes)
 				if err != nil {
 					t.Fatalf("failed to list nodes: %v", err)
 				}

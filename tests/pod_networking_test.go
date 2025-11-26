@@ -218,8 +218,11 @@ func TestPodNetworking_NamespaceSelector(t *testing.T) {
 			// Create namespace WITH matching label
 			matchingNsObj := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:   matchingNs,
-					Labels: map[string]string{"network-type": "custom"},
+					Name: matchingNs,
+					Labels: map[string]string{
+						"network-type":              "custom",
+						"k8s.aliyun.com/terway-e2e": "true",
+					},
 				},
 			}
 			err = config.Client().Resources().Create(ctx, matchingNsObj)
@@ -227,11 +230,14 @@ func TestPodNetworking_NamespaceSelector(t *testing.T) {
 				t.Fatalf("create matching namespace failed: %v", err)
 			}
 
-			// Create namespace WITHOUT matching label
+			// Create namespace WITHOUT matching label (for PodNetworking selector)
 			nonMatchingNsObj := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:   nonMatchingNs,
-					Labels: map[string]string{"network-type": "default"},
+					Name: nonMatchingNs,
+					Labels: map[string]string{
+						"network-type":              "default",
+						"k8s.aliyun.com/terway-e2e": "true",
+					},
 				},
 			}
 			err = config.Client().Resources().Create(ctx, nonMatchingNsObj)

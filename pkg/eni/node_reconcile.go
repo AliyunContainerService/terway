@@ -194,6 +194,10 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		PoolSyncPeriod: eniConfig.IPPoolSyncPeriod,
 	}
 
+	if eniConfig.IPWarmUpSize != nil {
+		node.Spec.Pool.WarmUpSize = *eniConfig.IPWarmUpSize
+	}
+
 	if eniConfig.IdleIPReclaimAfter != nil {
 		reclaim := &networkv1beta1.IPReclaimPolicy{}
 
@@ -305,6 +309,9 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		MaxPoolSize:    eniConfig.MaxPoolSize,
 		MinPoolSize:    eniConfig.MinPoolSize,
 		PoolSyncPeriod: eniConfig.IPPoolSyncPeriod,
+	}
+	if eniConfig.IPWarmUpSize != nil {
+		node.Spec.Pool.WarmUpSize = *eniConfig.IPWarmUpSize
 	}
 
 	if eniConfig.IdleIPReclaimAfter != nil {

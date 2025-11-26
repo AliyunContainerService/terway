@@ -51,6 +51,7 @@ var (
 
 	terway        string
 	terwayVersion string
+	k8sVersion    string
 
 	vSwitchIDs       string
 	securityGroupIDs string
@@ -107,10 +108,16 @@ func TestMain(m *testing.M) {
 		checkENIConfig,
 	)
 	testenv.AfterEachFeature(func(ctx context.Context, config *envconf.Config, t *testing.T, feature features.Feature) (context.Context, error) {
+		// If test was skipped, don't do anything
+		if t.Skipped() {
+			t.Log("Test was skipped, cleaning up")
+			return ctx, nil
+		}
+
 		pod := &corev1.PodList{}
 		err = config.Client().Resources(envCfg.Namespace()).List(ctx, pod)
 		t.Log("---------list pods---------")
-		// 遍历 Pod 列表，筛选出非 Running 状态的 Pod
+		// Filter pods that are not in Running state
 		isTestFailed := false
 		for _, printPod := range pod.Items {
 			if printPod.Status.Phase != corev1.PodRunning {
@@ -120,7 +127,7 @@ func TestMain(m *testing.M) {
 		}
 		if isTestFailed {
 			t.Log("---------list events---------")
-			// 遍历 Event 列表
+			// List events
 			event := &corev1.EventList{}
 			err = config.Client().Resources(envCfg.Namespace()).List(ctx, event)
 			for _, printEvent := range event.Items {
@@ -158,12 +165,40 @@ func checkENIConfig(ctx context.Context, config *envconf.Config) (context.Contex
 		case "terway", "terway-eni", "terway-eniip":
 			terway = d.Name
 
-			tag := strings.Split(d.Spec.Template.Spec.Containers[0].Image, ":")[1]
-			terwayVersion = tag
+			// Get version from the first init container's image tag (more reliable)
+			if len(d.Spec.Template.Spec.InitContainers) > 0 {
+				image := d.Spec.Template.Spec.InitContainers[0].Image
+				parts := strings.Split(image, ":")
+				if len(parts) >= 2 {
+					terwayVersion = parts[len(parts)-1]
+				}
+			} else if len(d.Spec.Template.Spec.Containers) > 0 {
+				// Fallback to container image tag
+				image := d.Spec.Template.Spec.Containers[0].Image
+				parts := strings.Split(image, ":")
+				if len(parts) >= 2 {
+					terwayVersion = parts[len(parts)-1]
+				}
+			}
 
 			break
 		}
 	}
+
+	// Get k8s version from node
+	nodes := &corev1.NodeList{}
+	err = config.Client().Resources().List(ctx, nodes)
+	if err != nil {
+		return ctx, err
+	}
+	if len(nodes.Items) > 0 {
+		k8sVersion = nodes.Items[0].Status.NodeInfo.KubeletVersion
+		if !strings.HasPrefix(k8sVersion, "v") {
+			k8sVersion = "v" + k8sVersion
+		}
+	}
+
+	fmt.Printf("Detected terway daemonset: %s, version: %s, k8s version: %s\n", terway, terwayVersion, k8sVersion)
 
 	// we can determine cluster config by terway eni-conifg
 	cm := &corev1.ConfigMap{}

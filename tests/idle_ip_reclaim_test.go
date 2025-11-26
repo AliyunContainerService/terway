@@ -74,34 +74,32 @@ func cleanupPoolConfig(ctx context.Context, t *testing.T, config *envconf.Config
 // TestIdleIPReclaimPolicy tests the idle IP reclaim policy feature
 // This test only covers centralized IPAM mode (ipam_type == "crd")
 func TestIdleIPReclaimPolicy(t *testing.T) {
+	// Pre-check: only test centralized IPAM mode
+	if eniConfig == nil || eniConfig.IPAMType != "crd" {
+		ipamType := ""
+		if eniConfig != nil {
+			ipamType = eniConfig.IPAMType
+		}
+		t.Skipf("skip: ipam type is not crd, current type: %s", ipamType)
+		return
+	}
+
+	// Pre-check: terway daemonset name must be terway-eniip
+	if terway != "terway-eniip" {
+		t.Skipf("TestIdleIPReclaimPolicy requires terway-eniip daemonset, current: %s", terway)
+		return
+	}
+
+	// Pre-check: terway version must be >= v1.16.1
+	if !RequireTerwayVersion("v1.16.1") {
+		t.Skipf("TestIdleIPReclaimPolicy requires terway version >= v1.16.1, current version: %s", GetCachedTerwayVersion())
+		return
+	}
+
 	feature := features.New("IdleIPReclaimPolicy").
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			// Only test centralized IPAM mode
-			if eniConfig.IPAMType != "crd" {
-				t.Skipf("skip: ipam type is not crd, current type: %s", eniConfig.IPAMType)
-			}
-
-			// Check terway daemonset name is terway-eniip
-			isTerwayENIIP, err := CheckTerwayDaemonSetName(ctx, config, "terway-eniip")
-			if err != nil {
-				t.Fatalf("failed to check terway daemonset name: %v", err)
-			}
-			if !isTerwayENIIP {
-				t.Skipf("TestIdleIPReclaimPolicy requires terway-eniip daemonset")
-			}
-
-			// Check terway version >= v1.16.1
-			versionOK, err := CheckTerwayVersion(ctx, config, "v1.16.1")
-			if err != nil {
-				t.Fatalf("failed to check terway version: %v", err)
-			}
-			if !versionOK {
-				terwayVersion, _ := GetTerwayVersion(ctx, config)
-				t.Skipf("TestIdleIPReclaimPolicy requires terway version >= v1.16.1, current version: %s", terwayVersion)
-			}
-
 			// Cleanup pool configuration before tests
-			err = cleanupPoolConfig(ctx, t, config)
+			err := cleanupPoolConfig(ctx, t, config)
 			if err != nil {
 				t.Fatalf("failed to cleanup pool configuration: %v", err)
 			}

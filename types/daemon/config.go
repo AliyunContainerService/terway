@@ -38,6 +38,7 @@ type Config struct {
 	ENITags        map[string]string   `yaml:"eni_tags" json:"eni_tags"`
 	MaxPoolSize    int                 `yaml:"max_pool_size" json:"max_pool_size"`
 	MinPoolSize    int                 `yaml:"min_pool_size" json:"min_pool_size"`
+	IPWarmUpSize   *int                `yaml:"ip_warm_up_size" json:"ip_warm_up_size"`
 
 	IdleIPReclaimAfter        *string `yaml:"idle_ip_reclaim_after,omitempty" json:"idle_ip_reclaim_after,omitempty"`
 	IdleIPReclaimBatchSize    int     `yaml:"idle_ip_reclaim_batch_size,omitempty" json:"idle_ip_reclaim_batch_size,omitempty"`

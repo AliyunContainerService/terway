@@ -104,6 +104,9 @@ type PoolSpec struct {
 	PoolSyncPeriod string `json:"poolSyncPeriod,omitempty"`
 
 	Reclaim *IPReclaimPolicy `json:"reclaim,omitempty"`
+
+	// +kubebuilder:validation:Minimum=0
+	WarmUpSize int `json:"warmUpSize,omitempty"`
 }
 
 type IPReclaimPolicy struct {
@@ -199,6 +202,10 @@ type NodeStatus struct {
 	LastModifiedTime      metav1.Time     `json:"lastModifiedTime,omitempty"`
 	NextIdleIPReclaimTime metav1.Time     `json:"nextIdleIPReclaimTime,omitempty"`
 	NetworkInterfaces     map[string]*Nic `json:"networkInterfaces,omitempty"`
+
+	WarmUpTarget         int  `json:"warmUpTarget,omitempty"`
+	WarmUpAllocatedCount int  `json:"warmUpAllocatedCount,omitempty"`
+	WarmUpCompleted      bool `json:"warmUpCompleted,omitempty"`
 }
 
 // +genclient
