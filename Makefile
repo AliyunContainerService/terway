@@ -67,15 +67,15 @@ datapath-test: ## Run datapath tests using the Makefile in tests/kind directory.
 
 .PHONY: e2e-test
 e2e-test: ## Run e2e functional tests (excludes upgrade tests).
-	go test -v -timeout 60m -tags e2e ./tests -run 'Test[^U].*' $(TESTARGS)
+	go test -v -count=1 -timeout 60m -tags e2e ./tests -run 'Test[^U].*' $(TESTARGS)
 
 .PHONY: e2e-upgrade-test
 e2e-upgrade-test: ## Run e2e upgrade tests only.
-	go test -v -timeout 60m -tags e2e ./tests -run 'TestUpgrade' $(TESTARGS)
+	go test -v -count=1 -timeout 60m -tags e2e ./tests -run 'TestUpgrade' $(TESTARGS)
 
 .PHONY: e2e-test-all
 e2e-test-all: ## Run all e2e tests (functional + upgrade).
-	go test -v -timeout 60m -tags e2e ./tests $(TESTARGS)
+	go test -v -count=1 -timeout 60m -tags e2e ./tests $(TESTARGS)
 
 ##@ Build
 

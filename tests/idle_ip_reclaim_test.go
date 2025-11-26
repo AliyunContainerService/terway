@@ -612,5 +612,5 @@ func triggerNode(ctx context.Context, config *envconf.Config, t *testing.T, node
 			},
 		},
 	})
-	return config.Client().Resources().Patch(ctx, node, k8s.Patch{PatchType: types.StrategicMergePatchType, Data: mergePatch})
+	return config.Client().Resources().Patch(ctx, node, k8s.Patch{PatchType: types.MergePatchType, Data: mergePatch})
 }
