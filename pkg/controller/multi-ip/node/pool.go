@@ -50,6 +50,7 @@ import (
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
+	"github.com/AliyunContainerService/terway/pkg/eni/ops"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
@@ -63,6 +64,12 @@ const (
 
 	ecsBatchSize  = 10
 	efloBatchSize = 1
+
+	// Maximum concurrent ENI attach operations per instance
+	// ECS API limits concurrent attach operations to 5
+	ecsMaxConcurrentAttach = 5
+	// EFLO API limits concurrent attach operations to 2
+	efloMaxConcurrentAttach = 2
 
 	// Event reasons
 	EventAllocIPFailed      = "AllocIPFailed"
@@ -108,7 +115,27 @@ func init() {
 		metrics.Registry.MustRegister(ResourcePoolTotal)
 		metrics.Registry.MustRegister(SyncOpenAPITotal)
 		metrics.Registry.MustRegister(ReconcileLatency)
+		metrics.Registry.MustRegister(ENITaskQueueSize)
+		metrics.Registry.MustRegister(ENIAttachDuration)
 		tracer := ctrlCtx.TracerProvider.Tracer(ControllerName)
+
+		// Create ENI task queue for async attach operations
+		eniNotifyCh := make(chan string, ctrlCtx.Config.ENIMaxConcurrent)
+		executor := ops.NewExecutor(ctrlCtx.AliyunClient, tracer)
+		eniTaskQueue := NewENITaskQueue(ctrlCtx.Context, executor, eniNotifyCh)
+
+		// Start a goroutine to forward eniNotifyCh to EventCh
+		// This ensures Reconcile is triggered when async ENI attach tasks complete
+		go func() {
+			for {
+				select {
+				case <-ctrlCtx.Done():
+					return
+				case name := <-eniNotifyCh:
+					Notify(ctrlCtx, name)
+				}
+			}
+		}()
 
 		ctrl, err := controller.New(ControllerName, mgr, controller.Options{
 			MaxConcurrentReconciles: ctrlCtx.Config.MultiIPNodeMaxConcurrent,
@@ -121,8 +148,9 @@ func init() {
 				fullSyncNodePeriod: fullSyncPeriod,
 				gcPeriod:           gcPeriod,
 				tracer:             tracer,
-				eniBatchSize:       5, // operate eni on one reconcile
+				eniBatchSize:       ecsMaxConcurrentAttach, // operate eni on one reconcile
 				v:                  controlplane.GetViper(),
+				eniTaskQueue:       eniTaskQueue,
 			},
 			RateLimiter: workqueue.NewTypedMaxOfRateLimiter(
 				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](minSyncPeriod, maxSyncPeriod),
@@ -151,7 +179,8 @@ type NodeStatus struct {
 	LastGCTime        time.Time
 	LastReconcileTime time.Time
 
-	Mutex sync.Mutex
+	ProcessedTaskIDs []string
+	Mutex            sync.Mutex
 }
 
 type ReconcileNode struct {
@@ -172,6 +201,9 @@ type ReconcileNode struct {
 	eniBatchSize int
 
 	v *viper.Viper
+
+	// eniTaskQueue manages async ENI attach operations
+	eniTaskQueue *ENITaskQueue
 }
 
 type ctxMetaKey struct{}
@@ -204,6 +236,14 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 
 	l.V(2).Info("reconcile node")
 
+	now := time.Now()
+	defer func() {
+		took := time.Since(now)
+		if took > 5*time.Second {
+			l.Info("slow reconcile", "took", took)
+		}
+	}()
+
 	node := &networkv1beta1.Node{}
 	err := n.client.Get(ctx, client.ObjectKey{Name: request.Name}, node)
 
@@ -232,6 +272,11 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		ResourcePoolTotal.Delete(prometheus.Labels{"node": request.Name})
 		SyncOpenAPITotal.Delete(prometheus.Labels{"node": request.Name})
 		ReconcileLatency.Delete(prometheus.Labels{"node": request.Name})
+
+		// Clean up async ENI tasks
+		if n.eniTaskQueue != nil {
+			n.eniTaskQueue.RemoveTasks(request.Name)
+		}
 
 		if changed {
 			err = n.client.Patch(ctx, node, patch)
@@ -279,6 +324,8 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 	} else {
 		nodeStatus = prev.(*NodeStatus)
 	}
+	// Reset processed tasks for this reconciliation loop
+	nodeStatus.ProcessedTaskIDs = nil
 
 	if nodeStatus.LastReconcileTime.Add(1 * time.Second).After(time.Now()) {
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
@@ -323,6 +370,11 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 	// initialize warm-up if needed (for new nodes or existing nodes without warm-up status)
 	n.initializeWarmUp(node)
 
+	// ensure async tasks are running for Attaching ENIs (recovery)
+	n.ensureAsyncTasks(ctx, node)
+
+	// do not block ipam
+
 	// do not block ipam
 	err = n.syncWithAPI(ctx, node)
 	if err != nil {
@@ -347,6 +399,10 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		span.AddEvent("update node cr")
 
 		err = n.client.Status().Update(ctx, node)
+
+		if err == nil && n.eniTaskQueue != nil && len(nodeStatus.ProcessedTaskIDs) > 0 {
+			n.eniTaskQueue.DeleteTasks(nodeStatus.ProcessedTaskIDs)
+		}
 
 		if err != nil && nodeStatus.StatusChanged.CompareAndSwap(true, false) {
 			nodeStatus.NeedSyncOpenAPI.Store(true)
@@ -416,12 +472,26 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 		eniIDMap[item.NetworkInterfaceID] = struct{}{}
 		remote := newENIFromAPI(item)
 
-		if item.Status == aliyunClient.LENIStatusExecuting ||
-			item.Status == aliyunClient.LENIStatusDeleting ||
-			item.Status == aliyunClient.ENIStatusAttaching ||
-			item.Status == aliyunClient.ENIStatusDetaching {
+		// Handle different ENI statuses
+		switch item.Status {
+		case aliyunClient.LENIStatusExecuting,
+			aliyunClient.LENIStatusDeleting,
+			aliyunClient.ENIStatusAttaching,
+			aliyunClient.ENIStatusDetaching:
+			// Middle statuses that need faster re-sync
+			// Note: LENIStatusAttaching/LENIStatusDetaching have the same value as ENIStatusAttaching/ENIStatusDetaching
 			hasMiddleStatus = true
+
+		case aliyunClient.LENIStatusCreateFailed,
+			aliyunClient.LENIStatusAttachFailed,
+			aliyunClient.LENIStatusDetachFailed,
+			aliyunClient.LENIStatusDeleteFailed:
+			// EFLO terminal failure statuses - mark for deletion
+			log.Info("EFLO ENI in failed state, marking for deletion")
+			hasMiddleStatus = true
+			remote.Status = aliyunClient.ENIStatusDeleting
 		}
+
 		crENI, ok := node.Status.NetworkInterfaces[item.NetworkInterfaceID]
 		if !ok {
 			log.Info("sync eni with remote, new eni added")
@@ -446,7 +516,10 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 			mergeIPMap(log, remote.IPv6, crENI.IPv6)
 
 			// nb(l1b0k): use Deleting status in cr for eni we don't wanted
-			if crENI.Status != aliyunClient.ENIStatusDeleting {
+			// Note: Don't overwrite Attaching status if we're managing it via queue
+			// The queue will update the status when attach completes
+			if crENI.Status != aliyunClient.ENIStatusDeleting &&
+				crENI.Status != aliyunClient.ENIStatusAttaching {
 				crENI.Status = remote.Status
 			}
 		}
@@ -807,6 +880,118 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 
 // addIP is called when there is no enough ip for current pods
 // for cases, eni is attaching, we need to wait
+// syncTaskQueueStatus syncs completed tasks from queue to Node CR
+func (n *ReconcileNode) syncTaskQueueStatus(ctx context.Context, node *networkv1beta1.Node) {
+	if n.eniTaskQueue == nil {
+		return
+	}
+
+	l := logf.FromContext(ctx).WithName("syncTaskQueueStatus")
+
+	// Process completed tasks
+	completedTasks := n.eniTaskQueue.PeekCompletedTasks(node.Name)
+	if len(completedTasks) == 0 {
+		return
+	}
+
+	l.Info("processing completed tasks", "count", len(completedTasks))
+
+	for _, task := range completedTasks {
+		nic, ok := node.Status.NetworkInterfaces[task.ENIID]
+
+		if !ok {
+			l.Info("ENI not found in Node CR, skip", "eni", task.ENIID)
+			continue
+		}
+
+		switch task.Status {
+		case TaskStatusCompleted:
+			// Update ENI info from task result
+			if task.ENIInfo != nil {
+				nic.Status = aliyunClient.ENIStatusInUse
+				nic.MacAddress = task.ENIInfo.MacAddress
+				nic.SecurityGroupIDs = task.ENIInfo.SecurityGroupIDs
+				nic.PrimaryIPAddress = task.ENIInfo.PrivateIPAddress
+				nic.NetworkInterfaceTrafficMode = networkv1beta1.NetworkInterfaceTrafficMode(task.ENIInfo.NetworkInterfaceTrafficMode)
+
+				// Convert IP sets using existing helper function
+				nic.IPv4 = convertIPSet(task.ENIInfo.PrivateIPSets)
+				nic.IPv6 = convertIPSet(task.ENIInfo.IPv6Set)
+
+				// Track OpenAPI allocations for warm-up
+				if !node.Status.WarmUpCompleted && node.Status.WarmUpTarget > 0 {
+					node.Status.WarmUpAllocatedCount += max(len(nic.IPv4), len(nic.IPv6))
+				}
+
+				l.Info("ENI attach completed", "eni", task.ENIID,
+					"ipv4Count", len(nic.IPv4), "ipv6Count", len(nic.IPv6))
+				n.record.Event(node, corev1.EventTypeNormal, "ENIAttachSuccess",
+					fmt.Sprintf("ENI %s is now ready with %d IPv4 and %d IPv6",
+						task.ENIID, len(nic.IPv4), len(nic.IPv6)))
+			} else {
+				// should not happen
+				nic.Status = aliyunClient.ENIStatusDeleting
+			}
+		case TaskStatusFailed, TaskStatusTimeout:
+			// Mark for deletion
+			nic.Status = aliyunClient.ENIStatusDeleting
+
+			errMsg := "unknown error"
+			if task.Error != nil {
+				errMsg = task.Error.Error()
+			}
+
+			l.Error(task.Error, "ENI attach failed", "eni", task.ENIID, "status", task.Status)
+			n.record.Event(node, corev1.EventTypeWarning, "ENIAttachFailed",
+				fmt.Sprintf("ENI %s attach failed: %s", task.ENIID, errMsg))
+		}
+
+		MetaCtx(ctx).StatusChanged.Store(true)
+		MetaCtx(ctx).ProcessedTaskIDs = append(MetaCtx(ctx).ProcessedTaskIDs, task.ENIID)
+	}
+}
+
+// staleTaskThreshold defines how long a completed task can stay in queue before being cleaned up
+const staleTaskThreshold = 30 * time.Minute
+
+// ensureAsyncTasks checks for Attaching ENIs that are not in the queue and submits them (recovery)
+// It also cleans up orphaned and stale tasks to prevent task leakage
+func (n *ReconcileNode) ensureAsyncTasks(ctx context.Context, node *networkv1beta1.Node) {
+	if n.eniTaskQueue == nil {
+		return
+	}
+
+	l := logf.FromContext(ctx)
+
+	// Build set of valid ENI IDs from current CR status
+	validENIIDs := make(map[string]struct{}, len(node.Status.NetworkInterfaces))
+	for eniID := range node.Status.NetworkInterfaces {
+		validENIIDs[eniID] = struct{}{}
+	}
+
+	// Clean up orphaned and stale tasks
+	// - Orphaned: ENI no longer exists in CR (was deleted externally or by syncWithAPI)
+	// - Stale: Completed tasks sitting in queue for more than 30 minutes without being consumed
+	removedTasks := n.eniTaskQueue.CleanupStaleTasks(node.Name, validENIIDs, staleTaskThreshold)
+	if len(removedTasks) > 0 {
+		l.Info("cleaned up stale/orphaned tasks", "count", len(removedTasks), "enis", removedTasks)
+	}
+
+	// Submit recovery tasks for Attaching ENIs that are not in the queue
+	for eniID, nic := range node.Status.NetworkInterfaces {
+		if nic.Status == aliyunClient.ENIStatusAttaching {
+			// Check if task exists
+			if _, ok := n.eniTaskQueue.GetTaskStatus(eniID); !ok {
+				// Task missing, submit recovery task
+				// We don't know the original requested IP count, so we start with 1
+				// The task will update the count after checking the API
+				n.eniTaskQueue.SubmitAttach(ctx, eniID, node.Spec.NodeMetadata.InstanceID, "", node.Name, 1, 1)
+				l.Info("submitted recovery attach task", "eni", eniID)
+			}
+		}
+	}
+}
+
 func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*PodRequest, node *networkv1beta1.Node) error {
 	ctx, span := n.tracer.Start(ctx, "addIP")
 	defer span.End()
@@ -816,6 +1001,9 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	defer func() {
 		ReconcileLatency.WithLabelValues("addIP", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
 	}()
+
+	// 1. Sync completed tasks from queue to Node CR
+	n.syncTaskQueueStatus(ctx, node)
 
 	if n.getDegradation() == controlplane.DegradationL0 {
 		logr.FromContextOrDiscard(ctx).Info("degradation to L0, skip addIP")
@@ -842,10 +1030,10 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	}
 
 	// handle trunk/secondary eni
-	assignEniWithOptions(ctx, node, totalDemand, options, func(option *eniOptions) bool {
+	assignEniWithOptions(ctx, node, totalDemand, options, n.eniTaskQueue, func(option *eniOptions) bool {
 		return n.validateENI(ctx, option, []eniTypeKey{secondaryKey, trunkKey})
 	})
-	assignEniWithOptions(ctx, node, len(rdmaPods), options, func(option *eniOptions) bool {
+	assignEniWithOptions(ctx, node, len(rdmaPods), options, n.eniTaskQueue, func(option *eniOptions) bool {
 		return n.validateENI(ctx, option, []eniTypeKey{rdmaKey})
 	})
 
@@ -1010,7 +1198,9 @@ func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eni
 	}
 
 	if option.eniRef != nil {
-		if option.eniRef.Status != aliyunClient.ENIStatusInUse {
+		switch option.eniRef.Status {
+		case aliyunClient.ENIStatusInUse, aliyunClient.ENIStatusAttaching:
+		default:
 			return false
 		}
 
@@ -1033,7 +1223,8 @@ func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eni
 
 // assignEniWithOptions determine how many ip should be added to this eni.
 // In dual stack, ip on eni is automatically balanced.
-func assignEniWithOptions(ctx context.Context, node *networkv1beta1.Node, toAdd int, options []*eniOptions, filterFunc func(option *eniOptions) bool) {
+func assignEniWithOptions(ctx context.Context, node *networkv1beta1.Node, toAdd int, options []*eniOptions, taskQueue *ENITaskQueue, filterFunc func(option *eniOptions) bool) {
+	l := logf.FromContext(ctx)
 	eniSpec := node.Spec.ENISpec
 
 	toAddIPv4, toAddIPv6 := 0, 0
@@ -1051,7 +1242,43 @@ func assignEniWithOptions(ctx context.Context, node *networkv1beta1.Node, toAdd 
 		}
 
 		if option.eniRef != nil {
-			// exist eni
+			// For Attaching status ENI, check requested IP count from task queue
+			if option.eniRef.Status == aliyunClient.ENIStatusAttaching {
+				task, found := taskQueue.GetTaskStatus(option.eniRef.ID)
+				if found {
+					// Requested IP counts from the task
+					requestedIPv4 := task.RequestedIPv4Count
+					requestedIPv6 := task.RequestedIPv6Count
+
+					l.V(4).Info("found Attaching ENI in task queue",
+						"eni", option.eniRef.ID,
+						"requestedIPv4", requestedIPv4,
+						"requestedIPv6", requestedIPv6,
+						"toAddIPv4", toAddIPv4,
+						"toAddIPv6", toAddIPv6)
+
+					// If requested count >= needed count, no need to request more
+					if toAddIPv4 > 0 && requestedIPv4 >= toAddIPv4 {
+						toAddIPv4 = 0
+					} else if toAddIPv4 > 0 {
+						// Partially satisfied, subtract already requested
+						toAddIPv4 -= requestedIPv4
+					}
+
+					if toAddIPv6 > 0 && requestedIPv6 >= toAddIPv6 {
+						toAddIPv6 = 0
+					} else if toAddIPv6 > 0 {
+						toAddIPv6 -= requestedIPv6
+					}
+					// for not found , this may happen when controller is restarted ,
+				}
+				// Clear addIP request for Attaching ENI (can't add IPs to Attaching ENI)
+				option.addIPv4N = 0
+				option.addIPv6N = 0
+				continue // Skip Attaching status ENI
+			}
+
+			// For InUse status ENI, normal processing (existing logic)
 			if toAddIPv4 > 0 {
 				toAddIPv4 -= len(getAllocatable(option.eniRef.IPv4))
 
@@ -1110,6 +1337,8 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 	ctx, span := n.tracer.Start(ctx, "allocateFromOptions")
 	defer span.End()
 
+	l := logf.FromContext(ctx).WithName("allocateFromOptions")
+
 	wg := wait.Group{}
 	lock := sync.Mutex{}
 	var errs []error
@@ -1118,14 +1347,43 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 
 	createBatchSize := min(n.eniBatchSize, 1)
 	if isEFLO(ctx) {
-		createBatchSize = 2
+		createBatchSize = efloMaxConcurrentAttach
 	}
+
+	// Get current attaching count from task queue
+	currentAttachingCount := 0
+	if n.eniTaskQueue != nil {
+		currentAttachingCount = n.eniTaskQueue.GetAttachingCount(node.Name)
+	}
+
+	// Calculate available slots for new ENI attach operations
+	availableSlots := createBatchSize - currentAttachingCount
+	if availableSlots <= 0 {
+		l.Info("max concurrent attach limit reached, skip creating new ENIs",
+			"maxConcurrent", createBatchSize, "currentAttaching", currentAttachingCount)
+		availableSlots = 0
+	}
+
+	// Track how many new ENI create operations we've submitted
+	newENICreateCount := 0
+
 	for _, option := range options {
 		if option.addIPv6N <= 0 && option.addIPv4N <= 0 {
 			continue
 		}
 		if inFlight >= createBatchSize {
 			continue
+		}
+
+		// For new ENI creation (async attach), check concurrent limit
+		if option.eniRef == nil {
+			if newENICreateCount >= availableSlots {
+				l.V(4).Info("skip creating new ENI due to concurrent attach limit",
+					"maxConcurrent", createBatchSize, "currentAttaching", currentAttachingCount,
+					"newENICreateCount", newENICreateCount)
+				continue
+			}
+			newENICreateCount++
 		}
 
 		node.Status.LastModifiedTime = metav1.Now()
@@ -1179,6 +1437,20 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 		log := l.WithValues("eni", eni.ID, "status", eni.Status)
 
 		switch eni.Status {
+		case aliyunClient.LENIStatusCreateFailed,
+			aliyunClient.LENIStatusAttachFailed,
+			aliyunClient.LENIStatusDetachFailed,
+			aliyunClient.LENIStatusDeleteFailed:
+			// EFLO failed statuses - directly delete
+			if !isEFLO(ctx) {
+				log.Info("non-EFLO ENI with LENI failed status, skipping")
+				continue
+			}
+
+			log.Info("cleaning up EFLO ENI in failed state")
+			//	 mark as deleting
+			eni.Status = aliyunClient.ENIStatusDeleting
+
 		case aliyunClient.ENIStatusDeleting, aliyunClient.ENIStatusDetaching:
 			if !isEFLO(ctx) {
 				err := n.aliyun.GetECS().DetachNetworkInterface(ctx, eni.ID, node.Spec.NodeMetadata.InstanceID, "")
@@ -1330,6 +1602,8 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 		ReconcileLatency.WithLabelValues("createENI", node.Name).Observe(float64(time.Since(startTime).Milliseconds()))
 	}()
 
+	l := logf.FromContext(ctx)
+
 	// for new eni
 	typeOption, ok := EniOptions[opt.eniTypeKey]
 	if !ok {
@@ -1370,6 +1644,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 		Backoff: &bo.Backoff,
 	}
 
+	// 1. Create ENI via OpenAPI
 	result, err := n.aliyun.CreateNetworkInterfaceV2(ctx, typeOption, createOpts)
 	if err != nil {
 		if apiErr.ErrorCodeIs(err, apiErr.InvalidVSwitchIDIPNotEnough, apiErr.QuotaExceededPrivateIPAddress) {
@@ -1381,84 +1656,44 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 		return err
 	}
 
+	l.Info("ENI created, submitting async attach task", "eni", result.NetworkInterfaceID,
+		"requestedIPv4", opt.addIPv4N, "requestedIPv6", opt.addIPv6N)
+
+	// 2. Submit attach task to queue (async, non-blocking)
+	// This never fails - it only adds a task to in-memory queue
+	n.eniTaskQueue.SubmitAttach(ctx,
+		result.NetworkInterfaceID,
+		node.Spec.NodeMetadata.InstanceID,
+		"", // trunkENIID - not used for secondary ENI
+		node.Name,
+		opt.addIPv4N,
+		opt.addIPv6N)
+
+	// 3. Mark ENI as Attaching in Node CR
+	networkInterface := &networkv1beta1.Nic{
+		ID:                          result.NetworkInterfaceID,
+		Status:                      aliyunClient.ENIStatusAttaching,
+		VSwitchID:                   vsw.ID,
+		IPv4CIDR:                    vsw.IPv4CIDR,
+		IPv6CIDR:                    vsw.IPv6CIDR,
+		NetworkInterfaceType:        networkv1beta1.ENIType(result.Type),
+		NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficMode(result.NetworkInterfaceTrafficMode),
+	}
+
 	MetaCtx(ctx).Mutex.Lock()
 	if node.Status.NetworkInterfaces == nil {
 		node.Status.NetworkInterfaces = make(map[string]*networkv1beta1.Nic)
 	}
-	MetaCtx(ctx).Mutex.Unlock()
-
-	defer func() {
-		if err != nil {
-			rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer rollbackCancel()
-
-			if isEFLO(ctx) {
-				rollbackCtx = aliyunClient.SetBackendAPI(rollbackCtx, aliyunClient.BackendAPIEFLO)
-			}
-
-			innerErr := n.aliyun.DeleteNetworkInterfaceV2(rollbackCtx, result.NetworkInterfaceID)
-			if innerErr == nil {
-				return
-			}
-			logf.FromContext(ctx).Error(innerErr, "failed to delete eni, this may result leak", "eni", result.NetworkInterfaceID)
-			// if we failed to delete the eni , we need to store the eni
-			MetaCtx(ctx).Mutex.Lock()
-			node.Status.NetworkInterfaces[result.NetworkInterfaceID] = &networkv1beta1.Nic{
-				ID:                          result.NetworkInterfaceID,
-				Status:                      aliyunClient.ENIStatusDeleting,
-				NetworkInterfaceType:        networkv1beta1.ENIType(result.Type),
-				NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficMode(result.NetworkInterfaceTrafficMode),
-			}
-			MetaCtx(ctx).Mutex.Unlock()
-
-			MetaCtx(ctx).StatusChanged.Store(true)
-		}
-	}()
-
-	if !isEFLO(ctx) {
-		err = n.aliyun.GetECS().AttachNetworkInterface(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
-			NetworkInterfaceID:     &result.NetworkInterfaceID,
-			InstanceID:             &node.Spec.NodeMetadata.InstanceID,
-			TrunkNetworkInstanceID: nil,
-			NetworkCardIndex:       nil,
-			Backoff:                nil,
-		})
-		if err != nil {
-			n.record.Event(node, corev1.EventTypeWarning, types.EventCreateENIFailed,
-				fmt.Sprintf("Failed to attach ENI %s: %v", result.NetworkInterfaceID, err))
-			return err
-		}
-
-		time.Sleep(3 * time.Second)
-	}
-
-	eni, err := n.aliyun.WaitForNetworkInterfaceV2(ctx, result.NetworkInterfaceID, aliyunClient.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus).Backoff, false)
-	if err != nil {
-		n.record.Event(node, corev1.EventTypeWarning, types.EventCreateENIFailed,
-			fmt.Sprintf("Failed to wait ENI %s ready: %v", result.NetworkInterfaceID, err))
-		return err
-	}
-
-	networkInterface := newENIFromAPI(eni)
-	// update vsw
-	networkInterface.IPv4CIDR = vsw.IPv4CIDR
-	networkInterface.IPv6CIDR = vsw.IPv6CIDR
-
-	MetaCtx(ctx).Mutex.Lock()
-	node.Status.NetworkInterfaces[eni.NetworkInterfaceID] = networkInterface
-	// if changed , but we update failed , that case ,need to sync openAPI...
-
-	// Track OpenAPI allocations for warm-up
-	if !node.Status.WarmUpCompleted && node.Status.WarmUpTarget > 0 {
-		node.Status.WarmUpAllocatedCount += max(len(networkInterface.IPv4), len(networkInterface.IPv6))
-	}
+	node.Status.NetworkInterfaces[result.NetworkInterfaceID] = networkInterface
 	MetaCtx(ctx).Mutex.Unlock()
 
 	MetaCtx(ctx).StatusChanged.Store(true)
 
 	n.record.Event(node, corev1.EventTypeNormal, types.EventCreateENISucceed,
-		fmt.Sprintf("Successfully created ENI %s type=%s with %d IPv4 and %d IPv6 addresses",
-			eni.NetworkInterfaceID, opt.eniTypeKey.ENIType, opt.addIPv4N, opt.addIPv6N))
+		fmt.Sprintf("ENI %s created with %d IPv4, attach in progress",
+			result.NetworkInterfaceID, opt.addIPv4N))
+
+	// Return immediately, don't block waiting for attach
 	return nil
 }
 

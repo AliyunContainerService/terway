@@ -22,7 +22,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -31,6 +30,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
+	"github.com/AliyunContainerService/terway/pkg/eni/ops"
 	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 )
 
@@ -1215,11 +1215,159 @@ func Test_assignEniWithOptions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assignEniWithOptions(context.Background(), tt.args.node, tt.args.toAdd, tt.args.options, tt.args.filterFunc)
+			assignEniWithOptions(context.Background(), tt.args.node, tt.args.toAdd, tt.args.options, nil, tt.args.filterFunc)
 
 			tt.checkResult(t, tt.args.options)
 		})
 	}
+}
+
+func Test_assignEniWithOptions_AttachingENI(t *testing.T) {
+	// Setup mock task queue
+	notifyCh := make(chan string, 10)
+	mockAPI := mocks.NewOpenAPI(t)
+	tracer := noop.NewTracerProvider().Tracer("test")
+	executor := ops.NewExecutor(mockAPI, tracer)
+	taskQueue := NewENITaskQueue(context.Background(), executor, notifyCh)
+
+	// Add an Attaching ENI with 5 requested IPs to the task queue
+	taskQueue.tasks["eni-attaching"] = &ENITaskRecord{
+		ENIID:              "eni-attaching",
+		Status:             TaskStatusRunning,
+		RequestedIPv4Count: 5,
+		RequestedIPv6Count: 0,
+	}
+
+	t.Run("attaching ENI satisfies full demand", func(t *testing.T) {
+		node := &networkv1beta1.Node{
+			Spec: networkv1beta1.NodeSpec{
+				NodeCap: networkv1beta1.NodeCap{
+					IPv4PerAdapter: 10,
+					IPv6PerAdapter: 10,
+				},
+				ENISpec: &networkv1beta1.ENISpec{
+					EnableIPv4: true,
+					EnableIPv6: false,
+				},
+			},
+			Status: networkv1beta1.NodeStatus{
+				NetworkInterfaces: map[string]*networkv1beta1.Nic{
+					"eni-attaching": {
+						ID:     "eni-attaching",
+						Status: aliyunClient.ENIStatusAttaching,
+					},
+				},
+			},
+		}
+
+		options := []*eniOptions{
+			{
+				eniTypeKey: secondaryKey,
+				eniRef:     node.Status.NetworkInterfaces["eni-attaching"],
+			},
+			{
+				eniTypeKey: secondaryKey, // New ENI slot
+			},
+		}
+
+		// Need 3 IPs, but Attaching ENI already requested 5
+		assignEniWithOptions(context.Background(), node, 3, options, taskQueue, func(o *eniOptions) bool { return true })
+
+		// Attaching ENI should not request more IPs
+		assert.Equal(t, 0, options[0].addIPv4N)
+		// New ENI slot should also not request (demand is satisfied)
+		assert.Equal(t, 0, options[1].addIPv4N)
+	})
+
+	t.Run("attaching ENI partially satisfies demand", func(t *testing.T) {
+		// Add a task with 3 requested IPs
+		taskQueue.tasks["eni-partial"] = &ENITaskRecord{
+			ENIID:              "eni-partial",
+			Status:             TaskStatusRunning,
+			RequestedIPv4Count: 3,
+			RequestedIPv6Count: 0,
+		}
+
+		node := &networkv1beta1.Node{
+			Spec: networkv1beta1.NodeSpec{
+				NodeCap: networkv1beta1.NodeCap{
+					IPv4PerAdapter: 10,
+					IPv6PerAdapter: 10,
+				},
+				ENISpec: &networkv1beta1.ENISpec{
+					EnableIPv4: true,
+					EnableIPv6: false,
+				},
+			},
+			Status: networkv1beta1.NodeStatus{
+				NetworkInterfaces: map[string]*networkv1beta1.Nic{
+					"eni-partial": {
+						ID:     "eni-partial",
+						Status: aliyunClient.ENIStatusAttaching,
+					},
+				},
+			},
+		}
+
+		options := []*eniOptions{
+			{
+				eniTypeKey: secondaryKey,
+				eniRef:     node.Status.NetworkInterfaces["eni-partial"],
+			},
+			{
+				eniTypeKey: secondaryKey, // New ENI slot
+			},
+		}
+
+		// Need 5 IPs, but Attaching ENI only requested 3, so need 2 more
+		assignEniWithOptions(context.Background(), node, 5, options, taskQueue, func(o *eniOptions) bool { return true })
+
+		// Attaching ENI should not request more IPs (can't add to Attaching)
+		assert.Equal(t, 0, options[0].addIPv4N)
+		// New ENI slot should request the remaining 2 IPs
+		assert.Equal(t, 2, options[1].addIPv4N)
+	})
+
+	t.Run("attaching ENI without task queue entry", func(t *testing.T) {
+		node := &networkv1beta1.Node{
+			Spec: networkv1beta1.NodeSpec{
+				NodeCap: networkv1beta1.NodeCap{
+					IPv4PerAdapter: 10,
+					IPv6PerAdapter: 10,
+				},
+				ENISpec: &networkv1beta1.ENISpec{
+					EnableIPv4: true,
+					EnableIPv6: false,
+				},
+			},
+			Status: networkv1beta1.NodeStatus{
+				NetworkInterfaces: map[string]*networkv1beta1.Nic{
+					"eni-unknown": {
+						ID:     "eni-unknown",
+						Status: aliyunClient.ENIStatusAttaching,
+					},
+				},
+			},
+		}
+
+		options := []*eniOptions{
+			{
+				eniTypeKey: secondaryKey,
+				eniRef:     node.Status.NetworkInterfaces["eni-unknown"],
+			},
+			{
+				eniTypeKey: secondaryKey, // New ENI slot
+			},
+		}
+
+		// Need 3 IPs, Attaching ENI not in queue (e.g., controller restart)
+		assignEniWithOptions(context.Background(), node, 3, options, taskQueue, func(o *eniOptions) bool { return true })
+
+		// Attaching ENI should not request more IPs
+		assert.Equal(t, 0, options[0].addIPv4N)
+		// New ENI slot should request all 3 IPs
+		assert.Equal(t, 3, options[1].addIPv4N)
+	})
 }
 
 func TestReconcileNode_adjustPool(t *testing.T) {
@@ -2209,90 +2357,111 @@ var _ = Describe("Test ReconcileNode", func() {
 		}).WithTimeout(10 * time.Second).Should(Succeed())
 	})
 
-	Context("Test create err", func() {
-		It("Test create err", func() {
+	Context("Test attach failure - syncTaskQueueStatus with failed task", func() {
+		It("Should mark ENI as Deleting when task queue reports failure", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
 
-			instanceID := "instanceID"
-			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
-				InstanceID: &instanceID,
-			}).Return([]*aliyunClient.NetworkInterface{}, nil).Maybe()
-			vpcClient.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
-				VSwitchId:               "vsw-1",
-				ZoneId:                  "zone-1",
-				AvailableIpAddressCount: 10,
-				CidrBlock:               "172.0.0.0/16",
-				Ipv6CidrBlock:           "fd00::/64",
-			}, nil).Maybe()
+			// Setup mock API
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, _, _ = mockHelper.GetMocks()
+			openAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil).Maybe()
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{}, nil).Maybe()
 
-			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
-				NetworkInterfaceID:          "eni-1",
-				Type:                        "Secondary",
-				NetworkInterfaceTrafficMode: "Standard",
-			}, nil).Once()
-			openAPI.On("CreateNetworkInterfaceV2", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
-				NetworkInterfaceID:          "eni-2",
-				Type:                        "Secondary",
-				NetworkInterfaceTrafficMode: "Standard",
-			}, nil).Once()
-			openAPI.On("DeleteNetworkInterfaceV2", mock.Anything, "eni-1").Return(fmt.Errorf("faile to del eni"))
-			openAPI.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-1", mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("timeout"))
-			openAPI.On("WaitForNetworkInterfaceV2", mock.Anything, "eni-2", mock.Anything, mock.Anything, mock.Anything).Return(&aliyunClient.NetworkInterface{
-				Status:             "InUse",
-				MacAddress:         "",
-				NetworkInterfaceID: "eni-2",
-				VSwitchID:          "vsw-1",
-				PrivateIPAddress:   "127.0.0.2",
-				PrivateIPSets: []aliyunClient.IPSet{
-					{
-						IPAddress: "127.0.0.2",
-						Primary:   true,
-					},
-				},
-				ZoneID:                      "zone-1",
-				SecurityGroupIDs:            nil,
-				ResourceGroupID:             "",
-				Type:                        "Secondary",
-				InstanceID:                  "",
-				TrunkNetworkInterfaceID:     "",
-				NetworkInterfaceTrafficMode: "Standard",
-				DeviceIndex:                 0,
-				CreationTime:                "",
-			}, nil)
+			// Create reconciler with task queue
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithDefaults().
+				Build()
 
-			By("reconcile")
-			controllerReconciler := &ReconcileNode{
-				client:  k8sClient,
-				scheme:  k8sClient.Scheme(),
-				aliyun:  openAPI,
-				tracer:  noop.NewTracerProvider().Tracer(""),
-				vswpool: switchPool,
-				record:  record.NewFakeRecorder(100),
+			By("Setting up node with Attaching ENI")
+			eniAttaching := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusAttaching, nil, nil)
+			eniAttaching.NetworkInterfaceType = networkv1beta1.ENITypeSecondary
+
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithInstanceID("i-test").
+				WithExistingENIs(eniAttaching).
+				Build()
+
+			By("Injecting failed task into queue")
+			now := time.Now()
+			reconciler.eniTaskQueue.tasks["eni-1"] = &ENITaskRecord{
+				ENIID:              "eni-1",
+				Operation:          OpAttach,
+				InstanceID:         "i-test",
+				NodeName:           "test-node",
+				Status:             TaskStatusFailed,
+				CreatedAt:          now.Add(-1 * time.Minute),
+				CompletedAt:        &now,
+				RequestedIPv4Count: 5,
+				RequestedIPv6Count: 0,
+				ENIInfo:            nil,
+				Error:              fmt.Errorf("attach timeout"),
 			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
+			By("Calling syncTaskQueueStatus to process failed task")
+			reconciler.syncTaskQueueStatus(ctx, node)
 
-			By("check this cr")
-			node := &networkv1beta1.Node{
-				ObjectMeta: metav1.ObjectMeta{Name: name},
-			}
-			err = k8sClient.Get(ctx, typeNamespacedName, node)
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(len(node.Status.NetworkInterfaces)).To(Equal(2))
-
-			By("delete failed eni should be kept")
-			Expect(node.Status.NetworkInterfaces["eni-1"].Status).To(Equal("Deleting"))
-			Expect(node.Status.NetworkInterfaces["eni-2"].Status).To(Equal("InUse"))
-
+			By("Verifying ENI status changed to Deleting")
+			Expect(node.Status.NetworkInterfaces).To(HaveKey("eni-1"))
+			Expect(node.Status.NetworkInterfaces["eni-1"].Status).To(Equal(aliyunClient.ENIStatusDeleting))
 			Expect(node.Status.NetworkInterfaces["eni-1"].NetworkInterfaceType).To(Equal(networkv1beta1.ENITypeSecondary))
-			Expect(node.Status.NetworkInterfaces["eni-2"].NetworkInterfaceType).To(Equal(networkv1beta1.ENITypeSecondary))
 
-			By("check pods ip should allocated")
-			Expect(node.Status.NetworkInterfaces["eni-2"].IPv4["127.0.0.2"].Primary).To(Equal(true))
-			Expect(node.Status.NetworkInterfaces["eni-2"].IPv4["127.0.0.2"].PodID).To(Not(BeEmpty()))
+			By("Verifying status changed flag is set")
+			Expect(MetaCtx(ctx).StatusChanged.Load()).To(BeTrue())
+		})
+
+		It("Should mark ENI as Deleting when task queue reports timeout", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
+
+			// Setup mock API
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, _, _ = mockHelper.GetMocks()
+			openAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil).Maybe()
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{}, nil).Maybe()
+
+			// Create reconciler with task queue
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithDefaults().
+				Build()
+
+			By("Setting up node with Attaching ENI")
+			eniAttaching := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusAttaching, nil, nil)
+			eniAttaching.NetworkInterfaceType = networkv1beta1.ENITypeSecondary
+
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithInstanceID("i-test").
+				WithExistingENIs(eniAttaching).
+				Build()
+
+			By("Injecting timeout task into queue")
+			now := time.Now()
+			reconciler.eniTaskQueue.tasks["eni-1"] = &ENITaskRecord{
+				ENIID:              "eni-1",
+				Operation:          OpAttach,
+				InstanceID:         "i-test",
+				NodeName:           "test-node",
+				Status:             TaskStatusTimeout,
+				CreatedAt:          now.Add(-5 * time.Minute),
+				CompletedAt:        &now,
+				RequestedIPv4Count: 3,
+				RequestedIPv6Count: 0,
+				ENIInfo:            nil,
+				Error:              fmt.Errorf("attach timeout after 5m"),
+			}
+
+			By("Calling syncTaskQueueStatus to process timeout task")
+			reconciler.syncTaskQueueStatus(ctx, node)
+
+			By("Verifying ENI status changed to Deleting")
+			Expect(node.Status.NetworkInterfaces).To(HaveKey("eni-1"))
+			Expect(node.Status.NetworkInterfaces["eni-1"].Status).To(Equal(aliyunClient.ENIStatusDeleting))
 		})
 	})
 
@@ -2392,14 +2561,13 @@ var _ = Describe("Test ReconcileNode", func() {
 			}, nil).Once()
 
 			By("reconcile")
-			controllerReconciler := &ReconcileNode{
-				client:  k8sClient,
-				scheme:  k8sClient.Scheme(),
-				aliyun:  openAPI,
-				tracer:  noop.NewTracerProvider().Tracer(""),
-				vswpool: switchPool,
-				record:  record.NewFakeRecorder(100),
-			}
+			controllerReconciler := NewReconcilerBuilder().
+				WithClient(k8sClient).
+				WithScheme(k8sClient.Scheme()).
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithDefaults().
+				Build()
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -2647,8 +2815,8 @@ var _ = Describe("Test ReconcileNode", func() {
 		})
 	})
 
-	Context("Test createENI", func() {
-		It("Should create ENI successfully", func() {
+	Context("Test createENI with async queue", func() {
+		It("Should create ENI and submit async attach task", func() {
 			ctx := context.TODO()
 			ctx = MetaIntoCtx(ctx)
 
@@ -2663,25 +2831,20 @@ var _ = Describe("Test ReconcileNode", func() {
 
 			// Use MockAPIHelper to setup API expectations
 			mockHelper := NewMockAPIHelperWithT(GinkgoT())
-			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+			openAPI, _, _ = mockHelper.GetMocks()
 
-			// Setup the ENI creation flow
+			// Setup the ENI creation flow - only CreateNetworkInterfaceV2 is called synchronously
 			mockHelper.SetupCreateENI("eni-1", aliyunClient.ENITypeSecondary,
 				WithMacAddress("00:00:00:00:00:01"),
 				WithIPv4("192.168.0.1"),
-				WithIPv6("fd00::1"),
 			)
 
-			ecsClient.On("AttachNetworkInterface", mock.Anything, mock.Anything).Return(nil)
-
-			// Build the complete mock ENI with all fields
-			completeENI := BuildMockENI("eni-1", aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusInUse,
-				"vsw-1", "cn-hangzhou-k",
-				[]string{"192.168.0.1"},
-				[]string{"fd00::1"})
-			completeENI.MacAddress = "00:00:00:00:00:01"
-
-			mockHelper.SetupWaitForENI("eni-1", aliyunClient.ENIStatusInUse, completeENI, nil)
+			// AttachNetworkInterfaceV2 and DescribeNetworkInterfaceV2 are used by async queue
+			openAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil).Maybe()
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				BuildMockENI("eni-1", aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusInUse,
+					"vsw-1", "cn-hangzhou-k", []string{"192.168.0.1"}, nil),
+			}, nil).Maybe()
 
 			// Setup vSwitch in pool
 			switchPool.Add(&vswpool.Switch{
@@ -2703,23 +2866,35 @@ var _ = Describe("Test ReconcileNode", func() {
 			By("Creating ENI")
 			opt := &eniOptions{
 				eniTypeKey: secondaryKey,
-				addIPv4N:   0,
+				addIPv4N:   5,
 				addIPv6N:   0,
 			}
 
 			err := reconciler.createENI(ctx, node, opt)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying the ENI was created correctly")
+			By("Verifying ENI is in Attaching status in node CRD")
 			Expect(node.Status.NetworkInterfaces).To(HaveKey("eni-1"))
 			eni := node.Status.NetworkInterfaces["eni-1"]
 			Expect(eni.ID).To(Equal("eni-1"))
-			Expect(eni.MacAddress).To(Equal("00:00:00:00:00:01"))
-			Expect(eni.IPv4).To(HaveKey("192.168.0.1"))
-			Expect(eni.IPv6).To(HaveKey("fd00::1"))
+			Expect(eni.Status).To(Equal(aliyunClient.ENIStatusAttaching))
+			Expect(eni.VSwitchID).To(Equal("vsw-1"))
+			Expect(eni.NetworkInterfaceType).To(Equal(networkv1beta1.ENITypeSecondary))
+
+			By("Verifying task was submitted to queue")
+			task, ok := reconciler.eniTaskQueue.GetTaskStatus("eni-1")
+			Expect(ok).To(BeTrue(), "Task should be in queue")
+			Expect(task.ENIID).To(Equal("eni-1"))
+			Expect(task.InstanceID).To(Equal("i-1"))
+			Expect(task.NodeName).To(Equal("test-node"))
+			Expect(task.RequestedIPv4Count).To(Equal(5))
+			Expect(task.RequestedIPv6Count).To(Equal(0))
+
+			By("Verifying status changed flag is set")
+			Expect(MetaCtx(ctx).StatusChanged.Load()).To(BeTrue())
 		})
 
-		It("Should handle ENI creation failure", func() {
+		It("Should handle ENI creation API failure", func() {
 			ctx := context.TODO()
 			ctx = MetaIntoCtx(ctx)
 
@@ -2735,7 +2910,7 @@ var _ = Describe("Test ReconcileNode", func() {
 			// Setup mock to return error
 			createErr := fmt.Errorf("create eni failed")
 			mockHelper := NewMockAPIHelperWithT(GinkgoT())
-			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+			openAPI, _, _ = mockHelper.GetMocks()
 			mockHelper.SetupCreateENIWithError(createErr)
 
 			// Setup vSwitch in pool
@@ -2764,10 +2939,14 @@ var _ = Describe("Test ReconcileNode", func() {
 
 			err := reconciler.createENI(ctx, node, opt)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(Equal(createErr))
+			Expect(err.Error()).To(ContainSubstring("create eni failed"))
 
 			By("Verifying the ENI was not added to node status")
 			Expect(node.Status.NetworkInterfaces).To(BeEmpty())
+
+			By("Verifying no task was submitted to queue")
+			_, ok := reconciler.eniTaskQueue.GetTaskStatus("eni-1")
+			Expect(ok).To(BeFalse(), "No task should be in queue after creation failure")
 		})
 
 		It("Should handle VSwitchID not found error", func() {
@@ -2786,7 +2965,7 @@ var _ = Describe("Test ReconcileNode", func() {
 			// Use ReconcilerBuilder to create reconciler
 			// Note: Not adding any vSwitch to switchPool, so GetOne will fail
 			mockHelper := NewMockAPIHelperWithT(GinkgoT())
-			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+			openAPI, _, _ = mockHelper.GetMocks()
 
 			reconciler := NewReconcilerBuilder().
 				WithAliyun(openAPI).
@@ -2808,6 +2987,146 @@ var _ = Describe("Test ReconcileNode", func() {
 
 			By("Verifying the ENI was not added to node status")
 			Expect(node.Status.NetworkInterfaces).To(BeEmpty())
+		})
+	})
+
+	Context("Test ensureAsyncTasks - Recovery on Restart", func() {
+		It("Should submit recovery task for Attaching ENI after restart", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
+
+			// Simulate restart scenario: Node CR has Attaching ENI but task queue is empty
+			eniAttaching := BuildENIWithCustomIPs("eni-restart-1", aliyunClient.ENIStatusAttaching, nil, nil)
+			eniInUse := BuildENIWithCustomIPs("eni-inuse", aliyunClient.ENIStatusInUse, nil, nil)
+
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithInstanceID("i-test").
+				WithExistingENIs(eniAttaching, eniInUse).
+				Build()
+
+			// Setup mock API - ECS attach is idempotent, won't fail on retry
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, _, _ = mockHelper.GetMocks()
+			openAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil).Maybe()
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-restart-1",
+					Status:             aliyunClient.ENIStatusInUse,
+				},
+			}, nil).Maybe()
+
+			// Create reconciler with task queue
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithDefaults().
+				Build()
+
+			// Verify task queue is empty initially
+			Expect(reconciler.eniTaskQueue.HasPendingTasks("test-node")).To(BeFalse())
+
+			By("Calling ensureAsyncTasks to trigger recovery")
+			reconciler.ensureAsyncTasks(ctx, node)
+
+			By("Verifying recovery task was submitted for Attaching ENI")
+			task, ok := reconciler.eniTaskQueue.GetTaskStatus("eni-restart-1")
+			Expect(ok).To(BeTrue(), "Recovery task should be submitted")
+			Expect(task.ENIID).To(Equal("eni-restart-1"))
+			Expect(task.InstanceID).To(Equal("i-test"))
+
+			By("Verifying no task was submitted for InUse ENI")
+			_, ok = reconciler.eniTaskQueue.GetTaskStatus("eni-inuse")
+			Expect(ok).To(BeFalse(), "No task should be submitted for InUse ENI")
+		})
+
+		It("Should not submit duplicate task if task already exists", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
+
+			// Setup mock API
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, _, _ = mockHelper.GetMocks()
+			openAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil).Maybe()
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-existing",
+					Status:             aliyunClient.ENIStatusInUse,
+				},
+			}, nil).Maybe()
+
+			// Create reconciler with task queue
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithDefaults().
+				Build()
+
+			// Pre-add a task to the queue
+			reconciler.eniTaskQueue.SubmitAttach(ctx, "eni-existing", "i-test", "", "test-node", 5, 0)
+
+			// Wait for task to be added
+			task, ok := reconciler.eniTaskQueue.GetTaskStatus("eni-existing")
+			Expect(ok).To(BeTrue())
+			originalIPv4Count := task.RequestedIPv4Count
+
+			// Create node with Attaching ENI
+			eniAttaching := BuildENIWithCustomIPs("eni-existing", aliyunClient.ENIStatusAttaching, nil, nil)
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithInstanceID("i-test").
+				WithExistingENIs(eniAttaching).
+				Build()
+
+			By("Calling ensureAsyncTasks - should not submit duplicate")
+			reconciler.ensureAsyncTasks(ctx, node)
+
+			By("Verifying task was not overwritten")
+			task, ok = reconciler.eniTaskQueue.GetTaskStatus("eni-existing")
+			Expect(ok).To(BeTrue())
+			// The original task should not be replaced - IP count should remain the same
+			Expect(task.RequestedIPv4Count).To(Equal(originalIPv4Count))
+		})
+
+		It("Should handle multiple Attaching ENIs on restart", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
+
+			// Create multiple Attaching ENIs
+			eni1 := BuildENIWithCustomIPs("eni-multi-1", aliyunClient.ENIStatusAttaching, nil, nil)
+			eni2 := BuildENIWithCustomIPs("eni-multi-2", aliyunClient.ENIStatusAttaching, nil, nil)
+			eni3 := BuildENIWithCustomIPs("eni-multi-3", aliyunClient.ENIStatusAttaching, nil, nil)
+
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithInstanceID("i-test").
+				WithExistingENIs(eni1, eni2, eni3).
+				Build()
+
+			// Setup mock API
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, _, _ = mockHelper.GetMocks()
+			openAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil).Maybe()
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{NetworkInterfaceID: "eni-multi-1", Status: aliyunClient.ENIStatusInUse},
+			}, nil).Maybe()
+
+			// Create reconciler
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithDefaults().
+				Build()
+
+			By("Calling ensureAsyncTasks")
+			reconciler.ensureAsyncTasks(ctx, node)
+
+			By("Verifying all Attaching ENIs got recovery tasks")
+			for _, eniID := range []string{"eni-multi-1", "eni-multi-2", "eni-multi-3"} {
+				task, ok := reconciler.eniTaskQueue.GetTaskStatus(eniID)
+				Expect(ok).To(BeTrue(), "Recovery task should be submitted for %s", eniID)
+				Expect(task.InstanceID).To(Equal("i-test"))
+			}
 		})
 	})
 

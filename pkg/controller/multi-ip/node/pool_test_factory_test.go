@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/eni/ops"
 	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/spf13/viper"
 )
@@ -517,6 +519,7 @@ type ReconcilerBuilder struct {
 	gcPeriod     time.Duration
 	syncPeriod   time.Duration
 	v            *viper.Viper
+	eniTaskQueue *ENITaskQueue
 }
 
 // NewReconcilerBuilder creates a new ReconcilerBuilder with minimal defaults.
@@ -588,6 +591,12 @@ func (b *ReconcilerBuilder) WithViper(v *viper.Viper) *ReconcilerBuilder {
 	return b
 }
 
+// WithENITaskQueue sets the ENI task queue.
+func (b *ReconcilerBuilder) WithENITaskQueue(queue *ENITaskQueue) *ReconcilerBuilder {
+	b.eniTaskQueue = queue
+	return b
+}
+
 // WithDefaults sets sensible defaults for testing (fake recorder, noop tracer, etc.).
 func (b *ReconcilerBuilder) WithDefaults() *ReconcilerBuilder {
 	if b.record == nil {
@@ -595,6 +604,12 @@ func (b *ReconcilerBuilder) WithDefaults() *ReconcilerBuilder {
 	}
 	if b.tracer == nil {
 		b.tracer = noop.NewTracerProvider().Tracer("")
+	}
+	// Auto-create ENI task queue if aliyun client is provided but queue is not set
+	if b.eniTaskQueue == nil && b.aliyun != nil {
+		eniNotifyCh := make(chan string, 10)
+		executor := ops.NewExecutor(b.aliyun, b.tracer)
+		b.eniTaskQueue = NewENITaskQueue(context.Background(), executor, eniNotifyCh)
 	}
 	return b
 }
@@ -615,5 +630,6 @@ func (b *ReconcilerBuilder) Build() *ReconcileNode {
 		gcPeriod:           b.gcPeriod,
 		fullSyncNodePeriod: b.syncPeriod,
 		v:                  b.v,
+		eniTaskQueue:       b.eniTaskQueue,
 	}
 }
