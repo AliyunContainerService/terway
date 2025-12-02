@@ -345,6 +345,8 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{}, err
 	}
 
+	requeueAfter := n.requeueAfter(node)
+
 	if !reflect.DeepEqual(beforeStatus, afterStatus) {
 		span.AddEvent("update node cr")
 
@@ -353,11 +355,14 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		if err != nil && nodeStatus.StatusChanged.CompareAndSwap(true, false) {
 			nodeStatus.NeedSyncOpenAPI.Store(true)
 		}
+		if err != nil {
+			return reconcile.Result{}, err
+		}
 
-		return reconcile.Result{RequeueAfter: 1 * time.Second}, err
+		return reconcile.Result{RequeueAfter: requeueAfter}, nil
 	}
 
-	return reconcile.Result{}, utilerrors.NewAggregate(errorList)
+	return reconcile.Result{RequeueAfter: requeueAfter}, utilerrors.NewAggregate(errorList)
 }
 
 // syncWithAPI will sync all eni from openAPI. Need to re-sync with local pods.
@@ -1275,15 +1280,7 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 func (n *ReconcileNode) adjustPool(ctx context.Context, node *networkv1beta1.Node) error {
 	l := logf.FromContext(ctx).WithName("adjustPool")
 
-	gcPeriod := n.gcPeriod
-	if node.Spec.Pool.PoolSyncPeriod != "" {
-		period, err := time.ParseDuration(node.Spec.Pool.PoolSyncPeriod)
-		if err != nil {
-			l.Error(err, "parse pool sync period failed, use default config")
-		} else {
-			gcPeriod = period
-		}
-	}
+	gcPeriod := n.poolSyncPeriod(node.Spec.Pool.PoolSyncPeriod)
 
 	if MetaCtx(ctx).LastGCTime.Add(gcPeriod).After(time.Now()) {
 		l.V(4).Info("skip adjustPool", "lastGCTime", MetaCtx(ctx).LastGCTime)
@@ -2021,4 +2018,41 @@ func (n *ReconcileNode) checkWarmUpCompletion(node *networkv1beta1.Node) {
 	if node.Status.WarmUpAllocatedCount >= node.Status.WarmUpTarget {
 		node.Status.WarmUpCompleted = true
 	}
+}
+
+func (n *ReconcileNode) poolSyncPeriod(user string) time.Duration {
+	system := n.gcPeriod
+	if user != "" {
+		period, err := time.ParseDuration(user)
+		if err == nil {
+			system = period
+		}
+	}
+	return system
+}
+
+func (n *ReconcileNode) requeueAfter(node *networkv1beta1.Node) time.Duration {
+
+	poolPeriod := n.poolSyncPeriod(node.Spec.Pool.PoolSyncPeriod)
+
+	now := time.Now()
+	result := poolPeriod
+
+	if !node.Status.NextSyncOpenAPITime.IsZero() {
+		nextSyncTime := node.Status.NextSyncOpenAPITime.Time
+		if nextSyncTime.After(now) {
+			nextSyncDuration := nextSyncTime.Sub(now)
+			// Take the minimum of poolPeriod and nextSyncDuration (priority processing principle)
+			if nextSyncDuration < poolPeriod {
+				result = nextSyncDuration
+			}
+		}
+	}
+
+	// Ensure minimum 1s
+	if result < 1*time.Second {
+		return 1 * time.Second
+	}
+
+	return result
 }
