@@ -3777,3 +3777,219 @@ func TestCheckWarmUpCompletion(t *testing.T) {
 		})
 	}
 }
+
+func TestReconcileNode_poolSyncPeriod(t *testing.T) {
+	tests := []struct {
+		name     string
+		user     string
+		gcPeriod time.Duration
+		want     time.Duration
+	}{
+		{
+			name:     "empty user string, use system default",
+			user:     "",
+			gcPeriod: 30 * time.Second,
+			want:     30 * time.Second,
+		},
+		{
+			name:     "valid user duration",
+			user:     "60s",
+			gcPeriod: 30 * time.Second,
+			want:     60 * time.Second,
+		},
+		{
+			name:     "valid user duration with minutes",
+			user:     "5m",
+			gcPeriod: 30 * time.Second,
+			want:     5 * time.Minute,
+		},
+		{
+			name:     "invalid user duration, use system default",
+			user:     "invalid",
+			gcPeriod: 30 * time.Second,
+			want:     30 * time.Second,
+		},
+		{
+			name:     "user duration overrides system default",
+			user:     "2m",
+			gcPeriod: 1 * time.Minute,
+			want:     2 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n := &ReconcileNode{
+				gcPeriod: tt.gcPeriod,
+			}
+			got := n.poolSyncPeriod(tt.user)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestReconcileNode_requeueAfter(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name        string
+		node        *networkv1beta1.Node
+		gcPeriod    time.Duration
+		want        time.Duration
+		wantMin     time.Duration
+		wantMax     time.Duration
+		description string
+	}{
+		{
+			name: "zero NextSyncOpenAPITime, use poolPeriod",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						PoolSyncPeriod: "",
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NextSyncOpenAPITime: metav1.Time{},
+				},
+			},
+			gcPeriod:    30 * time.Second,
+			want:        30 * time.Second,
+			description: "When NextSyncOpenAPITime is zero, should use poolPeriod",
+		},
+		{
+			name: "NextSyncOpenAPITime in future, less than poolPeriod",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						PoolSyncPeriod: "60s",
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NextSyncOpenAPITime: metav1.NewTime(now.Add(20 * time.Second)),
+				},
+			},
+			gcPeriod:    30 * time.Second,
+			wantMin:     19 * time.Second,
+			wantMax:     21 * time.Second,
+			description: "When NextSyncOpenAPITime is in future and less than poolPeriod, should use NextSyncOpenAPITime duration",
+		},
+		{
+			name: "NextSyncOpenAPITime in future, greater than poolPeriod",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						PoolSyncPeriod: "30s",
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NextSyncOpenAPITime: metav1.NewTime(now.Add(60 * time.Second)),
+				},
+			},
+			gcPeriod:    30 * time.Second,
+			want:        30 * time.Second,
+			description: "When NextSyncOpenAPITime is in future but greater than poolPeriod, should use poolPeriod",
+		},
+		{
+			name: "NextSyncOpenAPITime in past",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						PoolSyncPeriod: "",
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NextSyncOpenAPITime: metav1.NewTime(now.Add(-10 * time.Second)),
+				},
+			},
+			gcPeriod:    30 * time.Second,
+			want:        30 * time.Second,
+			description: "When NextSyncOpenAPITime is in past, should use poolPeriod",
+		},
+		{
+			name: "poolPeriod less than 1s, should enforce minimum 1s",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						PoolSyncPeriod: "500ms",
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NextSyncOpenAPITime: metav1.Time{},
+				},
+			},
+			gcPeriod:    500 * time.Millisecond,
+			want:        1 * time.Second,
+			description: "When poolPeriod is less than 1s, should enforce minimum 1s",
+		},
+		{
+			name: "NextSyncOpenAPITime duration less than 1s, should enforce minimum 1s",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						PoolSyncPeriod: "60s",
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NextSyncOpenAPITime: metav1.NewTime(now.Add(500 * time.Millisecond)),
+				},
+			},
+			gcPeriod:    30 * time.Second,
+			want:        1 * time.Second,
+			description: "When NextSyncOpenAPITime duration is less than 1s, should enforce minimum 1s",
+		},
+		{
+			name: "custom poolSyncPeriod from user config",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						PoolSyncPeriod: "2m",
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NextSyncOpenAPITime: metav1.NewTime(now.Add(90 * time.Second)),
+				},
+			},
+			gcPeriod:    30 * time.Second,
+			wantMin:     89 * time.Second,
+			wantMax:     91 * time.Second,
+			description: "When user provides custom poolSyncPeriod, should use it and compare with NextSyncOpenAPITime",
+		},
+		{
+			name: "NextSyncOpenAPITime exactly 1s in future",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					Pool: &networkv1beta1.PoolSpec{
+						PoolSyncPeriod: "60s",
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NextSyncOpenAPITime: metav1.NewTime(now.Add(1 * time.Second)),
+				},
+			},
+			gcPeriod:    30 * time.Second,
+			wantMin:     999 * time.Millisecond,
+			wantMax:     1001 * time.Millisecond,
+			description: "When NextSyncOpenAPITime is exactly 1s in future, should return approximately 1s",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n := &ReconcileNode{
+				gcPeriod: tt.gcPeriod,
+			}
+			got := n.requeueAfter(tt.node)
+
+			if tt.want != 0 {
+				assert.Equal(t, tt.want, got, tt.description)
+			} else {
+				if tt.wantMin != 0 && tt.wantMax != 0 {
+					assert.GreaterOrEqual(t, got, tt.wantMin, tt.description)
+					assert.LessOrEqual(t, got, tt.wantMax, tt.description)
+				} else {
+					assert.GreaterOrEqual(t, got, 1*time.Second, "result should be at least 1s")
+				}
+			}
+		})
+	}
+}
