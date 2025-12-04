@@ -106,6 +106,7 @@ func TestMain(m *testing.M) {
 		envfuncs.CreateNamespace(envCfg.Namespace()),
 		patchNamespace,
 		checkENIConfig,
+		configureKubeClientQPS,
 		printClusterEnvironment,
 	)
 	testenv.AfterEachFeature(func(ctx context.Context, config *envconf.Config, t *testing.T, feature features.Feature) (context.Context, error) {
@@ -313,6 +314,47 @@ type Config struct {
 	EnableENITrunking bool   `json:"enable_eni_trunking"`
 	IPStack           string `json:"ip_stack"`
 	IPAMType          string `json:"ipam_type"`
+}
+
+// configureKubeClientQPS configures kube_client_qps and kube_client_burst for all tests
+func configureKubeClientQPS(ctx context.Context, config *envconf.Config) (context.Context, error) {
+	cm := &corev1.ConfigMap{}
+	err := config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return ctx, nil
+		}
+		return ctx, err
+	}
+
+	eniConf := cm.Data["eni_conf"]
+	if eniConf == "" {
+		return ctx, nil
+	}
+
+	// Parse and update eni_conf
+	var eniConfMap map[string]interface{}
+	if err := json.Unmarshal([]byte(eniConf), &eniConfMap); err != nil {
+		return ctx, fmt.Errorf("failed to parse eni_conf: %v", err)
+	}
+
+	// Set kube_client_qps and kube_client_burst
+	eniConfMap["kube_client_qps"] = 50
+	eniConfMap["kube_client_burst"] = 100
+
+	updatedConf, err := json.Marshal(eniConfMap)
+	if err != nil {
+		return ctx, fmt.Errorf("failed to marshal eni_conf: %v", err)
+	}
+
+	cm.Data["eni_conf"] = string(updatedConf)
+	err = config.Client().Resources().Update(ctx, cm)
+	if err != nil {
+		return ctx, fmt.Errorf("failed to update eni-config: %v", err)
+	}
+
+	fmt.Printf("Configured kube_client_qps=50, kube_client_burst=100\n")
+	return ctx, nil
 }
 
 // printClusterEnvironment prints the cluster environment information including node capacities

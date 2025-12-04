@@ -149,7 +149,7 @@ func TestNetworkInterfaceStress(t *testing.T) {
 						name := fmt.Sprintf("stress-eni-%d", idx)
 
 						start := time.Now()
-						
+
 						patch := []byte(fmt.Sprintf(`{"status":{"phase":"%s","eniInfo":{"id":"%s"}}}`, "Bind", fmt.Sprintf("eni-%d", idx)))
 						if rand.Intn(2) == 0 {
 							patch = []byte(fmt.Sprintf(`{"status":{"phase":"%s","eniInfo":{"id":"%s"}}}`, "Unbind", fmt.Sprintf("eni-%d", idx)))
@@ -233,10 +233,10 @@ func TestNetworkInterfaceStress(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Logf("Cleaning up %d NetworkInterface CRs...", totalCRs)
-			
+
 			g, _ := errgroup.WithContext(ctx)
 			g.SetLimit(100)
-			
+
 			for i := 0; i < totalCRs; i++ {
 				idx := i
 				g.Go(func() error {

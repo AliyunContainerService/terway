@@ -3,7 +3,6 @@
 package stress
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,7 +14,6 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/envfuncs"
 
-	"github.com/AliyunContainerService/terway/tests/utils"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
@@ -23,8 +21,6 @@ import (
 
 var (
 	testenv env.Environment
-
-	containerNetworkPods int
 )
 
 func TestMain(m *testing.M) {
@@ -53,10 +49,6 @@ func TestMain(m *testing.M) {
 
 	testenv.Setup(
 		envfuncs.CreateNamespace(envCfg.Namespace()),
-		func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
-			containerNetworkPods, err = utils.GetAvailableContainerNetworkPods(ctx, cfg.Client())
-			return ctx, err
-		},
 	)
 
 	testenv.Finish(
