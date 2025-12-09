@@ -215,6 +215,7 @@ func runCilium(cfg *PolicyConfig) error {
 		"--ipam=delegated-plugin",
 		"--enable-bandwidth-manager=true",
 		"--agent-health-port=" + cfg.HealthCheckPort,
+		"--enable-tcx=false",
 	}
 
 	if cfg.EnableNetworkPolicy {

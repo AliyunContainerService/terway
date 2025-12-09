@@ -12,6 +12,8 @@ import (
 	"sigs.k8s.io/e2e-framework/klient/k8s"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
+
+	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
 
 // TestConnectivity_AllNodeTypes tests basic connectivity across all available node types and ENI modes
@@ -495,6 +497,201 @@ func createCrossZoneTest(nodeType NodeType) features.Feature {
 				_, err := Pull(config.Client(), config.Namespace(), clientName, "client", serviceName, t)
 				if err != nil {
 					t.Errorf("cross-zone connectivity failed for %s: %v", stack, err)
+				}
+			}
+			return MarkTestSuccess(ctx)
+		}).
+		Feature()
+}
+
+// TestConnectivity_TrunkPod tests connectivity for trunk pods (same-node and cross-node)
+// Trunk pods use PodNetworking with ENIOptionTypeTrunk to get member ENI
+func TestConnectivity_TrunkPod(t *testing.T) {
+	// Check if cluster has member-eni resource for trunk mode
+	eniInfo := checkENIResourcesBeforeTest(t)
+	if !eniInfo.HasMemberENIResource() {
+		t.Skipf("TestConnectivity_TrunkPod requires aliyun/member-eni resource, but no nodes have it (total: %d)", eniInfo.TotalMemberENI)
+	}
+
+	var feats []features.Feature
+
+	// Test same-node connectivity
+	sameNodeFeature := createTrunkPodConnectivityTest("Connectivity/TrunkPod/SameNode", true)
+	feats = append(feats, sameNodeFeature)
+
+	// Test cross-node connectivity
+	crossNodeFeature := createTrunkPodConnectivityTest("Connectivity/TrunkPod/CrossNode", false)
+	feats = append(feats, crossNodeFeature)
+
+	testenv.Test(t, feats...)
+}
+
+// createTrunkPodConnectivityTest creates a connectivity test for trunk pods
+// sameNode: if true, client and server pods are scheduled on the same node; otherwise on different nodes
+func createTrunkPodConnectivityTest(testName string, sameNode bool) features.Feature {
+	pnName := "trunk-connectivity-pn"
+	if !sameNode {
+		pnName = "trunk-cross-node-pn"
+	}
+	serverName := "server-trunk"
+	clientName := "client-trunk"
+	if !sameNode {
+		serverName = "server-trunk-cross"
+		clientName = "client-trunk-cross"
+	}
+
+	return features.New(testName).
+		WithLabel("env", "trunk-connectivity").
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			var objs []k8s.Object
+
+			// Create PodNetworking with trunk mode
+			pn := NewPodNetworking(pnName).
+				WithPodSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{"netplan": pnName},
+				}).
+				WithENIAttachType(networkv1beta1.ENIOptionTypeTrunk)
+
+			err := CreatePodNetworkingAndWaitReady(ctx, config.Client(), pn.PodNetworking)
+			if err != nil {
+				t.Fatalf("create PodNetworking failed: %v", err)
+			}
+			objs = append(objs, pn.PodNetworking)
+
+			// Create server pod with trunk mode labels
+			server := NewPod(serverName, config.Namespace()).
+				WithLabels(map[string]string{
+					"app":     "server",
+					"netplan": pnName,
+				}).
+				WithContainer("server", nginxImage, nil)
+
+			err = config.Client().Resources().Create(ctx, server.Pod)
+			if err != nil {
+				t.Fatalf("create server pod failed: %v", err)
+			}
+			objs = append(objs, server.Pod)
+
+			// Create client pod with trunk mode labels
+			client := NewPod(clientName, config.Namespace()).
+				WithLabels(map[string]string{
+					"app":     "client",
+					"netplan": pnName,
+				}).
+				WithContainer("client", nginxImage, nil)
+
+			if sameNode {
+				// Schedule on same node as server
+				client = client.WithPodAffinity(map[string]string{"app": "server", "netplan": pnName})
+			} else {
+				// Schedule on different node from server
+				client = client.WithPodAntiAffinity(map[string]string{"app": "server", "netplan": pnName})
+			}
+
+			err = config.Client().Resources().Create(ctx, client.Pod)
+			if err != nil {
+				t.Fatalf("create client pod failed: %v", err)
+			}
+			objs = append(objs, client.Pod)
+
+			// Create services
+			for _, stack := range getStack() {
+				svc := NewService(fmt.Sprintf("server-trunk-%s", stack), config.Namespace(),
+					map[string]string{"app": "server", "netplan": pnName}).
+					ExposePort(80, "http").
+					WithIPFamily(stack)
+
+				if !sameNode {
+					svc = NewService(fmt.Sprintf("server-trunk-cross-%s", stack), config.Namespace(),
+						map[string]string{"app": "server", "netplan": pnName}).
+						ExposePort(80, "http").
+						WithIPFamily(stack)
+				}
+
+				err = config.Client().Resources().Create(ctx, svc.Service)
+				if err != nil {
+					t.Fatalf("create service failed: %v", err)
+				}
+				objs = append(objs, svc.Service)
+			}
+
+			ctx = SaveResources(ctx, objs...)
+			return ctx
+		}).
+		Assess("pods should be ready and using PodNetworking", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
+			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
+
+			err := waitPodsReady(config.Client(), server, client)
+			if err != nil {
+				t.Fatalf("wait pods ready failed: %v", err)
+			}
+
+			// Refresh pods to get node info
+			err = config.Client().Resources().Get(ctx, serverName, config.Namespace(), server)
+			if err != nil {
+				t.Fatalf("get server pod failed: %v", err)
+			}
+			err = config.Client().Resources().Get(ctx, clientName, config.Namespace(), client)
+			if err != nil {
+				t.Fatalf("get client pod failed: %v", err)
+			}
+
+			if sameNode {
+				if server.Spec.NodeName != client.Spec.NodeName {
+					t.Fatalf("expected pods on same node, but server on %s, client on %s",
+						server.Spec.NodeName, client.Spec.NodeName)
+				}
+				t.Logf("✓ Both trunk pods are on same node: %s", server.Spec.NodeName)
+			} else {
+				if server.Spec.NodeName == client.Spec.NodeName {
+					t.Fatalf("expected pods on different nodes, but both on %s", server.Spec.NodeName)
+				}
+				t.Logf("✓ Trunk pods on different nodes: server=%s, client=%s",
+					server.Spec.NodeName, client.Spec.NodeName)
+			}
+
+			// Validate PodNetworking annotation
+			if err := ValidatePodHasPodNetworking(server, pnName); err != nil {
+				t.Fatalf("server pod should use PodNetworking: %v", err)
+			}
+			if err := ValidatePodHasPodNetworking(client, pnName); err != nil {
+				t.Fatalf("client pod should use PodNetworking: %v", err)
+			}
+			t.Logf("✓ Both pods are using PodNetworking: %s", pnName)
+
+			return ctx
+		}).
+		Assess("basic connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			for _, stack := range getStack() {
+				serviceName := fmt.Sprintf("server-trunk-%s", stack)
+				if !sameNode {
+					serviceName = fmt.Sprintf("server-trunk-cross-%s", stack)
+				}
+				_, err := Pull(config.Client(), config.Namespace(), clientName, "client", serviceName, t)
+				if err != nil {
+					if sameNode {
+						t.Errorf("same-node trunk pod connectivity failed for %s: %v", stack, err)
+					} else {
+						t.Errorf("cross-node trunk pod connectivity failed for %s: %v", stack, err)
+					}
+				}
+			}
+			return ctx
+		}).
+		Assess("hairpin connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			for _, stack := range getStack() {
+				// Skip IPv6 hairpin test for ipvlan mode (known limitation)
+				if stack == "ipv6" && ipvlan {
+					continue
+				}
+				serviceName := fmt.Sprintf("server-trunk-%s", stack)
+				if !sameNode {
+					serviceName = fmt.Sprintf("server-trunk-cross-%s", stack)
+				}
+				_, err := Pull(config.Client(), config.Namespace(), serverName, "server", serviceName, t)
+				if err != nil {
+					t.Errorf("hairpin connectivity test failed for trunk pod %s: %v", stack, err)
 				}
 			}
 			return MarkTestSuccess(ctx)
