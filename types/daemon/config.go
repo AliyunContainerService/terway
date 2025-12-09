@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/backoff"
@@ -85,14 +86,7 @@ func (c *Config) GetVSwitchIDs() []string {
 	for _, ids := range c.VSwitches {
 		vsws = append(vsws, ids...)
 	}
-	return vsws
-}
-
-func (c *Config) GetExtraRoutes() []string {
-	var vsws []string
-	for _, ids := range c.VSwitches {
-		vsws = append(vsws, ids...)
-	}
+	sort.Strings(vsws)
 	return vsws
 }
 
