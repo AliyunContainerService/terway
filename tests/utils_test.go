@@ -164,15 +164,35 @@ func (p *Pod) WithPodAffinity(labels map[string]string) *Pod {
 }
 
 func (p *Pod) WithPodAntiAffinity(labels map[string]string) *Pod {
-	p.Spec.Affinity = &corev1.Affinity{
-		PodAntiAffinity: &corev1.PodAntiAffinity{
-			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-				{
-					LabelSelector: &metav1.LabelSelector{
-						MatchLabels: labels,
-					},
-					TopologyKey: "kubernetes.io/hostname",
+	if p.Spec.Affinity == nil {
+		p.Spec.Affinity = &corev1.Affinity{}
+	}
+	p.Spec.Affinity.PodAntiAffinity = &corev1.PodAntiAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+			{
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: labels,
 				},
+				TopologyKey: "kubernetes.io/hostname",
+			},
+		},
+	}
+	return p
+}
+
+// WithPodAntiAffinityByZone creates pod anti-affinity using zone topology key
+// This ensures pods are scheduled to different zones
+func (p *Pod) WithPodAntiAffinityByZone(labels map[string]string) *Pod {
+	if p.Spec.Affinity == nil {
+		p.Spec.Affinity = &corev1.Affinity{}
+	}
+	p.Spec.Affinity.PodAntiAffinity = &corev1.PodAntiAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+			{
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: labels,
+				},
+				TopologyKey: "topology.kubernetes.io/zone",
 			},
 		},
 	}

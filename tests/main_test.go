@@ -106,33 +106,13 @@ func TestMain(m *testing.M) {
 		envfuncs.CreateNamespace(envCfg.Namespace()),
 		patchNamespace,
 		checkENIConfig,
+		printClusterEnvironment,
 	)
 	testenv.AfterEachFeature(func(ctx context.Context, config *envconf.Config, t *testing.T, feature features.Feature) (context.Context, error) {
 		// If test was skipped, don't do anything
 		if t.Skipped() {
 			t.Log("Test was skipped, cleaning up")
 			return ctx, nil
-		}
-
-		pod := &corev1.PodList{}
-		err = config.Client().Resources(envCfg.Namespace()).List(ctx, pod)
-		t.Log("---------list pods---------")
-		// Filter pods that are not in Running state
-		isTestFailed := false
-		for _, printPod := range pod.Items {
-			if printPod.Status.Phase != corev1.PodRunning {
-				isTestFailed = true
-			}
-			t.Logf("Pod: %s/%s, Node: %s, Status: %s\n", printPod.Namespace, printPod.Name, printPod.Spec.NodeName, printPod.Status.Phase)
-		}
-		if isTestFailed {
-			t.Log("---------list events---------")
-			// List events
-			event := &corev1.EventList{}
-			err = config.Client().Resources(envCfg.Namespace()).List(ctx, event)
-			for _, printEvent := range event.Items {
-				t.Logf("%s/%s, Event: %s %s, Time:%s\n", printEvent.InvolvedObject.Kind, printEvent.InvolvedObject.Name, printEvent.Reason, printEvent.Message, printEvent.LastTimestamp)
-			}
 		}
 
 		if IsTestSuccess(ctx) {
@@ -147,6 +127,27 @@ func TestMain(m *testing.M) {
 			})
 		} else {
 			t.Log("Test did not succeed, keeping resources for debugging")
+
+			pod := &corev1.PodList{}
+			err = config.Client().Resources(envCfg.Namespace()).List(ctx, pod)
+			t.Log("---------list pods---------")
+			// Filter pods that are not in Running state
+			isTestFailed := false
+			for _, printPod := range pod.Items {
+				if printPod.Status.Phase != corev1.PodRunning {
+					isTestFailed = true
+				}
+				t.Logf("Pod: %s/%s, Node: %s, Status: %s\n", printPod.Namespace, printPod.Name, printPod.Spec.NodeName, printPod.Status.Phase)
+			}
+			if isTestFailed {
+				t.Log("---------list events---------")
+				// List events
+				event := &corev1.EventList{}
+				err = config.Client().Resources(envCfg.Namespace()).List(ctx, event)
+				for _, printEvent := range event.Items {
+					t.Logf("%s/%s, Event: %s %s, Time:%s\n", printEvent.InvolvedObject.Kind, printEvent.InvolvedObject.Name, printEvent.Reason, printEvent.Message, printEvent.LastTimestamp)
+				}
+			}
 		}
 		return ctx, nil
 	})
@@ -312,4 +313,58 @@ type Config struct {
 	EnableENITrunking bool   `json:"enable_eni_trunking"`
 	IPStack           string `json:"ip_stack"`
 	IPAMType          string `json:"ipam_type"`
+}
+
+// printClusterEnvironment prints the cluster environment information including node capacities
+func printClusterEnvironment(ctx context.Context, config *envconf.Config) (context.Context, error) {
+	fmt.Println("=== Cluster Environment Information ===")
+
+	// Discover node types and capacities
+	nodeInfoWithCap, err := DiscoverNodeTypesWithCapacity(ctx, config.Client())
+	if err != nil {
+		fmt.Printf("Warning: failed to discover node types with capacity: %v\n", err)
+		return ctx, nil // Don't fail the test setup
+	}
+
+	// Print node type summary
+	fmt.Printf("Total Nodes: %d\n", len(nodeInfoWithCap.AllNodes))
+	fmt.Printf("  - ECS Shared ENI: %d nodes\n", len(nodeInfoWithCap.ECSSharedENINodes))
+	fmt.Printf("  - ECS Exclusive ENI: %d nodes\n", len(nodeInfoWithCap.ECSExclusiveENINodes))
+	fmt.Printf("  - EFLO/Lingjun Shared ENI: %d nodes\n", len(nodeInfoWithCap.LingjunSharedENINodes))
+	fmt.Printf("  - EFLO/Lingjun Exclusive ENI: %d nodes\n", len(nodeInfoWithCap.LingjunExclusiveENINodes))
+
+	// Print capacity summary
+	fmt.Println("\nNode Capacity Summary:")
+	for _, nodeType := range GetAllNodeTypes() {
+		qualified := nodeInfoWithCap.Capacities.GetQualifiedNodesForTest(nodeType)
+		disqualified := nodeInfoWithCap.Capacities.GetDisqualifiedNodes(nodeType)
+
+		if len(qualified) > 0 || len(disqualified) > 0 {
+			fmt.Printf("  %s: %d qualified, %d disqualified\n", nodeType, len(qualified), len(disqualified))
+
+			for _, nodeName := range qualified {
+				cap := nodeInfoWithCap.Capacities[nodeName]
+				fmt.Printf("    ✓ %s: adapters=%d, ipv4PerAdapter=%d (total IP capacity: %d)\n",
+					nodeName, cap.Adapters, cap.IPv4PerAdapter, cap.Adapters*cap.IPv4PerAdapter)
+			}
+
+			for nodeName, reason := range disqualified {
+				fmt.Printf("    ✗ %s: %s\n", nodeName, reason)
+			}
+		}
+	}
+
+	// Discover ENI resources
+	eniInfo, err := DiscoverENIResources(ctx, config.Client())
+	if err != nil {
+		fmt.Printf("Warning: failed to discover ENI resources: %v\n", err)
+	} else {
+		fmt.Println("\nENI Resources:")
+		fmt.Printf("  - aliyun/eni (Exclusive): %d total\n", eniInfo.TotalExclusiveENI)
+		fmt.Printf("  - aliyun/member-eni (Trunk): %d total\n", eniInfo.TotalMemberENI)
+	}
+
+	fmt.Println("========================================")
+
+	return ctx, nil
 }

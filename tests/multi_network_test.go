@@ -24,6 +24,10 @@ import (
 	"github.com/AliyunContainerService/terway/types/controlplane"
 )
 
+// =============================================================================
+// PodNetworking Multi-Network Tests
+// =============================================================================
+
 // WithMultiNetworkAnnotation adds the multi-network annotation to a pod
 func (p *Pod) WithMultiNetworkAnnotation(networks []controlplane.PodNetworkRef) *Pod {
 	if p.Annotations == nil {
@@ -36,18 +40,13 @@ func (p *Pod) WithMultiNetworkAnnotation(networks []controlplane.PodNetworkRef) 
 
 // MultiNetworkConfig defines the configuration for multi-network tests
 type MultiNetworkConfig struct {
-	NodeTypes         []NodeType
-	CustomVSwitches   []string
-	CustomSecGroups   []string
-	EnableDefaultMode bool // Whether to test with default PodNetworking config
+	CustomVSwitches []string
+	CustomSecGroups []string
 }
 
 // NewMultiNetworkConfig creates a default multi-network test configuration
 func NewMultiNetworkConfig() *MultiNetworkConfig {
-	config := &MultiNetworkConfig{
-		NodeTypes:         []NodeType{NodeTypeECSSharedENI, NodeTypeECSExclusiveENI, NodeTypeLingjunSharedENI, NodeTypeLingjunExclusiveENI},
-		EnableDefaultMode: true, // Always test default mode
-	}
+	config := &MultiNetworkConfig{}
 
 	// Parse custom vswitches and security groups if provided
 	if vSwitchIDs != "" {
@@ -65,11 +64,14 @@ func (c *MultiNetworkConfig) HasCustomConfig() bool {
 	return len(c.CustomVSwitches) > 0 && len(c.CustomSecGroups) > 0
 }
 
-// TestMultiNetwork tests multi-network functionality across different node types
-func TestMultiNetwork(t *testing.T) {
+// TestPodNetworking_MultiNetwork_Default tests multi-network functionality with default config
+// This test uses automatic scheduling - pods will be scheduled to nodes with required resources.
+// Trunk mode pods require aliyun/member-eni resource (ECS shared ENI nodes).
+// Exclusive ENI mode pods require aliyun/eni resource (ECS/Lingjun exclusive ENI nodes).
+func TestPodNetworking_MultiNetwork_Default(t *testing.T) {
 	// Pre-check: terway daemonset name must be terway-eniip
 	if terway != "terway-eniip" {
-		t.Skipf("TestMultiNetwork requires terway-eniip daemonset, current: %s", terway)
+		t.Skipf("TestPodNetworking_MultiNetwork requires terway-eniip daemonset, current: %s", terway)
 		return
 	}
 
@@ -80,115 +82,112 @@ func TestMultiNetwork(t *testing.T) {
 			version = "v" + version
 		}
 		if semver.IsValid(version) && semver.Compare(version, "v1.16.1") < 0 {
-			t.Skipf("TestMultiNetwork requires terway version >= v1.16.1, current: %s", terwayVersion)
+			t.Skipf("TestPodNetworking_MultiNetwork requires terway version >= v1.16.1, current: %s", terwayVersion)
 			return
 		}
 	}
 
-	config := NewMultiNetworkConfig()
+	var feats []features.Feature
 
-	// Test scenarios: default mode (if enabled) + custom mode (if config available)
-	testScenarios := []struct {
-		name      string
-		mode      string
-		skipCheck func() bool
-		nodeTypes []NodeType
-	}{
-		{
-			name:      "DefaultConfig",
-			mode:      "default",
-			skipCheck: func() bool { return false },
-			nodeTypes: config.NodeTypes,
-		},
-		{
-			name:      "CustomConfig",
-			mode:      "custom",
-			skipCheck: func() bool { return !config.HasCustomConfig() },
-			nodeTypes: config.NodeTypes,
-		},
-	}
+	// Test with Trunk mode (shared ENI, member-eni resource)
+	trunkFeat := createMultiNetworkTest("Trunk", networkv1beta1.ENIOptionTypeTrunk)
+	feats = append(feats, trunkFeat)
 
-	for _, scenario := range testScenarios {
-		if scenario.skipCheck() {
-			t.Logf("Skipping %s mode: conditions not met", scenario.name)
-			continue
-		}
+	// Test with exclusive ENI mode
+	exclusiveFeat := createMultiNetworkTest("ExclusiveENI", networkv1beta1.ENIOptionTypeENI)
+	feats = append(feats, exclusiveFeat)
 
-		for _, nodeType := range scenario.nodeTypes {
-			t.Run(fmt.Sprintf("%s_%s", scenario.name, nodeType), func(t *testing.T) {
-				testMultiNetworkForNodeType(t, nodeType, scenario.mode, config)
-			})
-		}
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
 	}
 }
 
-// testMultiNetworkForNodeType tests multi-network functionality for a specific node type and configuration mode
-func testMultiNetworkForNodeType(t *testing.T, nodeType NodeType, mode string, config *MultiNetworkConfig) {
-	// Pre-check: skip Lingjun nodes as they are not supported yet
-	switch nodeType {
-	case NodeTypeLingjunSharedENI, NodeTypeLingjunExclusiveENI:
-		t.Skipf("Lingjun nodes are not supported yet")
+// TestPodNetworking_MultiNetwork_Custom tests multi-network functionality with custom config
+// This test requires custom vswitches and security groups to be provided via flags.
+func TestPodNetworking_MultiNetwork_Custom(t *testing.T) {
+	config := NewMultiNetworkConfig()
+	if !config.HasCustomConfig() {
+		t.Skipf("TestPodNetworking_MultiNetwork_Custom requires custom vswitches and security groups")
 		return
 	}
 
-	testName := fmt.Sprintf("MultiNetwork/%s/%s", mode, nodeType)
+	// Pre-check: terway daemonset name must be terway-eniip
+	if terway != "terway-eniip" {
+		t.Skipf("TestPodNetworking_MultiNetwork requires terway-eniip daemonset, current: %s", terway)
+		return
+	}
 
-	feature := createMultiNetworkTestFeature(testName, nodeType, mode, config)
-	testenv.Test(t, feature)
+	// Pre-check: terway version must be >= v1.16.1
+	if terwayVersion != "" {
+		version := terwayVersion
+		if !strings.HasPrefix(version, "v") {
+			version = "v" + version
+		}
+		if semver.IsValid(version) && semver.Compare(version, "v1.16.1") < 0 {
+			t.Skipf("TestPodNetworking_MultiNetwork requires terway version >= v1.16.1, current: %s", terwayVersion)
+			return
+		}
+	}
+
+	var feats []features.Feature
+
+	// Test with Trunk mode and custom config
+	trunkFeat := createMultiNetworkTestWithCustomConfig("Trunk", networkv1beta1.ENIOptionTypeTrunk, config)
+	feats = append(feats, trunkFeat)
+
+	// Test with exclusive ENI mode and custom config
+	exclusiveFeat := createMultiNetworkTestWithCustomConfig("ExclusiveENI", networkv1beta1.ENIOptionTypeENI, config)
+	feats = append(feats, exclusiveFeat)
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
 }
 
-// createMultiNetworkTestFeature creates a multi-network test feature
-func createMultiNetworkTestFeature(testName string, nodeType NodeType, mode string, testConfig *MultiNetworkConfig) features.Feature {
-	pnPrimary := fmt.Sprintf("multi-net-primary-%s-%s", mode, nodeType)
-	pnSecondary := fmt.Sprintf("multi-net-secondary-%s-%s", mode, nodeType)
-	podName := fmt.Sprintf("multi-net-test-pod-%s-%s", mode, nodeType)
+// createMultiNetworkTest creates a multi-network test feature for a specific ENI mode
+func createMultiNetworkTest(eniModeName string, eniType networkv1beta1.ENIAttachType) features.Feature {
+	pnPrimary := fmt.Sprintf("multi-net-primary-%s", strings.ToLower(eniModeName))
+	pnSecondary := fmt.Sprintf("multi-net-secondary-%s", strings.ToLower(eniModeName))
+	podName := fmt.Sprintf("multi-net-pod-%s", strings.ToLower(eniModeName))
 
-	return features.New(testName).
-		WithLabel("env", "multi-network").
+	return features.New(fmt.Sprintf("PodNetworking/MultiNetwork/%s", eniModeName)).
+		WithLabel("eni-type", string(eniType)).
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			// Check if required node type is available
-			nodeInfo, err := DiscoverNodeTypes(context.Background(), config.Client())
-			if err != nil {
-				t.Fatalf("Failed to discover node types: %v", err)
+			// Check required ENI resources
+			eniInfo := checkENIResourcesBeforeTest(t)
+			if eniType == networkv1beta1.ENIOptionTypeTrunk {
+				if !eniInfo.HasMemberENIResource() {
+					t.Skipf("Trunk mode requires aliyun/member-eni resource, but no nodes have it")
+				}
+			} else {
+				if !eniInfo.HasENIResource() {
+					t.Skipf("Exclusive ENI mode requires aliyun/eni resource, but no nodes have it")
+				}
 			}
 
-			requiredNodes := nodeInfo.GetNodesByType(nodeType)
-			if len(requiredNodes) == 0 {
-				t.Skipf("No nodes of type %s available", nodeType)
-			}
-
-			// Create primary PodNetworking (always use default config)
-			pn1 := NewPodNetworking(pnPrimary)
-			if nodeType == NodeTypeECSExclusiveENI || nodeType == NodeTypeLingjunExclusiveENI {
-				pn1 = pn1.WithENIAttachType(networkv1beta1.ENIOptionTypeENI)
-			}
-			err = CreatePodNetworkingAndWaitReady(ctx, config.Client(), pn1.PodNetworking)
+			// Create primary PodNetworking
+			pn1 := NewPodNetworking(pnPrimary).
+				WithENIAttachType(eniType)
+			err := CreatePodNetworkingAndWaitReady(ctx, config.Client(), pn1.PodNetworking)
 			if err != nil {
-				t.Fatalf("create and wait podNetworking %s failed, %v", pnPrimary, err)
+				t.Fatalf("create and wait podNetworking %s failed: %v", pnPrimary, err)
 			}
 			ctx = SaveResources(ctx, pn1.PodNetworking)
-			t.Logf("Created primary PodNetworking: %s", pnPrimary)
+			t.Logf("Created primary PodNetworking: %s (eniType=%s)", pnPrimary, eniType)
 
-			// Create secondary PodNetworking based on mode
-			pn2 := NewPodNetworking(pnSecondary)
-			if nodeType == NodeTypeECSExclusiveENI || nodeType == NodeTypeLingjunExclusiveENI {
-				pn2 = pn2.WithENIAttachType(networkv1beta1.ENIOptionTypeENI)
-			}
-			if mode == "custom" {
-				pn2 = pn2.WithVSwitches(testConfig.CustomVSwitches).
-					WithSecurityGroups(testConfig.CustomSecGroups)
-				t.Logf("Created secondary PodNetworking with custom config: vswitches=%v, sg=%v",
-					testConfig.CustomVSwitches, testConfig.CustomSecGroups)
-			} else {
-				t.Logf("Created secondary PodNetworking with default config")
-			}
-
+			// Create secondary PodNetworking
+			pn2 := NewPodNetworking(pnSecondary).
+				WithENIAttachType(eniType)
 			err = CreatePodNetworkingAndWaitReady(ctx, config.Client(), pn2.PodNetworking)
 			if err != nil {
-				t.Fatalf("create and wait podNetworking %s failed, %v", pnSecondary, err)
+				t.Fatalf("create and wait podNetworking %s failed: %v", pnSecondary, err)
 			}
 			ctx = SaveResources(ctx, pn2.PodNetworking)
-			t.Logf("Created secondary PodNetworking: %s", pnSecondary)
+			t.Logf("Created secondary PodNetworking: %s (eniType=%s)", pnSecondary, eniType)
 
 			return ctx
 		}).
@@ -200,19 +199,8 @@ func createMultiNetworkTestFeature(testName string, nodeType NodeType, mode stri
 			assert.NoError(t, err, "secondary network should be ready")
 			return ctx
 		}).
-		Assess("pod should be created and configured", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			// Check if required node type is available
-			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
-			if err != nil {
-				t.Fatalf("Failed to discover node types: %v", err)
-			}
-
-			requiredNodes := nodeInfo.GetNodesByType(nodeType)
-			if len(requiredNodes) == 0 {
-				t.Fatalf("No nodes of type %s available: %v", nodeType, err)
-			}
-
-			// Create pod with multi-network annotation and node affinity
+		Assess("pod with multi-network should be running", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			// Create pod with multi-network annotation
 			networks := []controlplane.PodNetworkRef{
 				{
 					InterfaceName: "eth0",
@@ -230,42 +218,30 @@ func createMultiNetworkTestFeature(testName string, nodeType NodeType, mode stri
 				WithContainer("server", nginxImage, nil).
 				WithMultiNetworkAnnotation(networks)
 
-			// Apply node affinity based on node type
-			nodeAffinity := GetNodeAffinityForType(nodeType)
-			if len(nodeAffinity) > 0 {
-				pod = pod.WithNodeAffinity(nodeAffinity)
-			}
-			nodeAffinityExclude := GetNodeAffinityExcludeForType(nodeType)
-			if len(nodeAffinityExclude) > 0 {
-				pod = pod.WithNodeAffinityExclude(nodeAffinityExclude)
-			}
-
-			err = config.Client().Resources().Create(ctx, pod.Pod)
+			err := config.Client().Resources().Create(ctx, pod.Pod)
 			if err != nil {
-				t.Fatalf("create pod %s failed, %v", podName, err)
+				t.Fatalf("create pod %s failed: %v", podName, err)
 			}
-
 			ctx = SaveResources(ctx, pod.Pod)
-			t.Logf("Created pod %s with multi-network annotation (mode: %s)",
-				podName, mode)
-			return ctx
-		}).
-		Assess("pod should be running with multiple interfaces", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: config.Namespace()},
-			}
 
-			err := wait.For(conditions.New(config.Client().Resources()).PodReady(pod),
+			// Wait for pod to be ready
+			err = wait.For(conditions.New(config.Client().Resources()).PodReady(pod.Pod),
 				wait.WithTimeout(parsedTimeout),
 				wait.WithInterval(1*time.Second))
 			if err != nil {
-				t.Fatalf("wait pod ready failed, %v", err)
+				t.Fatalf("wait pod ready failed: %v", err)
 			}
 
-			// Get the pod to check annotations
-			err = config.Client().Resources().Get(ctx, podName, config.Namespace(), pod)
+			t.Logf("Pod %s is running with multi-network annotation (eniType=%s)", podName, eniType)
+			return ctx
+		}).
+		Assess("pod should have multiple network interfaces", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: config.Namespace()},
+			}
+			err := config.Client().Resources().Get(ctx, podName, config.Namespace(), pod)
 			if err != nil {
-				t.Fatalf("get pod failed, %v", err)
+				t.Fatalf("get pod failed: %v", err)
 			}
 
 			// Verify PodNetworks annotation is set
@@ -291,46 +267,136 @@ func createMultiNetworkTestFeature(testName string, nodeType NodeType, mode stri
 			assert.True(t, interfaces["eth0"], "eth0 interface should be configured")
 			assert.True(t, interfaces["eth1"], "eth1 interface should be configured")
 
-			t.Logf("Pod %s successfully configured with multiple interfaces on node type %s (mode: %s)",
-				podName, nodeType, mode)
+			t.Logf("Pod %s has multiple interfaces: eth0, eth1 (eniType=%s)", podName, eniType)
+			return MarkTestSuccess(ctx)
+		}).
+		Feature()
+}
+
+// createMultiNetworkTestWithCustomConfig creates a multi-network test with custom vswitches and security groups
+func createMultiNetworkTestWithCustomConfig(eniModeName string, eniType networkv1beta1.ENIAttachType, testConfig *MultiNetworkConfig) features.Feature {
+	pnPrimary := fmt.Sprintf("multi-net-custom-primary-%s", strings.ToLower(eniModeName))
+	pnSecondary := fmt.Sprintf("multi-net-custom-secondary-%s", strings.ToLower(eniModeName))
+	podName := fmt.Sprintf("multi-net-custom-pod-%s", strings.ToLower(eniModeName))
+
+	return features.New(fmt.Sprintf("PodNetworking/MultiNetwork/Custom/%s", eniModeName)).
+		WithLabel("eni-type", string(eniType)).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			// Check required ENI resources
+			eniInfo := checkENIResourcesBeforeTest(t)
+			if eniType == networkv1beta1.ENIOptionTypeTrunk {
+				if !eniInfo.HasMemberENIResource() {
+					t.Skipf("Trunk mode requires aliyun/member-eni resource, but no nodes have it")
+				}
+			} else {
+				if !eniInfo.HasENIResource() {
+					t.Skipf("Exclusive ENI mode requires aliyun/eni resource, but no nodes have it")
+				}
+			}
+
+			// Create primary PodNetworking with default config
+			pn1 := NewPodNetworking(pnPrimary).
+				WithENIAttachType(eniType)
+			err := CreatePodNetworkingAndWaitReady(ctx, config.Client(), pn1.PodNetworking)
+			if err != nil {
+				t.Fatalf("create and wait podNetworking %s failed: %v", pnPrimary, err)
+			}
+			ctx = SaveResources(ctx, pn1.PodNetworking)
+			t.Logf("Created primary PodNetworking: %s (eniType=%s)", pnPrimary, eniType)
+
+			// Create secondary PodNetworking with custom config
+			pn2 := NewPodNetworking(pnSecondary).
+				WithENIAttachType(eniType).
+				WithVSwitches(testConfig.CustomVSwitches).
+				WithSecurityGroups(testConfig.CustomSecGroups)
+			err = CreatePodNetworkingAndWaitReady(ctx, config.Client(), pn2.PodNetworking)
+			if err != nil {
+				t.Fatalf("create and wait podNetworking %s failed: %v", pnSecondary, err)
+			}
+			ctx = SaveResources(ctx, pn2.PodNetworking)
+			t.Logf("Created secondary PodNetworking: %s with custom config (vswitches=%v, sg=%v)",
+				pnSecondary, testConfig.CustomVSwitches, testConfig.CustomSecGroups)
+
 			return ctx
 		}).
-		Assess("multi-network connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			// Simple connectivity test - create a client pod and test communication
-			clientPod := NewPod(fmt.Sprintf("client-%s-%s", mode, nodeType), config.Namespace()).
-				WithLabels(map[string]string{"app": "multi-net-client"}).
-				WithContainer("client", nginxImage, nil)
+		Assess("both networks should be ready", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			err := WaitPodNetworkingReady(pnPrimary, config.Client())
+			assert.NoError(t, err, "primary network should be ready")
 
-			// Apply same node affinity as server pod
-			nodeAffinity := GetNodeAffinityForType(nodeType)
-			if len(nodeAffinity) > 0 {
-				clientPod = clientPod.WithNodeAffinity(nodeAffinity)
-			}
-			nodeAffinityExclude := GetNodeAffinityExcludeForType(nodeType)
-			if len(nodeAffinityExclude) > 0 {
-				clientPod = clientPod.WithNodeAffinityExclude(nodeAffinityExclude)
+			err = WaitPodNetworkingReady(pnSecondary, config.Client())
+			assert.NoError(t, err, "secondary network should be ready")
+			return ctx
+		}).
+		Assess("pod with multi-network should be running", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			// Create pod with multi-network annotation
+			networks := []controlplane.PodNetworkRef{
+				{
+					InterfaceName: "eth0",
+					Network:       pnPrimary,
+					DefaultRoute:  true,
+				},
+				{
+					InterfaceName: "eth1",
+					Network:       pnSecondary,
+				},
 			}
 
-			err := config.Client().Resources().Create(ctx, clientPod.Pod)
+			pod := NewPod(podName, config.Namespace()).
+				WithLabels(map[string]string{"app": "multi-net-custom-test"}).
+				WithContainer("server", nginxImage, nil).
+				WithMultiNetworkAnnotation(networks)
+
+			err := config.Client().Resources().Create(ctx, pod.Pod)
 			if err != nil {
-				t.Fatalf("create client pod failed, %v", err)
+				t.Fatalf("create pod %s failed: %v", podName, err)
 			}
-			ctx = SaveResources(ctx, clientPod.Pod)
+			ctx = SaveResources(ctx, pod.Pod)
 
-			// Wait for client pod to be ready
-			err = wait.For(conditions.New(config.Client().Resources()).PodReady(clientPod.Pod),
+			// Wait for pod to be ready
+			err = wait.For(conditions.New(config.Client().Resources()).PodReady(pod.Pod),
 				wait.WithTimeout(parsedTimeout),
 				wait.WithInterval(1*time.Second))
 			if err != nil {
-				t.Fatalf("wait client pod ready failed, %v", err)
+				t.Fatalf("wait pod ready failed: %v", err)
 			}
 
-			// Test basic connectivity between pods on the same node
-			// In a real multi-network scenario, we would test connectivity across different networks
-			// For now, we just verify both pods are running
-			t.Logf("Both server and client pods are running successfully on node type %s (mode: %s)",
-				nodeType, mode)
+			t.Logf("Pod %s is running with custom multi-network annotation (eniType=%s)", podName, eniType)
+			return ctx
+		}).
+		Assess("pod should have multiple network interfaces", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: config.Namespace()},
+			}
+			err := config.Client().Resources().Get(ctx, podName, config.Namespace(), pod)
+			if err != nil {
+				t.Fatalf("get pod failed: %v", err)
+			}
 
+			// Verify PodNetworks annotation is set
+			podNetworksAnno, ok := pod.Annotations[terwayTypes.PodNetworks]
+			if !ok {
+				t.Fatal("pod does not have PodNetworks annotation")
+			}
+
+			var podNetworks controlplane.PodNetworksAnnotation
+			err = json.Unmarshal([]byte(podNetworksAnno), &podNetworks)
+			if err != nil {
+				t.Fatalf("failed to parse PodNetworks annotation: %v", err)
+			}
+
+			// Verify we have 2 networks
+			assert.Equal(t, 2, len(podNetworks.PodNetworks), "expected 2 network interfaces")
+
+			// Verify interface names
+			interfaces := make(map[string]bool)
+			for _, net := range podNetworks.PodNetworks {
+				interfaces[net.Interface] = true
+			}
+			assert.True(t, interfaces["eth0"], "eth0 interface should be configured")
+			assert.True(t, interfaces["eth1"], "eth1 interface should be configured")
+
+			t.Logf("Pod %s has multiple interfaces with custom config: eth0, eth1 (eniType=%s)", podName, eniType)
 			return MarkTestSuccess(ctx)
-		}).Feature()
+		}).
+		Feature()
 }
