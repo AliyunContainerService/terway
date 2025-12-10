@@ -316,6 +316,16 @@ func (r *ExclusiveENI) Setup(ctx context.Context, cfg *types.SetupConfig, netNS 
 	}
 	defer hostNetNS.Close()
 
+	randomName, err := ip.RandomVethName()
+	if err != nil {
+		return fmt.Errorf("error get random veth name, %w", err)
+	}
+
+	err = utils.LinkSetName(ctx, nicLink, randomName)
+	if err != nil {
+		return fmt.Errorf("error set nic %s name to %s, %w", nicLink.Attrs().Name, randomName, err)
+	}
+
 	err = utils.LinkSetNsFd(ctx, nicLink, netNS)
 	if err != nil {
 		return fmt.Errorf("error set nic %s to container, %w", nicLink.Attrs().Name, err)
@@ -351,9 +361,9 @@ func (r *ExclusiveENI) Setup(ctx context.Context, cfg *types.SetupConfig, netNS 
 	// 2. setup addr and default route
 	err = netNS.Do(func(netNS ns.NetNS) error {
 		// 2.1 setup addr
-		contLink, err := netlink.LinkByName(nicLink.Attrs().Name)
+		contLink, err := netlink.LinkByName(randomName)
 		if err != nil {
-			return fmt.Errorf("error find link %s, %w", nicLink.Attrs().Name, err)
+			return fmt.Errorf("error find link %s, %w", randomName, err)
 		}
 
 		contCfg := generateContCfgForExclusiveENI(cfg, contLink)

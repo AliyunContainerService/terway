@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 	"testing"
 	"time"
 
@@ -31,519 +30,611 @@ func getStack() []string {
 	return r
 }
 
-type PodConfig struct {
-	name    string
-	podFunc func(pod *Pod) *Pod
-}
+// =============================================================================
+// Shared ENI Network Policy Tests
+// =============================================================================
 
-// generatePodConfigs generates pod configurations with proper node affinity to avoid exclusive ENI nodes
-func generatePodConfigs(testName string) []PodConfig {
-	// Get node affinity exclude labels to avoid scheduling on exclusive ENI nodes
-	nodeAffinityExclude := GetNodeAffinityExcludeForType(NodeTypeECSSharedENI)
-
-	var mutateConfig []PodConfig
-	if affinityLabel == "" {
-		mutateConfig = []PodConfig{
-			{
-				name: "normal config",
-				podFunc: func(pod *Pod) *Pod {
-					return pod.WithNodeAffinityExclude(nodeAffinityExclude)
-				},
-			},
-		}
-		if testTrunk {
-			mutateConfig = append(mutateConfig, PodConfig{
-				name: "trunk pod",
-				podFunc: func(pod *Pod) *Pod {
-					return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinityExclude(nodeAffinityExclude)
-				},
-			})
-		}
-	} else {
-		labelArr := strings.Split(affinityLabel, ":")
-		if len(labelArr) != 2 {
-			// This will be handled by the calling function
-			return nil
-		}
-		mutateConfig = []PodConfig{
-			{
-				name: fmt.Sprintf("normal_%s", labelArr[0]),
-				podFunc: func(pod *Pod) *Pod {
-					return pod.WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]}).WithNodeAffinityExclude(nodeAffinityExclude)
-				},
-			},
-		}
-		if testTrunk {
-			mutateConfig = append(mutateConfig, PodConfig{
-				name: fmt.Sprintf("trunk_%s", labelArr[0]),
-				podFunc: func(pod *Pod) *Pod {
-					return pod.WithLabels(map[string]string{"netplan": "default"}).WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]}).WithNodeAffinityExclude(nodeAffinityExclude)
-				},
-			})
-		}
-	}
-	return mutateConfig
-}
-
-// TestNormal_HostNetworkConnectivity tests connectivity from host network pods to regular pods
-// Note: Basic connectivity, hairpin, and cross-node tests have been migrated to connectivity_scenarios_test.go
-func TestNormal_HostNetworkConnectivity(t *testing.T) {
-	var feats []features.Feature
-
-	type PodConfig struct {
-		name    string
-		podFunc func(pod *Pod) *Pod
-	}
-	mutateConfig := []PodConfig{}
-	if affinityLabel == "" {
-		mutateConfig = []PodConfig{{
-			name: "normal config",
-			podFunc: func(pod *Pod) *Pod {
-				return pod
-			},
-		}}
-	} else {
-		labelArr := strings.Split(affinityLabel, ":")
-		if len(labelArr) != 2 {
-			t.Fatal("affinityLabel is not valid")
-		}
-		mutateConfig = []PodConfig{
-			{
-				name: fmt.Sprintf("normal_%s", labelArr[0]),
-				podFunc: func(pod *Pod) *Pod {
-					return pod.WithNodeAffinity(map[string]string{labelArr[0]: labelArr[1]})
-				},
-			},
-		}
-	}
-
-	for i := range mutateConfig {
-		name := mutateConfig[i].name
-		fn := mutateConfig[i].podFunc
-
-		// Host network to pod connectivity test (unique, not covered by new tests)
-		hostToPodSameNode := features.New(fmt.Sprintf("PodConnective/hostToSameNode-%s", name)).
-			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
-
-				server := fn(NewPod("server", config.Namespace()).
-					WithLabels(map[string]string{"app": "server"}).
-					WithContainer("server", nginxImage, nil))
-
-				err := config.Client().Resources().Create(ctx, server.Pod)
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
-
-				client := fn(NewPod("client", config.Namespace()).
-					WithLabels(map[string]string{"app": "client"}).
-					WithContainer("client", nginxImage, nil)).
-					WithPodAffinity(map[string]string{"app": "server"}).
-					WithDNSPolicy(corev1.DNSClusterFirstWithHostNet).
-					WithHostNetwork()
-
-				err = config.Client().Resources().Create(ctx, client.Pod)
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
-
-				objs = append(objs, server.Pod, client.Pod)
-
-				for _, stack := range getStack() {
-					svc := NewService("server-"+stack, config.Namespace(), map[string]string{"app": "server"}).
-						ExposePort(80, "http").
-						WithIPFamily(stack)
-
-					err = config.Client().Resources().Create(ctx, svc.Service)
-					if err != nil {
-						t.Error(err)
-						t.FailNow()
-					}
-					objs = append(objs, svc.Service)
-				}
-				ctx = SaveResources(ctx, objs...)
-
-				return ctx
-			}).
-			Assess("Pod can access server", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				server := fn(NewPod("server", config.Namespace()).
-					WithLabels(map[string]string{"app": "server"}).
-					WithContainer("server", nginxImage, nil))
-
-				client := fn(NewPod("client", config.Namespace()).
-					WithLabels(map[string]string{"app": "client"}).
-					WithContainer("client", nginxImage, nil)).
-					WithPodAffinity(map[string]string{"app": "server"})
-
-				err := wait.For(conditions.New(config.Client().Resources()).PodReady(client.Pod),
-					wait.WithTimeout(parsedTimeout),
-					wait.WithInterval(1*time.Second))
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
-				err = wait.For(conditions.New(config.Client().Resources()).PodReady(server.Pod),
-					wait.WithTimeout(parsedTimeout),
-					wait.WithInterval(1*time.Second))
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
-
-				for _, stack := range getStack() {
-					_, err = Pull(config.Client(), client.Namespace, client.Name, "client", "server-"+stack, t)
-					if err != nil {
-						t.Error(err)
-						t.FailNow()
-					}
-				}
-
-				return MarkTestSuccess(ctx)
-			}).
-			Feature()
-
-		feats = append(feats, hostToPodSameNode)
-	}
-
-	testenv.Test(t, feats...)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
-}
-
-func TestNormal_NetworkPolicy(t *testing.T) {
+// TestSharedENI_NetworkPolicy_HealthCheck tests that pods with network policy can still pass health checks
+// for shared ENI mode on both ECS and Lingjun nodes.
+func TestSharedENI_NetworkPolicy_HealthCheck(t *testing.T) {
 	if !testNetworkPolicy {
 		t.Log("Skip networkPolicy tests")
 		return
 	}
 
-	// Check terway daemonset name is terway-eniip (no version requirement)
 	if terway != "terway-eniip" {
-		t.Logf("TestNormal_NetworkPolicy requires terway-eniip daemonset, current: %s, skipping", terway)
+		t.Logf("TestSharedENI_NetworkPolicy_HealthCheck requires terway-eniip daemonset, current: %s, skipping", terway)
 		return
 	}
 
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+
 	var feats []features.Feature
-
-	mutateConfig := generatePodConfigs("NetworkPolicy")
-	if mutateConfig == nil {
-		labelArr := strings.Split(affinityLabel, ":")
-		if len(labelArr) != 2 {
-			t.Fatal("affinityLabel is not valid")
-		}
-	}
-	for i := range mutateConfig {
-		name := mutateConfig[i].name
-		fn := mutateConfig[i].podFunc
-
-		healthCheck := features.New(fmt.Sprintf("NetworkPolicy/PodHealthCheck-%s", name)).
-			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
-
-				policy := NewNetworkPolicy("default-deny-ingress", config.Namespace()).
-					WithPolicyType(networkingv1.PolicyTypeIngress)
-
-				server := fn(NewPod("server", config.Namespace()).
-					WithLabels(map[string]string{"app": "server"}).
-					WithContainer("server", nginxImage, nil).
-					WithHealthCheck(80))
-
-				objs = append(objs, policy.NetworkPolicy, server.Pod)
-
-				for _, obj := range objs {
-					err := config.Client().Resources().Create(ctx, obj)
-					if err != nil {
-						t.Error(err)
-						t.FailNow()
-					}
-				}
-
-				ctx = SaveResources(ctx, objs...)
-
-				return ctx
-			}).
-			Assess("Pod should ready", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server", Namespace: config.Namespace()}}
-				err := waitPodsReady(config.Client(), server)
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
-
-				return MarkTestSuccess(ctx)
-			}).Feature()
-
-		denyIngressSameNode := features.New(fmt.Sprintf("NetworkPolicy/DenyIngressSameNode-%s", name)).
-			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
-
-				policy := NewNetworkPolicy("deny-ingress", config.Namespace()).
-					WithPolicyType(networkingv1.PolicyTypeIngress).
-					WithPodSelector(map[string]string{"app": "deny-ingress"})
-
-				client := fn(NewPod("client", config.Namespace()).
-					WithLabels(map[string]string{"app": "client"}).
-					WithContainer("client", nginxImage, nil)).
-					WithPodAffinity(map[string]string{"app": "server"})
-
-				serverDenyIngress := fn(NewPod("server-deny-ingress", config.Namespace()).
-					WithLabels(map[string]string{"app": "deny-ingress"}).
-					WithContainer("server", nginxImage, nil))
-
-				server := fn(NewPod("server", config.Namespace()).
-					WithLabels(map[string]string{"app": "server"}).
-					WithContainer("server", nginxImage, nil).
-					WithPodAffinity(map[string]string{"app": "deny-ingress"}))
-
-				objs = append(objs, policy.NetworkPolicy, client.Pod, serverDenyIngress.Pod, server.Pod)
-
-				for _, stack := range getStack() {
-
-					denySvc := NewService("server-deny-ingress-"+stack, config.Namespace(), map[string]string{"app": "deny-ingress"}).WithIPFamily(stack).ExposePort(80, "http")
-
-					normalSvc := NewService("server-"+stack, config.Namespace(), map[string]string{"app": "server"}).WithIPFamily(stack).ExposePort(80, "http")
-
-					objs = append(objs, denySvc.Service, normalSvc.Service)
-				}
-
-				for _, obj := range objs {
-					err := config.Client().Resources().Create(ctx, obj)
-					if err != nil {
-						t.Error(err)
-						t.FailNow()
-					}
-				}
-
-				ctx = SaveResources(ctx, objs...)
-
-				return ctx
-			}).
-			Assess("Check ingress policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: config.Namespace()}}
-				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server", Namespace: config.Namespace()}}
-				serverDenyIngress := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-deny-ingress", Namespace: config.Namespace()}}
-				err := waitPodsReady(config.Client(), client, server, serverDenyIngress)
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
-
-				for _, stack := range getStack() {
-					t.Logf("Testing %s: client should be able to access server (normal traffic, no policy applied)", stack)
-					_, err = Pull(config.Client(), client.Namespace, client.Name, "client", "server-"+stack, t)
-					if err != nil {
-						t.Errorf("Expected: client can access server (%s), but failed: %v", stack, err)
-						t.FailNow()
-					}
-
-					t.Logf("Testing %s: client should NOT be able to access server-deny-ingress (ingress policy denies traffic to deny-ingress pods)", stack)
-					_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", "server-deny-ingress-"+stack, t)
-					if err != nil {
-						t.Errorf("Expected: client cannot access server-deny-ingress (%s), but connection succeeded: %v", stack, err)
-						t.FailNow()
-					}
-				}
-				return MarkTestSuccess(ctx)
-			}).Feature()
-
-		denyIngressotherNode := features.New(fmt.Sprintf("NetworkPolicy/denyIngressotherNode-%s", name)).
-			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
-
-				policy := NewNetworkPolicy("deny-ingress-other", config.Namespace()).
-					WithPolicyType(networkingv1.PolicyTypeIngress).
-					WithPodSelector(map[string]string{"app": "deny-ingress-other"})
-
-				client := fn(NewPod("client-other", config.Namespace()).
-					WithLabels(map[string]string{"app": "client-other"}).
-					WithContainer("client", nginxImage, nil)).
-					WithPodAntiAffinity(map[string]string{"app": "server-other", "applabel": "deny-ingress-other"})
-
-				serverDenyIngress := fn(NewPod("server-deny-ingress-other", config.Namespace()).
-					WithLabels(map[string]string{"applabel": "deny-ingress-other"}).
-					WithContainer("server", nginxImage, nil))
-
-				server := fn(NewPod("server-other", config.Namespace()).
-					WithLabels(map[string]string{"app": "server-other"}).
-					WithContainer("server", nginxImage, nil).
-					WithPodAffinity(map[string]string{"applabel": "deny-ingress-other"}))
-
-				objs = append(objs, policy.NetworkPolicy, client.Pod, serverDenyIngress.Pod, server.Pod)
-
-				for _, stack := range getStack() {
-
-					denySvc := NewService("server-deny-ingress-"+stack, config.Namespace(), map[string]string{"app": "deny-ingress-other"}).WithIPFamily(stack).ExposePort(80, "http")
-
-					normalSvc := NewService("server-"+stack, config.Namespace(), map[string]string{"app": "server-other"}).WithIPFamily(stack).ExposePort(80, "http")
-
-					objs = append(objs, denySvc.Service, normalSvc.Service)
-				}
-
-				for _, obj := range objs {
-					err := config.Client().Resources().Create(ctx, obj)
-					if err != nil {
-						t.Error(err)
-						t.FailNow()
-					}
-				}
-
-				ctx = SaveResources(ctx, objs...)
-
-				return ctx
-			}).
-			Assess("Check ingress policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client-other", Namespace: config.Namespace()}}
-				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-other", Namespace: config.Namespace()}}
-				serverDenyIngress := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-deny-ingress-other", Namespace: config.Namespace()}}
-				err := waitPodsReady(config.Client(), client, server, serverDenyIngress)
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
-
-				for _, stack := range getStack() {
-					t.Logf("Testing %s: client-other should be able to access server-other (normal traffic, no policy applied)", stack)
-					_, err = Pull(config.Client(), client.Namespace, client.Name, "client", "server-"+stack, t)
-					if err != nil {
-						t.Errorf("Expected: client-other can access server-other (%s), but failed: %v", stack, err)
-						t.FailNow()
-					}
-
-					t.Logf("Testing %s: client-other should NOT be able to access server-deny-ingress-other (ingress policy denies traffic to deny-ingress-other pods)", stack)
-					_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", "server-deny-ingress-"+stack, t)
-					if err != nil {
-						t.Errorf("Expected: client-other cannot access server-deny-ingress-other (%s), but connection succeeded: %v", stack, err)
-						t.FailNow()
-					}
-				}
-				return MarkTestSuccess(ctx)
-			}).Feature()
-
-		denyEgressSameNode := features.New(fmt.Sprintf("NetworkPolicy/denyEgressSameNode-%s", name)).
-			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
-
-				policy := NewNetworkPolicy("deny-egress", config.Namespace()).
-					WithPolicyType(networkingv1.PolicyTypeEgress).
-					WithPodSelector(map[string]string{"app": "client"})
-
-				client := fn(NewPod("client", config.Namespace()).
-					WithLabels(map[string]string{"app": "client"}).
-					WithContainer("client", nginxImage, nil)).
-					WithPodAffinity(map[string]string{"app": "server"})
-
-				server := fn(NewPod("server", config.Namespace()).
-					WithLabels(map[string]string{"app": "server"}).
-					WithContainer("server", nginxImage, nil))
-
-				objs = append(objs, policy.NetworkPolicy, client.Pod, server.Pod)
-
-				for _, stack := range getStack() {
-
-					normalSvc := NewService("server-"+stack, config.Namespace(), map[string]string{"app": "server"}).WithIPFamily(stack).ExposePort(80, "http")
-
-					objs = append(objs, normalSvc.Service)
-				}
-
-				for _, obj := range objs {
-					err := config.Client().Resources().Create(ctx, obj)
-					if err != nil {
-						t.Error(err)
-						t.FailNow()
-					}
-				}
-
-				ctx = SaveResources(ctx, objs...)
-				return ctx
-			}).
-			Assess("Check egress policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: config.Namespace()}}
-				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server", Namespace: config.Namespace()}}
-				err := waitPodsReady(config.Client(), client, server)
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
-
-				for _, stack := range getStack() {
-					t.Logf("Testing %s: client should NOT be able to access server (egress policy denies all outbound traffic from client)", stack)
-					_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", "server-"+stack, t)
-					if err != nil {
-						t.Errorf("Expected: client cannot access server (%s), but connection succeeded: %v", stack, err)
-						t.FailNow()
-					}
-				}
-				return MarkTestSuccess(ctx)
-			}).Feature()
-
-		denyEgressOtherNode := features.New(fmt.Sprintf("NetworkPolicy/denyEgressOtherNode-%s", name)).
-			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				var objs []k8s.Object
-
-				policy := NewNetworkPolicy("deny-egress", config.Namespace()).
-					WithPolicyType(networkingv1.PolicyTypeEgress).
-					WithPodSelector(map[string]string{"app": "client"})
-
-				client := fn(NewPod("client", config.Namespace()).
-					WithLabels(map[string]string{"app": "client"}).
-					WithContainer("client", nginxImage, nil)).
-					WithPodAntiAffinity(map[string]string{"app": "server"})
-
-				server := fn(NewPod("server", config.Namespace()).
-					WithLabels(map[string]string{"app": "server"}).
-					WithContainer("server", nginxImage, nil))
-
-				objs = append(objs, policy.NetworkPolicy, client.Pod, server.Pod)
-
-				for _, stack := range getStack() {
-
-					normalSvc := NewService("server-"+stack, config.Namespace(), map[string]string{"app": "server"}).WithIPFamily(stack).ExposePort(80, "http")
-
-					objs = append(objs, normalSvc.Service)
-				}
-
-				for _, obj := range objs {
-					err := config.Client().Resources().Create(ctx, obj)
-					if err != nil {
-						t.Error(err)
-						t.FailNow()
-					}
-				}
-
-				ctx = SaveResources(ctx, objs...)
-				return ctx
-			}).
-			Assess("Check egress policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: config.Namespace()}}
-				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server", Namespace: config.Namespace()}}
-				err := waitPodsReady(config.Client(), client, server)
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
-
-				for _, stack := range getStack() {
-					t.Logf("Testing %s: client should NOT be able to access server (egress policy denies all outbound traffic from client)", stack)
-					_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", "server-"+stack, t)
-					if err != nil {
-						t.Errorf("Expected: client cannot access server (%s), but connection succeeded: %v", stack, err)
-						t.FailNow()
-					}
-				}
-				return MarkTestSuccess(ctx)
-			}).Feature()
-
-		feats = append(feats, healthCheck, denyIngressSameNode, denyIngressotherNode, denyEgressSameNode, denyEgressOtherNode)
+	for _, nodeType := range nodeTypes {
+		feat := createNetworkPolicyHealthCheckTest(nodeType)
+		feats = append(feats, feat)
 	}
 
 	testenv.Test(t, feats...)
+
 	if t.Failed() {
 		isFailed.Store(true)
 	}
 }
+
+// TestSharedENI_NetworkPolicy_DenyIngressSameNode tests ingress deny policy for pods on the same node
+// for shared ENI mode on both ECS and Lingjun nodes.
+func TestSharedENI_NetworkPolicy_DenyIngressSameNode(t *testing.T) {
+	if !testNetworkPolicy {
+		t.Log("Skip networkPolicy tests")
+		return
+	}
+
+	if terway != "terway-eniip" {
+		t.Logf("TestSharedENI_NetworkPolicy_DenyIngressSameNode requires terway-eniip daemonset, current: %s, skipping", terway)
+		return
+	}
+
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createNetworkPolicyDenyIngressSameNodeTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// TestSharedENI_NetworkPolicy_DenyIngressCrossNode tests ingress deny policy for pods on different nodes
+// for shared ENI mode on both ECS and Lingjun nodes.
+func TestSharedENI_NetworkPolicy_DenyIngressCrossNode(t *testing.T) {
+	if !testNetworkPolicy {
+		t.Log("Skip networkPolicy tests")
+		return
+	}
+
+	if terway != "terway-eniip" {
+		t.Logf("TestSharedENI_NetworkPolicy_DenyIngressCrossNode requires terway-eniip daemonset, current: %s, skipping", terway)
+		return
+	}
+
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createNetworkPolicyDenyIngressCrossNodeTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// TestSharedENI_NetworkPolicy_DenyEgressSameNode tests egress deny policy for pods on the same node
+// for shared ENI mode on both ECS and Lingjun nodes.
+func TestSharedENI_NetworkPolicy_DenyEgressSameNode(t *testing.T) {
+	if !testNetworkPolicy {
+		t.Log("Skip networkPolicy tests")
+		return
+	}
+
+	if terway != "terway-eniip" {
+		t.Logf("TestSharedENI_NetworkPolicy_DenyEgressSameNode requires terway-eniip daemonset, current: %s, skipping", terway)
+		return
+	}
+
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createNetworkPolicyDenyEgressSameNodeTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// TestSharedENI_NetworkPolicy_DenyEgressCrossNode tests egress deny policy for pods on different nodes
+// for shared ENI mode on both ECS and Lingjun nodes.
+func TestSharedENI_NetworkPolicy_DenyEgressCrossNode(t *testing.T) {
+	if !testNetworkPolicy {
+		t.Log("Skip networkPolicy tests")
+		return
+	}
+
+	if terway != "terway-eniip" {
+		t.Logf("TestSharedENI_NetworkPolicy_DenyEgressCrossNode requires terway-eniip daemonset, current: %s, skipping", terway)
+		return
+	}
+
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createNetworkPolicyDenyEgressCrossNodeTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// =============================================================================
+// Shared ENI HostPort Tests
+// =============================================================================
+
+// TestSharedENI_HostPort_NodeIP tests HostPort functionality via node internal IP
+// for shared ENI mode on both ECS and Lingjun nodes.
+func TestSharedENI_HostPort_NodeIP(t *testing.T) {
+	if terway != "terway-eniip" {
+		t.Logf("TestSharedENI_HostPort_NodeIP requires terway-eniip daemonset, current: %s, skipping", terway)
+		return
+	}
+
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createHostPortNodeIPTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// TestSharedENI_HostPort_ExternalIP tests HostPort functionality via node external IP
+// for shared ENI mode on both ECS and Lingjun nodes.
+func TestSharedENI_HostPort_ExternalIP(t *testing.T) {
+	if terway != "terway-eniip" {
+		t.Logf("TestSharedENI_HostPort_ExternalIP requires terway-eniip daemonset, current: %s, skipping", terway)
+		return
+	}
+
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createHostPortExternalIPTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// =============================================================================
+// Network Policy Test Helpers
+// =============================================================================
+
+func createNetworkPolicyHealthCheckTest(nodeType NodeType) features.Feature {
+	eniMode := getENIModeFromNodeType(nodeType)
+	machineType := getMachineTypeFromNodeType(nodeType)
+	serverName := fmt.Sprintf("server-healthcheck-%s", nodeType)
+
+	return features.New(fmt.Sprintf("%sENI/NetworkPolicy/HealthCheck/%s", eniMode, machineType)).
+		WithLabel("eni-mode", eniMode).
+		WithLabel("machine-type", machineType).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("Failed to discover node types: %v", err)
+			}
+
+			requiredNodes := nodeInfo.GetNodesByType(nodeType)
+			if len(requiredNodes) == 0 {
+				t.Skipf("No nodes of type %s available", nodeType)
+			}
+
+			var objs []k8s.Object
+
+			policy := NewNetworkPolicy(fmt.Sprintf("deny-ingress-%s", nodeType), config.Namespace()).
+				WithPolicyType(networkingv1.PolicyTypeIngress)
+
+			server := NewPod(serverName, config.Namespace()).
+				WithLabels(map[string]string{"app": "server", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil).
+				WithHealthCheck(80)
+
+			server = applyNodeAffinityAndTolerations(server, nodeType)
+
+			objs = append(objs, policy.NetworkPolicy, server.Pod)
+
+			for _, obj := range objs {
+				err := config.Client().Resources().Create(ctx, obj)
+				if err != nil {
+					t.Fatalf("create resource failed: %v", err)
+				}
+			}
+
+			ctx = SaveResources(ctx, objs...)
+			return ctx
+		}).
+		Assess("Pod should be ready despite network policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
+			err := waitPodsReady(config.Client(), server)
+			if err != nil {
+				t.Fatalf("Pod failed to become ready: %v", err)
+			}
+
+			t.Logf("Pod is ready on node type %s", nodeType)
+			return MarkTestSuccess(ctx)
+		}).
+		Feature()
+}
+
+func createNetworkPolicyDenyIngressSameNodeTest(nodeType NodeType) features.Feature {
+	eniMode := getENIModeFromNodeType(nodeType)
+	machineType := getMachineTypeFromNodeType(nodeType)
+	clientName := fmt.Sprintf("client-ingress-same-%s", nodeType)
+	serverName := fmt.Sprintf("server-ingress-same-%s", nodeType)
+	serverDenyName := fmt.Sprintf("server-deny-ingress-same-%s", nodeType)
+
+	return features.New(fmt.Sprintf("%sENI/NetworkPolicy/DenyIngressSameNode/%s", eniMode, machineType)).
+		WithLabel("eni-mode", eniMode).
+		WithLabel("machine-type", machineType).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("Failed to discover node types: %v", err)
+			}
+
+			requiredNodes := nodeInfo.GetNodesByType(nodeType)
+			if len(requiredNodes) == 0 {
+				t.Skipf("No nodes of type %s available", nodeType)
+			}
+
+			var objs []k8s.Object
+
+			policy := NewNetworkPolicy(fmt.Sprintf("deny-ingress-same-%s", nodeType), config.Namespace()).
+				WithPolicyType(networkingv1.PolicyTypeIngress).
+				WithPodSelector(map[string]string{"app": "deny-ingress", "node-type": string(nodeType)})
+
+			serverDenyIngress := NewPod(serverDenyName, config.Namespace()).
+				WithLabels(map[string]string{"app": "deny-ingress", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil)
+			serverDenyIngress = applyNodeAffinityAndTolerations(serverDenyIngress, nodeType)
+
+			server := NewPod(serverName, config.Namespace()).
+				WithLabels(map[string]string{"app": "server", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil).
+				WithPodAffinity(map[string]string{"app": "deny-ingress", "node-type": string(nodeType)})
+			server = applyNodeAffinityAndTolerations(server, nodeType)
+
+			client := NewPod(clientName, config.Namespace()).
+				WithLabels(map[string]string{"app": "client", "node-type": string(nodeType)}).
+				WithContainer("client", nginxImage, nil).
+				WithPodAffinity(map[string]string{"app": "server", "node-type": string(nodeType)})
+			client = applyNodeAffinityAndTolerations(client, nodeType)
+
+			objs = append(objs, policy.NetworkPolicy, serverDenyIngress.Pod, server.Pod, client.Pod)
+
+			for _, stack := range getStack() {
+				denySvc := NewService(fmt.Sprintf("server-deny-%s-%s", nodeType, stack), config.Namespace(),
+					map[string]string{"app": "deny-ingress", "node-type": string(nodeType)}).
+					WithIPFamily(stack).ExposePort(80, "http")
+
+				normalSvc := NewService(fmt.Sprintf("server-%s-%s", nodeType, stack), config.Namespace(),
+					map[string]string{"app": "server", "node-type": string(nodeType)}).
+					WithIPFamily(stack).ExposePort(80, "http")
+
+				objs = append(objs, denySvc.Service, normalSvc.Service)
+			}
+
+			for _, obj := range objs {
+				err := config.Client().Resources().Create(ctx, obj)
+				if err != nil {
+					t.Fatalf("create resource failed: %v", err)
+				}
+			}
+
+			ctx = SaveResources(ctx, objs...)
+			return ctx
+		}).
+		Assess("Ingress policy should deny traffic", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
+			serverDeny := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverDenyName, Namespace: config.Namespace()}}
+
+			err := waitPodsReady(config.Client(), client, server, serverDeny)
+			if err != nil {
+				t.Fatalf("wait pods ready failed: %v", err)
+			}
+
+			for _, stack := range getStack() {
+				t.Logf("Testing %s: client should access server (no policy)", stack)
+				_, err = Pull(config.Client(), client.Namespace, client.Name, "client", fmt.Sprintf("server-%s-%s", nodeType, stack), t)
+				if err != nil {
+					t.Errorf("client should access server (%s): %v", stack, err)
+				}
+
+				t.Logf("Testing %s: client should NOT access deny-ingress server (policy applied)", stack)
+				_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", fmt.Sprintf("server-deny-%s-%s", nodeType, stack), t)
+				if err != nil {
+					t.Errorf("client should not access deny-ingress server (%s): %v", stack, err)
+				}
+			}
+			return MarkTestSuccess(ctx)
+		}).
+		Feature()
+}
+
+func createNetworkPolicyDenyIngressCrossNodeTest(nodeType NodeType) features.Feature {
+	eniMode := getENIModeFromNodeType(nodeType)
+	machineType := getMachineTypeFromNodeType(nodeType)
+	clientName := fmt.Sprintf("client-ingress-cross-%s", nodeType)
+	serverName := fmt.Sprintf("server-ingress-cross-%s", nodeType)
+	serverDenyName := fmt.Sprintf("server-deny-ingress-cross-%s", nodeType)
+
+	return features.New(fmt.Sprintf("%sENI/NetworkPolicy/DenyIngressCrossNode/%s", eniMode, machineType)).
+		WithLabel("eni-mode", eniMode).
+		WithLabel("machine-type", machineType).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("Failed to discover node types: %v", err)
+			}
+
+			nodes := nodeInfo.GetNodesByType(nodeType)
+			if len(nodes) < 2 {
+				t.Skipf("Need at least 2 nodes of type %s, got %d", nodeType, len(nodes))
+			}
+
+			var objs []k8s.Object
+
+			policy := NewNetworkPolicy(fmt.Sprintf("deny-ingress-cross-%s", nodeType), config.Namespace()).
+				WithPolicyType(networkingv1.PolicyTypeIngress).
+				WithPodSelector(map[string]string{"app": "deny-ingress-cross", "node-type": string(nodeType)})
+
+			serverDenyIngress := NewPod(serverDenyName, config.Namespace()).
+				WithLabels(map[string]string{"app": "deny-ingress-cross", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil)
+			serverDenyIngress = applyNodeAffinityAndTolerations(serverDenyIngress, nodeType)
+
+			server := NewPod(serverName, config.Namespace()).
+				WithLabels(map[string]string{"app": "server-cross", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil).
+				WithPodAffinity(map[string]string{"app": "deny-ingress-cross", "node-type": string(nodeType)})
+			server = applyNodeAffinityAndTolerations(server, nodeType)
+
+			client := NewPod(clientName, config.Namespace()).
+				WithLabels(map[string]string{"app": "client-cross", "node-type": string(nodeType)}).
+				WithContainer("client", nginxImage, nil).
+				WithPodAntiAffinity(map[string]string{"app": "server-cross", "node-type": string(nodeType)})
+			client = applyNodeAffinityAndTolerations(client, nodeType)
+
+			objs = append(objs, policy.NetworkPolicy, serverDenyIngress.Pod, server.Pod, client.Pod)
+
+			for _, stack := range getStack() {
+				denySvc := NewService(fmt.Sprintf("server-deny-cross-%s-%s", nodeType, stack), config.Namespace(),
+					map[string]string{"app": "deny-ingress-cross", "node-type": string(nodeType)}).
+					WithIPFamily(stack).ExposePort(80, "http")
+
+				normalSvc := NewService(fmt.Sprintf("server-cross-%s-%s", nodeType, stack), config.Namespace(),
+					map[string]string{"app": "server-cross", "node-type": string(nodeType)}).
+					WithIPFamily(stack).ExposePort(80, "http")
+
+				objs = append(objs, denySvc.Service, normalSvc.Service)
+			}
+
+			for _, obj := range objs {
+				err := config.Client().Resources().Create(ctx, obj)
+				if err != nil {
+					t.Fatalf("create resource failed: %v", err)
+				}
+			}
+
+			ctx = SaveResources(ctx, objs...)
+			return ctx
+		}).
+		Assess("Cross-node ingress policy should deny traffic", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
+			serverDeny := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverDenyName, Namespace: config.Namespace()}}
+
+			err := waitPodsReady(config.Client(), client, server, serverDeny)
+			if err != nil {
+				t.Fatalf("wait pods ready failed: %v", err)
+			}
+
+			for _, stack := range getStack() {
+				t.Logf("Testing %s: client should access server (no policy)", stack)
+				_, err = Pull(config.Client(), client.Namespace, client.Name, "client", fmt.Sprintf("server-cross-%s-%s", nodeType, stack), t)
+				if err != nil {
+					t.Errorf("client should access server (%s): %v", stack, err)
+				}
+
+				t.Logf("Testing %s: client should NOT access deny-ingress server (policy applied)", stack)
+				_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", fmt.Sprintf("server-deny-cross-%s-%s", nodeType, stack), t)
+				if err != nil {
+					t.Errorf("client should not access deny-ingress server (%s): %v", stack, err)
+				}
+			}
+			return MarkTestSuccess(ctx)
+		}).
+		Feature()
+}
+
+func createNetworkPolicyDenyEgressSameNodeTest(nodeType NodeType) features.Feature {
+	eniMode := getENIModeFromNodeType(nodeType)
+	machineType := getMachineTypeFromNodeType(nodeType)
+	clientName := fmt.Sprintf("client-egress-same-%s", nodeType)
+	serverName := fmt.Sprintf("server-egress-same-%s", nodeType)
+
+	return features.New(fmt.Sprintf("%sENI/NetworkPolicy/DenyEgressSameNode/%s", eniMode, machineType)).
+		WithLabel("eni-mode", eniMode).
+		WithLabel("machine-type", machineType).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("Failed to discover node types: %v", err)
+			}
+
+			requiredNodes := nodeInfo.GetNodesByType(nodeType)
+			if len(requiredNodes) == 0 {
+				t.Skipf("No nodes of type %s available", nodeType)
+			}
+
+			var objs []k8s.Object
+
+			policy := NewNetworkPolicy(fmt.Sprintf("deny-egress-same-%s", nodeType), config.Namespace()).
+				WithPolicyType(networkingv1.PolicyTypeEgress).
+				WithPodSelector(map[string]string{"app": "client-egress", "node-type": string(nodeType)})
+
+			server := NewPod(serverName, config.Namespace()).
+				WithLabels(map[string]string{"app": "server-egress", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil)
+			server = applyNodeAffinityAndTolerations(server, nodeType)
+
+			client := NewPod(clientName, config.Namespace()).
+				WithLabels(map[string]string{"app": "client-egress", "node-type": string(nodeType)}).
+				WithContainer("client", nginxImage, nil).
+				WithPodAffinity(map[string]string{"app": "server-egress", "node-type": string(nodeType)})
+			client = applyNodeAffinityAndTolerations(client, nodeType)
+
+			objs = append(objs, policy.NetworkPolicy, server.Pod, client.Pod)
+
+			for _, stack := range getStack() {
+				normalSvc := NewService(fmt.Sprintf("server-egress-%s-%s", nodeType, stack), config.Namespace(),
+					map[string]string{"app": "server-egress", "node-type": string(nodeType)}).
+					WithIPFamily(stack).ExposePort(80, "http")
+
+				objs = append(objs, normalSvc.Service)
+			}
+
+			for _, obj := range objs {
+				err := config.Client().Resources().Create(ctx, obj)
+				if err != nil {
+					t.Fatalf("create resource failed: %v", err)
+				}
+			}
+
+			ctx = SaveResources(ctx, objs...)
+			return ctx
+		}).
+		Assess("Egress policy should deny traffic", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
+
+			err := waitPodsReady(config.Client(), client, server)
+			if err != nil {
+				t.Fatalf("wait pods ready failed: %v", err)
+			}
+
+			for _, stack := range getStack() {
+				t.Logf("Testing %s: client should NOT access server (egress policy denies all)", stack)
+				_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", fmt.Sprintf("server-egress-%s-%s", nodeType, stack), t)
+				if err != nil {
+					t.Errorf("client should not access server (%s): %v", stack, err)
+				}
+			}
+			return MarkTestSuccess(ctx)
+		}).
+		Feature()
+}
+
+func createNetworkPolicyDenyEgressCrossNodeTest(nodeType NodeType) features.Feature {
+	eniMode := getENIModeFromNodeType(nodeType)
+	machineType := getMachineTypeFromNodeType(nodeType)
+	clientName := fmt.Sprintf("client-egress-cross-%s", nodeType)
+	serverName := fmt.Sprintf("server-egress-cross-%s", nodeType)
+
+	return features.New(fmt.Sprintf("%sENI/NetworkPolicy/DenyEgressCrossNode/%s", eniMode, machineType)).
+		WithLabel("eni-mode", eniMode).
+		WithLabel("machine-type", machineType).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("Failed to discover node types: %v", err)
+			}
+
+			nodes := nodeInfo.GetNodesByType(nodeType)
+			if len(nodes) < 2 {
+				t.Skipf("Need at least 2 nodes of type %s, got %d", nodeType, len(nodes))
+			}
+
+			var objs []k8s.Object
+
+			policy := NewNetworkPolicy(fmt.Sprintf("deny-egress-cross-%s", nodeType), config.Namespace()).
+				WithPolicyType(networkingv1.PolicyTypeEgress).
+				WithPodSelector(map[string]string{"app": "client-egress-cross", "node-type": string(nodeType)})
+
+			server := NewPod(serverName, config.Namespace()).
+				WithLabels(map[string]string{"app": "server-egress-cross", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil)
+			server = applyNodeAffinityAndTolerations(server, nodeType)
+
+			client := NewPod(clientName, config.Namespace()).
+				WithLabels(map[string]string{"app": "client-egress-cross", "node-type": string(nodeType)}).
+				WithContainer("client", nginxImage, nil).
+				WithPodAntiAffinity(map[string]string{"app": "server-egress-cross", "node-type": string(nodeType)})
+			client = applyNodeAffinityAndTolerations(client, nodeType)
+
+			objs = append(objs, policy.NetworkPolicy, server.Pod, client.Pod)
+
+			for _, stack := range getStack() {
+				normalSvc := NewService(fmt.Sprintf("server-egress-cross-%s-%s", nodeType, stack), config.Namespace(),
+					map[string]string{"app": "server-egress-cross", "node-type": string(nodeType)}).
+					WithIPFamily(stack).ExposePort(80, "http")
+
+				objs = append(objs, normalSvc.Service)
+			}
+
+			for _, obj := range objs {
+				err := config.Client().Resources().Create(ctx, obj)
+				if err != nil {
+					t.Fatalf("create resource failed: %v", err)
+				}
+			}
+
+			ctx = SaveResources(ctx, objs...)
+			return ctx
+		}).
+		Assess("Cross-node egress policy should deny traffic", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
+
+			err := waitPodsReady(config.Client(), client, server)
+			if err != nil {
+				t.Fatalf("wait pods ready failed: %v", err)
+			}
+
+			for _, stack := range getStack() {
+				t.Logf("Testing %s: client should NOT access server (egress policy denies all)", stack)
+				_, err = PullFail(config.Client(), client.Namespace, client.Name, "client", fmt.Sprintf("server-egress-cross-%s-%s", nodeType, stack), t)
+				if err != nil {
+					t.Errorf("client should not access server (%s): %v", stack, err)
+				}
+			}
+			return MarkTestSuccess(ctx)
+		}).
+		Feature()
+}
+
+// =============================================================================
+// HostPort Test Helpers
+// =============================================================================
 
 // hostPortTestState stores state for HostPort test configuration and restoration
 type hostPortTestState struct {
@@ -551,354 +642,418 @@ type hostPortTestState struct {
 	configured bool
 }
 
-func TestNormal_HostPort(t *testing.T) {
-	// Check terway daemonset name is terway-eniip
-	if terway != "terway-eniip" {
-		t.Logf("TestNormal_HostPort requires terway-eniip daemonset, current: %s, skipping", terway)
-		return
-	}
-
-	var feats []features.Feature
+func createHostPortNodeIPTest(nodeType NodeType) features.Feature {
+	eniMode := getENIModeFromNodeType(nodeType)
+	machineType := getMachineTypeFromNodeType(nodeType)
+	serverName := fmt.Sprintf("server-hostport-%s", nodeType)
+	clientName := fmt.Sprintf("client-hostport-%s", nodeType)
 	state := &hostPortTestState{}
 
-	mutateConfig := generatePodConfigs("HostPort")
-	if mutateConfig == nil {
-		labelArr := strings.Split(affinityLabel, ":")
-		if len(labelArr) != 2 {
-			t.Fatal("affinityLabel is not valid")
-		}
-	}
+	return features.New(fmt.Sprintf("%sENI/HostPort/NodeIP/%s", eniMode, machineType)).
+		WithLabel("eni-mode", eniMode).
+		WithLabel("machine-type", machineType).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if !RequireTerwayVersion("v1.15.0") {
+				t.Skipf("HostPort requires terway version >= v1.15.0, current: %s", GetCachedTerwayVersion())
+			}
 
-	for i := range mutateConfig {
-		name := mutateConfig[i].name
-		fn := mutateConfig[i].podFunc
+			if !RequireK8sVersion("v1.34.0") {
+				t.Skipf("HostPort requires k8s version >= v1.34.0, current: %s", GetCachedK8sVersion())
+			}
 
-		// Case 1: Node access node IP + port
-		hostPortNodeIP := features.New(fmt.Sprintf("HostPort/NodeIP-%s", name)).
-			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				// Check terway version >= v1.15.0
-				if !RequireTerwayVersion("v1.15.0") {
-					t.Skipf("TestNormal_HostPort requires terway version >= v1.15.0, current version: %s", GetCachedTerwayVersion())
-				}
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("Failed to discover node types: %v", err)
+			}
 
-				// Check k8s version >= v1.34.0
-				if !RequireK8sVersion("v1.34.0") {
-					t.Skipf("TestNormal_HostPort requires k8s version >= v1.34.0, current version: %s", GetCachedK8sVersion())
-				}
+			nodes := nodeInfo.GetNodesByType(nodeType)
+			if len(nodes) < 2 {
+				t.Skipf("Need at least 2 nodes of type %s, got %d", nodeType, len(nodes))
+			}
 
-				// Check if nodes have no-kube-proxy label (kube-proxy replacement / Datapath V2)
-				hasNoKubeProxy, err := CheckNoKubeProxyLabel(ctx, config.Client())
+			// Check and configure portmap if needed
+			hasNoKubeProxy, err := CheckNoKubeProxyLabel(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("failed to check no-kube-proxy label: %v", err)
+			}
+
+			if !hasNoKubeProxy {
+				t.Log("Configuring CNI chain with portmap plugin")
+				state.backup, err = BackupENIConfig(ctx, config)
 				if err != nil {
-					t.Fatalf("failed to check no-kube-proxy label: %v", err)
+					t.Fatalf("failed to backup eni-config: %v", err)
 				}
 
-				if hasNoKubeProxy {
-					t.Log("Node has k8s.aliyun.com/no-kube-proxy=true label, HostPort can be tested directly")
+				isDatapathV2, err := IsDatapathV2Enabled(ctx, config)
+				if err != nil {
+					t.Fatalf("failed to check datapath v2: %v", err)
+				}
+
+				err = ConfigureHostPortCNIChain(ctx, config, isDatapathV2)
+				if err != nil {
+					t.Fatalf("failed to configure CNI chain: %v", err)
+				}
+
+				err = restartTerway(ctx, config)
+				if err != nil {
+					t.Fatalf("failed to restart terway: %v", err)
+				}
+
+				state.configured = true
+			}
+
+			var objs []k8s.Object
+
+			// Use unique hostPort based on node type to avoid conflicts
+			hostPort := 8080 + int(nodeType[0])%10
+
+			server := NewPod(serverName, config.Namespace()).
+				WithLabels(map[string]string{"app": "server-hostport", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil).
+				WithHostPort(80, int32(hostPort))
+			server = applyNodeAffinityAndTolerations(server, nodeType)
+
+			err = config.Client().Resources().Create(ctx, server.Pod)
+			if err != nil {
+				t.Fatalf("create server pod failed: %v", err)
+			}
+
+			client := NewPod(clientName, config.Namespace()).
+				WithLabels(map[string]string{"app": "client-hostport", "node-type": string(nodeType)}).
+				WithContainer("client", nginxImage, nil).
+				WithPodAntiAffinity(map[string]string{"app": "server-hostport", "node-type": string(nodeType)})
+			client = applyNodeAffinityAndTolerations(client, nodeType)
+
+			err = config.Client().Resources().Create(ctx, client.Pod)
+			if err != nil {
+				t.Fatalf("create client pod failed: %v", err)
+			}
+
+			objs = append(objs, server.Pod, client.Pod)
+			ctx = SaveResources(ctx, objs...)
+			return ctx
+		}).
+		Assess("Client can access server via node IP + hostPort", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
+			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
+
+			err := waitPodsReady(config.Client(), server, client)
+			if err != nil {
+				t.Fatalf("wait pods ready failed: %v", err)
+			}
+
+			err = config.Client().Resources().Get(ctx, serverName, config.Namespace(), server)
+			if err != nil {
+				t.Fatalf("get server pod failed: %v", err)
+			}
+
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: server.Spec.NodeName}}
+			err = config.Client().Resources().Get(ctx, server.Spec.NodeName, "", node)
+			if err != nil {
+				t.Fatalf("get node failed: %v", err)
+			}
+
+			hostPort := 8080 + int(nodeType[0])%10
+
+			for _, stack := range getStack() {
+				isIPv6 := stack == "ipv6"
+
+				internalIP, _ := getNodeIPs(node, isIPv6)
+				if internalIP == "" {
+					t.Logf("No internal %s address found, skipping", stack)
+					continue
+				}
+
+				target := net.JoinHostPort(internalIP, fmt.Sprintf("%d", hostPort))
+				t.Logf("Testing %s connectivity to %s", stack, target)
+
+				if isIPv6 {
+					_, err = PullWithIPv6(config.Client(), client.Namespace, client.Name, "client", target, t)
 				} else {
-					t.Log("Node does not have k8s.aliyun.com/no-kube-proxy=true label, configuring CNI chain with portmap plugin")
-
-					// Backup current eni-config
-					state.backup, err = BackupENIConfig(ctx, config)
-					if err != nil {
-						t.Fatalf("failed to backup eni-config: %v", err)
-					}
-
-					// Check if Datapath V2 is enabled
-					isDatapathV2, err := IsDatapathV2Enabled(ctx, config)
-					if err != nil {
-						t.Fatalf("failed to check datapath v2: %v", err)
-					}
-
-					// Configure CNI chain with portmap plugin
-					err = ConfigureHostPortCNIChain(ctx, config, isDatapathV2)
-					if err != nil {
-						t.Fatalf("failed to configure CNI chain for HostPort: %v", err)
-					}
-
-					// Restart terway to apply new configuration
-					err = restartTerway(ctx, config)
-					if err != nil {
-						t.Fatalf("failed to restart terway: %v", err)
-					}
-
-					state.configured = true
-					t.Log("CNI chain configured with portmap plugin and terway restarted")
+					_, err = Pull(config.Client(), client.Namespace, client.Name, "client", target, t)
 				}
-
-				var objs []k8s.Object
-
-				// Create server pod with hostPort
-				server := fn(NewPod("server-hostport", config.Namespace()).
-					WithLabels(map[string]string{"app": "server-hostport"}).
-					WithContainer("server", nginxImage, nil).
-					WithHostPort(80, 8080))
-
-				err = config.Client().Resources().Create(ctx, server.Pod)
 				if err != nil {
-					t.Error(err)
-					t.FailNow()
+					t.Errorf("Failed to connect via %s: %v", stack, err)
 				}
+			}
 
-				// Create client pod on different node
-				client := fn(NewPod("client-hostport", config.Namespace()).
-					WithLabels(map[string]string{"app": "client-hostport"}).
-					WithContainer("client", nginxImage, nil)).
-					WithPodAntiAffinity(map[string]string{"app": "server-hostport"})
-
-				err = config.Client().Resources().Create(ctx, client.Pod)
+			return MarkTestSuccess(ctx)
+		}).
+		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if state.configured && state.backup != nil {
+				err := RestoreENIConfig(ctx, config, state.backup)
 				if err != nil {
-					t.Error(err)
-					t.FailNow()
+					t.Logf("Warning: failed to restore eni-config: %v", err)
+				} else {
+					_ = restartTerway(ctx, config)
 				}
+				state.configured = false
+				state.backup = nil
+			}
+			return ctx
+		}).
+		Feature()
+}
 
-				objs = append(objs, server.Pod, client.Pod)
-				ctx = SaveResources(ctx, objs...)
-				return ctx
-			}).
-			Assess("Client can access server via node IP + hostPort", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-hostport", Namespace: config.Namespace()}}
-				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client-hostport", Namespace: config.Namespace()}}
+func createHostPortExternalIPTest(nodeType NodeType) features.Feature {
+	eniMode := getENIModeFromNodeType(nodeType)
+	machineType := getMachineTypeFromNodeType(nodeType)
+	serverName := fmt.Sprintf("server-hostport-ext-%s", nodeType)
+	clientName := fmt.Sprintf("client-hostport-ext-%s", nodeType)
+	state := &hostPortTestState{}
 
-				// Wait for pods to be ready
-				err := waitPodsReady(config.Client(), server, client)
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
+	return features.New(fmt.Sprintf("%sENI/HostPort/ExternalIP/%s", eniMode, machineType)).
+		WithLabel("eni-mode", eniMode).
+		WithLabel("machine-type", machineType).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if !RequireTerwayVersion("v1.15.0") {
+				t.Skipf("HostPort requires terway version >= v1.15.0, current: %s", GetCachedTerwayVersion())
+			}
 
-				// Get server pod to find its node
-				err = config.Client().Resources().Get(ctx, "server-hostport", config.Namespace(), server)
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
+			if !RequireK8sVersion("v1.34.0") {
+				t.Skipf("HostPort requires k8s version >= v1.34.0, current: %s", GetCachedK8sVersion())
+			}
 
-				// Get node to find its IPs
-				node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: server.Spec.NodeName}}
-				err = config.Client().Resources().Get(ctx, server.Spec.NodeName, "", node)
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("Failed to discover node types: %v", err)
+			}
 
-				// Test for each IP stack
+			nodes := nodeInfo.GetNodesByType(nodeType)
+			if len(nodes) < 2 {
+				t.Skipf("Need at least 2 nodes of type %s, got %d", nodeType, len(nodes))
+			}
+
+			// Check if any node has external IP
+			hasExternalIP := false
+			for _, node := range nodes {
 				for _, stack := range getStack() {
 					isIPv6 := stack == "ipv6"
-
-					internalIP, _ := getNodeIPs(node, isIPv6)
-					if internalIP == "" {
-						t.Logf("No internal %s address found, skipping %s test", stack, stack)
-						continue
-					}
-
-					// Test connectivity via node IP + hostPort using net.JoinHostPort
-					target := net.JoinHostPort(internalIP, "8080")
-					t.Logf("Testing %s connectivity to %s", stack, target)
-					if isIPv6 {
-						_, err = PullWithIPv6(config.Client(), client.Namespace, client.Name, "client", target, t)
-					} else {
-						_, err = Pull(config.Client(), client.Namespace, client.Name, "client", target, t)
-					}
-					if err != nil {
-						t.Errorf("Failed to connect via %s: %v", stack, err)
-						t.FailNow()
-					}
-				}
-
-				return MarkTestSuccess(ctx)
-			}).
-			Feature()
-
-		// Case 2: Node access node external IP + port
-		hostPortExternalIP := features.New(fmt.Sprintf("HostPort/ExternalIP-%s", name)).
-			Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				// Check terway version >= v1.15.0
-				if !RequireTerwayVersion("v1.15.0") {
-					t.Skipf("TestNormal_HostPort requires terway version >= v1.15.0, current version: %s", GetCachedTerwayVersion())
-				}
-
-				// Check k8s version >= v1.34.0
-				if !RequireK8sVersion("v1.34.0") {
-					t.Skipf("TestNormal_HostPort requires k8s version >= v1.34.0, current version: %s", GetCachedK8sVersion())
-				}
-
-				// Check if any node has external IP before running the test
-				nodes := &corev1.NodeList{}
-				err := config.Client().Resources().List(ctx, nodes)
-				if err != nil {
-					t.Fatalf("failed to list nodes: %v", err)
-				}
-
-				hasExternalIP := false
-				for _, node := range nodes.Items {
-					for _, stack := range getStack() {
-						isIPv6 := stack == "ipv6"
-						_, externalIP := getNodeIPs(&node, isIPv6)
-						if externalIP != "" {
-							hasExternalIP = true
-							break
-						}
-					}
-					if hasExternalIP {
+					_, externalIP := getNodeIPs(&node, isIPv6)
+					if externalIP != "" {
+						hasExternalIP = true
 						break
 					}
 				}
-
-				if !hasExternalIP {
-					t.Skipf("No node has external IP, skipping HostPort/ExternalIP test")
+				if hasExternalIP {
+					break
 				}
+			}
 
-				// Check if nodes have no-kube-proxy label (kube-proxy replacement / Datapath V2)
-				hasNoKubeProxy, err := CheckNoKubeProxyLabel(ctx, config.Client())
+			if !hasExternalIP {
+				t.Skipf("No node of type %s has external IP", nodeType)
+			}
+
+			// Check and configure portmap if needed
+			hasNoKubeProxy, err := CheckNoKubeProxyLabel(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("failed to check no-kube-proxy label: %v", err)
+			}
+
+			if !hasNoKubeProxy {
+				t.Log("Configuring CNI chain with portmap plugin")
+				state.backup, err = BackupENIConfig(ctx, config)
 				if err != nil {
-					t.Fatalf("failed to check no-kube-proxy label: %v", err)
+					t.Fatalf("failed to backup eni-config: %v", err)
 				}
 
-				if hasNoKubeProxy {
-					t.Log("Node has k8s.aliyun.com/no-kube-proxy=true label, HostPort can be tested directly")
+				isDatapathV2, err := IsDatapathV2Enabled(ctx, config)
+				if err != nil {
+					t.Fatalf("failed to check datapath v2: %v", err)
+				}
+
+				err = ConfigureHostPortCNIChain(ctx, config, isDatapathV2)
+				if err != nil {
+					t.Fatalf("failed to configure CNI chain: %v", err)
+				}
+
+				err = restartTerway(ctx, config)
+				if err != nil {
+					t.Fatalf("failed to restart terway: %v", err)
+				}
+
+				state.configured = true
+			}
+
+			var objs []k8s.Object
+
+			// Use unique hostPort based on node type to avoid conflicts
+			hostPort := 8090 + int(nodeType[0])%10
+
+			server := NewPod(serverName, config.Namespace()).
+				WithLabels(map[string]string{"app": "server-hostport-ext", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil).
+				WithHostPort(80, int32(hostPort))
+			server = applyNodeAffinityAndTolerations(server, nodeType)
+
+			err = config.Client().Resources().Create(ctx, server.Pod)
+			if err != nil {
+				t.Fatalf("create server pod failed: %v", err)
+			}
+
+			client := NewPod(clientName, config.Namespace()).
+				WithLabels(map[string]string{"app": "client-hostport-ext", "node-type": string(nodeType)}).
+				WithContainer("client", nginxImage, nil).
+				WithPodAntiAffinity(map[string]string{"app": "server-hostport-ext", "node-type": string(nodeType)})
+			client = applyNodeAffinityAndTolerations(client, nodeType)
+
+			err = config.Client().Resources().Create(ctx, client.Pod)
+			if err != nil {
+				t.Fatalf("create client pod failed: %v", err)
+			}
+
+			objs = append(objs, server.Pod, client.Pod)
+			ctx = SaveResources(ctx, objs...)
+			return ctx
+		}).
+		Assess("Client can access server via external IP + hostPort", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
+			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
+
+			err := waitPodsReady(config.Client(), server, client)
+			if err != nil {
+				t.Fatalf("wait pods ready failed: %v", err)
+			}
+
+			err = config.Client().Resources().Get(ctx, serverName, config.Namespace(), server)
+			if err != nil {
+				t.Fatalf("get server pod failed: %v", err)
+			}
+
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: server.Spec.NodeName}}
+			err = config.Client().Resources().Get(ctx, server.Spec.NodeName, "", node)
+			if err != nil {
+				t.Fatalf("get node failed: %v", err)
+			}
+
+			hostPort := 8090 + int(nodeType[0])%10
+
+			for _, stack := range getStack() {
+				isIPv6 := stack == "ipv6"
+
+				_, externalIP := getNodeIPs(node, isIPv6)
+				if externalIP == "" {
+					t.Logf("No external %s address found, skipping", stack)
+					continue
+				}
+
+				target := net.JoinHostPort(externalIP, fmt.Sprintf("%d", hostPort))
+				t.Logf("Testing %s connectivity to external IP %s", stack, target)
+
+				if isIPv6 {
+					_, err = PullWithIPv6(config.Client(), client.Namespace, client.Name, "client", target, t)
 				} else {
-					// Only configure if not already configured by the first test case
-					if !state.configured {
-						t.Log("Node does not have k8s.aliyun.com/no-kube-proxy=true label, configuring CNI chain with portmap plugin")
-
-						// Backup current eni-config
-						state.backup, err = BackupENIConfig(ctx, config)
-						if err != nil {
-							t.Fatalf("failed to backup eni-config: %v", err)
-						}
-
-						// Check if Datapath V2 is enabled
-						isDatapathV2, err := IsDatapathV2Enabled(ctx, config)
-						if err != nil {
-							t.Fatalf("failed to check datapath v2: %v", err)
-						}
-
-						// Configure CNI chain with portmap plugin
-						err = ConfigureHostPortCNIChain(ctx, config, isDatapathV2)
-						if err != nil {
-							t.Fatalf("failed to configure CNI chain for HostPort: %v", err)
-						}
-
-						// Restart terway to apply new configuration
-						err = restartTerway(ctx, config)
-						if err != nil {
-							t.Fatalf("failed to restart terway: %v", err)
-						}
-
-						state.configured = true
-						t.Log("CNI chain configured with portmap plugin and terway restarted")
-					} else {
-						t.Log("CNI chain already configured with portmap plugin from previous test case")
-					}
+					_, err = Pull(config.Client(), client.Namespace, client.Name, "client", target, t)
 				}
-
-				var objs []k8s.Object
-
-				// Create server pod with hostPort on different port
-				server := fn(NewPod("server-hostport-ext", config.Namespace()).
-					WithLabels(map[string]string{"app": "server-hostport-ext"}).
-					WithContainer("server", nginxImage, nil).
-					WithHostPort(80, 8081))
-
-				err = config.Client().Resources().Create(ctx, server.Pod)
 				if err != nil {
-					t.Error(err)
-					t.FailNow()
+					t.Errorf("Failed to connect via %s: %v", stack, err)
 				}
+			}
 
-				// Create client pod on different node
-				client := fn(NewPod("client-hostport-ext", config.Namespace()).
-					WithLabels(map[string]string{"app": "client-hostport-ext"}).
-					WithContainer("client", nginxImage, nil)).
-					WithPodAntiAffinity(map[string]string{"app": "server-hostport-ext"})
-
-				err = config.Client().Resources().Create(ctx, client.Pod)
+			return MarkTestSuccess(ctx)
+		}).
+		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if state.configured && state.backup != nil {
+				err := RestoreENIConfig(ctx, config, state.backup)
 				if err != nil {
-					t.Error(err)
-					t.FailNow()
+					t.Logf("Warning: failed to restore eni-config: %v", err)
+				} else {
+					_ = restartTerway(ctx, config)
 				}
+				state.configured = false
+				state.backup = nil
+			}
+			return ctx
+		}).
+		Feature()
+}
 
-				objs = append(objs, server.Pod, client.Pod)
-				ctx = SaveResources(ctx, objs...)
-				return ctx
-			}).
-			Assess("Client can access server via node external IP + hostPort", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server-hostport-ext", Namespace: config.Namespace()}}
-				client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client-hostport-ext", Namespace: config.Namespace()}}
+// =============================================================================
+// Deprecated Tests - Keep for backward compatibility, will be removed
+// =============================================================================
 
-				// Wait for pods to be ready
-				err := waitPodsReady(config.Client(), server, client)
+// TestNormal_HostNetworkConnectivity tests connectivity from host network pods to regular pods
+// Deprecated: This test does not follow the new naming convention
+func TestNormal_HostNetworkConnectivity(t *testing.T) {
+	var feats []features.Feature
+
+	hostToPodSameNode := features.New("Legacy/HostNetworkConnectivity").
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			var objs []k8s.Object
+
+			server := NewPod("server", config.Namespace()).
+				WithLabels(map[string]string{"app": "server"}).
+				WithContainer("server", nginxImage, nil)
+
+			err := config.Client().Resources().Create(ctx, server.Pod)
+			if err != nil {
+				t.Fatalf("create server pod failed: %v", err)
+			}
+
+			client := NewPod("client", config.Namespace()).
+				WithLabels(map[string]string{"app": "client"}).
+				WithContainer("client", nginxImage, nil).
+				WithPodAffinity(map[string]string{"app": "server"}).
+				WithDNSPolicy(corev1.DNSClusterFirstWithHostNet).
+				WithHostNetwork()
+
+			err = config.Client().Resources().Create(ctx, client.Pod)
+			if err != nil {
+				t.Fatalf("create client pod failed: %v", err)
+			}
+
+			objs = append(objs, server.Pod, client.Pod)
+
+			for _, stack := range getStack() {
+				svc := NewService("server-"+stack, config.Namespace(), map[string]string{"app": "server"}).
+					ExposePort(80, "http").
+					WithIPFamily(stack)
+
+				err = config.Client().Resources().Create(ctx, svc.Service)
 				if err != nil {
-					t.Error(err)
-					t.FailNow()
+					t.Fatalf("create service failed: %v", err)
 				}
+				objs = append(objs, svc.Service)
+			}
+			ctx = SaveResources(ctx, objs...)
 
-				// Get server pod to find its node
-				err = config.Client().Resources().Get(ctx, "server-hostport-ext", config.Namespace(), server)
+			return ctx
+		}).
+		Assess("Host network pod can access server", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			server := NewPod("server", config.Namespace()).
+				WithLabels(map[string]string{"app": "server"}).
+				WithContainer("server", nginxImage, nil)
+
+			client := NewPod("client", config.Namespace()).
+				WithLabels(map[string]string{"app": "client"}).
+				WithContainer("client", nginxImage, nil).
+				WithPodAffinity(map[string]string{"app": "server"})
+
+			err := wait.For(conditions.New(config.Client().Resources()).PodReady(client.Pod),
+				wait.WithTimeout(parsedTimeout),
+				wait.WithInterval(1*time.Second))
+			if err != nil {
+				t.Fatalf("wait client ready failed: %v", err)
+			}
+			err = wait.For(conditions.New(config.Client().Resources()).PodReady(server.Pod),
+				wait.WithTimeout(parsedTimeout),
+				wait.WithInterval(1*time.Second))
+			if err != nil {
+				t.Fatalf("wait server ready failed: %v", err)
+			}
+
+			for _, stack := range getStack() {
+				_, err = Pull(config.Client(), client.Namespace, client.Name, "client", "server-"+stack, t)
 				if err != nil {
-					t.Error(err)
-					t.FailNow()
+					t.Errorf("connectivity test failed for %s: %v", stack, err)
 				}
+			}
 
-				// Get node to find its external IPs
-				node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: server.Spec.NodeName}}
-				err = config.Client().Resources().Get(ctx, server.Spec.NodeName, "", node)
-				if err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
+			return MarkTestSuccess(ctx)
+		}).
+		Feature()
 
-				// Test for each IP stack
-				for _, stack := range getStack() {
-					isIPv6 := stack == "ipv6"
-
-					_, externalIP := getNodeIPs(node, isIPv6)
-					if externalIP == "" {
-						t.Logf("No external %s address found, skipping %s test", stack, stack)
-						continue
-					}
-
-					// Test connectivity via node external IP + hostPort using net.JoinHostPort
-					target := net.JoinHostPort(externalIP, "8081")
-					t.Logf("Testing %s connectivity to external IP %s", stack, target)
-					if isIPv6 {
-						_, err = PullWithIPv6(config.Client(), client.Namespace, client.Name, "client", target, t)
-					} else {
-						_, err = Pull(config.Client(), client.Namespace, client.Name, "client", target, t)
-					}
-					if err != nil {
-						t.Errorf("Failed to connect via %s: %v", stack, err)
-						t.FailNow()
-					}
-				}
-
-				return MarkTestSuccess(ctx)
-			}).
-			Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-				// Restore eni-config if we configured it (do this in the last feature's teardown)
-				if state.configured && state.backup != nil {
-					err := RestoreENIConfig(ctx, config, state.backup)
-					if err != nil {
-						t.Logf("Warning: failed to restore eni-config: %v", err)
-					} else {
-						t.Log("Restored original eni-config")
-						// Restart terway to apply restored configuration
-						err = restartTerway(ctx, config)
-						if err != nil {
-							t.Logf("Warning: failed to restart terway after restoration: %v", err)
-						} else {
-							t.Log("Terway restarted with restored configuration")
-						}
-					}
-					state.configured = false
-					state.backup = nil
-				}
-				return ctx
-			}).
-			Feature()
-
-		feats = append(feats, hostPortNodeIP, hostPortExternalIP)
-	}
+	feats = append(feats, hostToPodSameNode)
 
 	testenv.Test(t, feats...)
 

@@ -12,49 +12,184 @@ import (
 	"sigs.k8s.io/e2e-framework/klient/k8s"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
-
-	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
 
-// TestConnectivity_AllNodeTypes tests basic connectivity across all available node types and ENI modes
-// Tests all combinations: ECS/Lingjun nodes × Shared/Exclusive ENI modes
-func TestConnectivity_AllNodeTypes(t *testing.T) {
+// =============================================================================
+// Shared ENI Mode Connectivity Tests
+// =============================================================================
+
+// TestSharedENI_Connectivity_SameNode tests basic pod connectivity on the same node
+// for shared ENI mode on both ECS and Lingjun nodes.
+func TestSharedENI_Connectivity_SameNode(t *testing.T) {
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+
 	var feats []features.Feature
-
-	// Test ECS nodes with shared ENI mode
-	ecsSharedFeature := createConnectivityTest("Connectivity/ECS-SharedENI", NodeTypeECSSharedENI, "ecs-shared")
-	feats = append(feats, ecsSharedFeature)
-
-	// Test ECS nodes with exclusive ENI mode
-	ecsExclusiveFeature := createConnectivityTest("Connectivity/ECS-ExclusiveENI", NodeTypeECSExclusiveENI, "ecs-exclusive")
-	feats = append(feats, ecsExclusiveFeature)
-
-	// Test Lingjun nodes with shared ENI mode
-	lingjunSharedFeature := createConnectivityTest("Connectivity/Lingjun-SharedENI", NodeTypeLingjunSharedENI, "lingjun-shared")
-	feats = append(feats, lingjunSharedFeature)
-
-	// Test Lingjun nodes with exclusive ENI mode
-	lingjunExclusiveFeature := createConnectivityTest("Connectivity/Lingjun-ExclusiveENI", NodeTypeLingjunExclusiveENI, "lingjun-exclusive")
-	feats = append(feats, lingjunExclusiveFeature)
+	for _, nodeType := range nodeTypes {
+		feat := createSameNodeConnectivityTest(nodeType)
+		feats = append(feats, feat)
+	}
 
 	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
 }
 
-// createConnectivityTest creates a basic connectivity test for a specific node type
-func createConnectivityTest(testName string, nodeType NodeType, label string) features.Feature {
-	serverName := fmt.Sprintf("server-%s", nodeType)
-	clientName := fmt.Sprintf("client-%s", nodeType)
+// TestSharedENI_Connectivity_CrossNode tests pod connectivity across different nodes
+// for shared ENI mode on both ECS and Lingjun nodes.
+func TestSharedENI_Connectivity_CrossNode(t *testing.T) {
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
 
-	return features.New(testName).
-		WithLabel("env", label).
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createCrossNodeConnectivityTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// TestSharedENI_Connectivity_Hairpin tests hairpin connectivity (pod accessing itself via service)
+// for shared ENI mode on both ECS and Lingjun nodes.
+func TestSharedENI_Connectivity_Hairpin(t *testing.T) {
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createHairpinConnectivityTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// =============================================================================
+// Exclusive ENI Mode Connectivity Tests
+// =============================================================================
+
+// TestExclusiveENI_Connectivity_SameNode tests basic pod connectivity on the same node
+// for exclusive ENI mode on both ECS and Lingjun nodes.
+func TestExclusiveENI_Connectivity_SameNode(t *testing.T) {
+	nodeTypes := []NodeType{NodeTypeECSExclusiveENI, NodeTypeLingjunExclusiveENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createSameNodeConnectivityTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// TestExclusiveENI_Connectivity_CrossNode tests pod connectivity across different nodes
+// for exclusive ENI mode on both ECS and Lingjun nodes.
+func TestExclusiveENI_Connectivity_CrossNode(t *testing.T) {
+	nodeTypes := []NodeType{NodeTypeECSExclusiveENI, NodeTypeLingjunExclusiveENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createCrossNodeConnectivityTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// TestExclusiveENI_Connectivity_Hairpin tests hairpin connectivity (pod accessing itself via service)
+// for exclusive ENI mode on both ECS and Lingjun nodes.
+func TestExclusiveENI_Connectivity_Hairpin(t *testing.T) {
+	nodeTypes := []NodeType{NodeTypeECSExclusiveENI, NodeTypeLingjunExclusiveENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createHairpinConnectivityTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// =============================================================================
+// Cross-Zone Connectivity Tests
+// =============================================================================
+
+// TestSharedENI_Connectivity_CrossZone tests pod connectivity across different availability zones
+// for shared ENI mode on both ECS and Lingjun nodes.
+func TestSharedENI_Connectivity_CrossZone(t *testing.T) {
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createCrossZoneConnectivityTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// TestExclusiveENI_Connectivity_CrossZone tests pod connectivity across different availability zones
+// for exclusive ENI mode on both ECS and Lingjun nodes.
+func TestExclusiveENI_Connectivity_CrossZone(t *testing.T) {
+	nodeTypes := []NodeType{NodeTypeECSExclusiveENI, NodeTypeLingjunExclusiveENI}
+
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feat := createCrossZoneConnectivityTest(nodeType)
+		feats = append(feats, feat)
+	}
+
+	testenv.Test(t, feats...)
+
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+// createSameNodeConnectivityTest creates a connectivity test for pods on the same node
+func createSameNodeConnectivityTest(nodeType NodeType) features.Feature {
+	eniMode := getENIModeFromNodeType(nodeType)
+	machineType := getMachineTypeFromNodeType(nodeType)
+	serverName := fmt.Sprintf("server-same-%s", nodeType)
+	clientName := fmt.Sprintf("client-same-%s", nodeType)
+
+	return features.New(fmt.Sprintf("%sENI/Connectivity/SameNode/%s", eniMode, machineType)).
+		WithLabel("eni-mode", eniMode).
+		WithLabel("machine-type", machineType).
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			// Discover node types
 			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
 			if err != nil {
 				t.Fatalf("Failed to discover node types: %v", err)
 			}
 
-			// Check if required node type is available
 			requiredNodes := nodeInfo.GetNodesByType(nodeType)
 			if len(requiredNodes) == 0 {
 				t.Skipf("No nodes of type %s available", nodeType)
@@ -65,548 +200,33 @@ func createConnectivityTest(testName string, nodeType NodeType, label string) fe
 				WithLabels(map[string]string{"app": "server", "node-type": string(nodeType)}).
 				WithContainer("server", nginxImage, nil)
 
-			// Apply node affinity
-			nodeAffinity := GetNodeAffinityForType(nodeType)
-			if len(nodeAffinity) > 0 {
-				server = server.WithNodeAffinity(nodeAffinity)
-			}
-			nodeAffinityExclude := GetNodeAffinityExcludeForType(nodeType)
-			if len(nodeAffinityExclude) > 0 {
-				server = server.WithNodeAffinityExclude(nodeAffinityExclude)
-			}
-
-			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
-			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
-				server = server.WithTolerations([]corev1.Toleration{
-					{
-						Key:      "node-role.alibabacloud.com/lingjun",
-						Operator: corev1.TolerationOpExists,
-						Effect:   corev1.TaintEffectNoSchedule,
-					},
-				})
-			}
-
-			err = config.Client().Resources().Create(ctx, server.Pod)
-			if err != nil {
-				t.Fatalf("create server pod failed, %v", err)
-			}
-
-			// Create client pod
-			client := NewPod(clientName, config.Namespace()).
-				WithLabels(map[string]string{"app": "client", "node-type": string(nodeType)}).
-				WithContainer("client", nginxImage, nil).
-				WithPodAffinity(map[string]string{"app": "server", "node-type": string(nodeType)})
-
-			// Apply node affinity
-			if len(nodeAffinity) > 0 {
-				client = client.WithNodeAffinity(nodeAffinity)
-			}
-			if len(nodeAffinityExclude) > 0 {
-				client = client.WithNodeAffinityExclude(nodeAffinityExclude)
-			}
-
-			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
-			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
-				client = client.WithTolerations([]corev1.Toleration{
-					{
-						Key:      "node-role.alibabacloud.com/lingjun",
-						Operator: corev1.TolerationOpExists,
-						Effect:   corev1.TaintEffectNoSchedule,
-					},
-				})
-			}
-
-			err = config.Client().Resources().Create(ctx, client.Pod)
-			if err != nil {
-				t.Fatalf("create client pod failed, %v", err)
-			}
-
-			// Create services
-			var objs []k8s.Object
-			for _, stack := range getStack() {
-				svc := NewService(fmt.Sprintf("server-%s-%s", nodeType, stack), config.Namespace(),
-					map[string]string{"app": "server", "node-type": string(nodeType)}).
-					ExposePort(80, "http").
-					WithIPFamily(stack)
-
-				err = config.Client().Resources().Create(ctx, svc.Service)
-				if err != nil {
-					t.Fatalf("create service failed, %v", err)
-				}
-				objs = append(objs, svc.Service)
-			}
-
-			ctx = SaveResources(ctx, server.Pod, client.Pod)
-			ctx = SaveResources(ctx, objs...)
-			return ctx
-		}).
-		Assess("pods should be running", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			server := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()},
-			}
-			client := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()},
-			}
-
-			err := waitPodsReady(config.Client(), server, client)
-			if err != nil {
-				t.Fatalf("wait pods ready failed, %v", err)
-			}
-
-			t.Logf("✓ Both pods are running on node type %s", nodeType)
-			return ctx
-		}).
-		Assess("basic connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			for _, stack := range getStack() {
-				serviceName := fmt.Sprintf("server-%s-%s", nodeType, stack)
-				_, err := Pull(config.Client(), config.Namespace(), clientName, "client", serviceName, t)
-				if err != nil {
-					t.Errorf("connectivity test failed for %s on node type %s: %v", stack, nodeType, err)
-				}
-			}
-			return ctx
-		}).
-		Assess("hairpin connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			for _, stack := range getStack() {
-				// Skip IPv6 hairpin test for ipvlan mode (known limitation)
-				if stack == "ipv6" && ipvlan {
-					continue
-				}
-				serviceName := fmt.Sprintf("server-%s-%s", nodeType, stack)
-				_, err := Pull(config.Client(), config.Namespace(), serverName, "server", serviceName, t)
-				if err != nil {
-					t.Errorf("hairpin connectivity test failed for %s on node type %s: %v", stack, nodeType, err)
-				}
-			}
-			return MarkTestSuccess(ctx)
-		}).
-		Feature()
-}
-
-// TestConnectivity_CrossNode tests pod connectivity across different nodes
-func TestConnectivity_CrossNode(t *testing.T) {
-	var feats []features.Feature
-
-	for _, nodeType := range []NodeType{NodeTypeECSSharedENI, NodeTypeECSExclusiveENI, NodeTypeLingjunSharedENI, NodeTypeLingjunExclusiveENI} {
-		feat := createCrossNodeTest(nodeType)
-		feats = append(feats, feat)
-	}
-
-	testenv.Test(t, feats...)
-}
-
-func createCrossNodeTest(nodeType NodeType) features.Feature {
-	serverName := fmt.Sprintf("server-cross-%s", nodeType)
-	clientName := fmt.Sprintf("client-cross-%s", nodeType)
-
-	return features.New(fmt.Sprintf("Connectivity/CrossNode/%s", nodeType)).
-		WithLabel("env", "connectivity").
-		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
-			if err != nil {
-				t.Fatalf("Failed to discover node types: %v", err)
-			}
-
-			nodes := nodeInfo.GetNodesByType(nodeType)
-			if len(nodes) < 2 {
-				t.Skipf("Need at least 2 nodes of type %s, got %d", nodeType, len(nodes))
-			}
-
-			// Create server on node 0
-			server := NewPod(serverName, config.Namespace()).
-				WithLabels(map[string]string{"app": "server", "test": "cross-node"}).
-				WithContainer("server", nginxImage, nil).
-				WithNodeAffinity(map[string]string{"kubernetes.io/hostname": nodes[0].Name})
-
-			nodeAffinity := GetNodeAffinityForType(nodeType)
-			if len(nodeAffinity) > 0 {
-				server = server.WithNodeAffinity(nodeAffinity)
-			}
-			nodeAffinityExclude := GetNodeAffinityExcludeForType(nodeType)
-			if len(nodeAffinityExclude) > 0 {
-				server = server.WithNodeAffinityExclude(nodeAffinityExclude)
-			}
-
-			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
-			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
-				server = server.WithTolerations([]corev1.Toleration{
-					{
-						Key:      "node-role.alibabacloud.com/lingjun",
-						Operator: corev1.TolerationOpExists,
-						Effect:   corev1.TaintEffectNoSchedule,
-					},
-				})
-			}
-
-			err = config.Client().Resources().Create(ctx, server.Pod)
-			if err != nil {
-				t.Fatalf("create server pod failed, %v", err)
-			}
-
-			// Create client on node 1
-			client := NewPod(clientName, config.Namespace()).
-				WithLabels(map[string]string{"app": "client", "test": "cross-node"}).
-				WithContainer("client", nginxImage, nil).
-				WithNodeAffinity(map[string]string{"kubernetes.io/hostname": nodes[1].Name})
-
-			if len(nodeAffinity) > 0 {
-				client = client.WithNodeAffinity(nodeAffinity)
-			}
-			if len(nodeAffinityExclude) > 0 {
-				client = client.WithNodeAffinityExclude(nodeAffinityExclude)
-			}
-
-			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
-			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
-				client = client.WithTolerations([]corev1.Toleration{
-					{
-						Key:      "node-role.alibabacloud.com/lingjun",
-						Operator: corev1.TolerationOpExists,
-						Effect:   corev1.TaintEffectNoSchedule,
-					},
-				})
-			}
-
-			err = config.Client().Resources().Create(ctx, client.Pod)
-			if err != nil {
-				t.Fatalf("create client pod failed, %v", err)
-			}
-
-			// Create services
-			var objs []k8s.Object
-			for _, stack := range getStack() {
-				svc := NewService(fmt.Sprintf("server-cross-%s-%s", nodeType, stack), config.Namespace(),
-					map[string]string{"app": "server", "test": "cross-node"}).
-					ExposePort(80, "http").
-					WithIPFamily(stack)
-
-				err = config.Client().Resources().Create(ctx, svc.Service)
-				if err != nil {
-					t.Fatalf("create service failed, %v", err)
-				}
-				objs = append(objs, svc.Service)
-			}
-
-			ctx = SaveResources(ctx, server.Pod, client.Pod)
-			ctx = SaveResources(ctx, objs...)
-			return ctx
-		}).
-		Assess("pods should be on different nodes", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
-			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
-
-			err := waitPodsReady(config.Client(), server, client)
-			if err != nil {
-				t.Fatalf("wait pods ready failed, %v", err)
-			}
-
-			if server.Spec.NodeName == client.Spec.NodeName {
-				t.Fatalf("pods are on same node: %s", server.Spec.NodeName)
-			}
-
-			t.Logf("✓ Pods on different nodes: server=%s, client=%s", server.Spec.NodeName, client.Spec.NodeName)
-			return ctx
-		}).
-		Assess("cross-node connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			for _, stack := range getStack() {
-				serviceName := fmt.Sprintf("server-cross-%s-%s", nodeType, stack)
-				_, err := Pull(config.Client(), config.Namespace(), clientName, "client", serviceName, t)
-				if err != nil {
-					t.Errorf("cross-node connectivity failed for %s: %v", stack, err)
-				}
-			}
-			return MarkTestSuccess(ctx)
-		}).
-		Feature()
-}
-
-// TestConnectivity_CrossZone tests pod connectivity across different availability zones
-func TestConnectivity_CrossZone(t *testing.T) {
-	var feats []features.Feature
-
-	for _, nodeType := range []NodeType{NodeTypeECSSharedENI, NodeTypeECSExclusiveENI, NodeTypeLingjunSharedENI, NodeTypeLingjunExclusiveENI} {
-		feat := createCrossZoneTest(nodeType)
-		feats = append(feats, feat)
-	}
-
-	testenv.Test(t, feats...)
-}
-
-func createCrossZoneTest(nodeType NodeType) features.Feature {
-	serverName := fmt.Sprintf("server-zone-%s", nodeType)
-	clientName := fmt.Sprintf("client-zone-%s", nodeType)
-
-	return features.New(fmt.Sprintf("Connectivity/CrossZone/%s", nodeType)).
-		WithLabel("env", "connectivity").
-		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
-			if err != nil {
-				t.Fatalf("Failed to discover node types: %v", err)
-			}
-
-			nodes := nodeInfo.GetNodesByType(nodeType)
-
-			// Group nodes by zone
-			zoneNodes := make(map[string][]corev1.Node)
-			for _, node := range nodes {
-				zone := node.Labels["topology.kubernetes.io/zone"]
-				if zone == "" {
-					zone = node.Labels["failure-domain.beta.kubernetes.io/zone"]
-				}
-				if zone != "" {
-					zoneNodes[zone] = append(zoneNodes[zone], node)
-				}
-			}
-
-			if len(zoneNodes) < 2 {
-				t.Skipf("Need at least 2 zones for cross-zone test, got %d", len(zoneNodes))
-			}
-
-			// Pick first node from first two zones
-			var selectedNodes []corev1.Node
-			for _, nodesInZone := range zoneNodes {
-				if len(nodesInZone) > 0 {
-					selectedNodes = append(selectedNodes, nodesInZone[0])
-					if len(selectedNodes) == 2 {
-						break
-					}
-				}
-			}
-
-			// Create server on node in zone 1
-			server := NewPod(serverName, config.Namespace()).
-				WithLabels(map[string]string{"app": "server", "test": "cross-zone"}).
-				WithContainer("server", nginxImage, nil).
-				WithNodeAffinity(map[string]string{"kubernetes.io/hostname": selectedNodes[0].Name})
-
-			nodeAffinity := GetNodeAffinityForType(nodeType)
-			if len(nodeAffinity) > 0 {
-				server = server.WithNodeAffinity(nodeAffinity)
-			}
-			nodeAffinityExclude := GetNodeAffinityExcludeForType(nodeType)
-			if len(nodeAffinityExclude) > 0 {
-				server = server.WithNodeAffinityExclude(nodeAffinityExclude)
-			}
-
-			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
-			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
-				server = server.WithTolerations([]corev1.Toleration{
-					{
-						Key:      "node-role.alibabacloud.com/lingjun",
-						Operator: corev1.TolerationOpExists,
-						Effect:   corev1.TaintEffectNoSchedule,
-					},
-				})
-			}
-
-			err = config.Client().Resources().Create(ctx, server.Pod)
-			if err != nil {
-				t.Fatalf("create server pod failed, %v", err)
-			}
-
-			// Create client on node in zone 2
-			client := NewPod(clientName, config.Namespace()).
-				WithLabels(map[string]string{"app": "client", "test": "cross-zone"}).
-				WithContainer("client", nginxImage, nil).
-				WithNodeAffinity(map[string]string{"kubernetes.io/hostname": selectedNodes[1].Name})
-
-			if len(nodeAffinity) > 0 {
-				client = client.WithNodeAffinity(nodeAffinity)
-			}
-			if len(nodeAffinityExclude) > 0 {
-				client = client.WithNodeAffinityExclude(nodeAffinityExclude)
-			}
-
-			// Add tolerations for Lingjun nodes (both shared and exclusive ENI modes)
-			if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
-				client = client.WithTolerations([]corev1.Toleration{
-					{
-						Key:      "node-role.alibabacloud.com/lingjun",
-						Operator: corev1.TolerationOpExists,
-						Effect:   corev1.TaintEffectNoSchedule,
-					},
-				})
-			}
-
-			err = config.Client().Resources().Create(ctx, client.Pod)
-			if err != nil {
-				t.Fatalf("create client pod failed, %v", err)
-			}
-
-			// Create services
-			var objs []k8s.Object
-			for _, stack := range getStack() {
-				svc := NewService(fmt.Sprintf("server-zone-%s-%s", nodeType, stack), config.Namespace(),
-					map[string]string{"app": "server", "test": "cross-zone"}).
-					ExposePort(80, "http").
-					WithIPFamily(stack)
-
-				err = config.Client().Resources().Create(ctx, svc.Service)
-				if err != nil {
-					t.Fatalf("create service failed, %v", err)
-				}
-				objs = append(objs, svc.Service)
-			}
-
-			ctx = SaveResources(ctx, server.Pod, client.Pod)
-			ctx = SaveResources(ctx, objs...)
-			return ctx
-		}).
-		Assess("pods should be in different zones", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
-			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
-
-			err := waitPodsReady(config.Client(), server, client)
-			if err != nil {
-				t.Fatalf("wait pods ready failed, %v", err)
-			}
-
-			// Get node zones
-			var serverNode, clientNode corev1.Node
-			err = config.Client().Resources().Get(ctx, server.Spec.NodeName, "", &serverNode)
-			if err != nil {
-				t.Fatalf("get server node failed, %v", err)
-			}
-			err = config.Client().Resources().Get(ctx, client.Spec.NodeName, "", &clientNode)
-			if err != nil {
-				t.Fatalf("get client node failed, %v", err)
-			}
-
-			getZone := func(node *corev1.Node) string {
-				zone := node.Labels["topology.kubernetes.io/zone"]
-				if zone == "" {
-					zone = node.Labels["failure-domain.beta.kubernetes.io/zone"]
-				}
-				return zone
-			}
-
-			serverZone := getZone(&serverNode)
-			clientZone := getZone(&clientNode)
-
-			if serverZone == clientZone {
-				t.Fatalf("pods in same zone: %s", serverZone)
-			}
-
-			t.Logf("✓ Pods in different zones: server=%s (node=%s), client=%s (node=%s)",
-				serverZone, server.Spec.NodeName, clientZone, client.Spec.NodeName)
-			return ctx
-		}).
-		Assess("cross-zone connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			for _, stack := range getStack() {
-				serviceName := fmt.Sprintf("server-zone-%s-%s", nodeType, stack)
-				_, err := Pull(config.Client(), config.Namespace(), clientName, "client", serviceName, t)
-				if err != nil {
-					t.Errorf("cross-zone connectivity failed for %s: %v", stack, err)
-				}
-			}
-			return MarkTestSuccess(ctx)
-		}).
-		Feature()
-}
-
-// TestConnectivity_TrunkPod tests connectivity for trunk pods (same-node and cross-node)
-// Trunk pods use PodNetworking with ENIOptionTypeTrunk to get member ENI
-func TestConnectivity_TrunkPod(t *testing.T) {
-	// Check if cluster has member-eni resource for trunk mode
-	eniInfo := checkENIResourcesBeforeTest(t)
-	if !eniInfo.HasMemberENIResource() {
-		t.Skipf("TestConnectivity_TrunkPod requires aliyun/member-eni resource, but no nodes have it (total: %d)", eniInfo.TotalMemberENI)
-	}
-
-	var feats []features.Feature
-
-	// Test same-node connectivity
-	sameNodeFeature := createTrunkPodConnectivityTest("Connectivity/TrunkPod/SameNode", true)
-	feats = append(feats, sameNodeFeature)
-
-	// Test cross-node connectivity
-	crossNodeFeature := createTrunkPodConnectivityTest("Connectivity/TrunkPod/CrossNode", false)
-	feats = append(feats, crossNodeFeature)
-
-	testenv.Test(t, feats...)
-}
-
-// createTrunkPodConnectivityTest creates a connectivity test for trunk pods
-// sameNode: if true, client and server pods are scheduled on the same node; otherwise on different nodes
-func createTrunkPodConnectivityTest(testName string, sameNode bool) features.Feature {
-	pnName := "trunk-connectivity-pn"
-	if !sameNode {
-		pnName = "trunk-cross-node-pn"
-	}
-	serverName := "server-trunk"
-	clientName := "client-trunk"
-	if !sameNode {
-		serverName = "server-trunk-cross"
-		clientName = "client-trunk-cross"
-	}
-
-	return features.New(testName).
-		WithLabel("env", "trunk-connectivity").
-		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			var objs []k8s.Object
-
-			// Create PodNetworking with trunk mode
-			pn := NewPodNetworking(pnName).
-				WithPodSelector(&metav1.LabelSelector{
-					MatchLabels: map[string]string{"netplan": pnName},
-				}).
-				WithENIAttachType(networkv1beta1.ENIOptionTypeTrunk)
-
-			err := CreatePodNetworkingAndWaitReady(ctx, config.Client(), pn.PodNetworking)
-			if err != nil {
-				t.Fatalf("create PodNetworking failed: %v", err)
-			}
-			objs = append(objs, pn.PodNetworking)
-
-			// Create server pod with trunk mode labels
-			server := NewPod(serverName, config.Namespace()).
-				WithLabels(map[string]string{
-					"app":     "server",
-					"netplan": pnName,
-				}).
-				WithContainer("server", nginxImage, nil)
+			server = applyNodeAffinityAndTolerations(server, nodeType)
 
 			err = config.Client().Resources().Create(ctx, server.Pod)
 			if err != nil {
 				t.Fatalf("create server pod failed: %v", err)
 			}
-			objs = append(objs, server.Pod)
 
-			// Create client pod with trunk mode labels
+			// Create client pod on same node
 			client := NewPod(clientName, config.Namespace()).
-				WithLabels(map[string]string{
-					"app":     "client",
-					"netplan": pnName,
-				}).
-				WithContainer("client", nginxImage, nil)
+				WithLabels(map[string]string{"app": "client", "node-type": string(nodeType)}).
+				WithContainer("client", nginxImage, nil).
+				WithPodAffinity(map[string]string{"app": "server", "node-type": string(nodeType)})
 
-			if sameNode {
-				// Schedule on same node as server
-				client = client.WithPodAffinity(map[string]string{"app": "server", "netplan": pnName})
-			} else {
-				// Schedule on different node from server
-				client = client.WithPodAntiAffinity(map[string]string{"app": "server", "netplan": pnName})
-			}
+			client = applyNodeAffinityAndTolerations(client, nodeType)
 
 			err = config.Client().Resources().Create(ctx, client.Pod)
 			if err != nil {
 				t.Fatalf("create client pod failed: %v", err)
 			}
-			objs = append(objs, client.Pod)
 
 			// Create services
+			var objs []k8s.Object
 			for _, stack := range getStack() {
-				svc := NewService(fmt.Sprintf("server-trunk-%s", stack), config.Namespace(),
-					map[string]string{"app": "server", "netplan": pnName}).
+				svc := NewService(fmt.Sprintf("server-same-%s-%s", nodeType, stack), config.Namespace(),
+					map[string]string{"app": "server", "node-type": string(nodeType)}).
 					ExposePort(80, "http").
 					WithIPFamily(stack)
-
-				if !sameNode {
-					svc = NewService(fmt.Sprintf("server-trunk-cross-%s", stack), config.Namespace(),
-						map[string]string{"app": "server", "netplan": pnName}).
-						ExposePort(80, "http").
-						WithIPFamily(stack)
-				}
 
 				err = config.Client().Resources().Create(ctx, svc.Service)
 				if err != nil {
@@ -615,10 +235,11 @@ func createTrunkPodConnectivityTest(testName string, sameNode bool) features.Fea
 				objs = append(objs, svc.Service)
 			}
 
+			ctx = SaveResources(ctx, server.Pod, client.Pod)
 			ctx = SaveResources(ctx, objs...)
 			return ctx
 		}).
-		Assess("pods should be ready and using PodNetworking", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("pods should be running on same node", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
 			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
 
@@ -637,64 +258,381 @@ func createTrunkPodConnectivityTest(testName string, sameNode bool) features.Fea
 				t.Fatalf("get client pod failed: %v", err)
 			}
 
-			if sameNode {
-				if server.Spec.NodeName != client.Spec.NodeName {
-					t.Fatalf("expected pods on same node, but server on %s, client on %s",
-						server.Spec.NodeName, client.Spec.NodeName)
-				}
-				t.Logf("✓ Both trunk pods are on same node: %s", server.Spec.NodeName)
-			} else {
-				if server.Spec.NodeName == client.Spec.NodeName {
-					t.Fatalf("expected pods on different nodes, but both on %s", server.Spec.NodeName)
-				}
-				t.Logf("✓ Trunk pods on different nodes: server=%s, client=%s",
+			if server.Spec.NodeName != client.Spec.NodeName {
+				t.Fatalf("expected pods on same node, but server on %s, client on %s",
 					server.Spec.NodeName, client.Spec.NodeName)
 			}
 
-			// Validate PodNetworking annotation
-			if err := ValidatePodHasPodNetworking(server, pnName); err != nil {
-				t.Fatalf("server pod should use PodNetworking: %v", err)
-			}
-			if err := ValidatePodHasPodNetworking(client, pnName); err != nil {
-				t.Fatalf("client pod should use PodNetworking: %v", err)
-			}
-			t.Logf("✓ Both pods are using PodNetworking: %s", pnName)
-
+			t.Logf("Both pods are running on node %s (type: %s)", server.Spec.NodeName, nodeType)
 			return ctx
 		}).
-		Assess("basic connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("same-node connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			for _, stack := range getStack() {
-				serviceName := fmt.Sprintf("server-trunk-%s", stack)
-				if !sameNode {
-					serviceName = fmt.Sprintf("server-trunk-cross-%s", stack)
-				}
+				serviceName := fmt.Sprintf("server-same-%s-%s", nodeType, stack)
 				_, err := Pull(config.Client(), config.Namespace(), clientName, "client", serviceName, t)
 				if err != nil {
-					if sameNode {
-						t.Errorf("same-node trunk pod connectivity failed for %s: %v", stack, err)
-					} else {
-						t.Errorf("cross-node trunk pod connectivity failed for %s: %v", stack, err)
-					}
+					t.Errorf("same-node connectivity test failed for %s on %s: %v", stack, nodeType, err)
 				}
 			}
+			return MarkTestSuccess(ctx)
+		}).
+		Feature()
+}
+
+// createCrossNodeConnectivityTest creates a connectivity test for pods on different nodes
+func createCrossNodeConnectivityTest(nodeType NodeType) features.Feature {
+	eniMode := getENIModeFromNodeType(nodeType)
+	machineType := getMachineTypeFromNodeType(nodeType)
+	serverName := fmt.Sprintf("server-cross-%s", nodeType)
+	clientName := fmt.Sprintf("client-cross-%s", nodeType)
+
+	return features.New(fmt.Sprintf("%sENI/Connectivity/CrossNode/%s", eniMode, machineType)).
+		WithLabel("eni-mode", eniMode).
+		WithLabel("machine-type", machineType).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("Failed to discover node types: %v", err)
+			}
+
+			nodes := nodeInfo.GetNodesByType(nodeType)
+			if len(nodes) < 2 {
+				t.Skipf("Need at least 2 nodes of type %s, got %d", nodeType, len(nodes))
+			}
+
+			// Create server pod with node type affinity
+			server := NewPod(serverName, config.Namespace()).
+				WithLabels(map[string]string{"app": "server", "test": "cross-node", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil)
+
+			server = applyNodeAffinityAndTolerations(server, nodeType)
+
+			err = config.Client().Resources().Create(ctx, server.Pod)
+			if err != nil {
+				t.Fatalf("create server pod failed: %v", err)
+			}
+
+			// Create client pod with pod anti-affinity to server (ensures different node)
+			client := NewPod(clientName, config.Namespace()).
+				WithLabels(map[string]string{"app": "client", "test": "cross-node", "node-type": string(nodeType)}).
+				WithContainer("client", nginxImage, nil).
+				WithPodAntiAffinity(map[string]string{"app": "server", "test": "cross-node", "node-type": string(nodeType)})
+
+			client = applyNodeAffinityAndTolerations(client, nodeType)
+
+			err = config.Client().Resources().Create(ctx, client.Pod)
+			if err != nil {
+				t.Fatalf("create client pod failed: %v", err)
+			}
+
+			// Create services
+			var objs []k8s.Object
+			for _, stack := range getStack() {
+				svc := NewService(fmt.Sprintf("server-cross-%s-%s", nodeType, stack), config.Namespace(),
+					map[string]string{"app": "server", "test": "cross-node", "node-type": string(nodeType)}).
+					ExposePort(80, "http").
+					WithIPFamily(stack)
+
+				err = config.Client().Resources().Create(ctx, svc.Service)
+				if err != nil {
+					t.Fatalf("create service failed: %v", err)
+				}
+				objs = append(objs, svc.Service)
+			}
+
+			ctx = SaveResources(ctx, server.Pod, client.Pod)
+			ctx = SaveResources(ctx, objs...)
+			return ctx
+		}).
+		Assess("pods should be on different nodes", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
+			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
+
+			err := waitPodsReady(config.Client(), server, client)
+			if err != nil {
+				t.Fatalf("wait pods ready failed: %v", err)
+			}
+
+			// Refresh pods to get node info
+			err = config.Client().Resources().Get(ctx, serverName, config.Namespace(), server)
+			if err != nil {
+				t.Fatalf("get server pod failed: %v", err)
+			}
+			err = config.Client().Resources().Get(ctx, clientName, config.Namespace(), client)
+			if err != nil {
+				t.Fatalf("get client pod failed: %v", err)
+			}
+
+			if server.Spec.NodeName == client.Spec.NodeName {
+				t.Fatalf("pods are on same node: %s", server.Spec.NodeName)
+			}
+
+			t.Logf("Pods on different nodes: server=%s, client=%s (type: %s)",
+				server.Spec.NodeName, client.Spec.NodeName, nodeType)
+			return ctx
+		}).
+		Assess("cross-node connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			for _, stack := range getStack() {
+				serviceName := fmt.Sprintf("server-cross-%s-%s", nodeType, stack)
+				_, err := Pull(config.Client(), config.Namespace(), clientName, "client", serviceName, t)
+				if err != nil {
+					t.Errorf("cross-node connectivity failed for %s on %s: %v", stack, nodeType, err)
+				}
+			}
+			return MarkTestSuccess(ctx)
+		}).
+		Feature()
+}
+
+// createHairpinConnectivityTest creates a hairpin connectivity test (pod accessing itself via service)
+func createHairpinConnectivityTest(nodeType NodeType) features.Feature {
+	eniMode := getENIModeFromNodeType(nodeType)
+	machineType := getMachineTypeFromNodeType(nodeType)
+	serverName := fmt.Sprintf("server-hairpin-%s", nodeType)
+
+	return features.New(fmt.Sprintf("%sENI/Connectivity/Hairpin/%s", eniMode, machineType)).
+		WithLabel("eni-mode", eniMode).
+		WithLabel("machine-type", machineType).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("Failed to discover node types: %v", err)
+			}
+
+			requiredNodes := nodeInfo.GetNodesByType(nodeType)
+			if len(requiredNodes) == 0 {
+				t.Skipf("No nodes of type %s available", nodeType)
+			}
+
+			// Create server pod
+			server := NewPod(serverName, config.Namespace()).
+				WithLabels(map[string]string{"app": "server", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil)
+
+			server = applyNodeAffinityAndTolerations(server, nodeType)
+
+			err = config.Client().Resources().Create(ctx, server.Pod)
+			if err != nil {
+				t.Fatalf("create server pod failed: %v", err)
+			}
+
+			// Create services
+			var objs []k8s.Object
+			for _, stack := range getStack() {
+				svc := NewService(fmt.Sprintf("server-hairpin-%s-%s", nodeType, stack), config.Namespace(),
+					map[string]string{"app": "server", "node-type": string(nodeType)}).
+					ExposePort(80, "http").
+					WithIPFamily(stack)
+
+				err = config.Client().Resources().Create(ctx, svc.Service)
+				if err != nil {
+					t.Fatalf("create service failed: %v", err)
+				}
+				objs = append(objs, svc.Service)
+			}
+
+			ctx = SaveResources(ctx, server.Pod)
+			ctx = SaveResources(ctx, objs...)
+			return ctx
+		}).
+		Assess("pod should be running", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
+
+			err := waitPodsReady(config.Client(), server)
+			if err != nil {
+				t.Fatalf("wait pod ready failed: %v", err)
+			}
+
+			t.Logf("Pod is running on node type %s", nodeType)
 			return ctx
 		}).
 		Assess("hairpin connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			for _, stack := range getStack() {
 				// Skip IPv6 hairpin test for ipvlan mode (known limitation)
 				if stack == "ipv6" && ipvlan {
+					t.Logf("Skipping IPv6 hairpin test for ipvlan mode (known limitation)")
 					continue
 				}
-				serviceName := fmt.Sprintf("server-trunk-%s", stack)
-				if !sameNode {
-					serviceName = fmt.Sprintf("server-trunk-cross-%s", stack)
-				}
+				serviceName := fmt.Sprintf("server-hairpin-%s-%s", nodeType, stack)
 				_, err := Pull(config.Client(), config.Namespace(), serverName, "server", serviceName, t)
 				if err != nil {
-					t.Errorf("hairpin connectivity test failed for trunk pod %s: %v", stack, err)
+					t.Errorf("hairpin connectivity test failed for %s on %s: %v", stack, nodeType, err)
 				}
 			}
 			return MarkTestSuccess(ctx)
 		}).
 		Feature()
+}
+
+// createCrossZoneConnectivityTest creates a connectivity test for pods in different availability zones
+func createCrossZoneConnectivityTest(nodeType NodeType) features.Feature {
+	eniMode := getENIModeFromNodeType(nodeType)
+	machineType := getMachineTypeFromNodeType(nodeType)
+	serverName := fmt.Sprintf("server-zone-%s", nodeType)
+	clientName := fmt.Sprintf("client-zone-%s", nodeType)
+
+	return features.New(fmt.Sprintf("%sENI/Connectivity/CrossZone/%s", eniMode, machineType)).
+		WithLabel("eni-mode", eniMode).
+		WithLabel("machine-type", machineType).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("Failed to discover node types: %v", err)
+			}
+
+			// Check if we have nodes in multiple zones
+			if !nodeInfo.HasMultipleZones(nodeType) {
+				zones := nodeInfo.GetZonesForNodeType(nodeType)
+				t.Skipf("Need nodes in at least 2 different zones for type %s, got zones: %v", nodeType, zones)
+			}
+
+			// Create server pod with node type affinity
+			server := NewPod(serverName, config.Namespace()).
+				WithLabels(map[string]string{"app": "server", "test": "cross-zone", "node-type": string(nodeType)}).
+				WithContainer("server", nginxImage, nil)
+
+			server = applyNodeAffinityAndTolerations(server, nodeType)
+
+			err = config.Client().Resources().Create(ctx, server.Pod)
+			if err != nil {
+				t.Fatalf("create server pod failed: %v", err)
+			}
+
+			// Create client pod with zone-based anti-affinity (ensures different zone)
+			client := NewPod(clientName, config.Namespace()).
+				WithLabels(map[string]string{"app": "client", "test": "cross-zone", "node-type": string(nodeType)}).
+				WithContainer("client", nginxImage, nil).
+				WithPodAntiAffinityByZone(map[string]string{"app": "server", "test": "cross-zone", "node-type": string(nodeType)})
+
+			client = applyNodeAffinityAndTolerations(client, nodeType)
+
+			err = config.Client().Resources().Create(ctx, client.Pod)
+			if err != nil {
+				t.Fatalf("create client pod failed: %v", err)
+			}
+
+			// Create services
+			var objs []k8s.Object
+			for _, stack := range getStack() {
+				svc := NewService(fmt.Sprintf("server-zone-%s-%s", nodeType, stack), config.Namespace(),
+					map[string]string{"app": "server", "test": "cross-zone", "node-type": string(nodeType)}).
+					ExposePort(80, "http").
+					WithIPFamily(stack)
+
+				err = config.Client().Resources().Create(ctx, svc.Service)
+				if err != nil {
+					t.Fatalf("create service failed: %v", err)
+				}
+				objs = append(objs, svc.Service)
+			}
+
+			ctx = SaveResources(ctx, server.Pod, client.Pod)
+			ctx = SaveResources(ctx, objs...)
+			return ctx
+		}).
+		Assess("pods should be in different zones", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
+			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: config.Namespace()}}
+
+			err := waitPodsReady(config.Client(), server, client)
+			if err != nil {
+				t.Fatalf("wait pods ready failed: %v", err)
+			}
+
+			// Refresh pods to get node info
+			err = config.Client().Resources().Get(ctx, serverName, config.Namespace(), server)
+			if err != nil {
+				t.Fatalf("get server pod failed: %v", err)
+			}
+			err = config.Client().Resources().Get(ctx, clientName, config.Namespace(), client)
+			if err != nil {
+				t.Fatalf("get client pod failed: %v", err)
+			}
+
+			// Get node info to check zones
+			nodeInfo, err := DiscoverNodeTypes(ctx, config.Client())
+			if err != nil {
+				t.Fatalf("Failed to discover node types: %v", err)
+			}
+
+			var serverZone, clientZone string
+			for _, node := range nodeInfo.AllNodes {
+				if node.Name == server.Spec.NodeName {
+					serverZone = GetNodeZone(&node)
+				}
+				if node.Name == client.Spec.NodeName {
+					clientZone = GetNodeZone(&node)
+				}
+			}
+
+			if serverZone == clientZone {
+				t.Fatalf("pods are in same zone: server=%s (zone=%s), client=%s (zone=%s)",
+					server.Spec.NodeName, serverZone, client.Spec.NodeName, clientZone)
+			}
+
+			t.Logf("Pods in different zones: server=%s (zone=%s), client=%s (zone=%s), type=%s",
+				server.Spec.NodeName, serverZone, client.Spec.NodeName, clientZone, nodeType)
+			return ctx
+		}).
+		Assess("cross-zone connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			for _, stack := range getStack() {
+				serviceName := fmt.Sprintf("server-zone-%s-%s", nodeType, stack)
+				_, err := Pull(config.Client(), config.Namespace(), clientName, "client", serviceName, t)
+				if err != nil {
+					t.Errorf("cross-zone connectivity failed for %s on %s: %v", stack, nodeType, err)
+				}
+			}
+			return MarkTestSuccess(ctx)
+		}).
+		Feature()
+}
+
+// applyNodeAffinityAndTolerations applies node affinity and tolerations based on node type
+func applyNodeAffinityAndTolerations(pod *Pod, nodeType NodeType) *Pod {
+	// Apply node affinity
+	nodeAffinity := GetNodeAffinityForType(nodeType)
+	if len(nodeAffinity) > 0 {
+		pod = pod.WithNodeAffinity(nodeAffinity)
+	}
+	nodeAffinityExclude := GetNodeAffinityExcludeForType(nodeType)
+	if len(nodeAffinityExclude) > 0 {
+		pod = pod.WithNodeAffinityExclude(nodeAffinityExclude)
+	}
+
+	// Add tolerations for Lingjun nodes
+	if nodeType == NodeTypeLingjunSharedENI || nodeType == NodeTypeLingjunExclusiveENI {
+		pod = pod.WithTolerations([]corev1.Toleration{
+			{
+				Key:      "node-role.alibabacloud.com/lingjun",
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoSchedule,
+			},
+		})
+	}
+
+	return pod
+}
+
+// getENIModeFromNodeType returns "Shared" or "Exclusive" based on node type
+func getENIModeFromNodeType(nodeType NodeType) string {
+	switch nodeType {
+	case NodeTypeECSSharedENI, NodeTypeLingjunSharedENI:
+		return "Shared"
+	case NodeTypeECSExclusiveENI, NodeTypeLingjunExclusiveENI:
+		return "Exclusive"
+	default:
+		return "Unknown"
+	}
+}
+
+// getMachineTypeFromNodeType returns "ECS" or "Lingjun" based on node type
+func getMachineTypeFromNodeType(nodeType NodeType) string {
+	switch nodeType {
+	case NodeTypeECSSharedENI, NodeTypeECSExclusiveENI:
+		return "ECS"
+	case NodeTypeLingjunSharedENI, NodeTypeLingjunExclusiveENI:
+		return "Lingjun"
+	default:
+		return "Unknown"
+	}
 }
