@@ -68,10 +68,6 @@ const (
 	EventAllocIPFailed      = "AllocIPFailed"
 	EventSyncOpenAPISuccess = "SyncOpenAPISuccess"
 	EventSyncOpenAPIFailed  = "SyncOpenAPIFailed"
-	EventENICreated         = "ENICreated"
-	EventENICreateFailed    = "ENICreateFailed"
-	EventENIDeleted         = "ENIDeleted"
-	EventENIDeleteFailed    = "ENIDeleteFailed"
 )
 
 var EventCh = make(chan event.GenericEvent, 1000)
@@ -471,7 +467,6 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 					opts.Tags = &node.Spec.ENISpec.TagFilter
 				}
 				remote, err = n.aliyun.DescribeNetworkInterfaceV2(ctx, opts)
-
 				if err != nil {
 					l.Error(err, "error get eni", "eni", id)
 					continue
@@ -905,7 +900,8 @@ func updateCrCondition(options []*eniOptions) {
 				if prev.ObservedTime.Add(5 * time.Minute).Before(time.Now()) {
 					item.eniRef.Conditions[ConditionInsufficientIP] = networkv1beta1.Condition{
 						ObservedTime: metav1.Now(),
-						Message:      fmt.Sprintf("%s ip is not enough", item.eniRef.VSwitchID)}
+						Message:      fmt.Sprintf("%s ip is not enough", item.eniRef.VSwitchID),
+					}
 				}
 			}
 		}
@@ -1202,14 +1198,14 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 			// wait eni detached
 			err := n.aliyun.DeleteNetworkInterfaceV2(ctx, eni.ID)
 			if err != nil {
-				n.record.Event(node, corev1.EventTypeWarning, EventENIDeleteFailed,
+				n.record.Event(node, corev1.EventTypeWarning, types.EventDeleteENIFailed,
 					fmt.Sprintf("Failed to delete ENI %s: %v", eni.ID, err))
 				log.Error(err, "run gc failed")
 				continue
 			}
 			MetaCtx(ctx).StatusChanged.Store(true)
 
-			n.record.Event(node, corev1.EventTypeNormal, EventENIDeleted,
+			n.record.Event(node, corev1.EventTypeNormal, types.EventDeleteENISucceed,
 				fmt.Sprintf("Successfully deleted ENI %s", eni.ID))
 			log.Info("run gc succeed, eni removed", "eni", eni.ID)
 			// remove from status
@@ -1380,7 +1376,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			// block
 			n.vswpool.Block(createOpts.NetworkInterfaceOptions.VSwitchID)
 		}
-		n.record.Event(node, corev1.EventTypeWarning, EventENICreateFailed,
+		n.record.Event(node, corev1.EventTypeWarning, types.EventCreateENIFailed,
 			fmt.Sprintf("Failed to create ENI type=%s vsw=%s: %v", opt.eniTypeKey.ENIType, vsw.ID, err))
 		return err
 	}
@@ -1428,7 +1424,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			Backoff:                nil,
 		})
 		if err != nil {
-			n.record.Event(node, corev1.EventTypeWarning, EventENICreateFailed,
+			n.record.Event(node, corev1.EventTypeWarning, types.EventCreateENIFailed,
 				fmt.Sprintf("Failed to attach ENI %s: %v", result.NetworkInterfaceID, err))
 			return err
 		}
@@ -1438,7 +1434,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 
 	eni, err := n.aliyun.WaitForNetworkInterfaceV2(ctx, result.NetworkInterfaceID, aliyunClient.ENIStatusInUse, backoff.Backoff(backoff.WaitENIStatus).Backoff, false)
 	if err != nil {
-		n.record.Event(node, corev1.EventTypeWarning, EventENICreateFailed,
+		n.record.Event(node, corev1.EventTypeWarning, types.EventCreateENIFailed,
 			fmt.Sprintf("Failed to wait ENI %s ready: %v", result.NetworkInterfaceID, err))
 		return err
 	}
@@ -1460,7 +1456,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 
 	MetaCtx(ctx).StatusChanged.Store(true)
 
-	n.record.Event(node, corev1.EventTypeNormal, EventENICreated,
+	n.record.Event(node, corev1.EventTypeNormal, types.EventCreateENISucceed,
 		fmt.Sprintf("Successfully created ENI %s type=%s with %d IPv4 and %d IPv6 addresses",
 			eni.NetworkInterfaceID, opt.eniTypeKey.ENIType, opt.addIPv4N, opt.addIPv6N))
 	return nil
@@ -1817,7 +1813,6 @@ func getTagFromImage(image string) string {
 }
 
 func calculateToDel(ctx context.Context, node *networkv1beta1.Node) int {
-
 	l := logr.FromContextOrDiscard(ctx)
 	keepN := node.Spec.Pool.MaxPoolSize
 
@@ -2032,7 +2027,6 @@ func (n *ReconcileNode) poolSyncPeriod(user string) time.Duration {
 }
 
 func (n *ReconcileNode) requeueAfter(node *networkv1beta1.Node) time.Duration {
-
 	poolPeriod := n.poolSyncPeriod(node.Spec.Pool.PoolSyncPeriod)
 
 	now := time.Now()
