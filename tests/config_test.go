@@ -18,6 +18,9 @@ import (
 )
 
 func TestIPPool(t *testing.T) {
+	if terway != "terway-eniip" {
+		t.Skipf("skip not terway-eniip")
+	}
 	feature := features.New("IPPool").
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			if eniConfig.IPAMType != "crd" {
