@@ -58,7 +58,6 @@ message ENIInfo {
   IPSet GatewayIP = 4;
   bool eRDMA = 5; // eni is eRDMA
   optional uint32 VfId = 6;
-  optional VfType VfType = 7;
 }
 
 message Route {
@@ -138,10 +137,4 @@ message EventRequest {
 message EventReply {
   bool Succeed = 1;
   string Error = 2;
-}
-
-enum VfType {
-  VfTypeDefault = 0;
-  VfTypeVPC = 1;
-  VfTypeENO = 2;
 }

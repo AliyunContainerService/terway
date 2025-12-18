@@ -13,10 +13,13 @@ import (
 )
 
 const (
-	defaultNUSAConfigPath = "/var/rdma/eni_topo"
-	defaultSysfsBasePath  = "/sys/bus/pci/devices"
+	defaultSysfsBasePath = "/sys/bus/pci/devices"
+	vfBind               = "/sys/bus/pci/drivers/virtio-pci"
+)
 
-	vfBind = "/sys/bus/pci/drivers/virtio-pci"
+var (
+	defaultNUSAConfigPath = "/var/rdma/eni_topo"
+	HcENIHostConfigPath   = "/var/run/hc-eni-host/vf-topo-vpc"
 )
 
 type Config struct {
@@ -48,7 +51,14 @@ func parse(path string, config []byte) (*Configs, error) {
 
 func GetBDFbyVFID(path string, vfID int) (string, error) {
 	if path == "" {
-		path = defaultNUSAConfigPath
+		_, err := os.Stat(defaultNUSAConfigPath)
+		if err == nil {
+			path = defaultNUSAConfigPath
+		} else if os.IsNotExist(err) {
+			path = HcENIHostConfigPath
+		} else {
+			return "", err
+		}
 	}
 	configContent, err := os.ReadFile(path)
 	if err != nil {

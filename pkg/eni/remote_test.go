@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 
@@ -74,14 +73,10 @@ func TestToRPC(t *testing.T) {
 		assert.Equal(t, true, result[0].DefaultRoute)
 	})
 
-	t.Run("test with VfTypeVPC when APIEcsHDeni annotation is set", func(t *testing.T) {
+	t.Run("test with VfId set in ENIInfo", func(t *testing.T) {
+		vfID := uint32(5)
 		l := &RemoteIPResource{
 			podENI: networkv1beta1.PodENI{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						types.ENOApi: types.APIEcsHDeni,
-					},
-				},
 				Spec: networkv1beta1.PodENISpec{
 					Allocations: []networkv1beta1.Allocation{
 						{
@@ -98,7 +93,9 @@ func TestToRPC(t *testing.T) {
 				},
 				Status: networkv1beta1.PodENIStatus{
 					ENIInfos: map[string]networkv1beta1.ENIInfo{
-						"eni-11": {},
+						"eni-11": {
+							VfID: &vfID,
+						},
 					},
 				},
 			},
@@ -107,15 +104,13 @@ func TestToRPC(t *testing.T) {
 		result := l.ToRPC()
 		assert.NotNil(t, result)
 		assert.Equal(t, 1, len(result))
-		assert.Equal(t, rpc.VfType_VfTypeVPC, *result[0].ENIInfo.VfType)
+		assert.NotNil(t, result[0].ENIInfo.VfId)
+		assert.Equal(t, uint32(5), *result[0].ENIInfo.VfId)
 	})
 
-	t.Run("test without ENOApi annotation", func(t *testing.T) {
+	t.Run("test with VfId nil in ENIInfo", func(t *testing.T) {
 		l := &RemoteIPResource{
 			podENI: networkv1beta1.PodENI{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{},
-				},
 				Spec: networkv1beta1.PodENISpec{
 					Allocations: []networkv1beta1.Allocation{
 						{
@@ -132,7 +127,9 @@ func TestToRPC(t *testing.T) {
 				},
 				Status: networkv1beta1.PodENIStatus{
 					ENIInfos: map[string]networkv1beta1.ENIInfo{
-						"eni-11": {},
+						"eni-11": {
+							VfID: nil,
+						},
 					},
 				},
 			},
@@ -141,8 +138,9 @@ func TestToRPC(t *testing.T) {
 		result := l.ToRPC()
 		assert.NotNil(t, result)
 		assert.Equal(t, 1, len(result))
-		assert.Nil(t, result[0].ENIInfo.VfType)
+		assert.Nil(t, result[0].ENIInfo.VfId)
 	})
+
 }
 
 func TestAllocateReturnsErrorWhenResourceTypeMismatch(t *testing.T) {
