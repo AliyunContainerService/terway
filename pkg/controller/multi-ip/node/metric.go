@@ -31,4 +31,23 @@ var (
 		},
 		[]string{"method", "node"},
 	)
+
+	// ENITaskQueueSize shows the current size of ENI task queue by status
+	ENITaskQueueSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "terway_eni_task_queue_size",
+			Help: "Current size of ENI task queue",
+		},
+		[]string{"status"},
+	)
+
+	// ENIAttachDuration records the duration of ENI attach operations
+	ENIAttachDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "terway_eni_attach_duration_seconds",
+			Help:    "Duration of ENI attach operations",
+			Buckets: []float64{1, 3, 5, 10, 20, 30, 60, 120, 180},
+		},
+		[]string{"result", "eni_type"},
+	)
 )
