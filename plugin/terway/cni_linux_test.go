@@ -398,7 +398,7 @@ func TestDoCmdAdd(t *testing.T) {
 				})
 
 				// Mock prepareVF function
-				patches.ApplyFunc(prepareVF, func(ctx context.Context, id int, mac string, vfType rpc.VfType) (int32, error) {
+				patches.ApplyFunc(prepareVF, func(ctx context.Context, id int, mac string) (int32, error) {
 					return 1, nil
 				})
 

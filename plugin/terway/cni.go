@@ -290,14 +290,9 @@ func parseSetupConf(ctx context.Context, args *skel.CmdArgs, alloc *rpc.NetConf,
 	if alloc.GetENIInfo() != nil {
 		mac := alloc.GetENIInfo().GetMAC()
 		vfID = alloc.GetENIInfo().VfId
-		vfType := rpc.VfType_VfTypeDefault
 		if vfID != nil {
 			// when do setup, this link must present
-			if alloc.GetENIInfo().VfType != nil {
-				vfType = *alloc.GetENIInfo().VfType
-			}
-
-			deviceID, err = prepareVF(ctx, int(*vfID), mac, vfType)
+			deviceID, err = prepareVF(ctx, int(*vfID), mac)
 			if err != nil {
 				return nil, err
 			}

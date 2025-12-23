@@ -40,6 +40,182 @@ func TestParse(t *testing.T) {
 	})
 }
 
+// TestGetBDFbyVFID tests the GetBDFbyVFID function
+func TestGetBDFbyVFID(t *testing.T) {
+	t.Run("valid config with matching vfID", func(t *testing.T) {
+		// Create a temporary directory and config file
+		tempDir := t.TempDir()
+		configPath := filepath.Join(tempDir, "vf-config.json")
+
+		// Write test config data
+		configData := `{"eniVFs": [{"pf_id": 1,"vf_id": 9,"bdf": "0000:1:1.6"}]}`
+		err := os.WriteFile(configPath, []byte(configData), 0644)
+		require.NoError(t, err)
+
+		// Test the function
+		bdf, err := GetBDFbyVFID(configPath, 9)
+		assert.NoError(t, err)
+		assert.Equal(t, "0000:1:1.6", bdf)
+	})
+
+	t.Run("valid config with non-matching vfID", func(t *testing.T) {
+		// Create a temporary directory and config file
+		tempDir := t.TempDir()
+		configPath := filepath.Join(tempDir, "vf-config.json")
+
+		// Write test config data
+		configData := `{"eniVFs": [{"pf_id": 1,"vf_id": 9,"bdf": "0000:1:1.6"}]}`
+		err := os.WriteFile(configPath, []byte(configData), 0644)
+		require.NoError(t, err)
+
+		// Test the function with non-matching vfID
+		_, err = GetBDFbyVFID(configPath, 10)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found specified vfID 10")
+	})
+
+	t.Run("invalid config file", func(t *testing.T) {
+		// Create a temporary directory and config file
+		tempDir := t.TempDir()
+		configPath := filepath.Join(tempDir, "vf-config.json")
+
+		// Write invalid config data
+		configData := `{"eniVFs": [{"pf_id": 1,"vf_id": 9,"bdf": "0000:1:1.6"}`
+		err := os.WriteFile(configPath, []byte(configData), 0644)
+		require.NoError(t, err)
+
+		// Test the function
+		_, err = GetBDFbyVFID(configPath, 9)
+		assert.Error(t, err)
+	})
+
+	t.Run("non-existent config file", func(t *testing.T) {
+		// Test the function with non-existent config file
+		_, err := GetBDFbyVFID("/non/existent/path", 9)
+		assert.Error(t, err)
+	})
+
+	t.Run("empty path with defaultNUSAConfigPath existing", func(t *testing.T) {
+		// Create a temporary directory and config file
+		tempDir := t.TempDir()
+
+		// Save original value
+		originalPath := defaultNUSAConfigPath
+		// Temporarily change the default path to our temp directory
+		defaultNUSAConfigPath = filepath.Join(tempDir, "eni_topo")
+
+		// Make sure the default path doesn't exist
+		_, err := os.Stat(defaultNUSAConfigPath)
+		if !os.IsNotExist(err) {
+			os.Remove(defaultNUSAConfigPath)
+		}
+
+		// Write test config data to the default path
+		configData := `[{"pf_id": 1,"vf_id": 9,"bdf": "0000:1:1.6"}]`
+		err = os.WriteFile(defaultNUSAConfigPath, []byte(configData), 0644)
+		require.NoError(t, err)
+
+		// Test the function with empty path
+		bdf, err := GetBDFbyVFID("", 9)
+		assert.NoError(t, err)
+		assert.Equal(t, "0000:1:1.6", bdf)
+
+		// Restore original value
+		defaultNUSAConfigPath = originalPath
+	})
+
+	t.Run("empty path with HcENIHostConfigPath existing", func(t *testing.T) {
+		// Create a temporary directory and config file
+		tempDir := t.TempDir()
+
+		// Save original values
+		originalNUSAPath := defaultNUSAConfigPath
+		originalHCPath := HcENIHostConfigPath
+
+		// Temporarily change the paths to our temp directory
+		defaultNUSAConfigPath = filepath.Join(tempDir, "eni_topo")
+		HcENIHostConfigPath = filepath.Join(tempDir, "vf-topo-vpc")
+
+		// Make sure the defaultNUSAConfigPath doesn't exist
+		_, err := os.Stat(defaultNUSAConfigPath)
+		if !os.IsNotExist(err) {
+			os.Remove(defaultNUSAConfigPath)
+		}
+
+		// Write test config data to the HcENIHostConfigPath
+		configData := `{"eniVFs": [{"pf_id": 1,"vf_id": 9,"bdf": "0000:1:1.6"}]}`
+		err = os.WriteFile(HcENIHostConfigPath, []byte(configData), 0644)
+		require.NoError(t, err)
+
+		// Test the function with empty path
+		bdf, err := GetBDFbyVFID("", 9)
+		assert.NoError(t, err)
+		assert.Equal(t, "0000:1:1.6", bdf)
+
+		// Restore original values
+		defaultNUSAConfigPath = originalNUSAPath
+		HcENIHostConfigPath = originalHCPath
+	})
+
+	t.Run("empty path with neither config file existing", func(t *testing.T) {
+		// Save original values
+		originalNUSAPath := defaultNUSAConfigPath
+		originalHCPath := HcENIHostConfigPath
+
+		// Temporarily change the paths to non-existent files
+		tempDir := t.TempDir()
+		defaultNUSAConfigPath = filepath.Join(tempDir, "non-existent-eni_topo")
+		HcENIHostConfigPath = filepath.Join(tempDir, "non-existent-vf-topo-vpc")
+
+		// Test the function with empty path
+		_, err := GetBDFbyVFID("", 9)
+		assert.Error(t, err)
+
+		// Restore original values
+		defaultNUSAConfigPath = originalNUSAPath
+		HcENIHostConfigPath = originalHCPath
+	})
+
+	t.Run("multiple VFs with matching vfID", func(t *testing.T) {
+		// Create a temporary directory and config file
+		tempDir := t.TempDir()
+		configPath := filepath.Join(tempDir, "vf-config.json")
+
+		// Write test config data with multiple VFs
+		configData := `{"eniVFs": [{"pf_id": 1,"vf_id": 8,"bdf": "0000:1:1.5"}, {"pf_id": 1,"vf_id": 9,"bdf": "0000:1:1.6"}, {"pf_id": 1,"vf_id": 10,"bdf": "0000:1:1.7"}]}`
+		err := os.WriteFile(configPath, []byte(configData), 0644)
+		require.NoError(t, err)
+
+		// Test the function
+		bdf, err := GetBDFbyVFID(configPath, 9)
+		assert.NoError(t, err)
+		assert.Equal(t, "0000:1:1.6", bdf)
+	})
+
+	t.Run("eni controller config format", func(t *testing.T) {
+		// Create a temporary directory and config file
+		tempDir := t.TempDir()
+		configPath := filepath.Join(tempDir, "eni-controller-config.json")
+
+		// Write test config data in eni controller format
+		configData := `[{"pf_id": 1,"vf_id": 9,"bdf": "0000:1:1.6"}]`
+		err := os.WriteFile(configPath, []byte(configData), 0644)
+		require.NoError(t, err)
+
+		// Temporarily change the default path to test eni controller format
+		originalPath := defaultNUSAConfigPath
+		defaultNUSAConfigPath = configPath
+
+		// Test the function
+		bdf, err := GetBDFbyVFID(configPath, 9)
+		assert.NoError(t, err)
+		assert.Equal(t, "0000:1:1.6", bdf)
+
+		// Restore original value
+		defaultNUSAConfigPath = originalPath
+	})
+}
+
 // TestGetPFBDF tests the getPFBDF function with mocked sysfs structure
 func TestGetPFBDF(t *testing.T) {
 	t.Run("invalid BDF format", func(t *testing.T) {

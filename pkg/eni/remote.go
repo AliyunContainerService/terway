@@ -8,7 +8,6 @@ import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -81,11 +80,6 @@ func (l *RemoteIPResource) ToRPC() []*rpc.NetConf {
 		}
 
 		eniInfo.VfId = info.VfID
-
-		switch l.podENI.Annotations[types.ENOApi] {
-		case types.APIEcsHDeni:
-			eniInfo.VfType = ptr.To(rpc.VfType_VfTypeVPC)
-		}
 
 		netConf = append(netConf, &rpc.NetConf{
 			BasicInfo: &rpc.BasicInfo{
