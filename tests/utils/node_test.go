@@ -71,4 +71,3 @@ func TestDeploymentWithLingjunToleration(t *testing.T) {
 		t.Error("Lingjun toleration not found in deployment")
 	}
 }
-

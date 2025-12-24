@@ -9,27 +9,27 @@ import (
 
 func TestNormalizePath(t *testing.T) {
 	tests := []struct {
-		name     string
-		path     string
-		expected string
+		name      string
+		path      string
+		expected  string
 		isWindows bool
 	}{
 		{
-			name:     "Unix absolute path on Linux",
-			path:     "/usr/local/bin",
-			expected: "/usr/local/bin",
+			name:      "Unix absolute path on Linux",
+			path:      "/usr/local/bin",
+			expected:  "/usr/local/bin",
 			isWindows: false,
 		},
 		{
-			name:     "Unix relative path on Linux",
-			path:     "relative/path",
-			expected: "relative/path",
+			name:      "Unix relative path on Linux",
+			path:      "relative/path",
+			expected:  "relative/path",
 			isWindows: false,
 		},
 		{
-			name:     "Windows style path on Linux",
-			path:     "C:\\Windows\\System32",
-			expected: "C:\\Windows\\System32",
+			name:      "Windows style path on Linux",
+			path:      "C:\\Windows\\System32",
+			expected:  "C:\\Windows\\System32",
 			isWindows: false,
 		},
 	}

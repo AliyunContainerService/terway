@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/agiledragon/gomonkey/v2"
-	"github.com/stretchr/testify/assert"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 )
@@ -42,12 +42,12 @@ func TestPrintKV(t *testing.T) {
 func TestArgumentValidation(t *testing.T) {
 	t.Run("runList argument validation", func(t *testing.T) {
 		cmd := &cobra.Command{}
-		
+
 		// Test with exactly 2 arguments (should fail)
 		err := runList(cmd, []string{"arg1", "arg2"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "too many arguments")
-		
+
 		// Test with more than 2 arguments (should fail)
 		err = runList(cmd, []string{"arg1", "arg2", "arg3"})
 		assert.Error(t, err)
@@ -56,17 +56,17 @@ func TestArgumentValidation(t *testing.T) {
 
 	t.Run("runShow argument validation", func(t *testing.T) {
 		cmd := &cobra.Command{}
-		
+
 		// Test with no arguments
 		err := runShow(cmd, []string{})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no arguments")
-		
+
 		// Test with 2 or more arguments
 		err = runShow(cmd, []string{"type", "name"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "too many arguments")
-		
+
 		// Test with 3 arguments
 		err = runShow(cmd, []string{"type", "name", "extra"})
 		assert.Error(t, err)
@@ -75,28 +75,28 @@ func TestArgumentValidation(t *testing.T) {
 
 	t.Run("runExecute argument validation", func(t *testing.T) {
 		cmd := &cobra.Command{}
-		
+
 		// Test with no arguments
 		err := runExecute(cmd, []string{})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "too few arguments")
-		
+
 		// Test with 1 argument
 		err = runExecute(cmd, []string{"type"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "too few arguments")
-		
+
 		// Test with 2 arguments
 		err = runExecute(cmd, []string{"type", "name"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "too few arguments")
-		
+
 		// Test with exactly 3 arguments should pass validation
 		// We don't call runExecute here since it will access nil client
 		// Instead, we verify the argument parsing logic
 		args := []string{"type", "name", "command"}
 		assert.True(t, len(args) >= 3, "Should have at least 3 arguments")
-		
+
 		// Verify argument assignment logic
 		typ, name, command := args[0], args[1], args[2]
 		remainingArgs := args[3:]

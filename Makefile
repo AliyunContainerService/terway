@@ -53,6 +53,10 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet envtest datapath-test## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -gcflags=all=-l -race --tags "$(GO_BUILD_TAGS)" $$(go list ./... | grep -Ev '/e2e|/mocks|/generated|/apis|/examples|/tests|/rpc|/windows|/internal/testutil') -coverprofile coverage.txt
 
+.PHONY: test-quick
+test-quick: manifests generate fmt vet envtest ## Run tests.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -gcflags=all=-l -race --tags "$(GO_BUILD_TAGS)" $$(go list ./... | grep -Ev '/e2e|/mocks|/generated|/apis|/examples|/tests|/rpc|/windows|/internal/testutil') -coverprofile coverage.txt
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter & yamllint
 	$(GOLANGCI_LINT) run

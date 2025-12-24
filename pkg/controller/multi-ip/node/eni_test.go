@@ -274,7 +274,7 @@ func Test_mergeIPMap(t *testing.T) {
 		{
 			name: "primary case",
 			args: args{
-				log: logr.Discard(),
+				log:    logr.Discard(),
 				remote: map[string]*networkv1beta1.IP{
 					// somehow primary ip is not in remote
 				},
