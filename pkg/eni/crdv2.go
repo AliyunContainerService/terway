@@ -63,12 +63,7 @@ type CRDV2 struct {
 	podENINotifier *Notifier
 }
 
-func NewCRDV2(nodeName, namespace string) *CRDV2 {
-	restConfig := ctrl.GetConfigOrDie()
-	return newCRDV2(restConfig, nodeName, namespace)
-}
-
-func newCRDV2(restConfig *rest.Config, nodeName, namespace string) *CRDV2 {
+func NewCRDV2(restConfig *rest.Config, nodeName, namespace string) *CRDV2 {
 	options := ctrl.Options{
 		Scheme:                 types.Scheme,
 		HealthProbeBindAddress: "0",

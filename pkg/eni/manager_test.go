@@ -9,9 +9,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/AliyunContainerService/terway/pkg/k8s/mocks"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
@@ -84,7 +83,7 @@ func (s *success) Run(ctx context.Context, podResources []daemon.PodResources, w
 
 func TestManagerAllocateReturnsResourcesWhenSuccessful(t *testing.T) {
 	mockNI := &success{}
-	manager := NewManager(nil, 0, []NetworkInterface{mockNI}, daemon.EniSelectionPolicyMostIPs, &FakeK8s{})
+	manager := NewManager(nil, 0, []NetworkInterface{mockNI}, daemon.EniSelectionPolicyMostIPs, mocks.NewKubernetes(t))
 
 	request := NewLocalIPRequest()
 	resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -108,7 +107,7 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 	}
 
 	{
-		manager := NewManager(nil, 0, []NetworkInterface{mockNI, mockNI2}, daemon.EniSelectionPolicyMostIPs, &FakeK8s{})
+		manager := NewManager(nil, 0, []NetworkInterface{mockNI, mockNI2}, daemon.EniSelectionPolicyMostIPs, mocks.NewKubernetes(t))
 
 		request := NewLocalIPRequest()
 		resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -121,7 +120,7 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 	}
 
 	{
-		manager := NewManager(nil, 0, []NetworkInterface{mockNI, mockNI2}, daemon.EniSelectionPolicyLeastIPs, &FakeK8s{})
+		manager := NewManager(nil, 0, []NetworkInterface{mockNI, mockNI2}, daemon.EniSelectionPolicyLeastIPs, mocks.NewKubernetes(t))
 
 		request := NewLocalIPRequest()
 		resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -135,7 +134,7 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 }
 
 func TestManagerAllocateReturnsErrorWhenNoBackendCanHandleAllocation(t *testing.T) {
-	manager := NewManager(nil, 0, []NetworkInterface{}, daemon.EniSelectionPolicyMostIPs, &FakeK8s{})
+	manager := NewManager(nil, 0, []NetworkInterface{}, daemon.EniSelectionPolicyMostIPs, mocks.NewKubernetes(t))
 
 	request := NewLocalIPRequest()
 	_, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -147,7 +146,7 @@ func TestManagerAllocateReturnsErrorWhenNoBackendCanHandleAllocation(t *testing.
 
 func TestManagerAllocateWithTimeoutWhenAllocationFails(t *testing.T) {
 	mockNI := &timeOut{}
-	manager := NewManager(nil, 0, []NetworkInterface{mockNI}, daemon.EniSelectionPolicyMostIPs, &FakeK8s{})
+	manager := NewManager(nil, 0, []NetworkInterface{mockNI}, daemon.EniSelectionPolicyMostIPs, mocks.NewKubernetes(t))
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -157,91 +156,6 @@ func TestManagerAllocateWithTimeoutWhenAllocationFails(t *testing.T) {
 		ResourceRequests: []ResourceRequest{request},
 	})
 	assert.NotNil(t, err)
-}
-
-type FakeK8s struct{}
-
-func (f *FakeK8s) NodeName() string {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) GetLocalPods() ([]*daemon.PodInfo, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) GetPod(ctx context.Context, namespace, name string, cache bool) (*daemon.PodInfo, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) GetServiceCIDR() *types.IPNetSet {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) SetNodeAllocatablePod(count int) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) PatchNodeAnnotations(anno map[string]string) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) PatchPodIPInfo(info *daemon.PodInfo, ips string) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, message string) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) RecordNodeEvent(eventType, reason, message string) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) RecordPodEvent(podName, podNamespace, eventType, reason, message string) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) GetNodeDynamicConfigLabel() string {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) GetDynamicConfigWithName(ctx context.Context, name string) (string, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) SetCustomStatefulWorkloadKinds(kinds []string) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) GetTrunkID() string {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) GetClient() client.Client {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (f *FakeK8s) PodExist(namespace, name string) (bool, error) {
-	panic("implement me")
-}
-
-func (f *FakeK8s) Node() *corev1.Node {
-	panic("implement me")
 }
 
 func TestManager_calculateToDel(t *testing.T) {

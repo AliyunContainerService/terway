@@ -25,6 +25,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -101,6 +102,8 @@ type Kubernetes interface {
 	NodeName() string
 
 	Node() *corev1.Node
+
+	GetRestConfig() *rest.Config
 }
 
 // NewK8S return Kubernetes service by pod spec and daemon mode
@@ -162,6 +165,7 @@ func NewK8S(daemonMode string, globalConfig *daemon.Config, namespace string) (K
 		recorder:        recorder,
 		Locker:          &sync.RWMutex{},
 		enableErdma:     globalConfig.EnableERDMA,
+		restConfig:      restConfig,
 	}
 
 	svcCIDR := &types.IPNetSet{}
@@ -200,6 +204,8 @@ type k8s struct {
 	svcCIDR                 *types.IPNetSet
 	statefulWorkloadKindSet sets.Set[string]
 	enableErdma             bool
+
+	restConfig *rest.Config
 
 	sync.Locker
 }
@@ -517,6 +523,10 @@ func (k *k8s) NodeName() string {
 
 func (k *k8s) Node() *corev1.Node {
 	return k.node
+}
+
+func (k *k8s) GetRestConfig() *rest.Config {
+	return k.restConfig
 }
 
 func podNetworkType(daemonMode string, pod *corev1.Pod) string {

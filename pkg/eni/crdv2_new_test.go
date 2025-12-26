@@ -18,7 +18,7 @@ var _ = Describe("start controller", func() {
 		)
 
 		It("New Controller", func() {
-			ctrl := newCRDV2(testEnv.Config, nodeName, "default")
+			ctrl := NewCRDV2(testEnv.Config, nodeName, "default")
 			Expect(ctrl).NotTo(BeNil())
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

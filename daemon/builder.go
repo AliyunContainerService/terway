@@ -465,7 +465,7 @@ func (b *NetworkServiceBuilder) PostInitForCRDV2() *NetworkServiceBuilder {
 	if b.err != nil {
 		return b
 	}
-	crdv2 := eni.NewCRDV2(b.service.k8s.NodeName(), b.namespace)
+	crdv2 := eni.NewCRDV2(b.service.k8s.GetRestConfig(), b.service.k8s.NodeName(), b.namespace)
 	mgr := eni.NewManager(nil, 0, []eni.NetworkInterface{crdv2}, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), nil)
 
 	svc := b.RunENIMgr(b.ctx, mgr)
