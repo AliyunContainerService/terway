@@ -508,17 +508,22 @@ func TestReleaseIP(t *testing.T) {
 			},
 		},
 		{
-			name: "error when pod not found but not NotFound error",
+			name: "non-NotFound error when getting pod - should continue release",
 			request: &rpc.ReleaseIPRequest{
 				K8SPodNamespace:        "default",
 				K8SPodName:             "test-pod",
 				K8SPodInfraContainerId: "container-123",
 			},
-			expectedError: true,
+			expectedError: false, // ReleaseIP ignores non-NotFound errors to not block delete operations
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod to return non-NotFound error
 				mockK8s := ns.k8s.(*mocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return((*daemon.PodInfo)(nil), assert.AnError)
+
+				// Mock resourceDB.Get to return ErrNotFound (no existing resource)
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return nil, storage.ErrNotFound
+				})
 			},
 		},
 		{
@@ -826,14 +831,7 @@ func TestGetIPInfo(t *testing.T) {
 			expectedError:  false,
 			expectedIPType: rpc.IPType_TypeENIMultiIP,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
-				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
-				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
-					Namespace:      "default",
-					Name:           "test-pod",
-					PodUID:         "pod-uid-123",
-					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
-				}, nil)
+				// GetIPInfo does NOT call GetPod - it only uses resourceDB
 
 				// Mock resourceDB.Get to return existing resource
 				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
@@ -877,14 +875,7 @@ func TestGetIPInfo(t *testing.T) {
 				// Set daemon mode to ENIOnly for VPCENI
 				ns.daemonMode = daemon.ModeENIOnly
 
-				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
-				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
-					Namespace:      "default",
-					Name:           "test-pod",
-					PodUID:         "pod-uid-123",
-					PodNetworkType: daemon.PodNetworkTypeVPCENI,
-				}, nil)
+				// GetIPInfo does NOT call GetPod - it only uses resourceDB
 
 				// Mock resourceDB.Get to return existing resource
 				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
@@ -901,17 +892,21 @@ func TestGetIPInfo(t *testing.T) {
 			},
 		},
 		{
-			name: "error when pod not found",
+			name: "success when resource not in DB - return empty netconf",
 			request: &rpc.GetInfoRequest{
 				K8SPodNamespace:        "default",
 				K8SPodName:             "test-pod",
 				K8SPodInfraContainerId: "container-123",
 			},
-			expectedError: true,
+			expectedError:  false, // GetIPInfo returns success with empty netconf when resource not found
+			expectedIPType: rpc.IPType_TypeENIMultiIP,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
-				// Mock k8s.GetPod to return error
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
-				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return((*daemon.PodInfo)(nil), assert.AnError)
+				// GetIPInfo does NOT call GetPod
+
+				// Mock resourceDB.Get to return ErrNotFound
+				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
+					return nil, storage.ErrNotFound
+				})
 			},
 		},
 		{
@@ -923,23 +918,16 @@ func TestGetIPInfo(t *testing.T) {
 			},
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
-				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
-				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
-					Namespace:      "default",
-					Name:           "test-pod",
-					PodUID:         "pod-uid-123",
-					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
-				}, nil)
+				// GetIPInfo does NOT call GetPod
 
-				// Mock resourceDB.Get to return error
+				// Mock resourceDB.Get to return error (not ErrNotFound)
 				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
 					return nil, assert.AnError
 				})
 			},
 		},
 		{
-			name: "error when pod network type is unknown",
+			name: "error when daemon mode is unknown",
 			request: &rpc.GetInfoRequest{
 				K8SPodNamespace:        "default",
 				K8SPodName:             "test-pod",
@@ -947,36 +935,26 @@ func TestGetIPInfo(t *testing.T) {
 			},
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
-				// Mock k8s.GetPod with unknown network type
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
-				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
-					Namespace:      "default",
-					Name:           "test-pod",
-					PodUID:         "pod-uid-123",
-					PodNetworkType: "UnknownType", // Unknown network type
-				}, nil)
+				// Set an invalid daemon mode
+				ns.daemonMode = "UnknownMode"
+
+				// GetIPInfo does NOT call GetPod
 			},
 		},
 		{
-			name: "error when daemon mode doesn't match pod network type",
+			name: "success with ENIOnly daemon mode",
 			request: &rpc.GetInfoRequest{
 				K8SPodNamespace:        "default",
 				K8SPodName:             "test-pod",
 				K8SPodInfraContainerId: "container-123",
 			},
-			expectedError: true,
+			expectedError:  false,
+			expectedIPType: rpc.IPType_TypeVPCENI,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
-				// Set daemon mode to ENIOnly but pod is ENIMultiIP
+				// Set daemon mode to ENIOnly
 				ns.daemonMode = daemon.ModeENIOnly
 
-				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
-				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
-					Namespace:      "default",
-					Name:           "test-pod",
-					PodUID:         "pod-uid-123",
-					PodNetworkType: daemon.PodNetworkTypeENIMultiIP, // Mismatch with daemon mode
-				}, nil)
+				// GetIPInfo does NOT call GetPod
 
 				// Mock resourceDB.Get to return existing resource
 				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
@@ -1015,14 +993,7 @@ func TestGetIPInfo(t *testing.T) {
 			expectedError:  false,
 			expectedIPType: rpc.IPType_TypeENIMultiIP,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
-				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
-				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
-					Namespace:      "default",
-					Name:           "test-pod",
-					PodUID:         "pod-uid-123",
-					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
-				}, nil)
+				// GetIPInfo does NOT call GetPod
 
 				// Mock resourceDB.Get with different container ID
 				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {
@@ -1048,14 +1019,7 @@ func TestGetIPInfo(t *testing.T) {
 			expectedError:  false,
 			expectedIPType: rpc.IPType_TypeENIMultiIP,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
-				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
-				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
-					Namespace:      "default",
-					Name:           "test-pod",
-					PodUID:         "pod-uid-123",
-					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
-				}, nil)
+				// GetIPInfo does NOT call GetPod
 
 				// Mock resourceDB.Get with invalid JSON
 				patches.ApplyMethodFunc(ns.resourceDB, "Get", func(key string) (interface{}, error) {

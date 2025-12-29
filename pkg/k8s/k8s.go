@@ -356,10 +356,19 @@ func (k *k8s) GetPod(ctx context.Context, namespace, name string, cache bool) (*
 	item := &storageItem{
 		Pod: podInfo,
 	}
-	err = k.storage.Put(key, item)
-	if err != nil {
-		return nil, err
+
+	if !k.shouldHandlePod(pod) {
+		return nil, apierrors.NewNotFound(corev1.Resource("pod"), name)
 	}
+
+	// nb(l1b0k): for backward compatibility
+	if podInfo.IPStickTime > 0 {
+		err = k.storage.Put(key, item)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return podInfo, nil
 }
 
@@ -371,7 +380,7 @@ func (k *k8s) PodExist(namespace, name string) (bool, error) {
 		}
 		return false, err
 	}
-	if pod.Spec.NodeName != k.nodeName {
+	if !k.shouldHandlePod(pod) {
 		return false, nil
 	}
 
@@ -380,7 +389,11 @@ func (k *k8s) PodExist(namespace, name string) (bool, error) {
 
 func (k *k8s) GetLocalPods() ([]*daemon.PodInfo, error) {
 	options := metav1.ListOptions{
-		FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", k.nodeName).String(),
+		FieldSelector: fields.AndSelectors(
+			fields.OneTermEqualSelector("spec.nodeName", k.nodeName),
+			fields.OneTermNotEqualSelector("status.phase", string(corev1.PodSucceeded)),
+			fields.OneTermNotEqualSelector("status.phase", string(corev1.PodFailed)),
+		).String(),
 		ResourceVersion: "0",
 	}
 	podList := &corev1.PodList{}
@@ -391,7 +404,7 @@ func (k *k8s) GetLocalPods() ([]*daemon.PodInfo, error) {
 	}
 	var ret []*daemon.PodInfo
 	for _, pod := range podList.Items {
-		if types.IgnoredByTerway(pod.Labels) {
+		if !k.shouldHandlePod(&pod) {
 			continue
 		}
 
@@ -529,7 +542,11 @@ func (k *k8s) GetRestConfig() *rest.Config {
 	return k.restConfig
 }
 
-func podNetworkType(daemonMode string, pod *corev1.Pod) string {
+func (k *k8s) shouldHandlePod(pod *corev1.Pod) bool {
+	return pod.Spec.NodeName == k.nodeName && !types.IgnoredByTerway(pod.Labels) && !pod.Spec.HostNetwork
+}
+
+func podNetworkType(daemonMode string) string {
 	switch daemonMode {
 	case daemon.ModeENIMultiIP:
 		return daemon.PodNetworkTypeENIMultiIP
@@ -549,7 +566,7 @@ func convertPod(daemonMode string, enableErdma bool, statefulWorkloadKindSet set
 		CreateTime: pod.CreationTimestamp.Time,
 	}
 
-	pi.PodNetworkType = podNetworkType(daemonMode, pod)
+	pi.PodNetworkType = podNetworkType(daemonMode)
 
 	for _, str := range pod.Status.PodIPs {
 		pi.PodIPs.SetIP(str.IP)
