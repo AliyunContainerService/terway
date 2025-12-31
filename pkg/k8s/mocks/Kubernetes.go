@@ -11,6 +11,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	rest "k8s.io/client-go/rest"
+
 	types "github.com/AliyunContainerService/terway/types"
 
 	v1 "k8s.io/api/core/v1"
@@ -145,6 +147,26 @@ func (_m *Kubernetes) GetPod(ctx context.Context, namespace string, name string,
 	}
 
 	return r0, r1
+}
+
+// GetRestConfig provides a mock function with no fields
+func (_m *Kubernetes) GetRestConfig() *rest.Config {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRestConfig")
+	}
+
+	var r0 *rest.Config
+	if rf, ok := ret.Get(0).(func() *rest.Config); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rest.Config)
+		}
+	}
+
+	return r0
 }
 
 // GetServiceCIDR provides a mock function with no fields

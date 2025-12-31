@@ -63,12 +63,7 @@ type CRDV2 struct {
 	podENINotifier *Notifier
 }
 
-func NewCRDV2(nodeName, namespace string) *CRDV2 {
-	restConfig := ctrl.GetConfigOrDie()
-	return newCRDV2(restConfig, nodeName, namespace)
-}
-
-func newCRDV2(restConfig *rest.Config, nodeName, namespace string) *CRDV2 {
+func NewCRDV2(restConfig *rest.Config, nodeName, namespace string) *CRDV2 {
 	options := ctrl.Options{
 		Scheme:                 types.Scheme,
 		HealthProbeBindAddress: "0",
@@ -110,11 +105,18 @@ func newCRDV2(restConfig *rest.Config, nodeName, namespace string) *CRDV2 {
 					Transform: nil,
 				},
 				&corev1.Pod{}: {
-					Field: client.MatchingFieldsSelector{
-						Selector: fields.SelectorFromSet(fields.Set{"spec.nodeName": nodeName}),
-					},
+					Field: fields.AndSelectors(
+						fields.OneTermEqualSelector("spec.nodeName", nodeName),
+						fields.OneTermNotEqualSelector("status.phase", string(corev1.PodSucceeded)),
+						fields.OneTermNotEqualSelector("status.phase", string(corev1.PodFailed)),
+					),
 					Transform: func(i interface{}) (interface{}, error) {
 						if pod, ok := i.(*corev1.Pod); ok {
+							if pod.Spec.HostNetwork {
+								pod.Annotations = nil
+								pod.Labels = nil
+							}
+
 							pod.Spec.Volumes = nil
 							pod.Spec.EphemeralContainers = nil
 							pod.Spec.SecurityContext = nil

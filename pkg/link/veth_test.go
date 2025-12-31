@@ -81,20 +81,20 @@ func TestVethNameForPod_Extended(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := VethNameForPod(tt.podName, tt.namespace, tt.ifName, tt.prefix)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("VethNameForPod() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr {
 				// Verify the result starts with the prefix
 				assert.True(t, len(got) > len(tt.prefix), "Generated veth name should be longer than prefix")
 				assert.True(t, got[:len(tt.prefix)] == tt.prefix, "Generated veth name should start with prefix")
-				
+
 				// Verify the total length is within limits (15 characters max for veth names)
 				assert.True(t, len(got) <= 15, "Generated veth name should not exceed 15 characters")
-				
+
 				// Verify consistent generation for same inputs
 				got2, err2 := VethNameForPod(tt.podName, tt.namespace, tt.ifName, tt.prefix)
 				assert.NoError(t, err2)
@@ -108,10 +108,10 @@ func TestVethNameForPod_EthZeroHandling(t *testing.T) {
 	// Test that eth0 is treated the same as empty string
 	name1, err1 := VethNameForPod("test-pod", "default", "eth0", "veth")
 	assert.NoError(t, err1)
-	
+
 	name2, err2 := VethNameForPod("test-pod", "default", "", "veth")
 	assert.NoError(t, err2)
-	
+
 	assert.Equal(t, name1, name2, "eth0 interface should be treated same as empty string")
 }
 
@@ -121,7 +121,7 @@ func TestVethNameForPod_Consistency(t *testing.T) {
 	namespace := "test-ns"
 	ifName := "eth0"
 	prefix := "test"
-	
+
 	// Generate multiple times and ensure consistency
 	results := make([]string, 5)
 	for i := 0; i < 5; i++ {
@@ -129,7 +129,7 @@ func TestVethNameForPod_Consistency(t *testing.T) {
 		assert.NoError(t, err)
 		results[i] = result
 	}
-	
+
 	// All results should be identical
 	for i := 1; i < len(results); i++ {
 		assert.Equal(t, results[0], results[i], "VethNameForPod should produce consistent results")

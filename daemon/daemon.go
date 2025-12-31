@@ -86,8 +86,8 @@ var serviceLog = logf.Log.WithName("server")
 var _ rpc.TerwayBackendServer = (*networkService)(nil)
 
 // return resource relation in db, or return nil.
-func (n *networkService) getPodResource(info *daemon.PodInfo) (daemon.PodResources, error) {
-	obj, err := n.resourceDB.Get(utils.PodInfoKey(info.Namespace, info.Name))
+func (n *networkService) getPodResource(podID string) (daemon.PodResources, error) {
+	obj, err := n.resourceDB.Get(podID)
 	if err == nil {
 		return obj.(daemon.PodResources), nil
 	}
@@ -98,9 +98,8 @@ func (n *networkService) getPodResource(info *daemon.PodInfo) (daemon.PodResourc
 	return daemon.PodResources{}, err
 }
 
-func (n *networkService) deletePodResource(info *daemon.PodInfo) error {
-	key := utils.PodInfoKey(info.Namespace, info.Name)
-	return n.resourceDB.Delete(key)
+func (n *networkService) deletePodResource(podID string) error {
+	return n.resourceDB.Delete(podID)
 }
 
 func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*rpc.AllocIPReply, error) {
@@ -163,7 +162,7 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 	}
 
 	// 2. Find old resource info
-	oldRes, err := n.getPodResource(pod)
+	oldRes, err := n.getPodResource(podID)
 	if err != nil {
 		return nil, &types.Error{
 			Code: types.ErrInternalError,
@@ -331,28 +330,29 @@ func (n *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest)
 	// 0. Get pod Info
 	pod, err := n.k8s.GetPod(ctx, r.K8SPodNamespace, r.K8SPodName, true)
 	if err != nil {
-		if k8sErr.IsNotFound(err) {
-			return reply, nil
+		if !k8sErr.IsNotFound(err) {
+			l.Error(err, "get pod failed")
+			// ignore error, do not block delete
 		}
-		return nil, err
 	}
 
 	cni := &daemon.CNI{
 		PodName:      r.K8SPodName,
 		PodNamespace: r.K8SPodNamespace,
 		PodID:        podID,
-		PodUID:       pod.PodUID,
+	}
+
+	var podIpStickTime time.Duration
+	if pod != nil {
+		cni.PodUID = pod.PodUID
+		podIpStickTime = pod.IPStickTime
 	}
 
 	// 1. Init Context
 
-	oldRes, err := n.getPodResource(pod)
+	oldRes, err := n.getPodResource(podID)
 	if err != nil {
 		return nil, err
-	}
-
-	if !n.verifyPodNetworkType(pod.PodNetworkType) {
-		return nil, fmt.Errorf("unexpect pod network type allocate, maybe daemon mode changed: %+v", pod.PodNetworkType)
 	}
 
 	if oldRes.ContainerID != nil {
@@ -365,7 +365,7 @@ func (n *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest)
 		cni.PodUID = oldRes.PodInfo.PodUID
 	}
 
-	if n.ipamType == types.IPAMTypeCRD || pod.IPStickTime == 0 {
+	if n.ipamType == types.IPAMTypeCRD || podIpStickTime <= 0 {
 		for _, resource := range oldRes.Resources {
 			res := parseNetworkResource(resource)
 			if res == nil {
@@ -379,7 +379,7 @@ func (n *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest)
 				return nil, err
 			}
 		}
-		err = n.deletePodResource(pod)
+		err = n.deletePodResource(podID)
 		if err != nil {
 			return nil, fmt.Errorf("error delete pod resource: %w", err)
 		}
@@ -388,6 +388,7 @@ func (n *networkService) ReleaseIP(ctx context.Context, r *rpc.ReleaseIPRequest)
 	return reply, nil
 }
 
+// GetIPInfo return cached alloc ip info
 func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (*rpc.GetInfoReply, error) {
 	podID := utils.PodInfoKey(r.K8SPodNamespace, r.K8SPodName)
 	log := logf.FromContext(ctx)
@@ -409,16 +410,6 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 
 	var err error
 
-	// 0. Get pod Info
-	pod, err := n.k8s.GetPod(ctx, r.K8SPodNamespace, r.K8SPodName, true)
-	if err != nil {
-		return nil, &types.Error{
-			Code: types.ErrInvalidArgsErrCode,
-			Msg:  err.Error(),
-			R:    err,
-		}
-	}
-
 	// 1. Init Context
 	reply := &rpc.GetInfoReply{
 		Success: true,
@@ -426,10 +417,10 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 		IPv6:    n.enableIPv6,
 	}
 
-	switch pod.PodNetworkType {
-	case daemon.PodNetworkTypeENIMultiIP:
+	switch n.daemonMode {
+	case daemon.ModeENIMultiIP:
 		reply.IPType = rpc.IPType_TypeENIMultiIP
-	case daemon.PodNetworkTypeVPCENI:
+	case daemon.ModeENIOnly:
 		reply.IPType = rpc.IPType_TypeVPCENI
 	default:
 		return nil, &types.Error{
@@ -439,7 +430,7 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 	}
 
 	// 2. Find old resource info
-	oldRes, err := n.getPodResource(pod)
+	oldRes, err := n.getPodResource(podID)
 	if err != nil {
 		return nil, &types.Error{
 			Code: types.ErrInternalError,
@@ -448,12 +439,6 @@ func (n *networkService) GetIPInfo(ctx context.Context, r *rpc.GetInfoRequest) (
 		}
 	}
 
-	if !n.verifyPodNetworkType(pod.PodNetworkType) {
-		return nil, &types.Error{
-			Code: types.ErrInvalidArgsErrCode,
-			Msg:  "Unexpected network type, maybe daemon mode changed",
-		}
-	}
 	if oldRes.ContainerID != nil {
 		if r.K8SPodInfraContainerId != *oldRes.ContainerID {
 			log.Info("cni request not match stored resource, ignored", "old", *oldRes.ContainerID)
@@ -640,7 +625,7 @@ func (n *networkService) gcPods(ctx context.Context) error {
 			}
 		}
 
-		err = n.deletePodResource(podRes.PodInfo)
+		err = n.deletePodResource(podID)
 		if err != nil {
 			return err
 		}

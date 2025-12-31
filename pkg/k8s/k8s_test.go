@@ -13,6 +13,7 @@ import (
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -28,57 +29,116 @@ import (
 )
 
 func TestK8s_PodExist(t *testing.T) {
-	// Setup
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
+	// Test existing pod on same node - should return true
+	t.Run("pod on same node should exist", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "test-node",
+			},
+		}
 
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
-			Namespace: "default",
-		},
-		Spec: corev1.PodSpec{
-			NodeName: "test-node",
-		},
-	}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
 
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pod).Build()
+		k8sObj := &k8s{
+			client:   fakeClient,
+			nodeName: "test-node",
+		}
 
-	k8sObj := &k8s{
-		client:   fakeClient,
-		nodeName: "test-node",
-	}
+		exist, err := k8sObj.PodExist("default", "test-pod")
+		assert.NoError(t, err)
+		assert.True(t, exist, "Pod on same node should exist")
+	})
 
-	// Test existing pod on node
-	exist, err := k8sObj.PodExist("default", "test-pod")
-	assert.NoError(t, err)
-	assert.True(t, exist)
+	// Test non-existent pod - should return false
+	t.Run("non-existent pod should not exist", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
 
-	// Test non-existent pod
-	exist, err = k8sObj.PodExist("default", "non-existent")
-	assert.NoError(t, err)
-	assert.False(t, exist)
+		k8sObj := &k8s{
+			client:   fakeClient,
+			nodeName: "test-node",
+		}
 
-	// Test pod on different node
-	podDifferentNode := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "other-pod",
-			Namespace: "default",
-		},
-		Spec: corev1.PodSpec{
-			NodeName: "other-node",
-		},
-	}
+		exist, err := k8sObj.PodExist("default", "non-existent")
+		assert.NoError(t, err)
+		assert.False(t, exist, "Non-existent pod should not exist")
+	})
 
-	fakeClient2 := fake.NewClientBuilder().WithScheme(scheme).WithObjects(podDifferentNode).Build()
-	k8sObj2 := &k8s{
-		client:   fakeClient2,
-		nodeName: "test-node",
-	}
+	// Test pod on different node - should return false (shouldHandlePod returns false)
+	t.Run("pod on different node should not exist", func(t *testing.T) {
+		podDifferentNode := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "other-pod",
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "other-node",
+			},
+		}
 
-	exist, err = k8sObj2.PodExist("default", "other-pod")
-	assert.NoError(t, err)
-	assert.False(t, exist)
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(podDifferentNode).Build()
+		k8sObj := &k8s{
+			client:   fakeClient,
+			nodeName: "test-node",
+		}
+
+		exist, err := k8sObj.PodExist("default", "other-pod")
+		assert.NoError(t, err)
+		assert.False(t, exist, "Pod on different node should not exist for this k8s instance")
+	})
+
+	// Test pod with host network - should return false (shouldHandlePod returns false)
+	t.Run("pod with host network should not exist", func(t *testing.T) {
+		podHostNetwork := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "host-network-pod",
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				NodeName:    "test-node",
+				HostNetwork: true,
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(podHostNetwork).Build()
+		k8sObj := &k8s{
+			client:   fakeClient,
+			nodeName: "test-node",
+		}
+
+		exist, err := k8sObj.PodExist("default", "host-network-pod")
+		assert.NoError(t, err)
+		assert.False(t, exist, "Pod with host network should not exist for terway")
+	})
+
+	// Test pod with ignore label - should return false (shouldHandlePod returns false)
+	t.Run("pod with ignore label should not exist", func(t *testing.T) {
+		podIgnored := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ignored-pod",
+				Namespace: "default",
+				Labels: map[string]string{
+					types.IgnoreByTerway: "true",
+				},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "test-node",
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(podIgnored).Build()
+		k8sObj := &k8s{
+			client:   fakeClient,
+			nodeName: "test-node",
+		}
+
+		exist, err := k8sObj.PodExist("default", "ignored-pod")
+		assert.NoError(t, err)
+		assert.False(t, exist, "Pod with ignore label should not exist for terway")
+	})
 }
 
 func TestK8s_GetLocalPods_ENIOnlyMode(t *testing.T) {
@@ -806,12 +866,10 @@ func TestIsERDMA(t *testing.T) {
 }
 
 func TestPodNetworkType(t *testing.T) {
-	pod := &corev1.Pod{}
-
-	result := podNetworkType(daemon.ModeENIMultiIP, pod)
+	result := podNetworkType(daemon.ModeENIMultiIP)
 	assert.Equal(t, daemon.PodNetworkTypeENIMultiIP, result)
 
-	result = podNetworkType(daemon.ModeENIOnly, pod)
+	result = podNetworkType(daemon.ModeENIOnly)
 	assert.Equal(t, daemon.PodNetworkTypeVPCENI, result)
 }
 
@@ -1382,163 +1440,255 @@ func TestSetSvcCIDR_APIServerError(t *testing.T) {
 // ==============================================================================
 
 func TestGetPod(t *testing.T) {
-	tests := []struct {
-		name          string
-		podExists     bool
-		useCache      bool
-		storageExists bool
-		storageError  error
-		expectError   bool
-		description   string
-	}{
-		{
-			name:          "get existing pod with cache",
-			podExists:     true,
-			useCache:      true,
-			storageExists: false,
-			expectError:   false,
-			description:   "Should successfully get pod from Kubernetes API",
-		},
-		{
-			name:          "get existing pod without cache",
-			podExists:     true,
-			useCache:      false,
-			storageExists: false,
-			expectError:   false,
-			description:   "Should successfully get pod from Kubernetes API without cache",
-		},
-		{
-			name:          "get non-existent pod with storage fallback",
-			podExists:     false,
-			useCache:      true,
-			storageExists: true,
-			expectError:   false,
-			description:   "Should get pod from storage when not found in Kubernetes API",
-		},
-		{
-			name:          "get non-existent pod without storage fallback",
-			podExists:     false,
-			useCache:      true,
-			storageExists: false,
-			expectError:   true,
-			description:   "Should return error when pod not found in API and storage",
-		},
-		{
-			name:          "storage error on fallback",
-			podExists:     false,
-			useCache:      true,
-			storageExists: false,
-			storageError:  fmt.Errorf("storage error"),
-			expectError:   true,
-			description:   "Should return storage error when storage operation fails",
-		},
-	}
+	// Test: get existing pod with cache - pod on same node should be returned
+	t.Run("get existing pod with cache", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "test-node",
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				PodIP: "10.0.0.1",
+			},
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Setup fake client
-			builder := fake.NewClientBuilder().WithScheme(scheme.Scheme)
-			if tt.podExists {
-				pod := &corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-pod",
-						Namespace: "default",
-					},
-					Spec: corev1.PodSpec{
-						NodeName: "test-node",
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodRunning,
-						PodIP: "10.0.0.1",
-					},
-				}
-				builder.WithObjects(pod)
-			}
-			client := builder.Build()
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
 
-			// Setup mock storage
-			mockStore := &mockStorage{data: make(map[string]interface{})}
+		// Setup mock storage (should not be accessed for existing pod)
+		mockStore := &mockStorage{data: make(map[string]interface{})}
 
-			// Only set up storage expectations when pod doesn't exist in Kubernetes
-			if !tt.podExists {
-				if tt.storageExists {
-					storageItem := &storageItem{
-						Pod: &daemon.PodInfo{
-							Name:      "test-pod",
-							Namespace: "default",
-						},
-					}
-					mockStore.data["default/test-pod"] = storageItem
-					mockStore.On("Get", "default/test-pod").Return(storageItem, nil)
-				} else if tt.storageError != nil {
-					mockStore.On("Get", "default/test-pod").Return(nil, tt.storageError)
-				} else {
-					mockStore.On("Get", "default/test-pod").Return(nil, storage.ErrNotFound)
-				}
-			} else {
-				// When pod exists in Kubernetes, we should expect Put to be called
-				mockStore.On("Put", "default/test-pod", mock.Anything).Return(nil)
-			}
+		k8sObj := &k8s{
+			client:                  fakeClient,
+			storage:                 mockStore,
+			mode:                    daemon.ModeENIMultiIP,
+			enableErdma:             false,
+			statefulWorkloadKindSet: sets.New[string](),
+			nodeName:                "test-node",
+		}
 
-			k8sObj := &k8s{
-				client:                  client,
-				storage:                 mockStore,
-				mode:                    daemon.ModeENIMultiIP,
-				enableErdma:             false,
-				statefulWorkloadKindSet: sets.New[string](),
-			}
+		podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", true)
 
-			// Execute GetPod
-			podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", tt.useCache)
+		require.NoError(t, err, "Should successfully get pod from Kubernetes API")
+		require.NotNil(t, podInfo, "PodInfo should not be nil")
+		assert.Equal(t, "test-pod", podInfo.Name, "Pod name should match")
+		assert.Equal(t, "default", podInfo.Namespace, "Pod namespace should match")
+	})
 
-			if tt.expectError {
-				assert.Error(t, err, tt.description)
-				assert.Nil(t, podInfo, "PodInfo should be nil on error")
-			} else {
-				assert.NoError(t, err, tt.description)
-				assert.NotNil(t, podInfo, "PodInfo should not be nil")
-				assert.Equal(t, "test-pod", podInfo.Name, "Pod name should match")
-				assert.Equal(t, "default", podInfo.Namespace, "Pod namespace should match")
-			}
+	// Test: get existing pod without cache
+	t.Run("get existing pod without cache", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "test-node",
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				PodIP: "10.0.0.1",
+			},
+		}
 
-			mockStore.AssertExpectations(t)
-		})
-	}
-}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
+		mockStore := &mockStorage{data: make(map[string]interface{})}
 
-func TestGetPod_StoragePutError(t *testing.T) {
-	// Test case where storage put fails
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
-			Namespace: "default",
-		},
-		Spec: corev1.PodSpec{
-			NodeName: "test-node",
-		},
-		Status: corev1.PodStatus{
-			Phase: corev1.PodRunning,
-		},
-	}
+		k8sObj := &k8s{
+			client:                  fakeClient,
+			storage:                 mockStore,
+			mode:                    daemon.ModeENIMultiIP,
+			enableErdma:             false,
+			statefulWorkloadKindSet: sets.New[string](),
+			nodeName:                "test-node",
+		}
 
-	client := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
+		podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", false)
 
-	mockStore := &mockStorage{}
-	mockStore.On("Put", "default/test-pod", mock.Anything).Return(fmt.Errorf("storage put error"))
+		require.NoError(t, err, "Should successfully get pod from Kubernetes API without cache")
+		require.NotNil(t, podInfo, "PodInfo should not be nil")
+		assert.Equal(t, "test-pod", podInfo.Name, "Pod name should match")
+		assert.Equal(t, "default", podInfo.Namespace, "Pod namespace should match")
+	})
 
-	k8sObj := &k8s{
-		client:                  client,
-		storage:                 mockStore,
-		mode:                    daemon.ModeENIMultiIP,
-		enableErdma:             false,
-		statefulWorkloadKindSet: sets.New[string](),
-	}
+	// Test: get non-existent pod with storage fallback
+	t.Run("get non-existent pod with storage fallback", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
 
-	podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", true)
+		// Setup mock storage with stored pod
+		mockStore := &mockStorage{data: make(map[string]interface{})}
+		storageItem := &storageItem{
+			Pod: &daemon.PodInfo{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+		}
+		mockStore.data["default/test-pod"] = storageItem
+		mockStore.On("Get", "default/test-pod").Return(storageItem, nil)
 
-	assert.Error(t, err, "Should return error when storage put fails")
-	assert.Nil(t, podInfo, "PodInfo should be nil on error")
-	assert.Contains(t, err.Error(), "storage put error", "Error should contain storage error message")
+		k8sObj := &k8s{
+			client:                  fakeClient,
+			storage:                 mockStore,
+			mode:                    daemon.ModeENIMultiIP,
+			enableErdma:             false,
+			statefulWorkloadKindSet: sets.New[string](),
+			nodeName:                "test-node",
+		}
+
+		podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", true)
+
+		require.NoError(t, err, "Should get pod from storage when not found in Kubernetes API")
+		require.NotNil(t, podInfo, "PodInfo should not be nil")
+		assert.Equal(t, "test-pod", podInfo.Name, "Pod name should match")
+		assert.Equal(t, "default", podInfo.Namespace, "Pod namespace should match")
+		mockStore.AssertExpectations(t)
+	})
+
+	// Test: get non-existent pod without storage fallback
+	t.Run("get non-existent pod without storage fallback", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+		mockStore := &mockStorage{data: make(map[string]interface{})}
+		mockStore.On("Get", "default/test-pod").Return(nil, storage.ErrNotFound)
+
+		k8sObj := &k8s{
+			client:                  fakeClient,
+			storage:                 mockStore,
+			mode:                    daemon.ModeENIMultiIP,
+			enableErdma:             false,
+			statefulWorkloadKindSet: sets.New[string](),
+			nodeName:                "test-node",
+		}
+
+		podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", true)
+
+		assert.Error(t, err, "Should return error when pod not found in API and storage")
+		assert.Nil(t, podInfo, "PodInfo should be nil on error")
+		mockStore.AssertExpectations(t)
+	})
+
+	// Test: storage error on fallback
+	t.Run("storage error on fallback", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+		mockStore := &mockStorage{data: make(map[string]interface{})}
+		mockStore.On("Get", "default/test-pod").Return(nil, fmt.Errorf("storage error"))
+
+		k8sObj := &k8s{
+			client:                  fakeClient,
+			storage:                 mockStore,
+			mode:                    daemon.ModeENIMultiIP,
+			enableErdma:             false,
+			statefulWorkloadKindSet: sets.New[string](),
+			nodeName:                "test-node",
+		}
+
+		podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", true)
+
+		assert.Error(t, err, "Should return storage error when storage operation fails")
+		assert.Nil(t, podInfo, "PodInfo should be nil on error")
+		mockStore.AssertExpectations(t)
+	})
+
+	// Test: pod on different node should return NotFound (shouldHandlePod returns false)
+	t.Run("pod on different node should return NotFound", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "other-node", // Different from k8sObj.nodeName
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
+		mockStore := &mockStorage{data: make(map[string]interface{})}
+
+		k8sObj := &k8s{
+			client:                  fakeClient,
+			storage:                 mockStore,
+			mode:                    daemon.ModeENIMultiIP,
+			enableErdma:             false,
+			statefulWorkloadKindSet: sets.New[string](),
+			nodeName:                "test-node",
+		}
+
+		podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", true)
+
+		assert.Error(t, err, "Should return error for pod on different node")
+		assert.True(t, apierrors.IsNotFound(err), "Error should be NotFound")
+		assert.Nil(t, podInfo, "PodInfo should be nil")
+	})
+
+	// Test: pod with host network should return NotFound (shouldHandlePod returns false)
+	t.Run("pod with host network should return NotFound", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				NodeName:    "test-node",
+				HostNetwork: true,
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
+		mockStore := &mockStorage{data: make(map[string]interface{})}
+
+		k8sObj := &k8s{
+			client:                  fakeClient,
+			storage:                 mockStore,
+			mode:                    daemon.ModeENIMultiIP,
+			enableErdma:             false,
+			statefulWorkloadKindSet: sets.New[string](),
+			nodeName:                "test-node",
+		}
+
+		podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", true)
+
+		assert.Error(t, err, "Should return error for pod with host network")
+		assert.True(t, apierrors.IsNotFound(err), "Error should be NotFound")
+		assert.Nil(t, podInfo, "PodInfo should be nil")
+	})
+
+	// Test: pod with ignore label should return NotFound (shouldHandlePod returns false)
+	t.Run("pod with ignore label should return NotFound", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod",
+				Namespace: "default",
+				Labels: map[string]string{
+					types.IgnoreByTerway: "true",
+				},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "test-node",
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
+		mockStore := &mockStorage{data: make(map[string]interface{})}
+
+		k8sObj := &k8s{
+			client:                  fakeClient,
+			storage:                 mockStore,
+			mode:                    daemon.ModeENIMultiIP,
+			enableErdma:             false,
+			statefulWorkloadKindSet: sets.New[string](),
+			nodeName:                "test-node",
+		}
+
+		podInfo, err := k8sObj.GetPod(context.Background(), "default", "test-pod", true)
+
+		assert.Error(t, err, "Should return error for pod with ignore label")
+		assert.True(t, apierrors.IsNotFound(err), "Error should be NotFound")
+		assert.Nil(t, podInfo, "PodInfo should be nil")
+	})
 }
 
 // ==============================================================================
@@ -2062,4 +2212,9 @@ func TestSerialize(t *testing.T) {
 
 	_, err = deserialize(v)
 	assert.NoError(t, err)
+}
+
+func TestApiErr(t *testing.T) {
+	err := apierrors.NewNotFound(corev1.Resource("pod"), "test-pod")
+	require.True(t, apierrors.IsNotFound(err))
 }
