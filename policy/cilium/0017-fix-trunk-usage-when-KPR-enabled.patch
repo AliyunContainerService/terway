@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Fri, 2 Jan 2026 22:46:16 +0800
+Subject: fix: trunk usage when KPR enabled
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ bpf/lib/nodeport.h | 21 +++++++++++++++++----
+ 1 file changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/bpf/lib/nodeport.h b/bpf/lib/nodeport.h
+index 4eab64b98f..bb2e369379 100644
+--- a/bpf/lib/nodeport.h
++++ b/bpf/lib/nodeport.h
+@@ -1591,6 +1591,10 @@ int tail_handle_snat_fwd_ipv6(struct __ctx_buff *ctx)
+ 			   TRACE_EP_ID_UNKNOWN, NATIVE_DEV_IFINDEX,
+ 			   trace.reason, trace.monitor);
+ 
++	/* Return CTX_ACT_PIPE to allow subsequent tc filters to process */
++	if (ret == CTX_ACT_OK)
++		return CTX_ACT_PIPE;
++
+ 	return ret;
+ }
+ 
+@@ -1652,10 +1656,13 @@ int tail_handle_nat_fwd_ipv6(struct __ctx_buff *ctx)
+ 		return send_drop_notify_error_ext(ctx, UNKNOWN_ID, ret, ext_err,
+ 						  CTX_ACT_DROP, METRIC_EGRESS);
+ 
+-	if (ret == CTX_ACT_OK)
++	if (ret == CTX_ACT_OK) {
+ 		send_trace_notify(ctx, obs_point, UNKNOWN_ID, UNKNOWN_ID,
+ 				  TRACE_EP_ID_UNKNOWN, NATIVE_DEV_IFINDEX,
+ 				  trace.reason, trace.monitor);
++		/* Return CTX_ACT_PIPE to allow subsequent tc filters to process */
++		return CTX_ACT_PIPE;
++	}
+ 
+ 	return ret;
+ }
+@@ -3202,10 +3209,13 @@ int tail_handle_snat_fwd_ipv4(struct __ctx_buff *ctx)
+ 	 * This can happen for egress gateway traffic that needs to egress from
+ 	 * the interface to which the egress IP is assigned to.
+ 	 */
+-	if (ret == CTX_ACT_OK)
++	if (ret == CTX_ACT_OK) {
+ 		send_trace_notify4(ctx, obs_point, UNKNOWN_ID, UNKNOWN_ID, saddr,
+ 				   TRACE_EP_ID_UNKNOWN, NATIVE_DEV_IFINDEX,
+ 				   trace.reason, trace.monitor);
++		/* Return CTX_ACT_PIPE to allow subsequent tc filters to process */
++		return CTX_ACT_PIPE;
++	}
+ 
+ 	return ret;
+ }
+@@ -3272,10 +3282,13 @@ int tail_handle_nat_fwd_ipv4(struct __ctx_buff *ctx)
+ 		return send_drop_notify_error_ext(ctx, UNKNOWN_ID, ret, ext_err,
+ 						  CTX_ACT_DROP, METRIC_EGRESS);
+ 
+-	if (ret == CTX_ACT_OK)
++	if (ret == CTX_ACT_OK) {
+ 		send_trace_notify(ctx, obs_point, UNKNOWN_ID, UNKNOWN_ID,
+ 				  TRACE_EP_ID_UNKNOWN, NATIVE_DEV_IFINDEX,
+ 				  trace.reason, trace.monitor);
++		/* Return CTX_ACT_PIPE to allow subsequent tc filters to process */
++		return CTX_ACT_PIPE;
++	}
+ 
+ 	return ret;
+ }
+@@ -3386,7 +3399,7 @@ handle_nat_fwd(struct __ctx_buff *ctx, __u32 cluster_id, __be16 proto,
+ 	       bool revdnat_only, struct trace_ctx *trace __maybe_unused,
+ 	       __s8 *ext_err __maybe_unused)
+ {
+-	int ret = CTX_ACT_OK;
++	int ret = CTX_ACT_PIPE;
+ 	__u32 cb_nat_flags = 0;
+ 
+ 	if (revdnat_only)
+-- 
+2.50.1 (Apple Git-155)
+
