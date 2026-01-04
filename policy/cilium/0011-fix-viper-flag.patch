@@ -9,10 +9,10 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 33d18ab335..120d749348 100644
+index ab0731826c..7d8dcd0f8f 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
-@@ -3063,7 +3063,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
+@@ -3062,7 +3062,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
  	c.EnableIPIPTermination = vp.GetBool(EnableIPIPTermination)
  	c.EnableUnreachableRoutes = vp.GetBool(EnableUnreachableRoutes)
  	c.EnableNodePort = vp.GetBool(EnableNodePort)
@@ -22,5 +22,5 @@ index 33d18ab335..120d749348 100644
  	c.EnableHostPort = vp.GetBool(EnableHostPort)
  	c.EnableHostLegacyRouting = vp.GetBool(EnableHostLegacyRouting)
 -- 
-2.39.5 (Apple Git-154)
+2.50.1 (Apple Git-155)
 

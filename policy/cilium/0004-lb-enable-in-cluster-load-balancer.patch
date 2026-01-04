@@ -61,7 +61,7 @@ index 486d4669c6..9e453da546 100644
  		k8sLoadBalancerIPs = parseIPs(loadBalancerIPs)
  	} else if option.Config.BGPAnnounceLBIP {
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index e38fd79cdb..854fd4abc5 100644
+index 581382cacc..d082a24585 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -245,6 +245,9 @@ const (
@@ -84,7 +84,7 @@ index e38fd79cdb..854fd4abc5 100644
  	// EnableSVCSourceRangeCheck enables check of loadBalancerSourceRanges
  	EnableSVCSourceRangeCheck bool
  
-@@ -3053,6 +3059,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
+@@ -3052,6 +3058,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
  	c.EnableIPIPTermination = vp.GetBool(EnableIPIPTermination)
  	c.EnableUnreachableRoutes = vp.GetBool(EnableUnreachableRoutes)
  	c.EnableNodePort = vp.GetBool(EnableNodePort)
@@ -93,5 +93,5 @@ index e38fd79cdb..854fd4abc5 100644
  	c.EnableHostPort = vp.GetBool(EnableHostPort)
  	c.EnableHostLegacyRouting = vp.GetBool(EnableHostLegacyRouting)
 -- 
-2.39.5 (Apple Git-154)
+2.50.1 (Apple Git-155)
 

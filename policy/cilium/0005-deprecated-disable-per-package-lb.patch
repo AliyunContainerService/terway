@@ -53,7 +53,7 @@ index 0db9f8a1fa..28ff4c121f 100644
  	cDefinesMap["HOST_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameHost))
  	cDefinesMap["WORLD_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameWorld))
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 854fd4abc5..33d18ab335 100644
+index d082a24585..ab0731826c 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -1233,6 +1233,8 @@ const (
@@ -65,7 +65,7 @@ index 854fd4abc5..33d18ab335 100644
  )
  
  // Default string arguments
-@@ -2435,6 +2437,8 @@ type DaemonConfig struct {
+@@ -2434,6 +2436,8 @@ type DaemonConfig struct {
  	// EnableSocketLBPodConnectionTermination enables the termination of connections from pods
  	// to deleted service backends when socket-LB is enabled
  	EnableSocketLBPodConnectionTermination bool
@@ -74,7 +74,7 @@ index 854fd4abc5..33d18ab335 100644
  }
  
  var (
-@@ -3171,6 +3175,8 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
+@@ -3170,6 +3174,8 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
  	c.BPFEventsTraceEnabled = vp.GetBool(BPFEventsTraceEnabled)
  	c.EnableIPSecEncryptedOverlay = vp.GetBool(EnableIPSecEncryptedOverlay)
  
@@ -84,5 +84,5 @@ index 854fd4abc5..33d18ab335 100644
  	switch c.ServiceNoBackendResponse {
  	case ServiceNoBackendResponseReject, ServiceNoBackendResponseDrop:
 -- 
-2.39.5 (Apple Git-154)
+2.50.1 (Apple Git-155)
 

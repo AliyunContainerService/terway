@@ -45,5 +45,5 @@ index df3ad3fd0a..146c802483 100644
  			scopedLog := ep.Logger(subsystem).WithFields(logrus.Fields{
  				logfields.Interface: device,
 -- 
-2.39.5 (Apple Git-154)
+2.50.1 (Apple Git-155)
 

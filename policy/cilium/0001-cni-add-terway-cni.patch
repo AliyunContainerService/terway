@@ -660,7 +660,7 @@ index 07b6afca7c..fd69aab5e6 100644
  	}
  }
 diff --git a/pkg/endpoint/endpoint.go b/pkg/endpoint/endpoint.go
-index bba3bc2aed..ae7e11b752 100644
+index 72f0cbfbbc..063d6c4f58 100644
 --- a/pkg/endpoint/endpoint.go
 +++ b/pkg/endpoint/endpoint.go
 @@ -31,6 +31,7 @@ import (
@@ -671,7 +671,7 @@ index bba3bc2aed..ae7e11b752 100644
  	dptypes "github.com/cilium/cilium/pkg/datapath/types"
  	"github.com/cilium/cilium/pkg/defaults"
  	"github.com/cilium/cilium/pkg/endpoint/regeneration"
-@@ -429,6 +430,10 @@ type Endpoint struct {
+@@ -425,6 +426,10 @@ type Endpoint struct {
  
  	// NetNsCookie is the network namespace cookie of the Endpoint.
  	NetNsCookie uint64
@@ -682,7 +682,7 @@ index bba3bc2aed..ae7e11b752 100644
  }
  
  func (e *Endpoint) GetRealizedRedirects() (redirects map[string]uint16) {
-@@ -711,6 +716,9 @@ func (e *Endpoint) GetID16() uint16 {
+@@ -709,6 +714,9 @@ func (e *Endpoint) GetID16() uint16 {
  // In some datapath modes, it may return an empty string as there is no unique
  // host netns network interface for this endpoint.
  func (e *Endpoint) HostInterface() string {
@@ -692,7 +692,7 @@ index bba3bc2aed..ae7e11b752 100644
  	return e.ifName
  }
  
-@@ -2590,6 +2598,9 @@ func (e *Endpoint) Delete(conf DeleteConfig) []error {
+@@ -2589,6 +2597,9 @@ func (e *Endpoint) Delete(conf DeleteConfig) []error {
  // setDown sets the Endpoint's underlying interface down. If the interface
  // cannot be retrieved, returns nil.
  func (e *Endpoint) setDown() error {
@@ -794,7 +794,7 @@ index 0000000000..16d42d2e7b
 +	return ep.eniIndex
 +}
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 0fbbdeb7f0..e38fd79cdb 100644
+index 41ce99326c..581382cacc 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -40,6 +40,7 @@ import (
@@ -805,7 +805,7 @@ index 0fbbdeb7f0..e38fd79cdb 100644
  	"github.com/cilium/cilium/pkg/defaults"
  	"github.com/cilium/cilium/pkg/ip"
  	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
-@@ -2574,7 +2575,8 @@ func (c *DaemonConfig) TunnelingEnabled() bool {
+@@ -2573,7 +2574,8 @@ func (c *DaemonConfig) TunnelingEnabled() bool {
  func (c *DaemonConfig) AreDevicesRequired() bool {
  	return c.EnableNodePort || c.EnableHostFirewall || c.EnableWireguard ||
  		c.EnableHighScaleIPcache || c.EnableL2Announcements || c.ForceDeviceRequired ||
@@ -1311,5 +1311,5 @@ index cd4b2f673e..fceb272841 100644
  
  // IPAM is the Cilium specific CNI IPAM configuration
 -- 
-2.39.5 (Apple Git-154)
+2.50.1 (Apple Git-155)
 
