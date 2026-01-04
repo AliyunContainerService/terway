@@ -179,67 +179,111 @@ func PullFail(client klient.Client, namespace, podName, container, target string
 }
 
 // PullFailWithConfig executes a connectivity test that expects failure with custom configuration
+// Logic:
+// 1. If connection succeeds (HTTP 200) → FAIL immediately (unexpected success)
+// 2. If connection fails → retry once to confirm it's not flaky
+// 3. If both attempts fail due to curl error (connection refused/timeout) → SUCCESS (expected failure)
+// 4. If failure is due to kubectl exec API timeout → FAIL (infrastructure issue)
 func PullFailWithConfig(client klient.Client, req *PullRequest, config ConnectivityTestConfig, t *testing.T) (PullResponse, error) {
 	resp := PullResponse{}
-	errors := []error{}
 	startTime := time.Now()
-	attempts := 0
 
 	t.Logf("🔍 Starting negative connectivity test (expecting failure): %s", req.String())
 
-	err := wait.For(func(ctx context.Context) (done bool, err error) {
-		attempts++
+	// Helper function to execute curl and check result
+	execCurl := func(attempt int) (succeeded bool, isCurlFailure bool, statusLine string, err error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
 		var stdout, stderr bytes.Buffer
+		// Use shorter timeout for curl since we expect it to fail
+		cmd := []string{"curl", "-m", "5", "-I", req.Target}
 
-		cmd := []string{"curl", "-m", "2", "--retry", fmt.Sprintf("%d", config.Retries), "-I", req.Target}
-
-		t.Logf("  [Attempt %d] Executing command: %v", attempts, cmd)
+		t.Logf("  [Attempt %d] Executing command: %v", attempt, cmd)
 
 		execErr := client.Resources().ExecInPod(ctx, req.Namespace, req.PodName, req.Container, cmd, &stdout, &stderr)
 		if execErr != nil {
-			t.Logf("  [Attempt %d] ✓ Expected failure: curl execution failed: %v", attempts, execErr)
-			resp.StatusLine = "Connection Failed"
-			resp.FullOutput = execErr.Error()
-			return true, nil
-		}
-
-		output := stdout.String()
-		statusLine := strings.Split(output, "\n")[0]
-
-		t.Logf("  [Attempt %d] ❌ Unexpected success: %s", attempts, statusLine)
-		errors = append(errors, fmt.Errorf("expected connection to fail but got success with status: %s", statusLine))
-
-		resp.StatusLine = statusLine
-		resp.FullOutput = output
-
-		return false, nil
-	},
-		wait.WithTimeout(config.Timeout),
-		wait.WithInterval(config.Interval))
-
-	duration := time.Since(startTime)
-	resp.Duration = duration
-	resp.Attempts = attempts
-
-	if err != nil {
-		resp.Success = false
-		errMsg := fmt.Sprintf("negative connectivity test failed for %s after %d attempts (duration: %v) - connection succeeded when it should have failed",
-			req.Target, attempts, duration)
-		t.Logf("❌ %s", errMsg)
-
-		if len(errors) > 0 {
-			t.Logf("Errors encountered:")
-			for i, e := range errors {
-				t.Logf("  [Error %d] %v", i+1, e)
+			// Check if it's an API/infrastructure error (not curl failure)
+			errStr := execErr.Error()
+			if strings.Contains(errStr, "i/o timeout") && strings.Contains(errStr, "6443") {
+				// kubectl API timeout - infrastructure issue
+				return false, false, "", fmt.Errorf("kubectl exec API timeout (infrastructure issue): %v", execErr)
 			}
+			// curl failed to connect - this is expected
+			t.Logf("  [Attempt %d] ✓ curl failed (expected): %v", attempt, execErr)
+			return false, true, "Connection Failed", nil
 		}
 
-		return resp, utilerrors.NewAggregate(errors)
+		// curl succeeded - check response
+		output := stdout.String()
+		statusLine = strings.Split(output, "\n")[0]
+		t.Logf("  [Attempt %d] Response: %s", attempt, statusLine)
+
+		return true, false, statusLine, nil
 	}
 
-	resp.Success = true
-	t.Logf("✓ Negative connectivity test succeeded for %s after %d attempts (duration: %v) - connection failed as expected",
-		req.Target, attempts, duration)
+	// First attempt
+	succeeded, isCurlFailure, statusLine, err := execCurl(1)
+	if err != nil {
+		// Infrastructure error
+		resp.Duration = time.Since(startTime)
+		resp.Attempts = 1
+		resp.Success = false
+		t.Logf("❌ Infrastructure error: %v", err)
+		return resp, err
+	}
 
-	return resp, nil
+	if succeeded {
+		// Connection succeeded - test should FAIL immediately
+		resp.Duration = time.Since(startTime)
+		resp.Attempts = 1
+		resp.Success = false
+		resp.StatusLine = statusLine
+		errMsg := fmt.Sprintf("negative connectivity test FAILED: connection succeeded with %s (expected to fail)", statusLine)
+		t.Logf("❌ %s", errMsg)
+		return resp, fmt.Errorf("%s", errMsg)
+	}
+
+	if isCurlFailure {
+		// First attempt failed as expected, retry once to confirm it's not flaky
+		t.Logf("  [Attempt 1] Connection failed, retrying once to confirm...")
+		time.Sleep(2 * time.Second)
+
+		succeeded2, isCurlFailure2, statusLine2, err2 := execCurl(2)
+		if err2 != nil {
+			// Infrastructure error on retry
+			resp.Duration = time.Since(startTime)
+			resp.Attempts = 2
+			resp.Success = false
+			t.Logf("❌ Infrastructure error on retry: %v", err2)
+			return resp, err2
+		}
+
+		if succeeded2 {
+			// Second attempt succeeded - first failure was flaky, test should FAIL
+			resp.Duration = time.Since(startTime)
+			resp.Attempts = 2
+			resp.Success = false
+			resp.StatusLine = statusLine2
+			errMsg := fmt.Sprintf("negative connectivity test FAILED: connection succeeded on retry with %s (first failure was flaky)", statusLine2)
+			t.Logf("❌ %s", errMsg)
+			return resp, fmt.Errorf("%s", errMsg)
+		}
+
+		if isCurlFailure2 {
+			// Both attempts failed - test PASSED (expected behavior)
+			resp.Duration = time.Since(startTime)
+			resp.Attempts = 2
+			resp.Success = true
+			resp.StatusLine = "Connection Failed"
+			t.Logf("✓ Negative connectivity test PASSED: connection failed on both attempts (as expected)")
+			return resp, nil
+		}
+	}
+
+	// Should not reach here
+	resp.Duration = time.Since(startTime)
+	resp.Attempts = 1
+	resp.Success = false
+	return resp, fmt.Errorf("unexpected state in PullFail")
 }
