@@ -462,7 +462,7 @@ index 594dad4677..013092819b 100644
  	if e.ConntrackLocalLocked() {
  		// Remove endpoint-specific CT map pins.
 diff --git a/pkg/endpoint/endpoint.go b/pkg/endpoint/endpoint.go
-index ae7e11b752..20005f82db 100644
+index 063d6c4f58..fbc397aca4 100644
 --- a/pkg/endpoint/endpoint.go
 +++ b/pkg/endpoint/endpoint.go
 @@ -217,6 +217,9 @@ type Endpoint struct {
@@ -475,7 +475,7 @@ index ae7e11b752..20005f82db 100644
  	// mac is the MAC address of the endpoint
  	// Constant after endpoint creation / restoration.
  	mac mac.MAC // Container MAC address.
-@@ -1835,7 +1838,7 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
+@@ -1834,7 +1837,7 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
  		if err != nil {
  			return "", filterResolveMetadataError(err)
  		}
@@ -918,5 +918,5 @@ index 0000000000..739c859fe4
 +	}
 +}
 -- 
-2.39.5 (Apple Git-154)
+2.50.1 (Apple Git-155)
 

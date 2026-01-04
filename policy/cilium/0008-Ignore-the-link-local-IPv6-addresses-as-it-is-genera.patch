@@ -34,5 +34,5 @@ index 0b1187c6dc..f003329fc9 100644
  				pluginCtx.Logger.WithError(err).WithField(logfields.Interface, link.Attrs().Name).Warn("No valid IPv6 address found")
  			}
 -- 
-2.39.5 (Apple Git-154)
+2.50.1 (Apple Git-155)
 
