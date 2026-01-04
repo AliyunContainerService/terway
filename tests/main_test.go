@@ -410,3 +410,54 @@ func printClusterEnvironment(ctx context.Context, config *envconf.Config) (conte
 
 	return ctx, nil
 }
+
+// SecurityGroupTestConfig holds security group IDs for a specific test
+type SecurityGroupTestConfig struct {
+	TestName   string
+	ClientSGID string
+	ServerSGID string
+}
+
+// GetSecurityGroupTestConfig returns the security group configuration for a specific test
+// Uses environment variable TERWAY_SG_TEST_CONFIG
+// Config format: TEST_NAME:CLIENT_SG:SERVER_SG;TEST_NAME2:CLIENT_SG2:SERVER_SG2
+// Example: export TERWAY_SG_TEST_CONFIG="TestSecurityGroup_TrunkMode:sg-xxx:sg-yyy"
+func GetSecurityGroupTestConfig(testName string) *SecurityGroupTestConfig {
+	configStr := os.Getenv("TERWAY_SG_TEST_CONFIG")
+	if configStr == "" {
+		return nil
+	}
+
+	// Parse each config entry separated by semicolon
+	entries := strings.Split(configStr, ";")
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+
+		parts := strings.Split(entry, ":")
+		if len(parts) != 3 {
+			continue
+		}
+
+		name := strings.TrimSpace(parts[0])
+		clientSG := strings.TrimSpace(parts[1])
+		serverSG := strings.TrimSpace(parts[2])
+
+		if name == testName && clientSG != "" && serverSG != "" {
+			return &SecurityGroupTestConfig{
+				TestName:   name,
+				ClientSGID: clientSG,
+				ServerSGID: serverSG,
+			}
+		}
+	}
+
+	return nil
+}
+
+// HasSecurityGroupTestConfig checks if security group test config is available for a test
+func HasSecurityGroupTestConfig(testName string) bool {
+	return GetSecurityGroupTestConfig(testName) != nil
+}
