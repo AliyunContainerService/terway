@@ -489,15 +489,87 @@ func restartTerway(ctx context.Context, config *envconf.Config) error {
 }
 
 func waitPodsReady(client klient.Client, pods ...*corev1.Pod) error {
+	timeout := 2 * time.Minute
 	for _, pod := range pods {
+		startTime := time.Now()
 		err := wait.For(conditions.New(client.Resources()).PodReady(pod),
-			wait.WithTimeout(2*time.Minute),
+			wait.WithTimeout(timeout),
 			wait.WithInterval(1*time.Second))
 		if err != nil {
-			return fmt.Errorf("wait pod %s/%s ready failed: %w", pod.Namespace, pod.Name, err)
+			waitDuration := time.Since(startTime)
+			return fmt.Errorf("wait pod %s/%s ready failed after %v (timeout: %v): %w\n%s",
+				pod.Namespace, pod.Name, waitDuration.Round(time.Second), timeout, err, getPodStatusDetails(client, pod))
 		}
 	}
 	return nil
+}
+
+func getPodStatusDetails(client klient.Client, pod *corev1.Pod) string {
+	var sb strings.Builder
+	sb.WriteString("--- Pod Status Details ---\n")
+
+	// fetch the latest pod status
+	latestPod := &corev1.Pod{}
+	err := client.Resources().Get(context.Background(), pod.Name, pod.Namespace, latestPod)
+	if err != nil {
+		sb.WriteString(fmt.Sprintf("failed to get pod status: %v\n", err))
+		return sb.String()
+	}
+
+	sb.WriteString(fmt.Sprintf("Phase: %s\n", latestPod.Status.Phase))
+	if latestPod.Status.Reason != "" {
+		sb.WriteString(fmt.Sprintf("Reason: %s\n", latestPod.Status.Reason))
+	}
+	if latestPod.Status.Message != "" {
+		sb.WriteString(fmt.Sprintf("Message: %s\n", latestPod.Status.Message))
+	}
+
+	// show pod conditions
+	if len(latestPod.Status.Conditions) > 0 {
+		sb.WriteString("Conditions:\n")
+		for _, cond := range latestPod.Status.Conditions {
+			sb.WriteString(fmt.Sprintf("  - Type: %s, Status: %s", cond.Type, cond.Status))
+			if cond.Reason != "" {
+				sb.WriteString(fmt.Sprintf(", Reason: %s", cond.Reason))
+			}
+			if cond.Message != "" {
+				sb.WriteString(fmt.Sprintf(", Message: %s", cond.Message))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// show container statuses
+	for _, cs := range latestPod.Status.ContainerStatuses {
+		sb.WriteString(fmt.Sprintf("Container %s: Ready=%v", cs.Name, cs.Ready))
+		if cs.State.Waiting != nil {
+			sb.WriteString(fmt.Sprintf(", Waiting: %s - %s", cs.State.Waiting.Reason, cs.State.Waiting.Message))
+		}
+		if cs.State.Terminated != nil {
+			sb.WriteString(fmt.Sprintf(", Terminated: %s - %s (ExitCode: %d)", cs.State.Terminated.Reason, cs.State.Terminated.Message, cs.State.Terminated.ExitCode))
+		}
+		sb.WriteString("\n")
+	}
+
+	// fetch and show recent events for the pod
+	eventList := &corev1.EventList{}
+	err = client.Resources(pod.Namespace).List(context.Background(), eventList)
+	if err == nil {
+		var podEvents []corev1.Event
+		for _, event := range eventList.Items {
+			if event.InvolvedObject.Name == pod.Name && event.InvolvedObject.Kind == "Pod" {
+				podEvents = append(podEvents, event)
+			}
+		}
+		if len(podEvents) > 0 {
+			sb.WriteString("Recent Events:\n")
+			for _, event := range podEvents {
+				sb.WriteString(fmt.Sprintf("  - [%s] %s: %s\n", event.Type, event.Reason, event.Message))
+			}
+		}
+	}
+
+	return sb.String()
 }
 
 type PodNetworking struct {
