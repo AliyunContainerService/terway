@@ -7,3 +7,6 @@ vendor
 bin/
 coverage*.txt
 *.coverprofile
+
+.qoder
+.vscode
