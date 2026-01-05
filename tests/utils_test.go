@@ -373,6 +373,66 @@ func (s *Service) ExposeNodePort() *Service {
 	return s
 }
 
+// WithExternalTrafficPolicy sets the external traffic policy for the service
+func (s *Service) WithExternalTrafficPolicy(policy corev1.ServiceExternalTrafficPolicyType) *Service {
+	s.Spec.ExternalTrafficPolicy = policy
+	return s
+}
+
+// WithNodePortNumber sets a specific NodePort number for the first port
+func (s *Service) WithNodePortNumber(nodePort int32) *Service {
+	if len(s.Spec.Ports) > 0 {
+		s.Spec.Ports[0].NodePort = nodePort
+	}
+	return s
+}
+
+// WithAnnotation adds a single annotation to the service
+func (s *Service) WithAnnotation(key, value string) *Service {
+	if s.Annotations == nil {
+		s.Annotations = make(map[string]string)
+	}
+	s.Annotations[key] = value
+	return s
+}
+
+// WithLoadBalancerAddressType sets the LoadBalancer address type (internet or intranet)
+func (s *Service) WithLoadBalancerAddressType(addressType string) *Service {
+	if s.Annotations == nil {
+		s.Annotations = make(map[string]string)
+	}
+	s.Annotations["service.beta.kubernetes.io/alibaba-cloud-loadbalancer-address-type"] = addressType
+	return s
+}
+
+// WithLoadBalancerSpec sets the LoadBalancer spec
+func (s *Service) WithLoadBalancerSpec(spec string) *Service {
+	if s.Annotations == nil {
+		s.Annotations = make(map[string]string)
+	}
+	s.Annotations["service.beta.kubernetes.io/alibaba-cloud-loadbalancer-spec"] = spec
+	return s
+}
+
+// ExposeLoadBalancerWithOptions creates a LoadBalancer service with specific options
+func (s *Service) ExposeLoadBalancerWithOptions(addressType string, trafficPolicy corev1.ServiceExternalTrafficPolicyType) *Service {
+	if s.Annotations == nil {
+		s.Annotations = make(map[string]string)
+	}
+	s.Annotations["service.beta.kubernetes.io/alibaba-cloud-loadbalancer-spec"] = "slb.s1.small"
+	s.Annotations["service.beta.kubernetes.io/alibaba-cloud-loadbalancer-address-type"] = addressType
+	s.Spec.Type = corev1.ServiceTypeLoadBalancer
+	s.Spec.ExternalTrafficPolicy = trafficPolicy
+	return s
+}
+
+// ExposeNodePortWithPolicy creates a NodePort service with specific traffic policy
+func (s *Service) ExposeNodePortWithPolicy(trafficPolicy corev1.ServiceExternalTrafficPolicyType) *Service {
+	s.Spec.Type = corev1.ServiceTypeNodePort
+	s.Spec.ExternalTrafficPolicy = trafficPolicy
+	return s
+}
+
 type NetworkPolicy struct {
 	*networkingv1.NetworkPolicy
 }
