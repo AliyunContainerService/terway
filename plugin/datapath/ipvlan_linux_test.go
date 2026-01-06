@@ -4,13 +4,16 @@ package datapath
 
 import (
 	"context"
+	"errors"
 	"net"
 	"runtime"
+	"syscall"
 	"testing"
 
 	types2 "github.com/AliyunContainerService/terway/plugin/driver/types"
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/agiledragon/gomonkey/v2"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
@@ -585,5 +588,197 @@ func TestDataPathIPvlanL2MultiNetwork(t *testing.T) {
 		},
 		ENIIndex: 0,
 	}, containerNS)
+	assert.NoError(t, err)
+}
+
+func TestCheckIPVLanAvailable(t *testing.T) {
+	tests := []struct {
+		name           string
+		kernelVersion  string
+		expectedResult bool
+		expectedError  bool
+		mockUnameError error
+	}{
+		{
+			name:           "kernel version 4.19 - should be available",
+			kernelVersion:  "4.19.0",
+			expectedResult: true,
+			expectedError:  false,
+		},
+		{
+			name:           "kernel version 4.20 - should be available",
+			kernelVersion:  "4.20.0",
+			expectedResult: true,
+			expectedError:  false,
+		},
+		{
+			name:           "kernel version 5.0 - should be available",
+			kernelVersion:  "5.0.0",
+			expectedResult: true,
+			expectedError:  false,
+		},
+		{
+			name:           "kernel version 5.10 - should be available",
+			kernelVersion:  "5.10.0",
+			expectedResult: true,
+			expectedError:  false,
+		},
+		{
+			name:           "kernel version 4.18 - should not be available",
+			kernelVersion:  "4.18.0",
+			expectedResult: false,
+			expectedError:  false,
+		},
+		{
+			name:           "kernel version 3.10 - should not be available",
+			kernelVersion:  "3.10.0",
+			expectedResult: false,
+			expectedError:  false,
+		},
+		{
+			name:           "kernel version 4.19.1 - should be available",
+			kernelVersion:  "4.19.1",
+			expectedResult: true,
+			expectedError:  false,
+		},
+		{
+			name:           "invalid kernel version format",
+			kernelVersion:  "invalid",
+			expectedResult: false,
+			expectedError:  true,
+		},
+		{
+			name:           "uname error",
+			kernelVersion:  "",
+			expectedResult: false,
+			expectedError:  true,
+			mockUnameError: errors.New("uname failed"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			patches := gomonkey.NewPatches()
+			defer patches.Reset()
+
+			// Mock syscall.Uname
+			patches.ApplyFunc(syscall.Uname, func(utsname *syscall.Utsname) error {
+				if tt.mockUnameError != nil {
+					return tt.mockUnameError
+				}
+
+				// Convert kernel version string to int8 array
+				release := []byte(tt.kernelVersion)
+				for i := 0; i < len(release) && i < len(utsname.Release); i++ {
+					utsname.Release[i] = int8(release[i])
+				}
+				// Null terminate
+				if len(release) < len(utsname.Release) {
+					utsname.Release[len(release)] = 0
+				}
+				return nil
+			})
+
+			result, err := CheckIPVLanAvailable()
+
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedResult, result)
+			}
+		})
+	}
+}
+
+func TestEnsureFQ(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	var err error
+	testNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+	defer func() {
+		err := testNS.Close()
+		assert.NoError(t, err)
+		err = testutils.UnmountNS(testNS)
+		assert.NoError(t, err)
+	}()
+
+	err = testNS.Do(func(netNS ns.NetNS) error {
+		// Create a dummy link for testing
+		linkName := "test-fq-link"
+		err := netlink.LinkAdd(&netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{Name: linkName},
+		})
+		assert.NoError(t, err)
+
+		link, err := netlink.LinkByName(linkName)
+		assert.NoError(t, err)
+
+		// Set link up
+		err = netlink.LinkSetUp(link)
+		assert.NoError(t, err)
+
+		// Test ensureFQ when FQ qdisc doesn't exist
+		err = ensureFQ(context.Background(), link)
+		assert.NoError(t, err)
+
+		// Verify FQ qdisc was added
+		qdiscs, err := netlink.QdiscList(link)
+		assert.NoError(t, err)
+
+		found := false
+		for _, qd := range qdiscs {
+			if qd.Attrs().LinkIndex != link.Attrs().Index {
+				continue
+			}
+			if qd.Type() != "fq" {
+				continue
+			}
+			if qd.Attrs().Parent != netlink.HANDLE_ROOT {
+				continue
+			}
+			if qd.Attrs().Handle != netlink.MakeHandle(1, 0) {
+				continue
+			}
+			found = true
+			break
+		}
+		assert.True(t, found, "FQ qdisc should be found")
+
+		// Test ensureFQ when FQ qdisc already exists (should be idempotent)
+		err = ensureFQ(context.Background(), link)
+		assert.NoError(t, err)
+
+		// Verify FQ qdisc still exists
+		qdiscs, err = netlink.QdiscList(link)
+		assert.NoError(t, err)
+
+		found = false
+		for _, qd := range qdiscs {
+			if qd.Attrs().LinkIndex != link.Attrs().Index {
+				continue
+			}
+			if qd.Type() != "fq" {
+				continue
+			}
+			if qd.Attrs().Parent != netlink.HANDLE_ROOT {
+				continue
+			}
+			if qd.Attrs().Handle != netlink.MakeHandle(1, 0) {
+				continue
+			}
+			found = true
+			break
+		}
+		assert.True(t, found, "FQ qdisc should still exist after second call")
+
+		// Clean up
+		err = netlink.LinkDel(link)
+		assert.NoError(t, err)
+
+		return nil
+	})
 	assert.NoError(t, err)
 }

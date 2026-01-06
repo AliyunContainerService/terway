@@ -3,23 +3,43 @@ package daemon
 import (
 	"context"
 	"net"
+	"net/http"
 	"net/netip"
+	"os"
+	"os/signal"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
-	"github.com/agiledragon/gomonkey/v2"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	corev1 "k8s.io/api/core/v1"
-	k8sErr "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/util/sets"
-
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	clientmocks "github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
+	aliyuneni "github.com/AliyunContainerService/terway/pkg/aliyun/eni"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
+	instancemocks "github.com/AliyunContainerService/terway/pkg/aliyun/instance/mocks"
 	"github.com/AliyunContainerService/terway/pkg/eni"
-	"github.com/AliyunContainerService/terway/pkg/k8s/mocks"
+	"github.com/AliyunContainerService/terway/pkg/factory"
+	"github.com/AliyunContainerService/terway/pkg/factory/aliyun"
+	k8smocks "github.com/AliyunContainerService/terway/pkg/k8s/mocks"
 	"github.com/AliyunContainerService/terway/pkg/storage"
+	storagemocks "github.com/AliyunContainerService/terway/pkg/storage/mocks"
+	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
+	daemon_types "github.com/AliyunContainerService/terway/types/daemon"
+	"github.com/agiledragon/gomonkey/v2"
+	"github.com/alexflint/go-filemutex"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
+	corev1 "k8s.io/api/core/v1"
+	k8sErr "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/component-base/featuregate"
 )
 
 func Test_registerPrometheus(t *testing.T) {
@@ -28,6 +48,16 @@ func Test_registerPrometheus(t *testing.T) {
 
 func Test_ensureCNIConfig(t *testing.T) {
 	_ = ensureCNIConfig()
+}
+
+// newMockStorage creates a new mock storage with default expectations
+func newMockStorage(t *testing.T) *storagemocks.Storage {
+	mockStorage := storagemocks.NewStorage(t)
+	mockStorage.On("Get", mock.Anything).Return(nil, storage.ErrNotFound).Maybe()
+	mockStorage.On("Put", mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockStorage.On("Delete", mock.Anything).Return(nil).Maybe()
+	mockStorage.On("List").Return([]interface{}{}, nil).Maybe()
+	return mockStorage
 }
 
 // TestAllocIP tests the AllocIP function with various scenarios
@@ -65,7 +95,7 @@ func TestAllocIP(t *testing.T) {
 			expectedIPType: rpc.IPType_TypeENIMultiIP,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod using testify mock
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", false).Return(&daemon.PodInfo{
 					Namespace:       "default",
 					Name:            "test-pod",
@@ -131,7 +161,7 @@ func TestAllocIP(t *testing.T) {
 				ns.daemonMode = daemon.ModeENIOnly
 
 				// Mock k8s.GetPod using testify mock
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", false).Return(&daemon.PodInfo{
 					Namespace:      "default",
 					Name:           "test-pod",
@@ -179,7 +209,7 @@ func TestAllocIP(t *testing.T) {
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod to return error
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", false).Return((*daemon.PodInfo)(nil), assert.AnError)
 			},
 		},
@@ -194,7 +224,7 @@ func TestAllocIP(t *testing.T) {
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", false).Return(&daemon.PodInfo{
 					Namespace:      "default",
 					Name:           "test-pod",
@@ -230,7 +260,7 @@ func TestAllocIP(t *testing.T) {
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", false).Return(&daemon.PodInfo{
 					Namespace:      "default",
 					Name:           "test-pod",
@@ -290,7 +320,10 @@ func TestAllocIP(t *testing.T) {
 			defer patches.Reset()
 
 			// Create mock k8s client
-			mockK8s := &mocks.Kubernetes{}
+			mockK8s := &k8smocks.Kubernetes{}
+
+			// Create mock storage
+			mockStorage := newMockStorage(t)
 
 			// Create mock network service
 			ns := &networkService{
@@ -299,7 +332,7 @@ func TestAllocIP(t *testing.T) {
 				enableIPv6:        false,
 				ipamType:          types.IPAMTypeDefault,
 				eniMgr:            &eni.Manager{},
-				resourceDB:        &mockStorage{},
+				resourceDB:        mockStorage,
 				k8s:               mockK8s,
 				pendingPods:       sync.Map{},
 				enablePatchPodIPs: false,
@@ -374,7 +407,7 @@ func TestReleaseIP(t *testing.T) {
 			expectedError: false,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
 					Namespace:      "default",
 					Name:           "test-pod",
@@ -452,7 +485,7 @@ func TestReleaseIP(t *testing.T) {
 				ns.daemonMode = daemon.ModeENIOnly
 
 				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
 					Namespace:      "default",
 					Name:           "test-pod",
@@ -503,7 +536,7 @@ func TestReleaseIP(t *testing.T) {
 			expectedError: false,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod to return NotFound error
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return((*daemon.PodInfo)(nil), k8sErr.NewNotFound(corev1.Resource("pod"), "test-pod"))
 			},
 		},
@@ -517,7 +550,7 @@ func TestReleaseIP(t *testing.T) {
 			expectedError: false, // ReleaseIP ignores non-NotFound errors to not block delete operations
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod to return non-NotFound error
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return((*daemon.PodInfo)(nil), assert.AnError)
 
 				// Mock resourceDB.Get to return ErrNotFound (no existing resource)
@@ -536,7 +569,7 @@ func TestReleaseIP(t *testing.T) {
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
 					Namespace:      "default",
 					Name:           "test-pod",
@@ -560,7 +593,7 @@ func TestReleaseIP(t *testing.T) {
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
 					Namespace:      "default",
 					Name:           "test-pod",
@@ -606,7 +639,7 @@ func TestReleaseIP(t *testing.T) {
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
 					Namespace:      "default",
 					Name:           "test-pod",
@@ -670,7 +703,7 @@ func TestReleaseIP(t *testing.T) {
 			expectedError: false,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetPod
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
 					Namespace:      "default",
 					Name:           "test-pod",
@@ -713,7 +746,7 @@ func TestReleaseIP(t *testing.T) {
 				ns.ipamType = types.IPAMTypeDefault
 
 				// Mock k8s.GetPod with IPStickTime > 0
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetPod", mock.Anything, "default", "test-pod", true).Return(&daemon.PodInfo{
 					Namespace:      "default",
 					Name:           "test-pod",
@@ -753,7 +786,10 @@ func TestReleaseIP(t *testing.T) {
 			defer patches.Reset()
 
 			// Create mock k8s client
-			mockK8s := &mocks.Kubernetes{}
+			mockK8s := &k8smocks.Kubernetes{}
+
+			// Create mock storage
+			mockStorage := newMockStorage(t)
 
 			// Create mock network service
 			ns := &networkService{
@@ -762,7 +798,7 @@ func TestReleaseIP(t *testing.T) {
 				enableIPv6:        false,
 				ipamType:          types.IPAMTypeDefault,
 				eniMgr:            &eni.Manager{},
-				resourceDB:        &mockStorage{},
+				resourceDB:        mockStorage,
 				k8s:               mockK8s,
 				pendingPods:       sync.Map{},
 				enablePatchPodIPs: false,
@@ -1044,7 +1080,10 @@ func TestGetIPInfo(t *testing.T) {
 			defer patches.Reset()
 
 			// Create mock k8s client
-			mockK8s := &mocks.Kubernetes{}
+			mockK8s := &k8smocks.Kubernetes{}
+
+			// Create mock storage
+			mockStorage := newMockStorage(t)
 
 			// Create mock network service
 			ns := &networkService{
@@ -1053,7 +1092,7 @@ func TestGetIPInfo(t *testing.T) {
 				enableIPv6:        false,
 				ipamType:          types.IPAMTypeDefault,
 				eniMgr:            &eni.Manager{},
-				resourceDB:        &mockStorage{},
+				resourceDB:        mockStorage,
 				k8s:               mockK8s,
 				pendingPods:       sync.Map{},
 				enablePatchPodIPs: false,
@@ -1099,7 +1138,7 @@ func TestGcPods(t *testing.T) {
 			expectedError: false,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return empty list
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return empty list
@@ -1118,7 +1157,7 @@ func TestGcPods(t *testing.T) {
 			expectedError: false,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return existing pods
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{
 					{
 						Namespace:     "default",
@@ -1172,7 +1211,7 @@ func TestGcPods(t *testing.T) {
 			expectedError: false,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return empty list (no existing pods)
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return pod resources that need cleanup
@@ -1230,7 +1269,7 @@ func TestGcPods(t *testing.T) {
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return error
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetLocalPods").Return(([]*daemon.PodInfo)(nil), assert.AnError)
 			},
 		},
@@ -1239,7 +1278,7 @@ func TestGcPods(t *testing.T) {
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return error
@@ -1253,7 +1292,7 @@ func TestGcPods(t *testing.T) {
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return empty list
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return pod resources
@@ -1301,7 +1340,7 @@ func TestGcPods(t *testing.T) {
 			expectedError: true,
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return empty list
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return pod resources
@@ -1357,7 +1396,7 @@ func TestGcPods(t *testing.T) {
 				ns.ipamType = types.IPAMTypeDefault
 
 				// Mock k8s.GetLocalPods to return empty list
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return pod resources with IP stick time
@@ -1409,7 +1448,7 @@ func TestGcPods(t *testing.T) {
 				ns.daemonMode = daemon.ModeENIMultiIP
 
 				// Mock k8s.GetLocalPods to return empty list
-				mockK8s := ns.k8s.(*mocks.Kubernetes)
+				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
 				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return pod resources
@@ -1471,7 +1510,10 @@ func TestGcPods(t *testing.T) {
 			defer patches.Reset()
 
 			// Create mock k8s client
-			mockK8s := &mocks.Kubernetes{}
+			mockK8s := &k8smocks.Kubernetes{}
+
+			// Create mock storage
+			mockStorage := newMockStorage(t)
 
 			// Create mock network service
 			ns := &networkService{
@@ -1480,7 +1522,7 @@ func TestGcPods(t *testing.T) {
 				enableIPv6:        false,
 				ipamType:          types.IPAMTypeDefault,
 				eniMgr:            &eni.Manager{},
-				resourceDB:        &mockStorage{},
+				resourceDB:        mockStorage,
 				k8s:               mockK8s,
 				pendingPods:       sync.Map{},
 				enablePatchPodIPs: false,
@@ -1513,22 +1555,488 @@ func stringPtr(s string) *string {
 	return &s
 }
 
-// Mock implementations for testing
+// TestNewUnixListener tests the newUnixListener function
+func TestNewUnixListener(t *testing.T) {
+	tests := []struct {
+		name          string
+		addr          string
+		setupFunc     func(string)
+		cleanupFunc   func(string)
+		expectedError bool
+	}{
+		{
+			name: "successful creation",
+			addr: "/tmp/test-terway-socket.sock",
+			setupFunc: func(addr string) {
+				// Ensure directory exists
+				os.MkdirAll(filepath.Dir(addr), 0700)
+			},
+			cleanupFunc: func(addr string) {
+				os.Remove(addr)
+			},
+			expectedError: false,
+		},
+		{
+			name: "create in non-existent directory",
+			addr: "/tmp/test-terway-dir/test-socket.sock",
+			setupFunc: func(addr string) {
+				// Don't create directory - let function create it
+			},
+			cleanupFunc: func(addr string) {
+				os.Remove(addr)
+				os.RemoveAll(filepath.Dir(addr))
+			},
+			expectedError: false,
+		},
+	}
 
-type mockStorage struct{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setupFunc != nil {
+				tt.setupFunc(tt.addr)
+			}
+			if tt.cleanupFunc != nil {
+				defer tt.cleanupFunc(tt.addr)
+			}
 
-func (m *mockStorage) Get(key string) (interface{}, error) {
-	return nil, storage.ErrNotFound
+			l, err := newUnixListener(tt.addr)
+
+			if tt.expectedError {
+				assert.Error(t, err)
+				assert.Nil(t, l)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, l)
+				if l != nil {
+					l.Close()
+				}
+			}
+		})
+	}
 }
 
-func (m *mockStorage) Put(key string, value interface{}) error {
+// TestRunDebugServer tests the runDebugServer function
+func TestRunDebugServer(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	patches.ApplyFunc(prometheus.MustRegister, func() {})
+
+	patches.ApplyMethod(http.DefaultServeMux, "Handle", func() {})
+
+	tests := []struct {
+		name              string
+		debugSocketListen string
+		expectedError     bool
+		setupFunc         func()
+		cleanupFunc       func()
+	}{
+		{
+			name:              "tcp listener",
+			debugSocketListen: "127.0.0.1:0", // Use port 0 to let OS assign a free port
+			expectedError:     false,
+		},
+		{
+			name:              "unix socket listener",
+			debugSocketListen: "unix:///tmp/test-debug.sock",
+			expectedError:     false,
+			cleanupFunc: func() {
+				os.Remove("/tmp/test-debug.sock")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setupFunc != nil {
+				tt.setupFunc()
+			}
+			if tt.cleanupFunc != nil {
+				defer tt.cleanupFunc()
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			wg := &sync.WaitGroup{}
+
+			err := runDebugServer(ctx, wg, tt.debugSocketListen)
+
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			// Wait for goroutines to finish
+			cancel()
+			wg.Wait()
+		})
+	}
+}
+
+// TestCniInterceptor tests the cniInterceptor function
+func TestCniInterceptor(t *testing.T) {
+	tests := []struct {
+		name          string
+		req           interface{}
+		expectedError bool
+	}{
+		{
+			name: "AllocIPRequest",
+			req: &rpc.AllocIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: false,
+		},
+		{
+			name: "ReleaseIPRequest",
+			req: &rpc.ReleaseIPRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: false,
+		},
+		{
+			name: "GetInfoRequest",
+			req: &rpc.GetInfoRequest{
+				K8SPodNamespace:        "default",
+				K8SPodName:             "test-pod",
+				K8SPodInfraContainerId: "container-123",
+			},
+			expectedError: false,
+		},
+		{
+			name:          "Unknown request type",
+			req:           &struct{}{},
+			expectedError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			handlerCalled := false
+			handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+				handlerCalled = true
+				return nil, nil
+			}
+
+			info := &grpc.UnaryServerInfo{
+				FullMethod: "/test.method",
+			}
+
+			_, err := cniInterceptor(ctx, tt.req, info, handler)
+
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.True(t, handlerCalled, "handler should be called")
+			}
+		})
+	}
+}
+
+// TestStackTriger tests the stackTriger function
+func TestStackTriger(t *testing.T) {
+	// This test just ensures stackTriger doesn't panic
+	// We can't easily test the signal handling without actually sending signals
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	// Mock signal.Notify to prevent actual signal registration
+	patches.ApplyFunc(signal.Notify, func(c chan<- os.Signal, sig ...os.Signal) {
+		// Do nothing
+	})
+
+	// Call stackTriger - it should not panic
+	assert.NotPanics(t, func() {
+		stackTriger()
+	})
+}
+
+// TestEnsureCNIConfig tests the ensureCNIConfig function with mocking
+func TestEnsureCNIConfigWithMocking(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupMocks    func(*gomonkey.Patches)
+		expectedError bool
+	}{
+		{
+			name: "feature gate enabled - skip write",
+			setupMocks: func(patches *gomonkey.Patches) {
+				// Mock feature gate to return true using ApplyMethodFunc
+				// Note: This may not work if DefaultFeatureGate is an interface
+				// In that case, we need to mock the actual implementation
+				patches.ApplyMethodFunc(utilfeature.DefaultFeatureGate, "Enabled", func(_ featuregate.Feature) bool {
+					return true
+				})
+			},
+			expectedError: false,
+		},
+		{
+			name: "source file not found",
+			setupMocks: func(patches *gomonkey.Patches) {
+				// Mock feature gate to return false
+				patches.ApplyMethodFunc(utilfeature.DefaultFeatureGate, "Enabled", func(_ featuregate.Feature) bool {
+					return false
+				})
+				// Mock os.Open to return error
+				patches.ApplyFunc(os.Open, func(name string) (*os.File, error) {
+					return nil, os.ErrNotExist
+				})
+			},
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			patches := gomonkey.NewPatches()
+			defer patches.Reset()
+
+			if tt.setupMocks != nil {
+				tt.setupMocks(patches)
+			}
+
+			err := ensureCNIConfig()
+
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestRun tests the Run function with mocking
+func TestRun(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupMocks    func(*gomonkey.Patches)
+		expectedError bool
+	}{
+		{
+			name: "lock acquisition failure",
+			setupMocks: func(patches *gomonkey.Patches) {
+				// Mock filemutex.New to return a mock lock
+				patches.ApplyFunc(filemutex.New, func(filename string) (*filemutex.FileMutex, error) {
+					return nil, assert.AnError
+				})
+			},
+			expectedError: true,
+		},
+		{
+			name: "lock timeout",
+			setupMocks: func(patches *gomonkey.Patches) {
+				mockLock := &filemutex.FileMutex{}
+				patches.ApplyFunc(filemutex.New, func(filename string) (*filemutex.FileMutex, error) {
+					return mockLock, nil
+				})
+				patches.ApplyMethodFunc(mockLock, "TryLock", func() error {
+					return assert.AnError
+				})
+				patches.ApplyMethodFunc(mockLock, "Unlock", func() error {
+					return nil
+				})
+				// Mock wait.PollUntilContextTimeout to return timeout error
+				patches.ApplyFunc(wait.PollUntilContextTimeout, func(ctx context.Context, interval, timeout time.Duration, immediate bool, condition wait.ConditionWithContextFunc) error {
+					return context.DeadlineExceeded
+				})
+			},
+			expectedError: true,
+		},
+		{
+			name: "newUnixListener failure",
+			setupMocks: func(patches *gomonkey.Patches) {
+				mockLock := &filemutex.FileMutex{}
+				patches.ApplyFunc(filemutex.New, func(filename string) (*filemutex.FileMutex, error) {
+					return mockLock, nil
+				})
+				patches.ApplyMethodFunc(mockLock, "TryLock", func() error {
+					return nil
+				})
+				patches.ApplyMethodFunc(mockLock, "Unlock", func() error {
+					return nil
+				})
+				patches.ApplyFunc(wait.PollUntilContextTimeout, func(ctx context.Context, interval, timeout time.Duration, immediate bool, condition wait.ConditionWithContextFunc) error {
+					return nil
+				})
+				patches.ApplyFunc(newUnixListener, func(addr string) (net.Listener, error) {
+					return nil, assert.AnError
+				})
+			},
+			expectedError: true,
+		},
+		{
+			name: "newNetworkService failure",
+			setupMocks: func(patches *gomonkey.Patches) {
+				mockLock := &filemutex.FileMutex{}
+				patches.ApplyFunc(filemutex.New, func(filename string) (*filemutex.FileMutex, error) {
+					return mockLock, nil
+				})
+				patches.ApplyMethodFunc(mockLock, "TryLock", func() error {
+					return nil
+				})
+				patches.ApplyMethodFunc(mockLock, "Unlock", func() error {
+					return nil
+				})
+				patches.ApplyFunc(wait.PollUntilContextTimeout, func(ctx context.Context, interval, timeout time.Duration, immediate bool, condition wait.ConditionWithContextFunc) error {
+					return nil
+				})
+				mockListener := &mockNetListener{}
+				patches.ApplyFunc(newUnixListener, func(addr string) (net.Listener, error) {
+					return mockListener, nil
+				})
+				patches.ApplyFunc(newNetworkService, func(ctx context.Context, configFilePath, daemonMode string) (*networkService, error) {
+					return nil, assert.AnError
+				})
+			},
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			patches := gomonkey.NewPatches()
+			defer patches.Reset()
+
+			if tt.setupMocks != nil {
+				tt.setupMocks(patches)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			err := Run(ctx, "/tmp/test.sock", "127.0.0.1:0", "/tmp/config.json", "ENIMultiIP")
+
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// mockNetListener is a mock implementation of net.Listener
+type mockNetListener struct {
+	acceptChan chan net.Conn
+	closeChan  chan struct{}
+}
+
+func (m *mockNetListener) Accept() (net.Conn, error) {
+	select {
+	case <-m.closeChan:
+		return nil, net.ErrClosed
+	case conn := <-m.acceptChan:
+		return conn, nil
+	}
+}
+
+func (m *mockNetListener) Close() error {
+	close(m.closeChan)
 	return nil
 }
 
-func (m *mockStorage) Delete(key string) error {
-	return nil
+func (m *mockNetListener) Addr() net.Addr {
+	return &net.UnixAddr{Name: "/tmp/test.sock", Net: "unix"}
 }
 
-func (m *mockStorage) List() ([]interface{}, error) {
-	return nil, nil
+func TestNetworkServiceBuilder_setupENIManager_Success(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	// Use context with cancel to ensure background goroutines stop when test finishes
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockECS := clientmocks.NewECS(t)
+	mockMeta := instancemocks.NewInterface(t)
+
+	instance.Init(mockMeta)
+
+	aliyunClient := &client.APIFacade{}
+	patches.ApplyMethodFunc(aliyunClient, "GetECS", func() client.ECS {
+		return mockECS
+	})
+
+	// 1. Mock instance metadata
+	mockMeta.On("GetZoneID").Return("cn-hangzhou-i", nil)
+	mockMeta.On("GetInstanceID").Return("i-instance", nil)
+	mockMeta.On("GetVSwitchID").Return("vsw-123", nil)
+
+	// 2. Mock configuration functions
+	patches.ApplyFunc(getENIConfig, func(cfg *daemon_types.Config, zoneID string) *daemon_types.ENIConfig {
+		return &daemon_types.ENIConfig{
+			SecurityGroupIDs: []string{"sg-1"},
+		}
+	})
+	patches.ApplyFunc(getPoolConfig, func(cfg *daemon_types.Config, daemonMode string, limit *client.Limits) (*daemon_types.PoolConfig, error) {
+		return &daemon_types.PoolConfig{
+			Capacity: 10,
+			MaxENI:   3,
+		}, nil
+	})
+
+	// 3. Mock factory and vswitch pool
+	patches.ApplyFunc(vswpool.NewSwitchPool, func(size int, ttl string) (*vswpool.SwitchPool, error) {
+		return &vswpool.SwitchPool{}, nil
+	})
+
+	attachedENIs := []*daemon_types.ENI{
+		{ID: "eni-1", MAC: "mac-1"},
+	}
+
+	patches.ApplyFunc(aliyun.NewAliyun, func(ctx context.Context, openAPI client.OpenAPI, getter aliyuneni.ENIInfoGetter, vsw *vswpool.SwitchPool, cfg *daemon_types.ENIConfig) *aliyun.Aliyun {
+		return &aliyun.Aliyun{}
+	})
+	patches.ApplyMethodFunc(&aliyun.Aliyun{}, "GetAttachedNetworkInterface", func(trunkENIID string) ([]*daemon_types.ENI, error) {
+		return attachedENIs, nil
+	})
+
+	// 5. Mock K8S and Storage
+	mockK8sReal := k8smocks.NewKubernetes(t)
+	mockK8sReal.On("PatchNodeAnnotations", mock.Anything).Return(nil)
+	// Mock GetLocalPods to handle the GC loop call. Using Maybe() as it happens asynchronously.
+	mockK8sReal.On("GetLocalPods").Return([]*daemon_types.PodInfo{}, nil).Maybe()
+
+	mockStorage := &builderMockStorage{
+		listResult: []interface{}{},
+		listErr:    nil,
+	}
+
+	// 6. Mock other package functions
+	patches.ApplyFunc(runDevicePlugin, func(daemonMode string, config *daemon_types.Config, poolConfig *daemon_types.PoolConfig) {})
+	patches.ApplyFunc(preStartResourceManager, func(daemonMode string, k8s interface{}) error { return nil })
+
+	// 7. Mock ENI package types/functions
+	patches.ApplyFunc(eni.NewLocal, func(eni *daemon_types.ENI, name string, factory factory.Factory, poolConfig *daemon_types.PoolConfig) eni.NetworkInterface {
+		return &mockNetworkInterface{}
+	})
+	patches.ApplyFunc(eni.NewManager, func(pool *daemon_types.PoolConfig, syncPeriod time.Duration, nis []eni.NetworkInterface, policy daemon_types.EniSelectionPolicy, k8s interface{}) *eni.Manager {
+		return &eni.Manager{}
+	})
+	patches.ApplyMethodFunc(&eni.Manager{}, "Run", func(ctx context.Context, wg *sync.WaitGroup, podResources []daemon_types.PodResources) error {
+		return nil
+	})
+
+	builder := &NetworkServiceBuilder{
+		ctx:          ctx,
+		daemonMode:   daemon_types.ModeENIMultiIP,
+		config:       &daemon_types.Config{IPStack: "ipv4"},
+		service:      &networkService{k8s: mockK8sReal, resourceDB: mockStorage, enableIPv4: true},
+		aliyunClient: aliyunClient,
+		limit:        &client.Limits{Adapters: 3, IPv4PerAdapter: 10, ERdmaAdapters: 0},
+	}
+
+	err := builder.setupENIManager()
+	assert.NoError(t, err)
+	assert.NotNil(t, builder.service.eniMgr)
 }

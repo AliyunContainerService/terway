@@ -10,9 +10,6 @@ import (
 	"time"
 
 	"github.com/agiledragon/gomonkey/v2"
-	"github.com/AliyunContainerService/terway/deviceplugin"
-	"github.com/AliyunContainerService/terway/pkg/storage"
-	"github.com/AliyunContainerService/terway/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -30,6 +27,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/AliyunContainerService/terway/deviceplugin"
+	"github.com/AliyunContainerService/terway/pkg/storage"
+	storagemocks "github.com/AliyunContainerService/terway/pkg/storage/mocks"
+	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
@@ -1270,57 +1271,6 @@ func TestGetTrunkID(t *testing.T) {
 	}
 }
 
-// Mock storage for testing
-type mockStorage struct {
-	mock.Mock
-	data map[string]interface{}
-}
-
-func (m *mockStorage) Put(key string, item interface{}) error {
-	args := m.Called(key, item)
-	if args.Error(0) == nil {
-		if m.data == nil {
-			m.data = make(map[string]interface{})
-		}
-		m.data[key] = item
-	}
-	return args.Error(0)
-}
-
-func (m *mockStorage) Get(key string) (interface{}, error) {
-	args := m.Called(key)
-	if args.Error(1) != nil {
-		return nil, args.Error(1)
-	}
-	if item, exists := m.data[key]; exists {
-		return item, nil
-	}
-	return args.Get(0), args.Error(1)
-}
-
-func (m *mockStorage) Delete(key string) error {
-	args := m.Called(key)
-	if args.Error(0) == nil && m.data != nil {
-		delete(m.data, key)
-	}
-	return args.Error(0)
-}
-
-func (m *mockStorage) List() ([]interface{}, error) {
-	args := m.Called()
-	if args.Error(1) != nil {
-		return nil, args.Error(1)
-	}
-	var items []interface{}
-	for _, item := range m.data {
-		items = append(items, item)
-	}
-	if args.Get(0) != nil {
-		return args.Get(0).([]interface{}), args.Error(1)
-	}
-	return items, args.Error(1)
-}
-
 // ==============================================================================
 // setSvcCIDR TESTS
 // ==============================================================================
@@ -1464,7 +1414,7 @@ func TestGetPod(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
 
 		// Setup mock storage (should not be accessed for existing pod)
-		mockStore := &mockStorage{data: make(map[string]interface{})}
+		mockStore := storagemocks.NewStorage(t)
 
 		k8sObj := &k8s{
 			client:                  fakeClient,
@@ -1500,7 +1450,7 @@ func TestGetPod(t *testing.T) {
 		}
 
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
-		mockStore := &mockStorage{data: make(map[string]interface{})}
+		mockStore := storagemocks.NewStorage(t)
 
 		k8sObj := &k8s{
 			client:                  fakeClient,
@@ -1524,14 +1474,13 @@ func TestGetPod(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
 
 		// Setup mock storage with stored pod
-		mockStore := &mockStorage{data: make(map[string]interface{})}
+		mockStore := storagemocks.NewStorage(t)
 		storageItem := &storageItem{
 			Pod: &daemon.PodInfo{
 				Name:      "test-pod",
 				Namespace: "default",
 			},
 		}
-		mockStore.data["default/test-pod"] = storageItem
 		mockStore.On("Get", "default/test-pod").Return(storageItem, nil)
 
 		k8sObj := &k8s{
@@ -1556,7 +1505,7 @@ func TestGetPod(t *testing.T) {
 	t.Run("get non-existent pod without storage fallback", func(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
 
-		mockStore := &mockStorage{data: make(map[string]interface{})}
+		mockStore := storagemocks.NewStorage(t)
 		mockStore.On("Get", "default/test-pod").Return(nil, storage.ErrNotFound)
 
 		k8sObj := &k8s{
@@ -1579,7 +1528,7 @@ func TestGetPod(t *testing.T) {
 	t.Run("storage error on fallback", func(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
 
-		mockStore := &mockStorage{data: make(map[string]interface{})}
+		mockStore := storagemocks.NewStorage(t)
 		mockStore.On("Get", "default/test-pod").Return(nil, fmt.Errorf("storage error"))
 
 		k8sObj := &k8s{
@@ -1611,7 +1560,7 @@ func TestGetPod(t *testing.T) {
 		}
 
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
-		mockStore := &mockStorage{data: make(map[string]interface{})}
+		mockStore := storagemocks.NewStorage(t)
 
 		k8sObj := &k8s{
 			client:                  fakeClient,
@@ -1643,7 +1592,7 @@ func TestGetPod(t *testing.T) {
 		}
 
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
-		mockStore := &mockStorage{data: make(map[string]interface{})}
+		mockStore := storagemocks.NewStorage(t)
 
 		k8sObj := &k8s{
 			client:                  fakeClient,
@@ -1677,7 +1626,7 @@ func TestGetPod(t *testing.T) {
 		}
 
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
-		mockStore := &mockStorage{data: make(map[string]interface{})}
+		mockStore := storagemocks.NewStorage(t)
 
 		k8sObj := &k8s{
 			client:                  fakeClient,
@@ -1785,13 +1734,7 @@ func TestClean(t *testing.T) {
 			client := builder.Build()
 
 			// Setup mock storage
-			mockStore := &mockStorage{data: make(map[string]interface{})}
-			for _, item := range tt.storageItems {
-				storageItem := item.(*storageItem)
-				key := fmt.Sprintf("%s/%s", storageItem.Pod.Namespace, storageItem.Pod.Name)
-				mockStore.data[key] = item
-			}
-
+			mockStore := storagemocks.NewStorage(t)
 			mockStore.On("List").Return(tt.storageItems, nil)
 
 			// Setup expectations for Put operations (tagging/untagged)
@@ -1854,7 +1797,7 @@ func TestClean_Errors(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
 
 			// Setup mock storage
-			mockStore := &mockStorage{}
+			mockStore := storagemocks.NewStorage(t)
 			mockStore.On("List").Return(nil, tt.storageErr)
 
 			k8sObj := &k8s{
@@ -1906,7 +1849,7 @@ func TestClean_StorageOperationErrors(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
 
 			// Setup mock storage with different error scenarios
-			mockStore := &mockStorage{data: make(map[string]interface{})}
+			mockStore := storagemocks.NewStorage(t)
 
 			switch tt.operation {
 			case "put_error_tag":
@@ -1914,7 +1857,6 @@ func TestClean_StorageOperationErrors(t *testing.T) {
 				storageItem := &storageItem{
 					Pod: &daemon.PodInfo{Name: "pod1", Namespace: "default"},
 				}
-				mockStore.data["default/pod1"] = storageItem
 				mockStore.On("List").Return([]interface{}{storageItem}, nil)
 				mockStore.On("Put", "default/pod1", mock.Anything).Return(fmt.Errorf("put error"))
 
@@ -1924,7 +1866,6 @@ func TestClean_StorageOperationErrors(t *testing.T) {
 					Pod:          &daemon.PodInfo{Name: "pod1", Namespace: "default"},
 					deletionTime: func() *time.Time { t := time.Now(); return &t }(),
 				}
-				mockStore.data["default/pod1"] = storageItem
 				mockStore.On("List").Return([]interface{}{storageItem}, nil)
 				mockStore.On("Put", "default/pod1", mock.Anything).Return(fmt.Errorf("put error"))
 
@@ -1945,7 +1886,6 @@ func TestClean_StorageOperationErrors(t *testing.T) {
 					Pod:          &daemon.PodInfo{Name: "old-pod", Namespace: "default"},
 					deletionTime: &oldTime,
 				}
-				mockStore.data["default/old-pod"] = storageItem
 				mockStore.On("List").Return([]interface{}{storageItem}, nil)
 				mockStore.On("Delete", "default/old-pod").Return(fmt.Errorf("delete error"))
 			}
@@ -2273,7 +2213,7 @@ func TestNewK8S_Success(t *testing.T) {
 	})
 
 	// Mock storage.NewDiskStorage
-	mockStorage := &mockStorage{data: make(map[string]interface{})}
+	mockStorage := storagemocks.NewStorage(t)
 	patches.ApplyFunc(storage.NewDiskStorage, func(name string, path string, serializer storage.Serializer, deserializer storage.Deserializer) (storage.Storage, error) {
 		return mockStorage, nil
 	})
@@ -2419,7 +2359,7 @@ func TestNewK8S_ENIOnlyModeForced(t *testing.T) {
 		return &kubernetes.Clientset{}
 	})
 
-	mockStorage := &mockStorage{data: make(map[string]interface{})}
+	mockStorage := storagemocks.NewStorage(t)
 	patches.ApplyFunc(storage.NewDiskStorage, func(name string, path string, serializer storage.Serializer, deserializer storage.Deserializer) (storage.Storage, error) {
 		return mockStorage, nil
 	})
@@ -2435,7 +2375,7 @@ func TestNewK8S_ENIOnlyModeForced(t *testing.T) {
 
 	require.NoError(t, err, "NewK8S should succeed")
 	require.NotNil(t, k8sObj, "K8S object should not be nil")
-	
+
 	// Note: We can't directly check the mode as it's a private field,
 	// but we can verify the node was set correctly
 	assert.NotNil(t, k8sObj.Node(), "Node should be set")
