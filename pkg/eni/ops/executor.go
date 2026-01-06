@@ -22,7 +22,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/util/wait"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -258,11 +257,6 @@ func (e *Executor) GetTimeout(eniID string) time.Duration {
 func (e *Executor) GetInitialDelay(eniID string) time.Duration {
 	bo := e.getBackoff(eniID)
 	return bo.InitialDelay
-}
-
-// GetLogger returns a logger with ENI context
-func GetLogger(ctx context.Context, eniID string) logr.Logger {
-	return logf.FromContext(ctx).WithValues("eni", eniID)
 }
 
 // toPtr converts string to pointer, returns nil for empty string

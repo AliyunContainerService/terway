@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/time/rate"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/factory"
 	factorymocks "github.com/AliyunContainerService/terway/pkg/factory/mocks"
 	"github.com/AliyunContainerService/terway/types"
@@ -1014,4 +1016,451 @@ func Test_commit_canceled(t *testing.T) {
 
 	assert.Equal(t, "", ipv4.podID)
 	assert.Equal(t, "", ipv6.podID)
+}
+
+// ==============================================================================
+// Usage and Status Tests
+// ==============================================================================
+
+func TestLocal_Usage_NilENI(t *testing.T) {
+	local := NewLocalTest(nil, nil, &daemon.PoolConfig{}, "")
+
+	idles, inUse, err := local.Usage()
+
+	assert.NoError(t, err)
+	assert.Equal(t, 0, idles)
+	assert.Equal(t, 0, inUse)
+}
+
+func TestLocal_Usage_StatusNotInUse(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
+	local.status = statusInit // Not statusInUse
+
+	idles, inUse, err := local.Usage()
+
+	assert.NoError(t, err)
+	assert.Equal(t, 0, idles)
+	assert.Equal(t, 0, inUse)
+}
+
+func TestLocal_Usage_IPv4Enabled(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{EnableIPv4: true}, "")
+	local.status = statusInUse
+
+	// Add some IPv4 addresses
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.2"), false))
+	local.ipv4[netip.MustParseAddr("192.0.2.2")].Allocate("pod-1")
+
+	idles, inUse, err := local.Usage()
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, idles)
+	assert.Equal(t, 1, inUse)
+}
+
+func TestLocal_Usage_IPv6Enabled(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{EnableIPv6: true}, "")
+	local.status = statusInUse
+
+	// Add some IPv6 addresses
+	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00::1"), false))
+	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00::2"), false))
+	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00::3"), false))
+	local.ipv6[netip.MustParseAddr("fd00::2")].Allocate("pod-1")
+	local.ipv6[netip.MustParseAddr("fd00::3")].Allocate("pod-2")
+
+	idles, inUse, err := local.Usage()
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, idles)
+	assert.Equal(t, 2, inUse)
+}
+
+func TestLocal_Usage_BothIPv4AndIPv6Enabled(t *testing.T) {
+	// When both are enabled, IPv4 takes precedence
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{
+		EnableIPv4: true,
+		EnableIPv6: true,
+	}, "")
+	local.status = statusInUse
+
+	// Add IPv4 addresses
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
+	local.ipv4[netip.MustParseAddr("192.0.2.1")].Allocate("pod-1")
+
+	// Add IPv6 addresses (should be ignored due to IPv4 precedence)
+	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00::1"), false))
+	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00::2"), false))
+
+	idles, inUse, err := local.Usage()
+
+	assert.NoError(t, err)
+	// IPv4 is checked first when enableIPv4 is true
+	assert.Equal(t, 0, idles)
+	assert.Equal(t, 1, inUse)
+}
+
+func TestLocal_Status_NilENI(t *testing.T) {
+	local := NewLocalTest(nil, nil, &daemon.PoolConfig{}, "erdma")
+	local.status = statusInit
+
+	status := local.Status()
+
+	assert.Equal(t, statusInit.String(), status.Status)
+	assert.Equal(t, "erdma", status.Type)
+	assert.Empty(t, status.MAC)
+	assert.Empty(t, status.NetworkInterfaceID)
+	assert.Nil(t, status.Usage)
+}
+
+func TestLocal_Status_WithENI(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{
+		ID:  "eni-123",
+		MAC: "00:00:00:00:00:01",
+	}, nil, &daemon.PoolConfig{}, "")
+	local.status = statusInUse
+
+	status := local.Status()
+
+	assert.Equal(t, statusInUse.String(), status.Status)
+	assert.Equal(t, "00:00:00:00:00:01", status.MAC)
+	assert.Equal(t, "eni-123", status.NetworkInterfaceID)
+}
+
+func TestLocal_Status_WithIPv4(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{
+		ID:  "eni-123",
+		MAC: "00:00:00:00:00:01",
+	}, nil, &daemon.PoolConfig{EnableIPv4: true}, "")
+	local.status = statusInUse
+
+	// Add IPv4 addresses with different statuses
+	ip1 := NewValidIP(netip.MustParseAddr("192.0.2.1"), false)
+	ip2 := NewValidIP(netip.MustParseAddr("192.0.2.2"), false)
+	ip2.Allocate("pod-1")
+
+	local.ipv4.Add(ip1)
+	local.ipv4.Add(ip2)
+
+	status := local.Status()
+
+	assert.Equal(t, statusInUse.String(), status.Status)
+	assert.Len(t, status.Usage, 2)
+}
+
+func TestLocal_Status_WithIPv6(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{
+		ID:  "eni-123",
+		MAC: "00:00:00:00:00:01",
+	}, nil, &daemon.PoolConfig{EnableIPv6: true}, "")
+	local.status = statusInUse
+
+	// Add IPv6 addresses
+	ip1 := NewValidIP(netip.MustParseAddr("fd00::1"), false)
+	ip1.Allocate("pod-1")
+
+	local.ipv6.Add(ip1)
+
+	status := local.Status()
+
+	assert.Equal(t, statusInUse.String(), status.Status)
+	assert.Len(t, status.Usage, 1)
+	assert.Equal(t, "fd00::1", status.Usage[0][0])
+	assert.Equal(t, "pod-1", status.Usage[0][1])
+}
+
+func TestLocal_Status_WithBothIPv4AndIPv6(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{
+		ID:  "eni-123",
+		MAC: "00:00:00:00:00:01",
+	}, nil, &daemon.PoolConfig{
+		EnableIPv4: true,
+		EnableIPv6: true,
+	}, "")
+	local.status = statusInUse
+
+	// Add IPv4 and IPv6 addresses
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
+	local.ipv6.Add(NewValidIP(netip.MustParseAddr("fd00::1"), false))
+
+	status := local.Status()
+
+	assert.Equal(t, statusInUse.String(), status.Status)
+	assert.Len(t, status.Usage, 2)
+}
+
+func TestLocal_Status_UsageSorted(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{
+		ID:  "eni-123",
+		MAC: "00:00:00:00:00:01",
+	}, nil, &daemon.PoolConfig{EnableIPv4: true}, "")
+	local.status = statusInUse
+
+	// Add IPv4 addresses in non-sorted order
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.1"), false))
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.3"), false))
+	local.ipv4.Add(NewValidIP(netip.MustParseAddr("192.0.2.2"), false))
+
+	status := local.Status()
+
+	assert.Len(t, status.Usage, 3)
+	// Check that usage is sorted in descending order
+	assert.True(t, status.Usage[0][0] > status.Usage[1][0])
+	assert.True(t, status.Usage[1][0] > status.Usage[2][0])
+}
+
+// ==============================================================================
+// NewLocal, Run, notify, and errorHandleLocked Tests
+// ==============================================================================
+
+func TestNewLocal(t *testing.T) {
+	eni := &daemon.ENI{ID: "eni-123", MAC: "00:00:00:00:00:01"}
+	mockFactory := factorymocks.NewFactory(t)
+	poolConfig := &daemon.PoolConfig{
+		BatchSize:   5,
+		MaxIPPerENI: 10,
+		EnableIPv4:  true,
+		EnableIPv6:  true,
+	}
+
+	local := NewLocal(eni, "erdma", mockFactory, poolConfig)
+
+	assert.NotNil(t, local)
+	assert.Equal(t, eni, local.eni)
+	assert.Equal(t, "erdma", local.eniType)
+	assert.Equal(t, 5, local.batchSize)
+	assert.Equal(t, 10, local.cap)
+	assert.True(t, local.enableIPv4)
+	assert.True(t, local.enableIPv6)
+	assert.NotNil(t, local.cond)
+	assert.NotNil(t, local.ipv4)
+	assert.NotNil(t, local.ipv6)
+	assert.NotNil(t, local.rateLimitEni)
+	assert.NotNil(t, local.rateLimitv4)
+	assert.NotNil(t, local.rateLimitv6)
+	assert.Equal(t, mockFactory, local.factory)
+}
+
+func TestNewLocal_DefaultValues(t *testing.T) {
+	eni := &daemon.ENI{ID: "eni-123"}
+	poolConfig := &daemon.PoolConfig{
+		BatchSize:   0,
+		MaxIPPerENI: 0,
+		EnableIPv4:  false,
+		EnableIPv6:  false,
+	}
+
+	local := NewLocal(eni, "", nil, poolConfig)
+
+	assert.NotNil(t, local)
+	assert.Equal(t, 0, local.batchSize)
+	assert.Equal(t, 0, local.cap)
+	assert.False(t, local.enableIPv4)
+	assert.False(t, local.enableIPv6)
+	assert.Empty(t, local.eniType)
+}
+
+func TestLocal_Run_LoadError(t *testing.T) {
+	mockFactory := factorymocks.NewFactory(t)
+	mockFactory.On("LoadNetworkInterface", "00:00:00:00:00:01").Return(nil, nil, fmt.Errorf("load error"))
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+		PrimaryIP: types.IPSet{
+			IPv4: net.ParseIP("192.0.2.1"),
+		},
+	}
+	local := NewLocal(eni, "", mockFactory, &daemon.PoolConfig{EnableIPv4: true})
+
+	ctx := context.Background()
+	wg := &sync.WaitGroup{}
+
+	err := local.Run(ctx, []daemon.PodResources{}, wg)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "load error")
+}
+
+func TestLocal_Run_Success(t *testing.T) {
+	mockFactory := factorymocks.NewFactory(t)
+	ipv4Addrs := []netip.Addr{netip.MustParseAddr("192.0.2.1")}
+	mockFactory.On("LoadNetworkInterface", "00:00:00:00:00:01").Return(ipv4Addrs, nil, nil)
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+		PrimaryIP: types.IPSet{
+			IPv4: net.ParseIP("192.0.2.1"),
+		},
+	}
+	local := NewLocal(eni, "", mockFactory, &daemon.PoolConfig{EnableIPv4: true})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wg := &sync.WaitGroup{}
+
+	err := local.Run(ctx, []daemon.PodResources{}, wg)
+	assert.NoError(t, err)
+
+	// Cancel context to stop background goroutines
+	cancel()
+
+	// Wait for goroutines to finish
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for goroutines to finish")
+	}
+}
+
+func TestLocal_notify(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start notify in background
+	done := make(chan struct{})
+	go func() {
+		local.notify(ctx)
+		close(done)
+	}()
+
+	// Cancel context should cause notify to broadcast and exit
+	cancel()
+
+	select {
+	case <-done:
+		// Success - notify exited
+	case <-time.After(1 * time.Second):
+		t.Fatal("notify did not exit after context cancellation")
+	}
+}
+
+func TestLocal_errorHandleLocked_NilError(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
+	initialExpireAt := local.ipAllocInhibitExpireAt
+
+	local.errorHandleLocked(nil)
+
+	// Should not modify ipAllocInhibitExpireAt
+	assert.Equal(t, initialExpireAt, local.ipAllocInhibitExpireAt)
+}
+
+func TestLocal_errorHandleLocked_EniPerInstanceLimitExceeded(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
+	initialExpireAt := local.ipAllocInhibitExpireAt
+
+	err := fmt.Errorf("some error")
+
+	// Use gomonkey to mock apiErr.ErrorCodeIs
+	patches := gomonkey.ApplyFunc(apiErr.ErrorCodeIs, func(e error, codes ...string) bool {
+		for _, code := range codes {
+			if code == apiErr.ErrEniPerInstanceLimitExceeded {
+				return true
+			}
+		}
+		return false
+	})
+	defer patches.Reset()
+
+	local.errorHandleLocked(err)
+
+	// Should set ipAllocInhibitExpireAt to approximately 1 minute from now
+	assert.True(t, local.ipAllocInhibitExpireAt.After(initialExpireAt))
+	assert.True(t, local.ipAllocInhibitExpireAt.Before(time.Now().Add(2*time.Minute)))
+}
+
+func TestLocal_errorHandleLocked_InvalidVSwitchIDIPNotEnough(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
+	initialExpireAt := local.ipAllocInhibitExpireAt
+
+	err := fmt.Errorf("some error")
+
+	// Use gomonkey to mock apiErr.ErrorCodeIs
+	patches := gomonkey.ApplyFunc(apiErr.ErrorCodeIs, func(e error, codes ...string) bool {
+		for _, code := range codes {
+			if code == apiErr.InvalidVSwitchIDIPNotEnough {
+				return true
+			}
+		}
+		return false
+	})
+	defer patches.Reset()
+
+	local.errorHandleLocked(err)
+
+	// Should set ipAllocInhibitExpireAt to approximately 10 minutes from now
+	assert.True(t, local.ipAllocInhibitExpireAt.After(initialExpireAt))
+	assert.True(t, local.ipAllocInhibitExpireAt.After(time.Now().Add(9*time.Minute)))
+}
+
+func TestLocal_errorHandleLocked_QuotaExceededPrivateIPAddress(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
+	initialExpireAt := local.ipAllocInhibitExpireAt
+
+	err := fmt.Errorf("some error")
+
+	// Use gomonkey to mock apiErr.ErrorCodeIs
+	patches := gomonkey.ApplyFunc(apiErr.ErrorCodeIs, func(e error, codes ...string) bool {
+		for _, code := range codes {
+			if code == apiErr.QuotaExceededPrivateIPAddress {
+				return true
+			}
+		}
+		return false
+	})
+	defer patches.Reset()
+
+	local.errorHandleLocked(err)
+
+	// Should set ipAllocInhibitExpireAt to approximately 10 minutes from now
+	assert.True(t, local.ipAllocInhibitExpireAt.After(initialExpireAt))
+	assert.True(t, local.ipAllocInhibitExpireAt.After(time.Now().Add(9*time.Minute)))
+}
+
+func TestLocal_errorHandleLocked_OtherError(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
+	initialExpireAt := local.ipAllocInhibitExpireAt
+
+	// Create an error that doesn't match any special error codes
+	err := fmt.Errorf("some random error")
+
+	local.errorHandleLocked(err)
+
+	// Should not modify ipAllocInhibitExpireAt for unrecognized errors
+	assert.Equal(t, initialExpireAt, local.ipAllocInhibitExpireAt)
+}
+
+func TestLocal_errorHandleLocked_AlreadyInhibited(t *testing.T) {
+	local := NewLocalTest(&daemon.ENI{ID: "eni-1"}, nil, &daemon.PoolConfig{}, "")
+
+	// Set a future inhibit time
+	futureTime := time.Now().Add(1 * time.Hour)
+	local.ipAllocInhibitExpireAt = futureTime
+
+	err := fmt.Errorf("some error")
+
+	// Use gomonkey to mock apiErr.ErrorCodeIs to return true for EniPerInstanceLimitExceeded
+	patches := gomonkey.ApplyFunc(apiErr.ErrorCodeIs, func(e error, codes ...string) bool {
+		for _, code := range codes {
+			if code == apiErr.ErrEniPerInstanceLimitExceeded {
+				return true
+			}
+		}
+		return false
+	})
+	defer patches.Reset()
+
+	local.errorHandleLocked(err)
+
+	// Should not reduce the existing inhibit time
+	assert.Equal(t, futureTime, local.ipAllocInhibitExpireAt)
 }

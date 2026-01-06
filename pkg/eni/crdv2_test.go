@@ -15,7 +15,9 @@ import (
 
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
+	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
 func TestGetTrunkENIReturnsErrorWhenNodeNotInitialized(t *testing.T) {
@@ -539,4 +541,112 @@ func TestSyncNodeRuntimeClearsDeletedPods(t *testing.T) {
 	err := r.syncNodeRuntime(context.Background())
 	assert.NoError(t, err)
 	assert.Empty(t, r.deletedPods)
+}
+
+// ==============================================================================
+// Allocate and Release Tests
+// ==============================================================================
+
+func TestCRDV2_Allocate_UnknownResourceType(t *testing.T) {
+	r := &CRDV2{
+		nodeName:    "node1",
+		deletedPods: make(map[string]*networkv1beta1.RuntimePodStatus),
+	}
+
+	// Create a mock request with unknown resource type (0 is not a valid type)
+	request := &mockResourceRequest{resourceType: 0}
+	cni := &daemon.CNI{PodID: "pod-1", PodUID: "uid-1"}
+
+	ch, traces := r.Allocate(context.Background(), cni, request)
+
+	assert.Nil(t, ch)
+	assert.Len(t, traces, 1)
+	assert.Equal(t, ResourceTypeMismatch, traces[0].Condition)
+}
+
+func TestCRDV2_Release_LocalIP(t *testing.T) {
+	r := &CRDV2{
+		nodeName:    "node1",
+		deletedPods: make(map[string]*networkv1beta1.RuntimePodStatus),
+	}
+
+	request := &mockNetworkResource{resourceType: ResourceTypeLocalIP}
+	cni := &daemon.CNI{PodID: "pod-1", PodUID: "uid-1"}
+
+	ok, err := r.Release(context.Background(), cni, request)
+
+	assert.False(t, ok)
+	assert.NoError(t, err)
+	assert.Contains(t, r.deletedPods, "uid-1")
+	assert.Equal(t, "pod-1", r.deletedPods["uid-1"].PodID)
+}
+
+func TestCRDV2_Release_RDMA(t *testing.T) {
+	r := &CRDV2{
+		nodeName:    "node1",
+		deletedPods: make(map[string]*networkv1beta1.RuntimePodStatus),
+	}
+
+	request := &mockNetworkResource{resourceType: ResourceTypeRDMA}
+	cni := &daemon.CNI{PodID: "pod-2", PodUID: "uid-2"}
+
+	ok, err := r.Release(context.Background(), cni, request)
+
+	assert.False(t, ok)
+	assert.NoError(t, err)
+	assert.Contains(t, r.deletedPods, "uid-2")
+	assert.Equal(t, "pod-2", r.deletedPods["uid-2"].PodID)
+}
+
+func TestCRDV2_Release_RemoteIP(t *testing.T) {
+	r := &CRDV2{
+		nodeName:    "node1",
+		deletedPods: make(map[string]*networkv1beta1.RuntimePodStatus),
+	}
+
+	request := &mockNetworkResource{resourceType: ResourceTypeRemoteIP}
+	cni := &daemon.CNI{PodID: "pod-3", PodUID: "uid-3"}
+
+	ok, err := r.Release(context.Background(), cni, request)
+
+	assert.False(t, ok)
+	assert.NoError(t, err)
+	// RemoteIP should not be added to deletedPods
+	assert.NotContains(t, r.deletedPods, "uid-3")
+}
+
+func TestCRDV2_Priority(t *testing.T) {
+	r := &CRDV2{}
+	assert.Equal(t, 100, r.Priority())
+}
+
+func TestCRDV2_Dispose(t *testing.T) {
+	r := &CRDV2{}
+	assert.Equal(t, 0, r.Dispose(10))
+}
+
+// mockResourceRequest implements ResourceRequest interface for testing
+type mockResourceRequest struct {
+	resourceType ResourceType
+}
+
+func (m *mockResourceRequest) ResourceType() ResourceType {
+	return m.resourceType
+}
+
+// mockNetworkResource implements NetworkResource interface for testing
+type mockNetworkResource struct {
+	resourceType ResourceType
+}
+
+func (m *mockNetworkResource) ResourceType() ResourceType {
+	return m.resourceType
+}
+
+func (m *mockNetworkResource) ToStore() []daemon.ResourceItem {
+	return nil
+}
+
+func (m *mockNetworkResource) ToRPC() []*rpc.NetConf {
+	return nil
 }

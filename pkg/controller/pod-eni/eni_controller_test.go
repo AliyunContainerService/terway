@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/controller/status"
@@ -2130,6 +2131,112 @@ var _ = Describe("ENI Controller Tests", func() {
 				resultCtx := r.injectNodeStatus(ctx, "default", podName)
 				Expect(resultCtx).To(Equal(ctx))
 			})
+		})
+	})
+
+	// ==============================================================================
+	// GC ENI FILTER TESTS
+	// Note: gcSecondaryENI and gcMemberENI depend on controlplane.GetConfig() which
+	// is not available in unit tests. We test the eniFilter helper method instead.
+	// ==============================================================================
+
+	Context("ENI Filter Logic", func() {
+		It("should filter ENIs with matching tags", func() {
+			r := createTestReconciler(openAPI, false, false)
+
+			eni := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-1",
+				Tags: []ecs.Tag{
+					{TagKey: types.TagKeyClusterID, TagValue: "test-cluster"},
+					{TagKey: types.NetworkInterfaceTagCreatorKey, TagValue: types.TagTerwayController},
+				},
+			}
+
+			tagFilter := map[string]string{
+				types.TagKeyClusterID:               "test-cluster",
+				types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
+			}
+
+			result := r.eniFilter(eni, tagFilter)
+			Expect(result).To(BeTrue())
+		})
+
+		It("should not filter ENIs without matching cluster ID tag", func() {
+			r := createTestReconciler(openAPI, false, false)
+
+			eni := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-1",
+				Tags: []ecs.Tag{
+					{TagKey: types.TagKeyClusterID, TagValue: "other-cluster"},
+					{TagKey: types.NetworkInterfaceTagCreatorKey, TagValue: types.TagTerwayController},
+				},
+			}
+
+			tagFilter := map[string]string{
+				types.TagKeyClusterID:               "test-cluster",
+				types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
+			}
+
+			result := r.eniFilter(eni, tagFilter)
+			Expect(result).To(BeFalse())
+		})
+
+		It("should not filter ENIs without matching creator tag", func() {
+			r := createTestReconciler(openAPI, false, false)
+
+			eni := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-1",
+				Tags: []ecs.Tag{
+					{TagKey: types.TagKeyClusterID, TagValue: "test-cluster"},
+					{TagKey: types.NetworkInterfaceTagCreatorKey, TagValue: "other-creator"},
+				},
+			}
+
+			tagFilter := map[string]string{
+				types.TagKeyClusterID:               "test-cluster",
+				types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
+			}
+
+			result := r.eniFilter(eni, tagFilter)
+			Expect(result).To(BeFalse())
+		})
+
+		It("should not filter ENIs with missing tags", func() {
+			r := createTestReconciler(openAPI, false, false)
+
+			eni := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-1",
+				Tags:               []ecs.Tag{},
+			}
+
+			tagFilter := map[string]string{
+				types.TagKeyClusterID:               "test-cluster",
+				types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
+			}
+
+			result := r.eniFilter(eni, tagFilter)
+			Expect(result).To(BeFalse())
+		})
+
+		It("should filter ENIs with extra tags", func() {
+			r := createTestReconciler(openAPI, false, false)
+
+			eni := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-1",
+				Tags: []ecs.Tag{
+					{TagKey: types.TagKeyClusterID, TagValue: "test-cluster"},
+					{TagKey: types.NetworkInterfaceTagCreatorKey, TagValue: types.TagTerwayController},
+					{TagKey: "extra-tag", TagValue: "extra-value"},
+				},
+			}
+
+			tagFilter := map[string]string{
+				types.TagKeyClusterID:               "test-cluster",
+				types.NetworkInterfaceTagCreatorKey: types.TagTerwayController,
+			}
+
+			result := r.eniFilter(eni, tagFilter)
+			Expect(result).To(BeTrue())
 		})
 	})
 
