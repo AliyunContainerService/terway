@@ -104,18 +104,7 @@ func init() {
 	}
 }
 
-// SetNodeCapabilities for unit test purpose
-func SetNodeCapabilities(capName, val string) {
-	capabilitiesStore.Set(capName, val)
-}
-
 // GetNodeCapabilities retrieves a capability
 func GetNodeCapabilities(capName string) string {
 	return capabilitiesStore.Get(capName)
-}
-
-// WriteNodeCapabilities writes a capability to the file
-func WriteNodeCapabilities(capName, value string) error {
-	capabilitiesStore.Set(capName, value)
-	return capabilitiesStore.Save()
 }

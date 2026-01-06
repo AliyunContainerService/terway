@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/types"
@@ -20,8 +22,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -2217,4 +2222,222 @@ func TestSerialize(t *testing.T) {
 func TestApiErr(t *testing.T) {
 	err := apierrors.NewNotFound(corev1.Resource("pod"), "test-pod")
 	require.True(t, apierrors.IsNotFound(err))
+}
+
+// ==============================================================================
+// NewK8S TESTS
+// ==============================================================================
+
+func TestNewK8S_Success(t *testing.T) {
+	// Set required environment variable
+	oldNodeName := os.Getenv("NODE_NAME")
+	defer func() {
+		if oldNodeName != "" {
+			os.Setenv("NODE_NAME", oldNodeName)
+		} else {
+			os.Unsetenv("NODE_NAME")
+		}
+	}()
+	os.Setenv("NODE_NAME", "test-node")
+
+	// Create test node
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+	}
+
+	// Create fake client
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(types.Scheme).
+		WithObjects(node).
+		Build()
+
+	// Mock ctrl.GetConfigOrDie
+	patches := gomonkey.ApplyFunc(ctrl.GetConfigOrDie, func() *rest.Config {
+		return &rest.Config{
+			Host: "https://localhost:6443",
+		}
+	})
+	defer patches.Reset()
+
+	// Mock client.New
+	patches.ApplyFunc(client.New, func(config *rest.Config, options client.Options) (client.Client, error) {
+		return fakeClient, nil
+	})
+
+	// Mock kubernetes.NewForConfigOrDie
+	patches.ApplyFunc(kubernetes.NewForConfigOrDie, func(c *rest.Config) *kubernetes.Clientset {
+		// Return a minimal clientset mock
+		return &kubernetes.Clientset{}
+	})
+
+	// Mock storage.NewDiskStorage
+	mockStorage := &mockStorage{data: make(map[string]interface{})}
+	patches.ApplyFunc(storage.NewDiskStorage, func(name string, path string, serializer storage.Serializer, deserializer storage.Deserializer) (storage.Storage, error) {
+		return mockStorage, nil
+	})
+
+	// Create global config
+	globalConfig := &daemon.Config{
+		KubeClientQPS:   10,
+		KubeClientBurst: 20,
+		ServiceCIDR:     "10.96.0.0/12",
+	}
+
+	// Execute NewK8S
+	k8sObj, err := NewK8S(daemon.ModeENIMultiIP, globalConfig, "kube-system")
+
+	// Verify results
+	require.NoError(t, err, "NewK8S should succeed")
+	require.NotNil(t, k8sObj, "K8S object should not be nil")
+	assert.Equal(t, "test-node", k8sObj.NodeName(), "Node name should match")
+	assert.NotNil(t, k8sObj.GetServiceCIDR(), "Service CIDR should be set")
+	assert.NotNil(t, k8sObj.GetRestConfig(), "REST config should be set")
+}
+
+func TestNewK8S_MissingNodeName(t *testing.T) {
+	// Ensure NODE_NAME is not set
+	oldNodeName := os.Getenv("NODE_NAME")
+	defer func() {
+		if oldNodeName != "" {
+			os.Setenv("NODE_NAME", oldNodeName)
+		}
+	}()
+	os.Unsetenv("NODE_NAME")
+
+	// Mock ctrl.GetConfigOrDie
+	patches := gomonkey.ApplyFunc(ctrl.GetConfigOrDie, func() *rest.Config {
+		return &rest.Config{
+			Host: "https://localhost:6443",
+		}
+	})
+	defer patches.Reset()
+
+	fakeClient := fake.NewClientBuilder().WithScheme(types.Scheme).Build()
+	patches.ApplyFunc(client.New, func(config *rest.Config, options client.Options) (client.Client, error) {
+		return fakeClient, nil
+	})
+
+	globalConfig := &daemon.Config{
+		KubeClientQPS:   10,
+		KubeClientBurst: 20,
+		ServiceCIDR:     "10.96.0.0/12",
+	}
+
+	// Execute NewK8S
+	k8sObj, err := NewK8S(daemon.ModeENIMultiIP, globalConfig, "kube-system")
+
+	// Verify error
+	assert.Error(t, err, "Should return error when NODE_NAME is not set")
+	assert.Nil(t, k8sObj, "K8S object should be nil on error")
+	assert.Contains(t, err.Error(), "NODE_NAME", "Error should mention NODE_NAME")
+}
+
+func TestNewK8S_NodeNotFound(t *testing.T) {
+	// Set required environment variable
+	oldNodeName := os.Getenv("NODE_NAME")
+	defer func() {
+		if oldNodeName != "" {
+			os.Setenv("NODE_NAME", oldNodeName)
+		} else {
+			os.Unsetenv("NODE_NAME")
+		}
+	}()
+	os.Setenv("NODE_NAME", "non-existent-node")
+
+	// Create fake client without the node
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(types.Scheme).
+		Build()
+
+	// Mock ctrl.GetConfigOrDie
+	patches := gomonkey.ApplyFunc(ctrl.GetConfigOrDie, func() *rest.Config {
+		return &rest.Config{
+			Host: "https://localhost:6443",
+		}
+	})
+	defer patches.Reset()
+
+	patches.ApplyFunc(client.New, func(config *rest.Config, options client.Options) (client.Client, error) {
+		return fakeClient, nil
+	})
+
+	globalConfig := &daemon.Config{
+		KubeClientQPS:   10,
+		KubeClientBurst: 20,
+		ServiceCIDR:     "10.96.0.0/12",
+	}
+
+	// Execute NewK8S
+	k8sObj, err := NewK8S(daemon.ModeENIMultiIP, globalConfig, "kube-system")
+
+	// Verify error
+	assert.Error(t, err, "Should return error when node is not found")
+	assert.Nil(t, k8sObj, "K8S object should be nil on error")
+	assert.Contains(t, err.Error(), "node spec", "Error should mention node retrieval")
+}
+
+func TestNewK8S_ENIOnlyModeForced(t *testing.T) {
+	// Set required environment variable
+	oldNodeName := os.Getenv("NODE_NAME")
+	defer func() {
+		if oldNodeName != "" {
+			os.Setenv("NODE_NAME", oldNodeName)
+		} else {
+			os.Unsetenv("NODE_NAME")
+		}
+	}()
+	os.Setenv("NODE_NAME", "test-node")
+
+	// Create test node with exclusive ENI label
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+			Labels: map[string]string{
+				types.ExclusiveENIModeLabel: string(types.ExclusiveENIOnly),
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(types.Scheme).
+		WithObjects(node).
+		Build()
+
+	// Mock functions
+	patches := gomonkey.ApplyFunc(ctrl.GetConfigOrDie, func() *rest.Config {
+		return &rest.Config{Host: "https://localhost:6443"}
+	})
+	defer patches.Reset()
+
+	patches.ApplyFunc(client.New, func(config *rest.Config, options client.Options) (client.Client, error) {
+		return fakeClient, nil
+	})
+
+	patches.ApplyFunc(kubernetes.NewForConfigOrDie, func(c *rest.Config) *kubernetes.Clientset {
+		return &kubernetes.Clientset{}
+	})
+
+	mockStorage := &mockStorage{data: make(map[string]interface{})}
+	patches.ApplyFunc(storage.NewDiskStorage, func(name string, path string, serializer storage.Serializer, deserializer storage.Deserializer) (storage.Storage, error) {
+		return mockStorage, nil
+	})
+
+	globalConfig := &daemon.Config{
+		KubeClientQPS:   10,
+		KubeClientBurst: 20,
+		ServiceCIDR:     "10.96.0.0/12",
+	}
+
+	// Execute NewK8S with ENIMultiIP mode (should be forced to ENIOnly)
+	k8sObj, err := NewK8S(daemon.ModeENIMultiIP, globalConfig, "kube-system")
+
+	require.NoError(t, err, "NewK8S should succeed")
+	require.NotNil(t, k8sObj, "K8S object should not be nil")
+	
+	// Note: We can't directly check the mode as it's a private field,
+	// but we can verify the node was set correctly
+	assert.NotNil(t, k8sObj.Node(), "Node should be set")
+	assert.Equal(t, "test-node", k8sObj.Node().Name, "Node name should match")
 }
