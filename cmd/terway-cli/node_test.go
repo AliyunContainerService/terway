@@ -1,18 +1,25 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"runtime"
 	"testing"
 
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
+	k8sClient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/AliyunContainerService/terway/types/daemon"
@@ -892,4 +899,188 @@ func TestSetExclusiveModeWithUnknownLabel(t *testing.T) {
 	err = store.Load()
 	assert.NoError(t, err)
 	assert.Equal(t, "default", store.Get(nodecap.NodeCapabilityExclusiveENI))
+}
+
+// TestGetENIConfig_Success tests getENIConfig with valid config
+func TestGetENIConfig_Success(t *testing.T) {
+	// Patch getAllConfig to return valid config
+	patchGetAllConfig := gomonkey.ApplyFunc(getAllConfig, func(base string) (*TerwayConfig, error) {
+		return &TerwayConfig{
+			cniConfig: []byte(`{"type":"terway"}`),
+			eniConfig: []byte(`{"ip_stack":"dual","max_pool_size":10}`),
+		}, nil
+	})
+	defer patchGetAllConfig.Reset()
+
+	// Save original eniCfg
+	originalEniCfg := eniCfg
+	defer func() { eniCfg = originalEniCfg }()
+
+	cmd := &cobra.Command{}
+	err := getENIConfig(cmd, []string{})
+	assert.NoError(t, err)
+	assert.NotNil(t, eniCfg)
+	assert.Equal(t, "dual", eniCfg.IPStack)
+}
+
+// TestGetENIConfig_GetAllConfigError tests getENIConfig when getAllConfig fails
+func TestGetENIConfig_GetAllConfigError(t *testing.T) {
+	// Patch getAllConfig to return error
+	patchGetAllConfig := gomonkey.ApplyFunc(getAllConfig, func(base string) (*TerwayConfig, error) {
+		return nil, errors.New("config file not found")
+	})
+	defer patchGetAllConfig.Reset()
+
+	cmd := &cobra.Command{}
+	err := getENIConfig(cmd, []string{})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "config file not found")
+}
+
+// TestGetENIConfig_InvalidJSON tests getENIConfig with invalid JSON
+func TestGetENIConfig_InvalidJSON(t *testing.T) {
+	// Patch getAllConfig to return invalid JSON
+	patchGetAllConfig := gomonkey.ApplyFunc(getAllConfig, func(base string) (*TerwayConfig, error) {
+		return &TerwayConfig{
+			cniConfig: []byte(`{"type":"terway"}`),
+			eniConfig: []byte(`{invalid json}`),
+		}, nil
+	})
+	defer patchGetAllConfig.Reset()
+
+	cmd := &cobra.Command{}
+	err := getENIConfig(cmd, []string{})
+	assert.Error(t, err)
+}
+
+// mockK8sClient is a mock implementation of k8sClient.Client for testing
+type mockK8sClient struct {
+	k8sClient.Client
+	getFunc func(ctx context.Context, key k8sClient.ObjectKey, obj k8sClient.Object, opts ...k8sClient.GetOption) error
+}
+
+func (m *mockK8sClient) Get(ctx context.Context, key k8sClient.ObjectKey, obj k8sClient.Object, opts ...k8sClient.GetOption) error {
+	if m.getFunc != nil {
+		return m.getFunc(ctx, key, obj, opts...)
+	}
+	return errors.New("not implemented")
+}
+
+// TestOverrideCNI_GetConfigOrDieError tests overrideCNI when config cannot be obtained
+func TestOverrideCNI_GetConfigOrDieError(t *testing.T) {
+	// This test verifies that overrideCNI handles k8s client creation errors
+	// Since ctrl.GetConfigOrDie() panics on error, we test the subsequent path
+
+	// Save and set environment variable
+	os.Setenv("K8S_NODE_NAME", "test-node")
+	defer os.Unsetenv("K8S_NODE_NAME")
+
+	// Create temp file for node capabilities
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	// Patch ctrl.GetConfigOrDie to return a config
+	patchGetConfig := gomonkey.ApplyFunc(ctrl.GetConfigOrDie, func() *rest.Config {
+		return &rest.Config{Host: "https://test-cluster:6443"}
+	})
+	defer patchGetConfig.Reset()
+
+	// Patch k8sClient.New to return error
+	patchClientNew := gomonkey.ApplyFunc(k8sClient.New, func(config *rest.Config, options k8sClient.Options) (k8sClient.Client, error) {
+		return nil, errors.New("failed to create k8s client")
+	})
+	defer patchClientNew.Reset()
+
+	cmd := &cobra.Command{}
+	err = overrideCNI(cmd, []string{})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create k8s client")
+}
+
+// TestOverrideCNI_GetNodeError tests overrideCNI when getting node fails
+func TestOverrideCNI_GetNodeError(t *testing.T) {
+	// Save and set environment variable
+	os.Setenv("K8S_NODE_NAME", "test-node")
+	defer os.Unsetenv("K8S_NODE_NAME")
+
+	// Create temp file for node capabilities
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	// Patch ctrl.GetConfigOrDie to return a config
+	patchGetConfig := gomonkey.ApplyFunc(ctrl.GetConfigOrDie, func() *rest.Config {
+		return &rest.Config{Host: "https://test-cluster:6443"}
+	})
+	defer patchGetConfig.Reset()
+
+	// Create a mock client that returns error on Get
+	mockClient := &mockK8sClient{
+		getFunc: func(ctx context.Context, key k8sClient.ObjectKey, obj k8sClient.Object, opts ...k8sClient.GetOption) error {
+			return errors.New("node not found")
+		},
+	}
+
+	// Patch k8sClient.New to return our mock client
+	patchClientNew := gomonkey.ApplyFunc(k8sClient.New, func(config *rest.Config, options k8sClient.Options) (k8sClient.Client, error) {
+		return mockClient, nil
+	})
+	defer patchClientNew.Reset()
+
+	cmd := &cobra.Command{}
+	err = overrideCNI(cmd, []string{})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "get node test-node error")
+}
+
+// TestOverrideCNI_Success tests overrideCNI with successful execution
+func TestOverrideCNI_Success(t *testing.T) {
+	// Save and set environment variable
+	os.Setenv("K8S_NODE_NAME", "test-node")
+	defer os.Unsetenv("K8S_NODE_NAME")
+
+	// Create temp file for node capabilities
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	// Create temp CNI file
+	tempCNIFile, err := os.CreateTemp("", "test_cni_config")
+	assert.NoError(t, err)
+	defer os.Remove(tempCNIFile.Name())
+
+	// Patch ctrl.GetConfigOrDie to return a config
+	patchGetConfig := gomonkey.ApplyFunc(ctrl.GetConfigOrDie, func() *rest.Config {
+		return &rest.Config{Host: "https://test-cluster:6443"}
+	})
+	defer patchGetConfig.Reset()
+
+	// Create a mock client that returns a node
+	mockClient := &mockK8sClient{
+		getFunc: func(ctx context.Context, key k8sClient.ObjectKey, obj k8sClient.Object, opts ...k8sClient.GetOption) error {
+			node := obj.(*corev1.Node)
+			node.Name = "test-node"
+			node.Labels = map[string]string{
+				"k8s.aliyun.com/exclusive-mode-eni-type": "default",
+			}
+			return nil
+		},
+	}
+
+	// Patch k8sClient.New to return our mock client
+	patchClientNew := gomonkey.ApplyFunc(k8sClient.New, func(config *rest.Config, options k8sClient.Options) (k8sClient.Client, error) {
+		return mockClient, nil
+	})
+	defer patchClientNew.Reset()
+
+	// Patch setExclusiveMode to succeed
+	patchSetExclusiveMode := gomonkey.ApplyFunc(setExclusiveMode, func(store nodecap.NodeCapabilitiesStore, labels map[string]string, cniPath string) error {
+		return nil
+	})
+	defer patchSetExclusiveMode.Reset()
+
+	cmd := &cobra.Command{}
+	err = overrideCNI(cmd, []string{})
+	assert.NoError(t, err)
 }

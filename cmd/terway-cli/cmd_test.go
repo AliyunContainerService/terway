@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"io"
 	"net"
 	"testing"
 
 	"github.com/agiledragon/gomonkey/v2"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
+	"github.com/AliyunContainerService/terway/rpc"
 )
 
 func TestPrintKV(t *testing.T) {
@@ -380,6 +384,519 @@ func TestRunMetadata_SuccessfulFlow(t *testing.T) {
 
 		err := runMetadata(cmd, []string{})
 		assert.NoError(t, err)
+	})
+}
+
+// mockTerwayTracingClient is a mock implementation of rpc.TerwayTracingClient for testing
+type mockTerwayTracingClient struct {
+	getResourceTypesFunc   func(ctx context.Context, in *rpc.Placeholder, opts ...grpc.CallOption) (*rpc.ResourcesTypesReply, error)
+	getResourcesFunc       func(ctx context.Context, in *rpc.ResourceTypeRequest, opts ...grpc.CallOption) (*rpc.ResourcesNamesReply, error)
+	getResourceConfigFunc  func(ctx context.Context, in *rpc.ResourceTypeNameRequest, opts ...grpc.CallOption) (*rpc.ResourceConfigReply, error)
+	getResourceTraceFunc   func(ctx context.Context, in *rpc.ResourceTypeNameRequest, opts ...grpc.CallOption) (*rpc.ResourceTraceReply, error)
+	resourceExecuteFunc    func(ctx context.Context, in *rpc.ResourceExecuteRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[rpc.ResourceExecuteReply], error)
+	getResourceMappingFunc func(ctx context.Context, in *rpc.Placeholder, opts ...grpc.CallOption) (*rpc.ResourceMappingReply, error)
+}
+
+func (m *mockTerwayTracingClient) GetResourceTypes(ctx context.Context, in *rpc.Placeholder, opts ...grpc.CallOption) (*rpc.ResourcesTypesReply, error) {
+	if m.getResourceTypesFunc != nil {
+		return m.getResourceTypesFunc(ctx, in, opts...)
+	}
+	return nil, errors.New("not implemented")
+}
+
+func (m *mockTerwayTracingClient) GetResources(ctx context.Context, in *rpc.ResourceTypeRequest, opts ...grpc.CallOption) (*rpc.ResourcesNamesReply, error) {
+	if m.getResourcesFunc != nil {
+		return m.getResourcesFunc(ctx, in, opts...)
+	}
+	return nil, errors.New("not implemented")
+}
+
+func (m *mockTerwayTracingClient) GetResourceConfig(ctx context.Context, in *rpc.ResourceTypeNameRequest, opts ...grpc.CallOption) (*rpc.ResourceConfigReply, error) {
+	if m.getResourceConfigFunc != nil {
+		return m.getResourceConfigFunc(ctx, in, opts...)
+	}
+	return nil, errors.New("not implemented")
+}
+
+func (m *mockTerwayTracingClient) GetResourceTrace(ctx context.Context, in *rpc.ResourceTypeNameRequest, opts ...grpc.CallOption) (*rpc.ResourceTraceReply, error) {
+	if m.getResourceTraceFunc != nil {
+		return m.getResourceTraceFunc(ctx, in, opts...)
+	}
+	return nil, errors.New("not implemented")
+}
+
+func (m *mockTerwayTracingClient) ResourceExecute(ctx context.Context, in *rpc.ResourceExecuteRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[rpc.ResourceExecuteReply], error) {
+	if m.resourceExecuteFunc != nil {
+		return m.resourceExecuteFunc(ctx, in, opts...)
+	}
+	return nil, errors.New("not implemented")
+}
+
+func (m *mockTerwayTracingClient) GetResourceMapping(ctx context.Context, in *rpc.Placeholder, opts ...grpc.CallOption) (*rpc.ResourceMappingReply, error) {
+	if m.getResourceMappingFunc != nil {
+		return m.getResourceMappingFunc(ctx, in, opts...)
+	}
+	return nil, errors.New("not implemented")
+}
+
+// mockResourceExecuteStream is a mock implementation of grpc.ServerStreamingClient for ResourceExecute
+type mockResourceExecuteStream struct {
+	grpc.ClientStream
+	messages []*rpc.ResourceExecuteReply
+	index    int
+	err      error
+}
+
+func (m *mockResourceExecuteStream) Recv() (*rpc.ResourceExecuteReply, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.index >= len(m.messages) {
+		return nil, io.EOF
+	}
+	msg := m.messages[m.index]
+	m.index++
+	return msg, nil
+}
+
+func (m *mockResourceExecuteStream) CloseSend() error {
+	return nil
+}
+
+func TestRunList_Success(t *testing.T) {
+	originalClient := client
+	originalCtx := ctx
+	defer func() {
+		client = originalClient
+		ctx = originalCtx
+	}()
+
+	ctx = context.Background()
+
+	t.Run("List types when no arguments", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourceTypesFunc: func(ctx context.Context, in *rpc.Placeholder, opts ...grpc.CallOption) (*rpc.ResourcesTypesReply, error) {
+				return &rpc.ResourcesTypesReply{
+					TypeNames: []string{"type1", "type2", "type3"},
+				}, nil
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runList(cmd, []string{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("List resources when type argument provided", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourcesFunc: func(ctx context.Context, in *rpc.ResourceTypeRequest, opts ...grpc.CallOption) (*rpc.ResourcesNamesReply, error) {
+				assert.Equal(t, "eni", in.Name)
+				return &rpc.ResourcesNamesReply{
+					ResourceNames: []string{"eni-001", "eni-002"},
+				}, nil
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runList(cmd, []string{"eni"})
+		assert.NoError(t, err)
+	})
+}
+
+func TestRunList_Error(t *testing.T) {
+	originalClient := client
+	originalCtx := ctx
+	defer func() {
+		client = originalClient
+		ctx = originalCtx
+	}()
+
+	ctx = context.Background()
+
+	t.Run("Error when GetResourceTypes fails", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourceTypesFunc: func(ctx context.Context, in *rpc.Placeholder, opts ...grpc.CallOption) (*rpc.ResourcesTypesReply, error) {
+				return nil, errors.New("connection failed")
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runList(cmd, []string{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "connection failed")
+	})
+
+	t.Run("Error when GetResources fails", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourcesFunc: func(ctx context.Context, in *rpc.ResourceTypeRequest, opts ...grpc.CallOption) (*rpc.ResourcesNamesReply, error) {
+				return nil, errors.New("resource type not found")
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runList(cmd, []string{"unknown"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "resource type not found")
+	})
+}
+
+func TestRunShow_Success(t *testing.T) {
+	originalClient := client
+	originalCtx := ctx
+	defer func() {
+		client = originalClient
+		ctx = originalCtx
+	}()
+
+	ctx = context.Background()
+
+	t.Run("Show with type only - gets first resource", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourcesFunc: func(ctx context.Context, in *rpc.ResourceTypeRequest, opts ...grpc.CallOption) (*rpc.ResourcesNamesReply, error) {
+				return &rpc.ResourcesNamesReply{
+					ResourceNames: []string{"resource-1", "resource-2"},
+				}, nil
+			},
+			getResourceConfigFunc: func(ctx context.Context, in *rpc.ResourceTypeNameRequest, opts ...grpc.CallOption) (*rpc.ResourceConfigReply, error) {
+				assert.Equal(t, "eni", in.Type)
+				assert.Equal(t, "resource-1", in.Name)
+				return &rpc.ResourceConfigReply{
+					Config: []*rpc.MapKeyValueEntry{
+						{Key: "key1", Value: "value1"},
+					},
+				}, nil
+			},
+			getResourceTraceFunc: func(ctx context.Context, in *rpc.ResourceTypeNameRequest, opts ...grpc.CallOption) (*rpc.ResourceTraceReply, error) {
+				return &rpc.ResourceTraceReply{
+					Trace: []*rpc.MapKeyValueEntry{
+						{Key: "trace1", Value: "traceValue1"},
+					},
+				}, nil
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runShow(cmd, []string{"eni"})
+		assert.NoError(t, err)
+	})
+}
+
+func TestRunShow_Error(t *testing.T) {
+	originalClient := client
+	originalCtx := ctx
+	defer func() {
+		client = originalClient
+		ctx = originalCtx
+	}()
+
+	ctx = context.Background()
+
+	t.Run("Error when no resources found for type", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourcesFunc: func(ctx context.Context, in *rpc.ResourceTypeRequest, opts ...grpc.CallOption) (*rpc.ResourcesNamesReply, error) {
+				return &rpc.ResourcesNamesReply{
+					ResourceNames: []string{},
+				}, nil
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runShow(cmd, []string{"eni"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no resource in the specified type")
+	})
+
+	t.Run("Error when GetResourceConfig fails", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourcesFunc: func(ctx context.Context, in *rpc.ResourceTypeRequest, opts ...grpc.CallOption) (*rpc.ResourcesNamesReply, error) {
+				return &rpc.ResourcesNamesReply{
+					ResourceNames: []string{"resource-1"},
+				}, nil
+			},
+			getResourceConfigFunc: func(ctx context.Context, in *rpc.ResourceTypeNameRequest, opts ...grpc.CallOption) (*rpc.ResourceConfigReply, error) {
+				return nil, errors.New("config not found")
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runShow(cmd, []string{"eni"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "config not found")
+	})
+
+	t.Run("Error when GetResourceTrace fails", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourcesFunc: func(ctx context.Context, in *rpc.ResourceTypeRequest, opts ...grpc.CallOption) (*rpc.ResourcesNamesReply, error) {
+				return &rpc.ResourcesNamesReply{
+					ResourceNames: []string{"resource-1"},
+				}, nil
+			},
+			getResourceConfigFunc: func(ctx context.Context, in *rpc.ResourceTypeNameRequest, opts ...grpc.CallOption) (*rpc.ResourceConfigReply, error) {
+				return &rpc.ResourceConfigReply{Config: []*rpc.MapKeyValueEntry{}}, nil
+			},
+			getResourceTraceFunc: func(ctx context.Context, in *rpc.ResourceTypeNameRequest, opts ...grpc.CallOption) (*rpc.ResourceTraceReply, error) {
+				return nil, errors.New("trace not found")
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runShow(cmd, []string{"eni"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "trace not found")
+	})
+}
+
+func TestRunMapping_Success(t *testing.T) {
+	originalClient := client
+	originalCtx := ctx
+	defer func() {
+		client = originalClient
+		ctx = originalCtx
+	}()
+
+	ctx = context.Background()
+
+	t.Run("Get resource mapping successfully", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourceMappingFunc: func(ctx context.Context, in *rpc.Placeholder, opts ...grpc.CallOption) (*rpc.ResourceMappingReply, error) {
+				return &rpc.ResourceMappingReply{
+					Info: []*rpc.ResourceMapping{
+						{
+							NetworkInterfaceID:   "eni-123",
+							MAC:                  "00:11:22:33:44:55",
+							Status:               "InUse",
+							Type:                 "Secondary",
+							AllocInhibitExpireAt: "2024-01-01T00:00:00Z",
+							Info:                 []string{"info1", "info2"},
+						},
+						{
+							NetworkInterfaceID:   "eni-456",
+							MAC:                  "00:11:22:33:44:66",
+							Status:               "Available",
+							Type:                 "Primary",
+							AllocInhibitExpireAt: "",
+							Info:                 []string{},
+						},
+					},
+				}, nil
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runMapping(cmd, []string{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("Get resource mapping with empty result", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourceMappingFunc: func(ctx context.Context, in *rpc.Placeholder, opts ...grpc.CallOption) (*rpc.ResourceMappingReply, error) {
+				return &rpc.ResourceMappingReply{
+					Info: []*rpc.ResourceMapping{},
+				}, nil
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runMapping(cmd, []string{})
+		assert.NoError(t, err)
+	})
+}
+
+func TestRunMapping_Error(t *testing.T) {
+	originalClient := client
+	originalCtx := ctx
+	defer func() {
+		client = originalClient
+		ctx = originalCtx
+	}()
+
+	ctx = context.Background()
+
+	t.Run("Error when GetResourceMapping fails", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourceMappingFunc: func(ctx context.Context, in *rpc.Placeholder, opts ...grpc.CallOption) (*rpc.ResourceMappingReply, error) {
+				return nil, errors.New("mapping service unavailable")
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runMapping(cmd, []string{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mapping service unavailable")
+	})
+}
+
+func TestRunExecute_Success(t *testing.T) {
+	originalClient := client
+	originalCtx := ctx
+	defer func() {
+		client = originalClient
+		ctx = originalCtx
+	}()
+
+	ctx = context.Background()
+
+	t.Run("Execute command successfully with messages", func(t *testing.T) {
+		mockStream := &mockResourceExecuteStream{
+			messages: []*rpc.ResourceExecuteReply{
+				{Message: "output line 1\n"},
+				{Message: "output line 2\n"},
+			},
+		}
+
+		mockClient := &mockTerwayTracingClient{
+			resourceExecuteFunc: func(ctx context.Context, in *rpc.ResourceExecuteRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[rpc.ResourceExecuteReply], error) {
+				assert.Equal(t, "eni", in.Type)
+				assert.Equal(t, "eni-001", in.Name)
+				assert.Equal(t, "status", in.Command)
+				assert.Equal(t, []string{"arg1", "arg2"}, in.Args)
+				return mockStream, nil
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runExecute(cmd, []string{"eni", "eni-001", "status", "arg1", "arg2"})
+		assert.NoError(t, err)
+	})
+
+	t.Run("Execute command with empty response", func(t *testing.T) {
+		mockStream := &mockResourceExecuteStream{
+			messages: []*rpc.ResourceExecuteReply{},
+		}
+
+		mockClient := &mockTerwayTracingClient{
+			resourceExecuteFunc: func(ctx context.Context, in *rpc.ResourceExecuteRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[rpc.ResourceExecuteReply], error) {
+				return mockStream, nil
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runExecute(cmd, []string{"eni", "eni-001", "status"})
+		assert.NoError(t, err)
+	})
+}
+
+func TestRunExecute_Error(t *testing.T) {
+	originalClient := client
+	originalCtx := ctx
+	defer func() {
+		client = originalClient
+		ctx = originalCtx
+	}()
+
+	ctx = context.Background()
+
+	t.Run("Error when ResourceExecute fails", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			resourceExecuteFunc: func(ctx context.Context, in *rpc.ResourceExecuteRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[rpc.ResourceExecuteReply], error) {
+				return nil, errors.New("execute failed")
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runExecute(cmd, []string{"eni", "eni-001", "status"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "execute failed")
+	})
+
+	t.Run("Error when stream.Recv fails", func(t *testing.T) {
+		mockStream := &mockResourceExecuteStream{
+			err: errors.New("stream error"),
+		}
+
+		mockClient := &mockTerwayTracingClient{
+			resourceExecuteFunc: func(ctx context.Context, in *rpc.ResourceExecuteRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[rpc.ResourceExecuteReply], error) {
+				return mockStream, nil
+			},
+		}
+		client = mockClient
+
+		cmd := &cobra.Command{}
+		err := runExecute(cmd, []string{"eni", "eni-001", "status"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "stream error")
+	})
+}
+
+func TestGetFirstNameWithType_Success(t *testing.T) {
+	originalClient := client
+	originalCtx := ctx
+	defer func() {
+		client = originalClient
+		ctx = originalCtx
+	}()
+
+	ctx = context.Background()
+
+	t.Run("Get first name successfully", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourcesFunc: func(ctx context.Context, in *rpc.ResourceTypeRequest, opts ...grpc.CallOption) (*rpc.ResourcesNamesReply, error) {
+				assert.Equal(t, "eni", in.Name)
+				return &rpc.ResourcesNamesReply{
+					ResourceNames: []string{"eni-first", "eni-second"},
+				}, nil
+			},
+		}
+		client = mockClient
+
+		name, err := getFirstNameWithType("eni")
+		assert.NoError(t, err)
+		assert.Equal(t, "eni-first", name)
+	})
+}
+
+func TestGetFirstNameWithType_Error(t *testing.T) {
+	originalClient := client
+	originalCtx := ctx
+	defer func() {
+		client = originalClient
+		ctx = originalCtx
+	}()
+
+	ctx = context.Background()
+
+	t.Run("Error when GetResources fails", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourcesFunc: func(ctx context.Context, in *rpc.ResourceTypeRequest, opts ...grpc.CallOption) (*rpc.ResourcesNamesReply, error) {
+				return nil, errors.New("service unavailable")
+			},
+		}
+		client = mockClient
+
+		name, err := getFirstNameWithType("eni")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "service unavailable")
+		assert.Empty(t, name)
+	})
+
+	t.Run("Error when no resources found", func(t *testing.T) {
+		mockClient := &mockTerwayTracingClient{
+			getResourcesFunc: func(ctx context.Context, in *rpc.ResourceTypeRequest, opts ...grpc.CallOption) (*rpc.ResourcesNamesReply, error) {
+				return &rpc.ResourcesNamesReply{
+					ResourceNames: []string{},
+				}, nil
+			},
+		}
+		client = mockClient
+
+		name, err := getFirstNameWithType("eni")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no resource in the specified type")
+		assert.Empty(t, name)
 	})
 }
 

@@ -2,8 +2,11 @@ package eni
 
 import (
 	"context"
+	"reflect"
 	"testing"
+	"time"
 
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -649,4 +652,237 @@ func (m *mockNetworkResource) ToStore() []daemon.ResourceItem {
 
 func (m *mockNetworkResource) ToRPC() []*rpc.NetConf {
 	return nil
+}
+
+// ==============================================================================
+// remote method Tests
+// ==============================================================================
+
+func TestCRDV2_remote_GetTrunkENIError(t *testing.T) {
+	// Set up backoff to make tests run faster
+	backoff.Backoff(backoff.WaitPodENIStatus)
+	backoff.OverrideBackoff(map[string]backoff.ExtendedBackoff{
+		backoff.WaitPodENIStatus: {
+			Backoff: wait.Backoff{
+				Duration: 0,
+				Factor:   0,
+				Jitter:   0,
+				Steps:    1,
+				Cap:      0,
+			},
+		},
+	})
+
+	crd := &CRDV2{
+		nodeName:       "node1",
+		podENINotifier: NewNotifier(),
+	}
+
+	ctx := context.Background()
+
+	// Create a fake client that will cause getTrunkENI to fail
+	fakeClient := fake.NewClientBuilder().WithScheme(types.Scheme).WithObjects(&networkv1beta1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+		Spec:       networkv1beta1.NodeSpec{ENISpec: nil}, // This will cause getTrunkENI to fail
+	}).Build()
+	crd.client = fakeClient
+
+	request := &mockResourceRequest{resourceType: ResourceTypeRemoteIP}
+	cni := &daemon.CNI{PodID: "pod-1", PodUID: "uid-1"}
+
+	resp, traces := crd.remote(ctx, cni, request)
+
+	// Should return a channel and no traces
+	assert.NotNil(t, resp)
+	assert.Nil(t, traces)
+
+	// Wait for the error response
+	select {
+	case result := <-resp:
+		assert.NotNil(t, result)
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "has not been initialized")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for error response")
+	}
+}
+
+func TestCRDV2_remote_GetTrunkENIError_ContextCanceled(t *testing.T) {
+	// Set up backoff to make tests run faster
+	backoff.Backoff(backoff.WaitPodENIStatus)
+	backoff.OverrideBackoff(map[string]backoff.ExtendedBackoff{
+		backoff.WaitPodENIStatus: {
+			Backoff: wait.Backoff{
+				Duration: 0,
+				Factor:   0,
+				Jitter:   0,
+				Steps:    1,
+				Cap:      0,
+			},
+		},
+	})
+
+	crd := &CRDV2{
+		nodeName:       "node1",
+		podENINotifier: NewNotifier(),
+	}
+
+	// Create a context that will be canceled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	// Create a fake client that will cause getTrunkENI to fail
+	fakeClient := fake.NewClientBuilder().WithScheme(types.Scheme).WithObjects(&networkv1beta1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+		Spec:       networkv1beta1.NodeSpec{ENISpec: nil},
+	}).Build()
+	crd.client = fakeClient
+
+	request := &mockResourceRequest{resourceType: ResourceTypeRemoteIP}
+	cni := &daemon.CNI{PodID: "pod-1", PodUID: "uid-1"}
+
+	resp, traces := crd.remote(ctx, cni, request)
+
+	// Should return a channel and no traces
+	assert.NotNil(t, resp)
+	assert.Nil(t, traces)
+
+	// With canceled context, the goroutine should exit without sending
+	select {
+	case result := <-resp:
+		// If we get a result, it should be nil (channel closed) or have an error
+		if result != nil {
+			// If there's an error, that's also acceptable
+			assert.Error(t, result.Err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		// Channel might be closed without sending, which is also acceptable
+		// This is a race condition test
+	}
+}
+
+func TestCRDV2_remote_GetTrunkENISuccess(t *testing.T) {
+	crd := &CRDV2{
+		nodeName:       "node1",
+		podENINotifier: NewNotifier(),
+	}
+
+	ctx := context.Background()
+	request := &mockResourceRequest{resourceType: ResourceTypeRemoteIP}
+	cni := &daemon.CNI{
+		PodID:        "pod-1",
+		PodUID:       "uid-1",
+		PodName:      "pod-1",
+		PodNamespace: "default",
+	}
+
+	// Mock getTrunkENI to return a valid trunk ENI
+	trunkENI := &daemon.ENI{
+		ID:               "eni-1",
+		MAC:              "00:00:00:00:00:01",
+		SecurityGroupIDs: []string{"sg-1"},
+		Trunk:            true,
+	}
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	// Mock getTrunkENI method
+	patches.ApplyPrivateMethod(crd, "getTrunkENI", func(_ *CRDV2, _ context.Context) (*daemon.ENI, error) {
+		return trunkENI, nil
+	})
+
+	// Create a mock Remote instance and mock its Allocate method
+	expectedResp := make(chan *AllocResp, 1)
+	expectedResp <- &AllocResp{
+		Err: nil,
+		NetworkConfigs: NetworkResources{
+			&RemoteIPResource{},
+		},
+	}
+	close(expectedResp)
+
+	// We need to mock Remote.Allocate, but since it's called on a new instance,
+	// we'll use ApplyMethod on the Remote type
+	patches.ApplyMethod(reflect.TypeOf(&Remote{}), "Allocate",
+		func(_ *Remote, _ context.Context, _ *daemon.CNI, _ ResourceRequest) (chan *AllocResp, []Trace) {
+			return expectedResp, nil
+		})
+
+	resp, traces := crd.remote(ctx, cni, request)
+
+	// Should return a channel and no traces
+	assert.NotNil(t, resp)
+	assert.Nil(t, traces)
+
+	// Verify the response
+	select {
+	case result := <-resp:
+		assert.NotNil(t, result)
+		assert.NoError(t, result.Err)
+		assert.NotNil(t, result.NetworkConfigs)
+		assert.Equal(t, 1, len(result.NetworkConfigs))
+		// Verify ResourceType by comparing the underlying value
+		assert.Equal(t, int(ResourceTypeRemoteIP), int(result.NetworkConfigs[0].ResourceType()))
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for allocation response")
+	}
+}
+
+func TestCRDV2_remote_GetTrunkENISuccess_TrunkNotEnabled(t *testing.T) {
+	crd := &CRDV2{
+		nodeName:       "node1",
+		podENINotifier: NewNotifier(),
+	}
+
+	ctx := context.Background()
+	request := &mockResourceRequest{resourceType: ResourceTypeRemoteIP}
+	cni := &daemon.CNI{
+		PodID:        "pod-1",
+		PodUID:       "uid-1",
+		PodName:      "pod-1",
+		PodNamespace: "default",
+	}
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	// Mock getTrunkENI to return nil, nil (trunk not enabled)
+	patches.ApplyPrivateMethod(crd, "getTrunkENI", func(_ *CRDV2, _ context.Context) (*daemon.ENI, error) {
+		return nil, nil
+	})
+
+	// Mock Remote.Allocate to return expected response
+	expectedResp := make(chan *AllocResp, 1)
+	expectedResp <- &AllocResp{
+		Err: nil,
+		NetworkConfigs: NetworkResources{
+			&RemoteIPResource{},
+		},
+	}
+	close(expectedResp)
+
+	patches.ApplyMethod(reflect.TypeOf(&Remote{}), "Allocate",
+		func(_ *Remote, _ context.Context, _ *daemon.CNI, _ ResourceRequest) (chan *AllocResp, []Trace) {
+			return expectedResp, nil
+		})
+
+	resp, traces := crd.remote(ctx, cni, request)
+
+	// Should return a channel and no traces
+	assert.NotNil(t, resp)
+	assert.Nil(t, traces)
+
+	// Verify the response
+	select {
+	case result := <-resp:
+		assert.NotNil(t, result)
+		assert.NoError(t, result.Err)
+		assert.NotNil(t, result.NetworkConfigs)
+		assert.Equal(t, 1, len(result.NetworkConfigs))
+		// Verify ResourceType by comparing the underlying value
+		assert.Equal(t, int(ResourceTypeRemoteIP), int(result.NetworkConfigs[0].ResourceType()))
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for allocation response")
+	}
 }

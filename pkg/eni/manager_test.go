@@ -10,9 +10,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/AliyunContainerService/terway/pkg/k8s/mocks"
+	k8smocks "github.com/AliyunContainerService/terway/pkg/k8s/mocks"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
+	"github.com/stretchr/testify/mock"
 )
 
 var _ NetworkInterface = &timeOut{}
@@ -83,7 +84,7 @@ func (s *success) Run(ctx context.Context, podResources []daemon.PodResources, w
 
 func TestManagerAllocateReturnsResourcesWhenSuccessful(t *testing.T) {
 	mockNI := &success{}
-	manager := NewManager(nil, 0, []NetworkInterface{mockNI}, daemon.EniSelectionPolicyMostIPs, mocks.NewKubernetes(t))
+	manager := NewManager(nil, 0, []NetworkInterface{mockNI}, daemon.EniSelectionPolicyMostIPs, k8smocks.NewKubernetes(t))
 
 	request := NewLocalIPRequest()
 	resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -107,7 +108,7 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 	}
 
 	{
-		manager := NewManager(nil, 0, []NetworkInterface{mockNI, mockNI2}, daemon.EniSelectionPolicyMostIPs, mocks.NewKubernetes(t))
+		manager := NewManager(nil, 0, []NetworkInterface{mockNI, mockNI2}, daemon.EniSelectionPolicyMostIPs, k8smocks.NewKubernetes(t))
 
 		request := NewLocalIPRequest()
 		resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -120,7 +121,7 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 	}
 
 	{
-		manager := NewManager(nil, 0, []NetworkInterface{mockNI, mockNI2}, daemon.EniSelectionPolicyLeastIPs, mocks.NewKubernetes(t))
+		manager := NewManager(nil, 0, []NetworkInterface{mockNI, mockNI2}, daemon.EniSelectionPolicyLeastIPs, k8smocks.NewKubernetes(t))
 
 		request := NewLocalIPRequest()
 		resources, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -134,7 +135,7 @@ func TestManagerAllocateSelectionPolicy(t *testing.T) {
 }
 
 func TestManagerAllocateReturnsErrorWhenNoBackendCanHandleAllocation(t *testing.T) {
-	manager := NewManager(nil, 0, []NetworkInterface{}, daemon.EniSelectionPolicyMostIPs, mocks.NewKubernetes(t))
+	manager := NewManager(nil, 0, []NetworkInterface{}, daemon.EniSelectionPolicyMostIPs, k8smocks.NewKubernetes(t))
 
 	request := NewLocalIPRequest()
 	_, err := manager.Allocate(context.Background(), &daemon.CNI{}, &AllocRequest{
@@ -146,7 +147,7 @@ func TestManagerAllocateReturnsErrorWhenNoBackendCanHandleAllocation(t *testing.
 
 func TestManagerAllocateWithTimeoutWhenAllocationFails(t *testing.T) {
 	mockNI := &timeOut{}
-	manager := NewManager(nil, 0, []NetworkInterface{mockNI}, daemon.EniSelectionPolicyMostIPs, mocks.NewKubernetes(t))
+	manager := NewManager(nil, 0, []NetworkInterface{mockNI}, daemon.EniSelectionPolicyMostIPs, k8smocks.NewKubernetes(t))
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -456,4 +457,65 @@ func TestManager_calculateToDel_EdgeCases(t *testing.T) {
 		// Just verify it doesn't panic and sets nextReclaimTime
 		assert.False(t, m.nextReclaimTime.IsZero())
 	})
+}
+
+func TestManager(t *testing.T) {
+	pool := &daemon.PoolConfig{
+		Capacity:         10,
+		MaxENI:           3,
+		ReclaimBatchSize: 3,
+		ReclaimInterval:  time.Minute,
+		ReclaimAfter:     time.Minute,
+		ReclaimFactor:    0.1,
+	}
+
+	k8s := k8smocks.NewKubernetes(t)
+	k8s.On("PatchNodeIPResCondition", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	mgr := NewManager(pool, 10*time.Second, []NetworkInterface{&NoOpNetworkInterface{}}, daemon.EniSelectionPolicyMostIPs, k8s)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wg := &sync.WaitGroup{}
+	err := mgr.Run(ctx, wg, []daemon.PodResources{})
+	assert.NoError(t, err)
+
+	resources, err := mgr.Allocate(ctx, &daemon.CNI{}, &AllocRequest{
+		ResourceRequests: []ResourceRequest{NewLocalIPRequest()},
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, resources)
+
+	err = mgr.Release(ctx, &daemon.CNI{}, &ReleaseRequest{
+		[]NetworkResource{
+			&LocalIPResource{},
+		},
+	})
+	assert.NoError(t, err)
+}
+
+type NoOpNetworkInterface struct {
+}
+
+func (n *NoOpNetworkInterface) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace) {
+	resp := make(chan *AllocResp)
+	go func() {
+		resp <- &AllocResp{}
+	}()
+	return resp, nil
+}
+
+func (n *NoOpNetworkInterface) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) (bool, error) {
+	return true, nil
+}
+
+func (n *NoOpNetworkInterface) Priority() int {
+	return 0
+}
+
+func (n *NoOpNetworkInterface) Dispose(int) int {
+	return 0
+}
+
+func (n *NoOpNetworkInterface) Run(ctx context.Context, podResources []daemon.PodResources, wg *sync.WaitGroup) error {
+	return nil
 }
