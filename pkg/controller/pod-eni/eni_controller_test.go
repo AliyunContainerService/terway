@@ -7,6 +7,7 @@ import (
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/status"
 	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
 	"github.com/AliyunContainerService/terway/types"
@@ -112,6 +113,17 @@ var _ = Describe("ENI Controller Tests", func() {
 		}
 	})
 
+	Context("Test init", func() {
+		It("register should succeed", func() {
+			v, ok := register.Controllers[controllerName]
+			Expect(ok).To(BeTrue())
+
+			mgr, ctx := testutil.NewManager(cfg, openAPI, k8sClient)
+			err := v.Creator(mgr, ctx)
+
+			Expect(err).To(Not(HaveOccurred()))
+		})
+	})
 	// ==============================================================================
 	// RECONCILE ENTRY POINT TESTS
 	// ==============================================================================

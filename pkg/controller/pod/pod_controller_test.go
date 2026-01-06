@@ -3,6 +3,7 @@ package pod
 import (
 	"context"
 
+	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	. "github.com/onsi/ginkgo/v2"
@@ -60,6 +61,18 @@ var _ = Describe("Pod controller", func() {
 		testNodeCRD = &networkv1beta1.Node{}
 		testNodeCRD.Name = nodeName
 		_ = k8sClient.Delete(ctx, testNodeCRD)
+	})
+
+	Context("Test init", func() {
+		It("register should succeed", func() {
+			v, ok := register.Controllers[controllerName]
+			Expect(ok).To(BeTrue())
+
+			mgr, ctx := testutil.NewManager(cfg, openAPI, k8sClient)
+			err := v.Creator(mgr, ctx)
+
+			Expect(err).To(Not(HaveOccurred()))
+		})
 	})
 
 	Context("create normal pod use pod-networks anno", func() {

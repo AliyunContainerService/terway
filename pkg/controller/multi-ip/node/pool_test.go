@@ -9,6 +9,14 @@ import (
 	"testing"
 	"time"
 
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
+	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
+	register "github.com/AliyunContainerService/terway/pkg/controller"
+	"github.com/AliyunContainerService/terway/pkg/eni/ops"
+	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
+	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -25,13 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
-	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
-	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
-	"github.com/AliyunContainerService/terway/pkg/backoff"
-	"github.com/AliyunContainerService/terway/pkg/eni/ops"
-	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 )
 
 func MetaIntoCtx(ctx context.Context) context.Context {
@@ -3747,6 +3748,20 @@ var _ = Describe("Test ReconcileNode", func() {
 			result := isDaemonSupportNodeRuntime(ctx, k8sClient, testNodeName)
 			Expect(result).To(BeTrue())
 		})
+	})
+
+	Context("Test init", func() {
+		{
+			It("register should succeed", func() {
+				v, ok := register.Controllers[ControllerName]
+				Expect(ok).To(BeTrue())
+
+				mgr, ctx := testutil.NewManager(cfg, openAPI, k8sClient)
+				err := v.Creator(mgr, ctx)
+
+				Expect(err).To(Not(HaveOccurred()))
+			})
+		}
 	})
 })
 

@@ -63,11 +63,21 @@ func init() {
 	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &corev1.Pod{})
 
-		crdMode := controlplane.GetConfig().IPAMType == types.IPAMTypeCRD
+		crdMode := ctrlCtx.Config.IPAMType == types.IPAMTypeCRD
+
+		r := &ReconcilePod{
+			client:    mgr.GetClient(),
+			scheme:    mgr.GetScheme(),
+			record:    mgr.GetEventRecorderFor("TerwayPodController"),
+			aliyun:    ctrlCtx.AliyunClient,
+			swPool:    ctrlCtx.VSwitchPool,
+			trunkMode: *ctrlCtx.Config.EnableTrunk,
+			crdMode:   crdMode,
+		}
 
 		c, err := controller.NewUnmanaged(controllerName, controller.Options{
-			Reconciler:              NewReconcilePod(mgr, ctrlCtx.AliyunClient, ctrlCtx.VSwitchPool, crdMode),
-			MaxConcurrentReconciles: controlplane.GetConfig().PodMaxConcurrent,
+			Reconciler:              r,
+			MaxConcurrentReconciles: ctrlCtx.Config.PodMaxConcurrent,
 		})
 
 		if err != nil {
@@ -146,20 +156,6 @@ func (w *Wrapper) Start(ctx context.Context) error {
 
 func (w *Wrapper) NeedLeaderElection() bool {
 	return true
-}
-
-// NewReconcilePod watch pod lifecycle events and sync to podENI resource
-func NewReconcilePod(mgr manager.Manager, aliyunClient aliyunClient.OpenAPI, swPool *vswitch.SwitchPool, crdMode bool) *ReconcilePod {
-	r := &ReconcilePod{
-		client:    mgr.GetClient(),
-		scheme:    mgr.GetScheme(),
-		record:    mgr.GetEventRecorderFor("TerwayPodController"),
-		aliyun:    aliyunClient,
-		swPool:    swPool,
-		trunkMode: *controlplane.GetConfig().EnableTrunk,
-		crdMode:   crdMode,
-	}
-	return r
 }
 
 // Reconcile all pod events

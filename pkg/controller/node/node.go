@@ -35,7 +35,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/feature"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
-	"github.com/AliyunContainerService/terway/types/controlplane"
 )
 
 const (
@@ -57,13 +56,13 @@ func init() {
 		}
 
 		nodePredicate := &predicateForNodeEvent{
-			nodeLabelWhiteList: controlplane.GetConfig().NodeLabelWhiteList,
+			nodeLabelWhiteList: ctrlCtx.Config.NodeLabelWhiteList,
 			supportEFLO:        utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
 		}
 		return ctrl.NewControllerManagedBy(mgr).
 			Named(ControllerName).
 			WithOptions(controller.Options{
-				MaxConcurrentReconciles: controlplane.GetConfig().NodeMaxConcurrent,
+				MaxConcurrentReconciles: ctrlCtx.Config.NodeMaxConcurrent,
 				LogConstructor: func(request *reconcile.Request) logr.Logger {
 					log := mgr.GetLogger()
 					if request != nil {

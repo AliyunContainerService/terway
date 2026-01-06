@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	. "github.com/onsi/ginkgo/v2"
@@ -106,6 +107,18 @@ var _ = Describe("Node Controller", func() {
 		Expect(resource.Spec.NodeCap.NetworkCardsCount).NotTo(BeNil())
 		Expect(*resource.Spec.NodeCap.NetworkCardsCount).To(Equal(expectedCount))
 	}
+
+	Context("Test init", func() {
+		It("register should succeed", func() {
+			v, ok := register.Controllers[ControllerName]
+			Expect(ok).To(BeTrue())
+
+			mgr, ctx := testutil.NewManager(cfg, openAPI, k8sClient)
+			err := v.Creator(mgr, ctx)
+
+			Expect(err).To(Not(HaveOccurred()))
+		})
+	})
 
 	Context("ECS Node", func() {
 		const nodeName = "test-ecs-node"

@@ -3,8 +3,10 @@ package pod
 import (
 	"context"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
+	register "github.com/AliyunContainerService/terway/pkg/controller"
+	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -15,28 +17,17 @@ import (
 var _ = Describe("Pod Controller", func() {
 	ctx := context.Background()
 
-	BeforeEach(func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "default"},
-			Spec: corev1.PodSpec{
-				NodeName: "node-az-1",
-				Containers: []corev1.Container{
-					{
-						Name:  "foo",
-						Image: "busybox",
-					},
-				},
-			},
-		}
-		err := k8sClient.Create(ctx, pod)
-		Expect(err).NotTo(HaveOccurred())
-	})
-	AfterEach(func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "default"},
-		}
-		err := k8sClient.Delete(ctx, pod)
-		Expect(err).NotTo(HaveOccurred())
+	Context("Test init", func() {
+		It("register should succeed", func() {
+			v, ok := register.Controllers[ControllerName]
+			Expect(ok).To(BeTrue())
+
+			openAPI := mocks.NewOpenAPI(GinkgoT())
+			mgr, ctx := testutil.NewManager(cfg, openAPI, k8sClient)
+			err := v.Creator(mgr, ctx)
+
+			Expect(err).To(Not(HaveOccurred()))
+		})
 	})
 
 	Context("Reconcile", func() {
@@ -54,71 +45,71 @@ var _ = Describe("Pod Controller", func() {
 			Expect(err).To(BeNil())
 		})
 	})
-})
 
-var _ = Describe("NeedProcess Function", func() {
-	var pod *corev1.Pod
+	Context("NeedProcess Function", func() {
+		var pod *corev1.Pod
 
-	BeforeEach(func() {
-		pod = &corev1.Pod{
-			Spec: corev1.PodSpec{
-				NodeName: "node1",
-			},
-		}
-	})
-
-	Context("When object is not a Pod", func() {
-		It("returns false", func() {
-			obj := &corev1.Service{}
-			result := needProcess(obj)
-			Expect(result).To(BeFalse())
+		BeforeEach(func() {
+			pod = &corev1.Pod{
+				Spec: corev1.PodSpec{
+					NodeName: "node1",
+				},
+			}
 		})
-	})
 
-	Context("When Pod has no NodeName", func() {
-		It("returns false", func() {
-			pod.Spec.NodeName = ""
-			result := needProcess(pod)
-			Expect(result).To(BeFalse())
+		Context("When object is not a Pod", func() {
+			It("returns false", func() {
+				obj := &corev1.Service{}
+				result := needProcess(obj)
+				Expect(result).To(BeFalse())
+			})
 		})
-	})
 
-	Context("When Pod uses HostNetwork", func() {
-		It("returns false", func() {
-			pod.Spec.HostNetwork = true
-			result := needProcess(pod)
-			Expect(result).To(BeFalse())
+		Context("When Pod has no NodeName", func() {
+			It("returns false", func() {
+				pod.Spec.NodeName = ""
+				result := needProcess(pod)
+				Expect(result).To(BeFalse())
+			})
 		})
-	})
 
-	Context("When Pod is ignored by Terway", func() {
-		It("returns false", func() {
-			pod.ObjectMeta.Labels = map[string]string{"k8s.aliyun.com/ignore-by-terway": "true"}
-			result := needProcess(pod)
-			Expect(result).To(BeFalse())
+		Context("When Pod uses HostNetwork", func() {
+			It("returns false", func() {
+				pod.Spec.HostNetwork = true
+				result := needProcess(pod)
+				Expect(result).To(BeFalse())
+			})
 		})
-	})
 
-	Context("When Pod uses ENI", func() {
-		It("returns false", func() {
-			pod.ObjectMeta.Annotations = map[string]string{"k8s.aliyun.com/pod-eni": "true"}
-			result := needProcess(pod)
-			Expect(result).To(BeFalse())
+		Context("When Pod is ignored by Terway", func() {
+			It("returns false", func() {
+				pod.ObjectMeta.Labels = map[string]string{"k8s.aliyun.com/ignore-by-terway": "true"}
+				result := needProcess(pod)
+				Expect(result).To(BeFalse())
+			})
 		})
-	})
 
-	Context("When Pod sandbox not exited and has PodIP", func() {
-		It("returns false", func() {
-			pod.Status.PodIP = "192.168.1.1"
-			result := needProcess(pod)
-			Expect(result).To(BeFalse())
+		Context("When Pod uses ENI", func() {
+			It("returns false", func() {
+				pod.ObjectMeta.Annotations = map[string]string{"k8s.aliyun.com/pod-eni": "true"}
+				result := needProcess(pod)
+				Expect(result).To(BeFalse())
+			})
 		})
-	})
 
-	Context("When Pod is ready to process", func() {
-		It("returns true", func() {
-			result := needProcess(pod)
-			Expect(result).To(BeTrue())
+		Context("When Pod sandbox not exited and has PodIP", func() {
+			It("returns false", func() {
+				pod.Status.PodIP = "192.168.1.1"
+				result := needProcess(pod)
+				Expect(result).To(BeFalse())
+			})
+		})
+
+		Context("When Pod is ready to process", func() {
+			It("returns true", func() {
+				result := needProcess(pod)
+				Expect(result).To(BeTrue())
+			})
 		})
 	})
 })

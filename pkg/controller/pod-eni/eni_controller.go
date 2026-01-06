@@ -76,13 +76,13 @@ func init() {
 			scheme:          mgr.GetScheme(),
 			record:          mgr.GetEventRecorderFor("TerwayPodENIController"),
 			aliyun:          ctrlCtx.AliyunClient,
-			trunkMode:       *controlplane.GetConfig().EnableTrunk,
-			crdMode:         controlplane.GetConfig().IPAMType == types.IPAMTypeCRD,
+			trunkMode:       *ctrlCtx.Config.EnableTrunk,
+			crdMode:         ctrlCtx.Config.IPAMType == types.IPAMTypeCRD,
 			nodeStatusCache: ctrlCtx.NodeStatusCache,
 		}
 		c, err := controller.NewUnmanaged(controllerName, controller.Options{
 			Reconciler:              r,
-			MaxConcurrentReconciles: controlplane.GetConfig().PodENIMaxConcurrent,
+			MaxConcurrentReconciles: ctrlCtx.Config.PodENIMaxConcurrent,
 		})
 		if err != nil {
 			return err
