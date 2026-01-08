@@ -2,8 +2,11 @@ package client
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/agiledragon/gomonkey/v2"
 	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
@@ -14,6 +17,10 @@ import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel"
+	"k8s.io/apimachinery/pkg/util/wait"
+
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
+	sdkErr "github.com/aliyun/alibaba-cloud-sdk-go/sdk/errors"
 )
 
 // Mock ClientSet for testing
@@ -1006,4 +1013,642 @@ func TestECSService_DescribeNetworkInterface2_WithGomonkey(t *testing.T) {
 	assert.Equal(t, "", eni.TrunkNetworkInterfaceID)
 	assert.Equal(t, 0, eni.DeviceIndex)
 	assert.Equal(t, "Standard", eni.NetworkInterfaceTrafficMode)
+}
+
+func TestECSService_WaitForNetworkInterface_WithGomonkey(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock response for DescribeNetworkInterface
+	mockResponse := []*NetworkInterface{
+		{
+			NetworkInterfaceID: "eni-test-001",
+			Status:             "InUse",
+			MacAddress:         "02:11:22:33:44:55",
+			VSwitchID:          "vsw-test-001",
+			PrivateIPAddress:   "10.0.0.100",
+			ZoneID:             "cn-hangzhou-a",
+		},
+	}
+
+	// Mock DescribeNetworkInterface method
+	patches := gomonkey.ApplyMethod(
+		ecsService,
+		"DescribeNetworkInterface",
+		func(_ *ECSService, ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error) {
+			// Verify request parameters
+			assert.Equal(t, []string{"eni-test-001"}, eniID)
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	backoff := wait.Backoff{
+		Duration: 1 * time.Millisecond,
+		Factor:   1,
+		Jitter:   0,
+		Steps:    1,
+	}
+	result, err := ecsService.WaitForNetworkInterface(
+		ctx,
+		"eni-test-001",
+		"InUse",
+		backoff,
+		false,
+	)
+
+	// Verify result
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "eni-test-001", result.NetworkInterfaceID)
+	assert.Equal(t, "InUse", result.Status)
+	assert.Equal(t, "02:11:22:33:44:55", result.MacAddress)
+	assert.Equal(t, "vsw-test-001", result.VSwitchID)
+	assert.Equal(t, "10.0.0.100", result.PrivateIPAddress)
+	assert.Equal(t, "cn-hangzhou-a", result.ZoneID)
+}
+
+func TestECSService_WaitForNetworkInterface_EmptyEniID(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Execute test
+	ctx := context.Background()
+	backoff := wait.Backoff{
+		Duration: 1 * time.Millisecond,
+		Factor:   1,
+		Jitter:   0,
+		Steps:    1,
+	}
+	result, err := ecsService.WaitForNetworkInterface(
+		ctx,
+		"",
+		"InUse",
+		backoff,
+		false,
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "eniID not set")
+}
+
+func TestECSService_WaitForNetworkInterface_StatusMismatch(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	callCount := 0
+	// Mock response for DescribeNetworkInterface - first call returns wrong status, second returns correct
+	mockResponseWrongStatus := []*NetworkInterface{
+		{
+			NetworkInterfaceID: "eni-test-001",
+			Status:             "Available",
+		},
+	}
+	mockResponseCorrectStatus := []*NetworkInterface{
+		{
+			NetworkInterfaceID: "eni-test-001",
+			Status:             "InUse",
+			MacAddress:         "02:11:22:33:44:55",
+		},
+	}
+
+	// Mock DescribeNetworkInterface method
+	patches := gomonkey.ApplyMethod(
+		ecsService,
+		"DescribeNetworkInterface",
+		func(_ *ECSService, ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error) {
+			callCount++
+			if callCount == 1 {
+				return mockResponseWrongStatus, nil
+			}
+			return mockResponseCorrectStatus, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	backoff := wait.Backoff{
+		Duration: 1 * time.Millisecond,
+		Factor:   1,
+		Jitter:   0,
+		Steps:    2, // Allow retry
+	}
+	result, err := ecsService.WaitForNetworkInterface(
+		ctx,
+		"eni-test-001",
+		"InUse",
+		backoff,
+		false,
+	)
+
+	// Verify result
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "eni-test-001", result.NetworkInterfaceID)
+	assert.Equal(t, "InUse", result.Status)
+	assert.Equal(t, 2, callCount) // Should have been called twice
+}
+
+func TestECSService_WaitForNetworkInterface_IgnoreNotExist(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock response for DescribeNetworkInterface - returns empty list
+	mockResponse := []*NetworkInterface{}
+
+	// Mock DescribeNetworkInterface method
+	patches := gomonkey.ApplyMethod(
+		ecsService,
+		"DescribeNetworkInterface",
+		func(_ *ECSService, ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error) {
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	backoff := wait.Backoff{
+		Duration: 1 * time.Millisecond,
+		Factor:   1,
+		Jitter:   0,
+		Steps:    1,
+	}
+	result, err := ecsService.WaitForNetworkInterface(
+		ctx,
+		"eni-test-001",
+		"InUse",
+		backoff,
+		true, // ignoreNotExist = true
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	// The error is wrapped by fmt.Errorf, so we need to use errors.Is to check
+	assert.True(t, errors.Is(err, apiErr.ErrNotFound))
+	assert.Contains(t, err.Error(), "error wait for eni")
+}
+
+func TestECSService_WaitForNetworkInterface_EmptyStatus(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock response for DescribeNetworkInterface
+	mockResponse := []*NetworkInterface{
+		{
+			NetworkInterfaceID: "eni-test-001",
+			Status:             "Available", // Any status is OK when status parameter is empty
+			MacAddress:         "02:11:22:33:44:55",
+		},
+	}
+
+	// Mock DescribeNetworkInterface method
+	patches := gomonkey.ApplyMethod(
+		ecsService,
+		"DescribeNetworkInterface",
+		func(_ *ECSService, ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error) {
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	backoff := wait.Backoff{
+		Duration: 1 * time.Millisecond,
+		Factor:   1,
+		Jitter:   0,
+		Steps:    1,
+	}
+	result, err := ecsService.WaitForNetworkInterface(
+		ctx,
+		"eni-test-001",
+		"", // Empty status - should accept any status
+		backoff,
+		false,
+	)
+
+	// Verify result
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "eni-test-001", result.NetworkInterfaceID)
+	assert.Equal(t, "Available", result.Status)
+}
+
+func TestECSService_WaitForNetworkInterface_DescribeError(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock DescribeNetworkInterface method to return error
+	patches := gomonkey.ApplyMethod(
+		ecsService,
+		"DescribeNetworkInterface",
+		func(_ *ECSService, ctx context.Context, vpcID string, eniID []string, instanceID string, instanceType string, status string, tags map[string]string) ([]*NetworkInterface, error) {
+			return nil, fmt.Errorf("network error")
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	backoff := wait.Backoff{
+		Duration: 1 * time.Millisecond,
+		Factor:   1,
+		Jitter:   0,
+		Steps:    1,
+	}
+	result, err := ecsService.WaitForNetworkInterface(
+		ctx,
+		"eni-test-001",
+		"InUse",
+		backoff,
+		false,
+	)
+
+	// Verify result - should retry and eventually timeout
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "error wait for eni")
+}
+
+// Error scenario tests
+
+func TestECSService_CreateNetworkInterface_WithGomonkey_Error(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock CreateNetworkInterface method to return error
+	mockError := sdkErr.NewServerError(403, "{\"Code\": \"Forbidden\"}", "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).CreateNetworkInterface,
+		func(client *ecs.Client, request *ecs.CreateNetworkInterfaceRequest) (*ecs.CreateNetworkInterfaceResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	result, err := ecsService.CreateNetworkInterface(
+		ctx,
+		WithVSwitchIDForCreate("vsw-test-001"),
+		WithSecurityGroupIDsForCreate([]string{"sg-test-001"}),
+		WithResourceGroupIDForCreate("rg-test-001"),
+		WithInstanceTypeForCreate("Secondary"),
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, apiErr.ErrorCodeIs(err, "Forbidden"))
+}
+
+func TestECSService_DescribeNetworkInterface_WithGomonkey_Error(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock DescribeNetworkInterfaces method to return error
+	mockError := sdkErr.NewServerError(403, "{\"Code\": \"Forbidden\"}", "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).DescribeNetworkInterfaces,
+		func(client *ecs.Client, request *ecs.DescribeNetworkInterfacesRequest) (*ecs.DescribeNetworkInterfacesResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	result, err := ecsService.DescribeNetworkInterface(
+		ctx,
+		"vpc-test-001",
+		[]string{"eni-test-001"},
+		"",
+		"",
+		"",
+		nil,
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, apiErr.ErrorCodeIs(err, "Forbidden"))
+}
+
+func TestECSService_AttachNetworkInterface_WithGomonkey_Error(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock AttachNetworkInterface method to return error
+	mockError := sdkErr.NewServerError(403, "{\"Code\": \"Forbidden\"}", "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).AttachNetworkInterface,
+		func(client *ecs.Client, request *ecs.AttachNetworkInterfaceRequest) (*ecs.AttachNetworkInterfaceResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := ecsService.AttachNetworkInterface(
+		ctx,
+		WithNetworkInterfaceIDForAttach("eni-test-001"),
+		WithInstanceIDForAttach("i-test-001"),
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.True(t, apiErr.ErrorCodeIs(err, "Forbidden"))
+}
+
+func TestECSService_DetachNetworkInterface_WithGomonkey_Error(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock DetachNetworkInterface method to return error (not ignored error codes)
+	mockError := sdkErr.NewServerError(403, "{\"Code\": \"Forbidden\"}", "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).DetachNetworkInterface,
+		func(client *ecs.Client, request *ecs.DetachNetworkInterfaceRequest) (*ecs.DetachNetworkInterfaceResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := ecsService.DetachNetworkInterface(
+		ctx,
+		"eni-test-001",
+		"i-test-001",
+		"",
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.True(t, apiErr.ErrorCodeIs(err, "Forbidden"))
+}
+
+func TestECSService_DetachNetworkInterface_WithGomonkey_IgnoredError(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock DetachNetworkInterface method to return ignored error (ENI not found)
+	mockError := sdkErr.NewServerError(400, fmt.Sprintf("{\"Code\": \"%s\"}", apiErr.ErrInvalidENINotFound), "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).DetachNetworkInterface,
+		func(client *ecs.Client, request *ecs.DetachNetworkInterfaceRequest) (*ecs.DetachNetworkInterfaceResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := ecsService.DetachNetworkInterface(
+		ctx,
+		"eni-test-001",
+		"i-test-001",
+		"",
+	)
+
+	// Verify result - should succeed because error is ignored
+	assert.NoError(t, err)
+}
+
+func TestECSService_DeleteNetworkInterface_WithGomonkey_Error(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock DeleteNetworkInterface method to return error (not ignored error codes)
+	mockError := sdkErr.NewServerError(403, "{\"Code\": \"Forbidden\"}", "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).DeleteNetworkInterface,
+		func(client *ecs.Client, request *ecs.DeleteNetworkInterfaceRequest) (*ecs.DeleteNetworkInterfaceResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := ecsService.DeleteNetworkInterface(
+		ctx,
+		"eni-test-001",
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.True(t, apiErr.ErrorCodeIs(err, "Forbidden"))
+}
+
+func TestECSService_DeleteNetworkInterface_WithGomonkey_IgnoredError(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock DeleteNetworkInterface method to return ignored error (ENI not found)
+	mockError := sdkErr.NewServerError(400, fmt.Sprintf("{\"Code\": \"%s\"}", apiErr.ErrInvalidENINotFound), "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).DeleteNetworkInterface,
+		func(client *ecs.Client, request *ecs.DeleteNetworkInterfaceRequest) (*ecs.DeleteNetworkInterfaceResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := ecsService.DeleteNetworkInterface(
+		ctx,
+		"eni-test-001",
+	)
+
+	// Verify result - should succeed because error is ignored
+	assert.NoError(t, err)
+}
+
+func TestECSService_AssignPrivateIPAddress_WithGomonkey_Error(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock AssignPrivateIpAddresses method to return error
+	mockError := sdkErr.NewServerError(403, "{\"Code\": \"Forbidden\"}", "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).AssignPrivateIpAddresses,
+		func(client *ecs.Client, request *ecs.AssignPrivateIpAddressesRequest) (*ecs.AssignPrivateIpAddressesResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	result, err := ecsService.AssignPrivateIPAddress(
+		ctx,
+		WithNetworkInterfaceIDForAssign("eni-test-001"),
+		WithIPCountForAssign(2),
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, apiErr.ErrorCodeIs(err, "Forbidden"))
+}
+
+func TestECSService_UnAssignPrivateIPAddresses_WithGomonkey_Error(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock UnassignPrivateIpAddresses method to return error (not ignored error codes)
+	mockError := sdkErr.NewServerError(403, "{\"Code\": \"Forbidden\"}", "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).UnassignPrivateIpAddresses,
+		func(client *ecs.Client, request *ecs.UnassignPrivateIpAddressesRequest) (*ecs.UnassignPrivateIpAddressesResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := ecsService.UnAssignPrivateIPAddresses(
+		ctx,
+		"eni-test-001",
+		[]netip.Addr{
+			netip.MustParseAddr("10.0.0.101"),
+			netip.MustParseAddr("10.0.0.102"),
+		},
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.True(t, apiErr.ErrorCodeIs(err, "Forbidden"))
+}
+
+func TestECSService_UnAssignPrivateIPAddresses_WithGomonkey_IgnoredError(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock UnassignPrivateIpAddresses method to return ignored error (IP already unassigned)
+	mockError := sdkErr.NewServerError(400, fmt.Sprintf("{\"Code\": \"%s\"}", apiErr.ErrInvalidIPIPUnassigned), "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).UnassignPrivateIpAddresses,
+		func(client *ecs.Client, request *ecs.UnassignPrivateIpAddressesRequest) (*ecs.UnassignPrivateIpAddressesResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := ecsService.UnAssignPrivateIPAddresses(
+		ctx,
+		"eni-test-001",
+		[]netip.Addr{
+			netip.MustParseAddr("10.0.0.101"),
+		},
+	)
+
+	// Verify result - should succeed because error is ignored
+	assert.NoError(t, err)
+}
+
+func TestECSService_AssignIpv6Addresses_WithGomonkey_Error(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock AssignIpv6Addresses method to return error
+	mockError := sdkErr.NewServerError(403, "{\"Code\": \"Forbidden\"}", "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).AssignIpv6Addresses,
+		func(client *ecs.Client, request *ecs.AssignIpv6AddressesRequest) (*ecs.AssignIpv6AddressesResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	result, err := ecsService.AssignIpv6Addresses(
+		ctx,
+		WithNetworkInterfaceIDForAssignIPv6("eni-test-001"),
+		WithIPv6CountForAssignIPv6(2),
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, apiErr.ErrorCodeIs(err, "Forbidden"))
+}
+
+func TestECSService_UnAssignIpv6Addresses_WithGomonkey_Error(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock UnassignIpv6Addresses method to return error (not ignored error codes)
+	mockError := sdkErr.NewServerError(403, "{\"Code\": \"Forbidden\"}", "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).UnassignIpv6Addresses,
+		func(client *ecs.Client, request *ecs.UnassignIpv6AddressesRequest) (*ecs.UnassignIpv6AddressesResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := ecsService.UnAssignIpv6Addresses(
+		ctx,
+		"eni-test-001",
+		[]netip.Addr{
+			netip.MustParseAddr("2001:db8::1"),
+			netip.MustParseAddr("2001:db8::2"),
+		},
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.True(t, apiErr.ErrorCodeIs(err, "Forbidden"))
+}
+
+func TestECSService_UnAssignIpv6Addresses_WithGomonkey_IgnoredError(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock UnassignIpv6Addresses method to return ignored error (IP already unassigned)
+	mockError := sdkErr.NewServerError(400, fmt.Sprintf("{\"Code\": \"%s\"}", apiErr.ErrInvalidIPIPUnassigned), "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).UnassignIpv6Addresses,
+		func(client *ecs.Client, request *ecs.UnassignIpv6AddressesRequest) (*ecs.UnassignIpv6AddressesResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := ecsService.UnAssignIpv6Addresses(
+		ctx,
+		"eni-test-001",
+		[]netip.Addr{
+			netip.MustParseAddr("2001:db8::1"),
+		},
+	)
+
+	// Verify result - should succeed because error is ignored
+	assert.NoError(t, err)
+}
+
+func TestECSService_DescribeInstanceTypes_WithGomonkey_Error(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	// Mock DescribeInstanceTypes method to return error
+	mockError := sdkErr.NewServerError(403, "{\"Code\": \"Forbidden\"}", "test-request-id")
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).DescribeInstanceTypes,
+		func(client *ecs.Client, request *ecs.DescribeInstanceTypesRequest) (*ecs.DescribeInstanceTypesResponse, error) {
+			return nil, mockError
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	result, err := ecsService.DescribeInstanceTypes(
+		ctx,
+		[]string{"ecs.c6.large"},
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, apiErr.ErrorCodeIs(err, "Forbidden"))
 }

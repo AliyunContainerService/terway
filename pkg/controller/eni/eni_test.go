@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	register "github.com/AliyunContainerService/terway/pkg/controller"
+	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
@@ -22,6 +24,19 @@ import (
 )
 
 var _ = Describe("Eni controller", func() {
+	Context("Test init", func() {
+		It("register should succeed", func() {
+			openAPI := mocks.NewOpenAPI(GinkgoT())
+
+			v, ok := register.Controllers[ControllerName]
+			Expect(ok).To(BeTrue())
+
+			mgr, ctx := testutil.NewManager(cfg, openAPI, k8sClient)
+			err := v.Creator(mgr, ctx)
+
+			Expect(err).To(Not(HaveOccurred()))
+		})
+	})
 	Context("delete eni test (eni not found)", func() {
 		eniID := "eni-1"
 		instacneID := "i-1"

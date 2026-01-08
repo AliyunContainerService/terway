@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel"
 	"k8s.io/apimachinery/pkg/util/wait"
+
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 )
 
 // Mock ClientSet for EFLO Service testing
@@ -108,6 +110,41 @@ func TestEFLOService_CreateElasticNetworkInterfaceV2_WithGomonkey(t *testing.T) 
 	assert.Equal(t, ENITrafficModeStandard, result.NetworkInterfaceTrafficMode)
 }
 
+func TestEFLOService_CreateElasticNetworkInterfaceV2_WithGomonkey_ErrorCode(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	// Mock response with non-zero code
+	mockResponse := &eflo.CreateElasticNetworkInterfaceResponse{
+		Code:      1001,
+		Message:   "Resource not found",
+		RequestId: "test-request-id",
+		Content:   eflo.Content{},
+	}
+
+	// Mock CreateElasticNetworkInterface method
+	patches := gomonkey.ApplyFunc(
+		(*eflo.Client).CreateElasticNetworkInterface,
+		func(client *eflo.Client, request *eflo.CreateElasticNetworkInterfaceRequest) (*eflo.CreateElasticNetworkInterfaceResponse, error) {
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	result, err := efloService.CreateElasticNetworkInterfaceV2(
+		ctx,
+		WithVSwitchIDForEFLO("vsw-test-001"),
+		WithSecurityGroupIDsForEFLO([]string{"sg-test-001"}),
+		WithZoneIDForEFLO("cn-hangzhou-a"),
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, apiErr.IsEfloCode(err, 1001))
+}
+
 func TestEFLOService_DescribeLeniNetworkInterface_WithGomonkey(t *testing.T) {
 	efloService := createTestEFLOServiceForAPI()
 
@@ -194,6 +231,41 @@ func TestEFLOService_DescribeLeniNetworkInterface_WithGomonkey(t *testing.T) {
 	assert.Equal(t, "02:11:22:33:44:55", leni.MacAddress)
 }
 
+func TestEFLOService_DescribeLeniNetworkInterface_WithGomonkey_ErrorCode(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	// Mock response with non-zero code
+	mockResponse := &eflo.ListElasticNetworkInterfacesResponse{
+		Code:      1001,
+		Message:   "Resource not found",
+		RequestId: "test-request-id",
+		Content:   eflo.Content{},
+	}
+
+	// Mock ListElasticNetworkInterfaces method
+	patches := gomonkey.ApplyFunc(
+		(*eflo.Client).ListElasticNetworkInterfaces,
+		func(client *eflo.Client, request *eflo.ListElasticNetworkInterfacesRequest) (*eflo.ListElasticNetworkInterfacesResponse, error) {
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	result, err := efloService.DescribeLeniNetworkInterface(
+		ctx,
+		WithVPCIDForEFLO("vpc-test-001"),
+		WithNetworkInterfaceIDsForEFLO([]string{"leni-test-001"}),
+		WithStatusForEFLO("Available"),
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, apiErr.IsEfloCode(err, 1001))
+}
+
 func TestEFLOService_AssignLeniPrivateIPAddress2_WithGomonkey(t *testing.T) {
 	efloService := createTestEFLOServiceForAPI()
 
@@ -256,6 +328,39 @@ func TestEFLOService_AssignLeniPrivateIPAddress2_WithGomonkey(t *testing.T) {
 	assert.Len(t, result, 1)
 	assert.Equal(t, "10.0.0.101", result[0].IPAddress)
 	assert.False(t, result[0].Primary)
+}
+
+func TestEFLOService_AssignLeniPrivateIPAddress2_WithGomonkey_ErrorCode(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	// Mock response with non-zero code
+	mockResponse := &eflo.AssignLeniPrivateIpAddressResponse{
+		Code:      1001,
+		Message:   "Resource not found",
+		RequestId: "test-request-id",
+		Content:   eflo.Content{},
+	}
+
+	// Mock AssignLeniPrivateIpAddress method
+	patches := gomonkey.ApplyFunc(
+		(*eflo.Client).AssignLeniPrivateIpAddress,
+		func(client *eflo.Client, request *eflo.AssignLeniPrivateIpAddressRequest) (*eflo.AssignLeniPrivateIpAddressResponse, error) {
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	result, err := efloService.AssignLeniPrivateIPAddress2(
+		ctx,
+		WithNetworkInterfaceIDForEFLOAssign("leni-test-001"),
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, apiErr.IsEfloCode(err, 1001))
 }
 
 func TestEFLOService_UnAssignLeniPrivateIPAddresses2_WithGomonkey(t *testing.T) {
@@ -334,6 +439,42 @@ func TestEFLOService_AttachLeni_WithGomonkey(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestEFLOService_AttachLeni_WithGomonkey_ErrorCode(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	// Mock response with non-zero code
+	errorCode := int32(1001)
+	mockResponse := &eflo20220530.AttachElasticNetworkInterfaceResponse{
+		Body: &eflo20220530.AttachElasticNetworkInterfaceResponseBody{
+			Code:      &errorCode,
+			Message:   stringPtr("Resource not found"),
+			RequestId: stringPtr("test-request-id"),
+		},
+	}
+
+	// Mock AttachElasticNetworkInterface method
+	patches := gomonkey.ApplyFunc(
+		(*eflo20220530.Client).AttachElasticNetworkInterface,
+		func(client *eflo20220530.Client, request *eflo20220530.AttachElasticNetworkInterfaceRequest) (*eflo20220530.AttachElasticNetworkInterfaceResponse, error) {
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := efloService.AttachLeni(
+		ctx,
+		WithNetworkInterfaceIDForEFLOAttach("leni-test-001"),
+		WithInstanceIDForEFLOAttach("i-test-001"),
+		WithNetworkCardIndexForEFLOAttach(1),
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.True(t, apiErr.IsEfloCode(err, 1001))
+}
+
 func TestEFLOService_DetachLeni_WithGomonkey(t *testing.T) {
 	efloService := createTestEFLOServiceForAPI()
 
@@ -371,6 +512,41 @@ func TestEFLOService_DetachLeni_WithGomonkey(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestEFLOService_DetachLeni_WithGomonkey_ErrorCode(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	// Mock response with non-zero code
+	errorCode := int32(1001)
+	mockResponse := &eflo20220530.DetachElasticNetworkInterfaceResponse{
+		Body: &eflo20220530.DetachElasticNetworkInterfaceResponseBody{
+			Code:      &errorCode,
+			Message:   stringPtr("Resource not found"),
+			RequestId: stringPtr("test-request-id"),
+		},
+	}
+
+	// Mock DetachElasticNetworkInterface method
+	patches := gomonkey.ApplyFunc(
+		(*eflo20220530.Client).DetachElasticNetworkInterface,
+		func(client *eflo20220530.Client, request *eflo20220530.DetachElasticNetworkInterfaceRequest) (*eflo20220530.DetachElasticNetworkInterfaceResponse, error) {
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := efloService.DetachLeni(
+		ctx,
+		WithNetworkInterfaceIDForEFLODetach("leni-test-001"),
+		WithInstanceIDForEFLODetach("i-test-001"),
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.True(t, apiErr.IsEfloCode(err, 1001))
+}
+
 func TestEFLOService_DeleteElasticNetworkInterface_WithGomonkey(t *testing.T) {
 	efloService := createTestEFLOServiceForAPI()
 
@@ -402,6 +578,38 @@ func TestEFLOService_DeleteElasticNetworkInterface_WithGomonkey(t *testing.T) {
 
 	// Verify result
 	assert.NoError(t, err)
+}
+
+func TestEFLOService_DeleteElasticNetworkInterface_WithGomonkey_ErrorCode(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	// Mock response with non-zero code (not 1011, so it should return error)
+	mockResponse := &eflo.DeleteElasticNetworkInterfaceResponse{
+		Code:      1001,
+		Message:   "Resource not found",
+		RequestId: "test-request-id",
+		Content:   eflo.Content{},
+	}
+
+	// Mock DeleteElasticNetworkInterface method
+	patches := gomonkey.ApplyFunc(
+		(*eflo.Client).DeleteElasticNetworkInterface,
+		func(client *eflo.Client, request *eflo.DeleteElasticNetworkInterfaceRequest) (*eflo.DeleteElasticNetworkInterfaceResponse, error) {
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := efloService.DeleteElasticNetworkInterface(
+		ctx,
+		"leni-test-001",
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.True(t, apiErr.IsEfloCode(err, 1001))
 }
 
 func TestEFLOService_ListLeniPrivateIPAddresses_WithGomonkey(t *testing.T) {
@@ -461,6 +669,41 @@ func TestEFLOService_ListLeniPrivateIPAddresses_WithGomonkey(t *testing.T) {
 	assert.Equal(t, "10.0.0.101", result.PrivateIpAddresses[1].PrivateIpAddress)
 }
 
+func TestEFLOService_ListLeniPrivateIPAddresses_WithGomonkey_ErrorCode(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	// Mock response with non-zero code
+	mockResponse := &eflo.ListLeniPrivateIpAddressesResponse{
+		Code:      1001,
+		Message:   "Resource not found",
+		RequestId: "test-request-id",
+		Content:   eflo.Content{},
+	}
+
+	// Mock ListLeniPrivateIpAddresses method
+	patches := gomonkey.ApplyFunc(
+		(*eflo.Client).ListLeniPrivateIpAddresses,
+		func(client *eflo.Client, request *eflo.ListLeniPrivateIpAddressesRequest) (*eflo.ListLeniPrivateIpAddressesResponse, error) {
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	result, err := efloService.ListLeniPrivateIPAddresses(
+		ctx,
+		"leni-test-001",
+		"ip-test-001",
+		"10.0.0.100",
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, apiErr.IsEfloCode(err, 1001))
+}
+
 func TestEFLOService_GetNodeInfoForPod_WithGomonkey(t *testing.T) {
 	efloService := createTestEFLOServiceForAPI()
 
@@ -505,6 +748,72 @@ func TestEFLOService_GetNodeInfoForPod_WithGomonkey(t *testing.T) {
 	assert.Equal(t, "vpc-test-001", result.VpcId)
 	assert.Equal(t, "vsw-test-001", result.VSwitchId)
 	assert.Equal(t, "10.0.0.100", result.PrivateIpAddress)
+}
+
+func TestEFLOService_GetNodeInfoForPod_WithGomonkey_ErrorCode(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	// Mock response with non-zero code
+	mockResponse := &eflo.GetNodeInfoForPodResponse{
+		Code:      1001,
+		Message:   "Resource not found",
+		RequestId: "test-request-id",
+		Content:   eflo.Content{},
+	}
+
+	// Mock GetNodeInfoForPod method
+	patches := gomonkey.ApplyFunc(
+		(*eflo.Client).GetNodeInfoForPod,
+		func(client *eflo.Client, request *eflo.GetNodeInfoForPodRequest) (*eflo.GetNodeInfoForPodResponse, error) {
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	result, err := efloService.GetNodeInfoForPod(
+		ctx,
+		"node-test-001",
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, apiErr.IsEfloCode(err, 1001))
+}
+
+func TestEFLOService_UnassignLeniPrivateIPAddress_WithGomonkey_ErrorCode(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	// Mock response with non-zero code (not 1011, so it should return error)
+	mockResponse := &eflo.UnassignLeniPrivateIpAddressResponse{
+		Code:      1001,
+		Message:   "Resource not found",
+		RequestId: "test-request-id",
+		Content:   eflo.Content{},
+	}
+
+	// Mock UnassignLeniPrivateIpAddress method
+	patches := gomonkey.ApplyFunc(
+		(*eflo.Client).UnassignLeniPrivateIpAddress,
+		func(client *eflo.Client, request *eflo.UnassignLeniPrivateIpAddressRequest) (*eflo.UnassignLeniPrivateIpAddressResponse, error) {
+			return mockResponse, nil
+		},
+	)
+	defer patches.Reset()
+
+	// Execute test
+	ctx := context.Background()
+	err := efloService.UnassignLeniPrivateIPAddress(
+		ctx,
+		"leni-test-001",
+		"ip-test-001",
+	)
+
+	// Verify result
+	assert.Error(t, err)
+	assert.True(t, apiErr.IsEfloCode(err, 1001))
 }
 
 // Helper functions

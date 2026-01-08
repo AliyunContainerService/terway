@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
+	register "github.com/AliyunContainerService/terway/pkg/controller"
+	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -35,6 +37,18 @@ var _ = Describe("Networking controller", func() {
 		var err error
 		switchPool, err = vswpool.NewSwitchPool(100, "10m")
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	Context("Test init", func() {
+		It("register should succeed", func() {
+			v, ok := register.Controllers[ControllerName]
+			Expect(ok).To(BeTrue())
+
+			mgr, ctx := testutil.NewManager(cfg, openAPI, k8sClient)
+			err := v.Creator(mgr, ctx)
+
+			Expect(err).To(Not(HaveOccurred()))
+		})
 	})
 
 	Context("Create normal", func() {

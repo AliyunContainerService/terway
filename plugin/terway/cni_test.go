@@ -1,11 +1,18 @@
+//go:build privileged
+
 package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net"
 	"testing"
 
 	"github.com/AliyunContainerService/terway/plugin/driver/types"
 	"github.com/AliyunContainerService/terway/rpc"
+	terwayTypes "github.com/AliyunContainerService/terway/types"
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/containernetworking/cni/pkg/skel"
 	cniTypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -13,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
+	"google.golang.org/grpc"
 )
 
 func TestParseSetupConf(t *testing.T) {
@@ -472,6 +480,568 @@ func TestGetDatePath(t *testing.T) {
 			} else {
 				dp := getDatePath(tc.ipType, tc.vlanStripType, tc.trunk)
 				assert.Equal(t, tc.expectedDP, dp)
+			}
+		})
+	}
+}
+
+func TestCmdAdd(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupArgs     func() *skel.CmdArgs
+		setupMocks    func() *gomonkey.Patches
+		expectedError bool
+		errorContains string
+	}{
+		{
+			name: "Success case",
+			setupArgs: func() *skel.CmdArgs {
+				netns, _ := testutils.NewNS()
+				conf := &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				}
+				confData, _ := json.Marshal(conf)
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       netns.Path(),
+					IfName:      "eth0",
+					StdinData:   confData,
+					Args:        "K8S_POD_NAME=test-pod;K8S_POD_NAMESPACE=test-ns;K8S_POD_INFRA_CONTAINER_ID=test-container-id",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+				mockClient := &mockTerwayBackendClient{}
+				mockConn := &grpc.ClientConn{}
+
+				// Mock grpc.ClientConn.Close to avoid nil pointer dereference
+				patches.ApplyMethod(&grpc.ClientConn{}, "Close", func() error {
+					return nil
+				})
+
+				// Mock getNetworkClient
+				patches.ApplyFunc(getNetworkClient, func(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
+					return mockClient, mockConn, nil
+				})
+
+				// Mock doCmdAdd
+				patches.ApplyFunc(doCmdAdd, func(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) (*terwayTypes.IPNetSet, *terwayTypes.IPSet, error) {
+					_, ipNet, _ := net.ParseCIDR("192.168.1.10/24")
+					return &terwayTypes.IPNetSet{
+							IPv4: ipNet,
+						}, &terwayTypes.IPSet{
+							IPv4: net.ParseIP("192.168.1.1"),
+						}, nil
+				})
+
+				// Mock cniTypes.PrintResult
+				patches.ApplyFunc(cniTypes.PrintResult, func(obj interface{}, version string) error {
+					return nil
+				})
+
+				return patches
+			},
+			expectedError: false,
+		},
+		{
+			name: "getCmdArgs error",
+			setupArgs: func() *skel.CmdArgs {
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       "/invalid/netns",
+					IfName:      "eth0",
+					StdinData:   []byte(`invalid json`),
+					Args:        "K8S_POD_NAME=test-pod;K8S_POD_NAMESPACE=test-ns;K8S_POD_INFRA_CONTAINER_ID=test-container-id",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				return gomonkey.NewPatches()
+			},
+			expectedError: true,
+		},
+		{
+			name: "getNetworkClient error",
+			setupArgs: func() *skel.CmdArgs {
+				netns, _ := testutils.NewNS()
+				conf := &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				}
+				confData, _ := json.Marshal(conf)
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       netns.Path(),
+					IfName:      "eth0",
+					StdinData:   confData,
+					Args:        "K8S_POD_NAME=test-pod;K8S_POD_NAMESPACE=test-ns;K8S_POD_INFRA_CONTAINER_ID=test-container-id",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+				// Mock getNetworkClient to return error
+				patches.ApplyFunc(getNetworkClient, func(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
+					return nil, nil, errors.New("connection failed")
+				})
+				return patches
+			},
+			expectedError: true,
+		},
+		{
+			name: "doCmdAdd error",
+			setupArgs: func() *skel.CmdArgs {
+				netns, _ := testutils.NewNS()
+				conf := &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				}
+				confData, _ := json.Marshal(conf)
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       netns.Path(),
+					IfName:      "eth0",
+					StdinData:   confData,
+					Args:        "K8S_POD_NAME=test-pod;K8S_POD_NAMESPACE=test-ns;K8S_POD_INFRA_CONTAINER_ID=test-container-id",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+				mockClient := &mockTerwayBackendClient{}
+				mockConn := &grpc.ClientConn{}
+
+				// Mock grpc.ClientConn.Close to avoid nil pointer dereference
+				patches.ApplyMethod(&grpc.ClientConn{}, "Close", func() error {
+					return nil
+				})
+
+				// Mock getNetworkClient
+				patches.ApplyFunc(getNetworkClient, func(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
+					return mockClient, mockConn, nil
+				})
+
+				// Mock doCmdAdd to return error
+				patches.ApplyFunc(doCmdAdd, func(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) (*terwayTypes.IPNetSet, *terwayTypes.IPSet, error) {
+					return nil, nil, errors.New("failed to add")
+				})
+
+				// Mock cniTypes.PrintResult
+				patches.ApplyFunc(cniTypes.PrintResult, func(obj interface{}, version string) error {
+					return nil
+				})
+
+				return patches
+			},
+			expectedError: true,
+			errorContains: "failed to do add",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := tt.setupArgs()
+			patches := tt.setupMocks()
+			defer patches.Reset()
+
+			err := cmdAdd(args)
+			if tt.expectedError {
+				assert.Error(t, err)
+				if tt.errorContains != "" {
+					assert.Contains(t, err.Error(), tt.errorContains)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCmdDel(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupArgs     func() *skel.CmdArgs
+		setupMocks    func() *gomonkey.Patches
+		expectedError bool
+		errorContains string
+	}{
+		{
+			name: "Empty Netns should return nil",
+			setupArgs: func() *skel.CmdArgs {
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       "",
+					IfName:      "eth0",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				return gomonkey.NewPatches()
+			},
+			expectedError: false,
+		},
+		{
+			name: "Success case",
+			setupArgs: func() *skel.CmdArgs {
+				netns, _ := testutils.NewNS()
+				conf := &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				}
+				confData, _ := json.Marshal(conf)
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       netns.Path(),
+					IfName:      "eth0",
+					StdinData:   confData,
+					Args:        "K8S_POD_NAME=test-pod;K8S_POD_NAMESPACE=test-ns;K8S_POD_INFRA_CONTAINER_ID=test-container-id",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+				mockClient := &mockTerwayBackendClient{}
+				mockConn := &grpc.ClientConn{}
+
+				// Mock grpc.ClientConn.Close to avoid nil pointer dereference
+				patches.ApplyMethod(&grpc.ClientConn{}, "Close", func() error {
+					return nil
+				})
+
+				// Mock getNetworkClient
+				patches.ApplyFunc(getNetworkClient, func(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
+					return mockClient, mockConn, nil
+				})
+
+				// Mock doCmdDel
+				patches.ApplyFunc(doCmdDel, func(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
+					return nil
+				})
+
+				// Mock cniTypes.PrintResult
+				patches.ApplyFunc(cniTypes.PrintResult, func(obj interface{}, version string) error {
+					return nil
+				})
+
+				return patches
+			},
+			expectedError: false,
+		},
+		{
+			name: "getNetworkClient error",
+			setupArgs: func() *skel.CmdArgs {
+				netns, _ := testutils.NewNS()
+				conf := &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				}
+				confData, _ := json.Marshal(conf)
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       netns.Path(),
+					IfName:      "eth0",
+					StdinData:   confData,
+					Args:        "K8S_POD_NAME=test-pod;K8S_POD_NAMESPACE=test-ns;K8S_POD_INFRA_CONTAINER_ID=test-container-id",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+				// Mock getNetworkClient to return error
+				patches.ApplyFunc(getNetworkClient, func(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
+					return nil, nil, errors.New("connection failed")
+				})
+				return patches
+			},
+			expectedError: true,
+			errorContains: "error create grpc client",
+		},
+		{
+			name: "doCmdDel error",
+			setupArgs: func() *skel.CmdArgs {
+				netns, _ := testutils.NewNS()
+				conf := &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				}
+				confData, _ := json.Marshal(conf)
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       netns.Path(),
+					IfName:      "eth0",
+					StdinData:   confData,
+					Args:        "K8S_POD_NAME=test-pod;K8S_POD_NAMESPACE=test-ns;K8S_POD_INFRA_CONTAINER_ID=test-container-id",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+				mockClient := &mockTerwayBackendClient{}
+				mockConn := &grpc.ClientConn{}
+
+				// Mock grpc.ClientConn.Close to avoid nil pointer dereference
+				patches.ApplyMethod(&grpc.ClientConn{}, "Close", func() error {
+					return nil
+				})
+
+				// Mock getNetworkClient
+				patches.ApplyFunc(getNetworkClient, func(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
+					return mockClient, mockConn, nil
+				})
+
+				// Mock doCmdDel to return error
+				patches.ApplyFunc(doCmdDel, func(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
+					return errors.New("failed to delete")
+				})
+
+				// Mock cniTypes.PrintResult
+				patches.ApplyFunc(cniTypes.PrintResult, func(obj interface{}, version string) error {
+					return nil
+				})
+
+				return patches
+			},
+			expectedError: true,
+			errorContains: "failed to do del",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := tt.setupArgs()
+			patches := tt.setupMocks()
+			defer patches.Reset()
+
+			err := cmdDel(args)
+			if tt.expectedError {
+				assert.Error(t, err)
+				if tt.errorContains != "" {
+					assert.Contains(t, err.Error(), tt.errorContains)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCmdCheck(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupArgs     func() *skel.CmdArgs
+		setupMocks    func() *gomonkey.Patches
+		expectedError bool
+		errorContains string
+	}{
+		{
+			name: "Empty Netns should return nil",
+			setupArgs: func() *skel.CmdArgs {
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       "",
+					IfName:      "eth0",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				return gomonkey.NewPatches()
+			},
+			expectedError: false,
+		},
+		{
+			name: "Success case",
+			setupArgs: func() *skel.CmdArgs {
+				netns, _ := testutils.NewNS()
+				conf := &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				}
+				confData, _ := json.Marshal(conf)
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       netns.Path(),
+					IfName:      "eth0",
+					StdinData:   confData,
+					Args:        "K8S_POD_NAME=test-pod;K8S_POD_NAMESPACE=test-ns;K8S_POD_INFRA_CONTAINER_ID=test-container-id",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+				mockClient := &mockTerwayBackendClient{}
+				mockConn := &grpc.ClientConn{}
+
+				// Mock grpc.ClientConn.Close to avoid nil pointer dereference
+				patches.ApplyMethod(&grpc.ClientConn{}, "Close", func() error {
+					return nil
+				})
+
+				// Mock getNetworkClient
+				patches.ApplyFunc(getNetworkClient, func(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
+					return mockClient, mockConn, nil
+				})
+
+				// Mock doCmdCheck
+				patches.ApplyFunc(doCmdCheck, func(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
+					return nil
+				})
+
+				return patches
+			},
+			expectedError: false,
+		},
+		{
+			name: "getCmdArgs error with NSPathNotExist",
+			setupArgs: func() *skel.CmdArgs {
+				conf := &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				}
+				confData, _ := json.Marshal(conf)
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       "/invalid/netns/path",
+					IfName:      "eth0",
+					StdinData:   confData,
+					Args:        "K8S_POD_NAME=test-pod;K8S_POD_NAMESPACE=test-ns;K8S_POD_INFRA_CONTAINER_ID=test-container-id",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+				// Mock getCmdArgs to return an error that will be checked by isNSPathNotExist
+				// We'll use a custom error type that implements the interface
+				patches.ApplyFunc(getCmdArgs, func(args *skel.CmdArgs) (*cniCmdArgs, error) {
+					// Return an error that will be caught by isNSPathNotExist check
+					// Since we can't easily create NSPathNotExistErr, we'll mock getCmdArgs to return nil
+					// and let the actual getCmdArgs be called, which will fail for invalid path
+					return nil, errors.New("invalid netns path")
+				})
+				// Mock isNSPathNotExist to return true for this test
+				patches.ApplyFunc(isNSPathNotExist, func(err error) bool {
+					return err != nil && err.Error() == "invalid netns path"
+				})
+				return patches
+			},
+			expectedError: false, // Should return nil for NSPathNotExist
+		},
+		{
+			name: "getNetworkClient error",
+			setupArgs: func() *skel.CmdArgs {
+				netns, _ := testutils.NewNS()
+				conf := &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				}
+				confData, _ := json.Marshal(conf)
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       netns.Path(),
+					IfName:      "eth0",
+					StdinData:   confData,
+					Args:        "K8S_POD_NAME=test-pod;K8S_POD_NAMESPACE=test-ns;K8S_POD_INFRA_CONTAINER_ID=test-container-id",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+				// Mock getNetworkClient to return error
+				patches.ApplyFunc(getNetworkClient, func(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
+					return nil, nil, errors.New("connection failed")
+				})
+				return patches
+			},
+			expectedError: true,
+			errorContains: "error create grpc client",
+		},
+		{
+			name: "doCmdCheck error",
+			setupArgs: func() *skel.CmdArgs {
+				netns, _ := testutils.NewNS()
+				conf := &types.CNIConf{
+					NetConf: cniTypes.NetConf{
+						CNIVersion: "0.4.0",
+						Name:       "terway",
+						Type:       "terway",
+					},
+					MTU: 1500,
+				}
+				confData, _ := json.Marshal(conf)
+				return &skel.CmdArgs{
+					ContainerID: "test-container-id",
+					Netns:       netns.Path(),
+					IfName:      "eth0",
+					StdinData:   confData,
+					Args:        "K8S_POD_NAME=test-pod;K8S_POD_NAMESPACE=test-ns;K8S_POD_INFRA_CONTAINER_ID=test-container-id",
+				}
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+				mockClient := &mockTerwayBackendClient{}
+				mockConn := &grpc.ClientConn{}
+
+				// Mock grpc.ClientConn.Close to avoid nil pointer dereference
+				patches.ApplyMethod(&grpc.ClientConn{}, "Close", func() error {
+					return nil
+				})
+
+				// Mock getNetworkClient
+				patches.ApplyFunc(getNetworkClient, func(ctx context.Context) (rpc.TerwayBackendClient, *grpc.ClientConn, error) {
+					return mockClient, mockConn, nil
+				})
+
+				// Mock doCmdCheck to return error
+				patches.ApplyFunc(doCmdCheck, func(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) error {
+					return errors.New("check failed")
+				})
+
+				return patches
+			},
+			expectedError: true,
+			errorContains: "check failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := tt.setupArgs()
+			patches := tt.setupMocks()
+			defer patches.Reset()
+
+			err := cmdCheck(args)
+			if tt.expectedError {
+				assert.Error(t, err)
+				if tt.errorContains != "" {
+					assert.Contains(t, err.Error(), tt.errorContains)
+				}
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}
