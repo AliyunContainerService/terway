@@ -223,6 +223,10 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		node.Spec.Pool.Reclaim = reclaim
 	}
 
+	node.Spec.Datapath = &networkv1beta1.Datapath{
+		Type: networkv1beta1.DatapathType(getDatapath()),
+	}
+
 	afterStatus, err := runtime.DefaultUnstructuredConverter.ToUnstructured(node.DeepCopy())
 	if err != nil {
 		return reconcile.Result{}, err
@@ -339,6 +343,10 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		node.Spec.Pool.Reclaim = reclaim
 	}
 
+	node.Spec.Datapath = &networkv1beta1.Datapath{
+		Type: networkv1beta1.DatapathType(getDatapath()),
+	}
+
 	afterStatus, err := runtime.DefaultUnstructuredConverter.ToUnstructured(node.DeepCopy())
 	if err != nil {
 		return reconcile.Result{}, err
@@ -366,4 +374,12 @@ func (r *nodeReconcile) runERDMADevicePlugin(count int) {
 		dp := deviceplugin.NewENIDevicePlugin(count, deviceplugin.ENITypeERDMA)
 		go dp.Serve()
 	})
+}
+
+func getDatapath() string {
+	dp := nodecap.GetNodeCapabilities(nodecap.NodeCapabilityDataPath)
+	if dp == "" {
+		return "veth"
+	}
+	return dp
 }

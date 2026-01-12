@@ -12,19 +12,24 @@ import (
 	clientmocks "github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	instancemocks "github.com/AliyunContainerService/terway/pkg/aliyun/instance/mocks"
+	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/eni"
 	factorymocks "github.com/AliyunContainerService/terway/pkg/factory/mocks"
 	"github.com/AliyunContainerService/terway/pkg/k8s"
 	k8smocks "github.com/AliyunContainerService/terway/pkg/k8s/mocks"
 	"github.com/AliyunContainerService/terway/pkg/storage"
+	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/daemon"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/agiledragon/gomonkey/v2"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 func TestNewNetworkServiceBuilder(t *testing.T) {
@@ -1311,4 +1316,179 @@ func Test_InitK8S(t *testing.T) {
 	assert.Nil(t, result.err)
 	assert.Equal(t, mockK8s, result.service.k8s)
 
+}
+
+func TestNetworkServiceBuilder_ReportDatapath(t *testing.T) {
+	tests := []struct {
+		name             string
+		existingError    bool
+		nodeName         string
+		getErr           error
+		updateErr        error
+		datapathValue    string
+		expectedError    bool
+		expectedErrorMsg string
+	}{
+		{
+			name:          "successful datapath report",
+			existingError: false,
+			nodeName:      "test-node",
+			getErr:        nil,
+			updateErr:     nil,
+			datapathValue: "veth",
+			expectedError: false,
+		},
+		{
+			name:          "successful datapath report with datapathv2",
+			existingError: false,
+			nodeName:      "test-node",
+			getErr:        nil,
+			updateErr:     nil,
+			datapathValue: "datapathv2",
+			expectedError: false,
+		},
+		{
+			name:          "skip when existing error",
+			existingError: true,
+			expectedError: true,
+		},
+		{
+			name:             "get node fails then succeeds on retry",
+			existingError:    false,
+			nodeName:         "test-node",
+			getErr:           errors.New("temporary network error"),
+			updateErr:        nil,
+			datapathValue:    "veth",
+			expectedError:    true,
+			expectedErrorMsg: "failed to report node datapath after retries",
+		},
+		{
+			name:             "update node fails",
+			existingError:    false,
+			nodeName:         "test-node",
+			getErr:           nil,
+			updateErr:        errors.New("update conflict"),
+			datapathValue:    "veth",
+			expectedError:    true,
+			expectedErrorMsg: "failed to report node datapath after retries",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			patches := gomonkey.NewPatches()
+			defer patches.Reset()
+
+			// Mock getDatapath function
+			patches.ApplyFunc(getDatapath, func() string {
+				return tc.datapathValue
+			})
+
+			// Create mock k8s client
+			mockK8s := k8smocks.NewKubernetes(t)
+
+			if !tc.existingError {
+				// Mock NodeName
+				mockK8s.On("NodeName").Return(tc.nodeName)
+
+				// Create mock controller-runtime client
+				scheme := runtime.NewScheme()
+				_ = networkv1beta1.AddToScheme(scheme)
+
+				node := &networkv1beta1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: tc.nodeName,
+					},
+				}
+
+				var fakeClient ctrlclient.Client
+				if tc.getErr == nil && tc.updateErr == nil {
+					// Successful case
+					fakeClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+				} else if tc.getErr != nil {
+					// Get error case
+					fakeClient = fake.NewClientBuilder().WithScheme(scheme).Build()
+				} else {
+					// Update error case - need to mock update failure
+					fakeClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+					// Patch the Update method to return error
+					patches.ApplyMethod(fakeClient, "Update",
+						func(_ ctrlclient.Client, ctx context.Context, obj ctrlclient.Object, opts ...ctrlclient.UpdateOption) error {
+							return tc.updateErr
+						})
+				}
+
+				mockK8s.On("GetClient").Return(fakeClient)
+			}
+
+			builder := &NetworkServiceBuilder{
+				ctx:     context.Background(),
+				service: &networkService{k8s: mockK8s},
+			}
+
+			if tc.existingError {
+				builder.err = errors.New("existing error")
+			}
+
+			result := builder.ReportDatapath()
+
+			if tc.expectedError {
+				assert.NotNil(t, result.err)
+				if tc.expectedErrorMsg != "" {
+					assert.Contains(t, result.err.Error(), tc.expectedErrorMsg)
+				}
+			} else {
+				assert.Nil(t, result.err)
+			}
+
+			if !tc.existingError {
+				mockK8s.AssertExpectations(t)
+			}
+		})
+	}
+}
+
+func TestGetDatapath(t *testing.T) {
+	tests := []struct {
+		name             string
+		nodeCapValue     string
+		expectedDatapath string
+	}{
+		{
+			name:             "returns veth when no capability set",
+			nodeCapValue:     "",
+			expectedDatapath: "veth",
+		},
+		{
+			name:             "returns datapathv2 when set",
+			nodeCapValue:     "datapathv2",
+			expectedDatapath: "datapathv2",
+		},
+		{
+			name:             "returns veth when explicitly set",
+			nodeCapValue:     "veth",
+			expectedDatapath: "veth",
+		},
+		{
+			name:             "returns ipvlan when set",
+			nodeCapValue:     "ipvlan",
+			expectedDatapath: "ipvlan",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			patches := gomonkey.NewPatches()
+			defer patches.Reset()
+
+			// Mock nodecap.GetNodeCapabilities
+			patches.ApplyFunc(nodecap.GetNodeCapabilities, func(capName string) string {
+				return tc.nodeCapValue
+			})
+
+			result := getDatapath()
+
+			assert.Equal(t, tc.expectedDatapath, result)
+		})
+	}
 }
