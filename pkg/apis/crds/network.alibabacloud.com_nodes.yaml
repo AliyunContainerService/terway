@@ -39,6 +39,16 @@ spec:
           spec:
             description: NodeSpec defines the desired state of Node
             properties:
+              datapath:
+                properties:
+                  type:
+                    description: DatapathType
+                    enum:
+                    - veth
+                    - ipvlan
+                    - datapathv2
+                    type: string
+                type: object
               eni:
                 properties:
                   enableERDMA:
