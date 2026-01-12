@@ -10,7 +10,10 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
+	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/wait"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
@@ -24,6 +27,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/storage"
 	"github.com/AliyunContainerService/terway/pkg/tracing"
 	"github.com/AliyunContainerService/terway/pkg/utils"
+	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
@@ -525,6 +529,59 @@ func (b *NetworkServiceBuilder) Build() (*networkService, error) {
 	return b.service, nil
 }
 
+func (b *NetworkServiceBuilder) ReportDatapath() *NetworkServiceBuilder {
+	if b.err != nil {
+		return b
+	}
+
+	node := &networkv1beta1.Node{}
+	nodeName := b.service.k8s.NodeName()
+
+	// Retry logic for getting and updating node datapath
+	bo := backoff.ExtendedBackoff{
+		InitialDelay: 0,
+		Backoff: wait.Backoff{
+			Duration: time.Second,
+			Factor:   2.0,
+			Jitter:   0.1,
+			Steps:    6,
+		},
+	}
+
+	err := backoff.ExponentialBackoffWithInitialDelay(b.ctx, bo, func(ctx context.Context) (bool, error) {
+		err := b.service.k8s.GetClient().Get(ctx, ctrlclient.ObjectKey{Name: nodeName}, node)
+		if err != nil {
+			return false, nil
+		}
+
+		node.Spec.Datapath = &networkv1beta1.Datapath{
+			Type: networkv1beta1.DatapathType(getDatapath()),
+		}
+
+		err = b.service.k8s.GetClient().Update(ctx, node)
+		if err != nil {
+			return false, nil
+		}
+
+		return true, nil
+	})
+
+	if err != nil {
+		b.err = fmt.Errorf("failed to report node datapath after retries: %w", err)
+		return b
+	}
+
+	return b
+}
+
+func getDatapath() string {
+	dp := nodecap.GetNodeCapabilities(nodecap.NodeCapabilityDataPath)
+	if dp == "" {
+		return "veth"
+	}
+	return dp
+}
+
 func newCRDV2Service(ctx context.Context, configFilePath, daemonMode string) (*networkService, error) {
 	builder := NewNetworkServiceBuilder(ctx).
 		WithConfigFilePath(configFilePath).
@@ -548,6 +605,7 @@ func newLegacyService(ctx context.Context, configFilePath, daemonMode string) (*
 		InitK8S().
 		InitResourceDB().
 		LoadDynamicConfig().
+		ReportDatapath().
 		PostInitForLegacyMode().
 		RegisterTracing()
 

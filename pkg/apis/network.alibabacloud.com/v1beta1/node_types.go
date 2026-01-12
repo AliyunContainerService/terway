@@ -139,6 +139,7 @@ type Flavor struct {
 type NodeSpec struct {
 	NodeMetadata NodeMetadata `json:"nodeMetadata,omitempty"`
 	NodeCap      NodeCap      `json:"nodeCap,omitempty"`
+	Datapath     *Datapath    `json:"datapath,omitempty"`
 	ENISpec      *ENISpec     `json:"eni,omitempty"`
 	Pool         *PoolSpec    `json:"pool,omitempty"`
 	// Flavor guide the controller to generate eni as expected
@@ -193,6 +194,20 @@ type Nic struct {
 type Condition struct {
 	ObservedTime metav1.Time `json:"observedTime,omitempty"`
 	Message      string      `json:"message,omitempty"`
+}
+
+// DatapathType
+// +kubebuilder:validation:Enum=veth;ipvlan;datapathv2
+type DatapathType string
+
+const (
+	DatapathTypeVeth       DatapathType = "veth"
+	DatapathTypeIPVlan     DatapathType = "ipvlan"
+	DatapathTypeDatapathV2 DatapathType = "datapathv2"
+)
+
+type Datapath struct {
+	Type DatapathType `json:"type,omitempty"`
 }
 
 // NodeStatus defines the observed state of Node
