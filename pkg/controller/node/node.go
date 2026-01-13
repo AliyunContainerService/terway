@@ -77,7 +77,7 @@ func init() {
 			Complete(&ReconcileNode{
 				client:          mgr.GetClient(),
 				scheme:          mgr.GetScheme(),
-				record:          mgr.GetEventRecorderFor(ControllerName),
+				record:          mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
 				aliyun:          ctrlCtx.AliyunClient,
 				supportEFLO:     utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
 				nodePredicate:   nodePredicate,

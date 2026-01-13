@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
@@ -41,14 +42,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-const controllerName = "pod-networking"
+const ControllerName = "pod-networking"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+	register.Add(ControllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &v1beta1.PodNetworking{})
 
 		err := builder.ControllerManagedBy(mgr).
-			Named(controllerName).
+			Named(ControllerName).
 			WithOptions(controller.Options{
 				MaxConcurrentReconciles: 1,
 			}).
@@ -76,7 +77,7 @@ type ReconcilePodNetworking struct {
 func NewReconcilePodNetworking(mgr manager.Manager, aliyunClient aliyunClient.OpenAPI, swPool *vswitch.SwitchPool) *ReconcilePodNetworking {
 	r := &ReconcilePodNetworking{
 		client:       mgr.GetClient(),
-		record:       mgr.GetEventRecorderFor("PodNetworking"),
+		record:       mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
 		aliyunClient: aliyunClient,
 		swPool:       swPool,
 	}

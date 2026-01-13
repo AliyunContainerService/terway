@@ -62,25 +62,25 @@ import (
 	"github.com/AliyunContainerService/terway/types/controlplane"
 )
 
-var ctrlLog = ctrl.Log.WithName(controllerName)
+var ctrlLog = ctrl.Log.WithName(ControllerName)
 
-const controllerName = "pod-eni"
+const ControllerName = "pod-eni"
 const layout = "2006-01-02T15:04:05Z"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+	register.Add(ControllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &v1beta1.PodENI{})
 
 		r := &ReconcilePodENI{
 			client:          mgr.GetClient(),
 			scheme:          mgr.GetScheme(),
-			record:          mgr.GetEventRecorderFor("TerwayPodENIController"),
+			record:          mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
 			aliyun:          ctrlCtx.AliyunClient,
 			trunkMode:       *ctrlCtx.Config.EnableTrunk,
 			crdMode:         ctrlCtx.Config.IPAMType == types.IPAMTypeCRD,
 			nodeStatusCache: ctrlCtx.NodeStatusCache,
 		}
-		c, err := controller.NewUnmanaged(controllerName, controller.Options{
+		c, err := controller.NewUnmanaged(ControllerName, controller.Options{
 			Reconciler:              r,
 			MaxConcurrentReconciles: ctrlCtx.Config.PodENIMaxConcurrent,
 		})

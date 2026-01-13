@@ -97,3 +97,7 @@ func RuntimeFinalStatus(status map[v1beta1.CNIStatus]*v1beta1.CNIStatusInfo) (cn
 	}
 	return
 }
+
+func EventName(name string) string {
+	return fmt.Sprintf("terway-controlplane/%s", name)
+}

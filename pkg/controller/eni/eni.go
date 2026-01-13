@@ -29,6 +29,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	register "github.com/AliyunContainerService/terway/pkg/controller"
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 )
@@ -45,14 +46,14 @@ type ReconcileNetworkInterface struct {
 	resourceBackoff *BackoffManager
 }
 
-const controllerName = "eni"
+const ControllerName = "eni"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+	register.Add(ControllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &v1beta1.NetworkInterface{})
 
 		err := builder.ControllerManagedBy(mgr).
-			Named(controllerName).
+			Named(ControllerName).
 			WithOptions(controller.Options{
 				MaxConcurrentReconciles: controlplane.GetConfig().ENIMaxConcurrent,
 				LogConstructor: func(request *reconcile.Request) logr.Logger {
@@ -69,7 +70,7 @@ func init() {
 				client:          mgr.GetClient(),
 				scheme:          mgr.GetScheme(),
 				aliyun:          ctrlCtx.AliyunClient, // use direct client
-				record:          mgr.GetEventRecorderFor("TerwayENetworkInterfaceontroller"),
+				record:          mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
 				resourceBackoff: NewBackoffManager(),
 			})
 

@@ -3,6 +3,7 @@ package pod
 import (
 	"context"
 
+	"github.com/AliyunContainerService/terway/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,7 +33,7 @@ func init() {
 			Complete(&ReconcilePod{
 				client: mgr.GetClient(),
 				scheme: mgr.GetScheme(),
-				record: mgr.GetEventRecorderFor(ControllerName),
+				record: mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
 			})
 	}, false)
 }
