@@ -11,10 +11,12 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/controller/status"
 	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/AliyunContainerService/terway/types/controlplane"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
@@ -2252,4 +2254,116 @@ var _ = Describe("ENI Controller Tests", func() {
 		})
 	})
 
+	Context("gcSecondaryENI", func() {
+		BeforeEach(func() {
+			// Set up controlplane config for tests
+			controlplane.SetConfig(&controlplane.Config{
+				VPCID:     "vpc-test",
+				ClusterID: "test-cluster",
+			})
+		})
+
+		It("should call aliyun.GetECS().DescribeNetworkInterface with expected filter", func() {
+			r := createTestReconciler(openAPI, false, false)
+
+			// Prepare secondary ENIs
+			secondaryENI := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-secondary-1",
+				Type:               aliyunClient.ENITypeSecondary,
+			}
+			otherENI := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-primary-1",
+				Type:               aliyunClient.ENITypePrimary,
+			}
+			// Set up the mock DescribeNetworkInterface call
+			ecsClient.On("DescribeNetworkInterface", mock.Anything, "vpc-test", mock.Anything, mock.Anything, aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusAvailable, mock.Anything).
+				Return([]*aliyunClient.NetworkInterface{secondaryENI, otherENI}, nil).Once()
+
+			// Call gcSecondaryENI - it should filter and only process secondary ENIs
+			r.gcSecondaryENI(ctx)
+
+			// Verify the mock was called
+			ecsClient.AssertExpectations(GinkgoT())
+		})
+
+		It("should handle no secondary ENI", func() {
+			r := createTestReconciler(openAPI, false, false)
+			ecsClient.On("DescribeNetworkInterface", mock.Anything, "vpc-test", mock.Anything, mock.Anything, aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusAvailable, mock.Anything).
+				Return([]*aliyunClient.NetworkInterface{}, nil).Once()
+
+			// Should return early when no ENIs found
+			r.gcSecondaryENI(ctx)
+
+			// Verify the mock was called
+			ecsClient.AssertExpectations(GinkgoT())
+		})
+
+		It("should handle DescribeNetworkInterface error gracefully", func() {
+			r := createTestReconciler(openAPI, false, false)
+			ecsClient.On("DescribeNetworkInterface", mock.Anything, "vpc-test", mock.Anything, mock.Anything, aliyunClient.ENITypeSecondary, aliyunClient.ENIStatusAvailable, mock.Anything).
+				Return(nil, assert.AnError).Once()
+
+			// Should not panic on error
+			Expect(func() { r.gcSecondaryENI(ctx) }).ToNot(Panic())
+
+			// Verify the mock was called
+			ecsClient.AssertExpectations(GinkgoT())
+		})
+	})
+
+	Context("gcMemberENI", func() {
+		BeforeEach(func() {
+			// Set up controlplane config for tests
+			controlplane.SetConfig(&controlplane.Config{
+				VPCID:     "vpc-test",
+				ClusterID: "test-cluster",
+			})
+		})
+
+		It("should call aliyun.GetECS().DescribeNetworkInterface with expected filter", func() {
+			r := createTestReconciler(openAPI, false, false)
+
+			// Prepare member ENIs
+			memberENI := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-member-1",
+				Type:               aliyunClient.ENITypeMember,
+			}
+			otherENI := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-secondary-2",
+				Type:               aliyunClient.ENITypeSecondary,
+			}
+			ecsClient.On("DescribeNetworkInterface", mock.Anything, "vpc-test", mock.Anything, mock.Anything, aliyunClient.ENITypeMember, aliyunClient.ENIStatusInUse, mock.Anything).
+				Return([]*aliyunClient.NetworkInterface{memberENI, otherENI}, nil).Once()
+
+			// Call gcMemberENI - it should filter and only process member ENIs
+			r.gcMemberENI(ctx)
+
+			// Verify the mock was called
+			ecsClient.AssertExpectations(GinkgoT())
+		})
+
+		It("should handle no member ENI", func() {
+			r := createTestReconciler(openAPI, false, false)
+			ecsClient.On("DescribeNetworkInterface", mock.Anything, "vpc-test", mock.Anything, mock.Anything, aliyunClient.ENITypeMember, aliyunClient.ENIStatusInUse, mock.Anything).
+				Return([]*aliyunClient.NetworkInterface{}, nil).Once()
+
+			// Should return early when no ENIs found
+			r.gcMemberENI(ctx)
+
+			// Verify the mock was called
+			ecsClient.AssertExpectations(GinkgoT())
+		})
+
+		It("should handle DescribeNetworkInterface error gracefully", func() {
+			r := createTestReconciler(openAPI, false, false)
+			ecsClient.On("DescribeNetworkInterface", mock.Anything, "vpc-test", mock.Anything, mock.Anything, aliyunClient.ENITypeMember, aliyunClient.ENIStatusInUse, mock.Anything).
+				Return(nil, assert.AnError).Once()
+
+			// Should not panic on error
+			Expect(func() { r.gcMemberENI(ctx) }).ToNot(Panic())
+
+			// Verify the mock was called
+			ecsClient.AssertExpectations(GinkgoT())
+		})
+	})
 })

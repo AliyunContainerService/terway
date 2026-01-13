@@ -306,6 +306,100 @@ func (s *CniSuite) TestGetCmdArgsWithAdditionalConfig() {
 	s.Require().NoError(err)
 }
 
+func (s *CniSuite) TestCniCmdArgs_GetCNIConf() {
+	// Test normal case
+	conf := s.cniArgs.GetCNIConf()
+	s.Require().NotNil(conf)
+	s.Equal("0.4.0", conf.CNIVersion)
+	s.Equal("terway", conf.Name)
+	s.Equal(1500, conf.MTU)
+
+	// Test with nil args
+	var nilArgs *cniCmdArgs
+	conf = nilArgs.GetCNIConf()
+	s.Nil(conf)
+
+	// Test with nil conf
+	argsWithNilConf := &cniCmdArgs{
+		conf:      nil,
+		netNS:     s.netNS,
+		k8sArgs:   s.cniArgs.k8sArgs,
+		inputArgs: s.cniArgs.inputArgs,
+	}
+	conf = argsWithNilConf.GetCNIConf()
+	s.Nil(conf)
+}
+
+func (s *CniSuite) TestCniCmdArgs_GetK8SConfig() {
+	// Test normal case
+	k8sConfig := s.cniArgs.GetK8SConfig()
+	s.Require().NotNil(k8sConfig)
+	s.Equal("test-pod", string(k8sConfig.K8S_POD_NAME))
+	s.Equal("test-ns", string(k8sConfig.K8S_POD_NAMESPACE))
+	s.Equal("test-container-id", string(k8sConfig.K8S_POD_INFRA_CONTAINER_ID))
+
+	// Test with nil args
+	var nilArgs *cniCmdArgs
+	k8sConfig = nilArgs.GetK8SConfig()
+	s.Nil(k8sConfig)
+
+	// Test with nil k8sArgs
+	argsWithNilK8sArgs := &cniCmdArgs{
+		conf:      s.cniArgs.conf,
+		netNS:     s.netNS,
+		k8sArgs:   nil,
+		inputArgs: s.cniArgs.inputArgs,
+	}
+	k8sConfig = argsWithNilK8sArgs.GetK8SConfig()
+	s.Nil(k8sConfig)
+}
+
+func (s *CniSuite) TestCniCmdArgs_GetInputArgs() {
+	// Test normal case
+	inputArgs := s.cniArgs.GetInputArgs()
+	s.Require().NotNil(inputArgs)
+	s.Equal("test-container-id", inputArgs.ContainerID)
+	s.Equal(s.netNS.Path(), inputArgs.Netns)
+	s.Equal("eth0", inputArgs.IfName)
+
+	// Test with nil args
+	var nilArgs *cniCmdArgs
+	inputArgs = nilArgs.GetInputArgs()
+	s.Nil(inputArgs)
+
+	// Test with nil inputArgs (should still return nil, not panic)
+	argsWithNilInputArgs := &cniCmdArgs{
+		conf:      s.cniArgs.conf,
+		netNS:     s.netNS,
+		k8sArgs:   s.cniArgs.k8sArgs,
+		inputArgs: nil,
+	}
+	inputArgs = argsWithNilInputArgs.GetInputArgs()
+	s.Nil(inputArgs)
+}
+
+func (s *CniSuite) TestCniCmdArgs_GetNetNSPath() {
+	// Test normal case
+	netNSPath := s.cniArgs.GetNetNSPath()
+	s.NotEmpty(netNSPath)
+	s.Equal(s.netNS.Path(), netNSPath)
+
+	// Test with nil args
+	var nilArgs *cniCmdArgs
+	netNSPath = nilArgs.GetNetNSPath()
+	s.Empty(netNSPath)
+
+	// Test with nil netNS
+	argsWithNilNetNS := &cniCmdArgs{
+		conf:      s.cniArgs.conf,
+		netNS:     nil,
+		k8sArgs:   s.cniArgs.k8sArgs,
+		inputArgs: s.cniArgs.inputArgs,
+	}
+	netNSPath = argsWithNilNetNS.GetNetNSPath()
+	s.Empty(netNSPath)
+}
+
 // Mock TerwayBackendClient
 type mockTerwayBackendClient struct{}
 

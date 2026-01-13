@@ -2,23 +2,31 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/types/controlplane"
+	"github.com/AliyunContainerService/terway/types/daemon"
+	v1 "k8s.io/api/admission/v1"
 )
 
 func Test_setNodeAffinityByZones(t *testing.T) {
@@ -1096,4 +1104,380 @@ func Test_getPodNetworkRequests(t *testing.T) {
 			assert.Equalf(t, tt.want1, got1, "getPodNetworkRequests(%v, %v, %v)", tt.args.ctx, tt.args.client, tt.args.anno)
 		})
 	}
+}
+
+// ==============================================================================
+// podNetworkingWebhook Tests (Lines 259-284)
+// ==============================================================================
+
+func TestPodNetworkingWebhook_ConfigFromConfigMap_NotFound(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta1.AddToScheme(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	podNetworking := &v1beta1.PodNetworking{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-podnetworking",
+		},
+		Spec: v1beta1.PodNetworkingSpec{
+			SecurityGroupIDs: []string{},
+			VSwitchOptions:   []string{},
+		},
+	}
+	original, _ := json.Marshal(podNetworking)
+
+	req := webhook.AdmissionRequest{
+		AdmissionRequest: v1.AdmissionRequest{
+			Kind: metav1.GroupVersionKind{
+				Kind: "PodNetworking",
+			},
+			Object: runtime.RawExtension{
+				Raw: original,
+			},
+		},
+	}
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	// Mock ConfigFromConfigMap to return NotFound error
+	patches.ApplyFunc(daemon.ConfigFromConfigMap, func(ctx context.Context, client client.Client, nodeName string) (*daemon.Config, error) {
+		return nil, k8sErr.NewNotFound(schema.GroupResource{Resource: "configmaps"}, "eni-config")
+	})
+
+	ctx := context.Background()
+	resp := podNetworkingWebhook(ctx, req, fakeClient)
+
+	assert.True(t, resp.Allowed)
+	assert.Equal(t, "no terway eni-config found", resp.Result.Message)
+}
+
+func TestPodNetworkingWebhook_ConfigFromConfigMap_OtherError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta1.AddToScheme(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	podNetworking := &v1beta1.PodNetworking{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-podnetworking",
+		},
+		Spec: v1beta1.PodNetworkingSpec{
+			SecurityGroupIDs: []string{},
+			VSwitchOptions:   []string{},
+		},
+	}
+	original, _ := json.Marshal(podNetworking)
+
+	req := webhook.AdmissionRequest{
+		AdmissionRequest: v1.AdmissionRequest{
+			Kind: metav1.GroupVersionKind{
+				Kind: "PodNetworking",
+			},
+			Object: runtime.RawExtension{
+				Raw: original,
+			},
+		},
+	}
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	// Mock ConfigFromConfigMap to return other error
+	patches.ApplyFunc(daemon.ConfigFromConfigMap, func(ctx context.Context, client client.Client, nodeName string) (*daemon.Config, error) {
+		return nil, errors.New("internal server error")
+	})
+
+	ctx := context.Background()
+	resp := podNetworkingWebhook(ctx, req, fakeClient)
+
+	assert.False(t, resp.Allowed)
+	assert.Equal(t, int32(1), resp.Result.Code)
+}
+
+func TestPodNetworkingWebhook_FillSecurityGroupIDs(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta1.AddToScheme(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	podNetworking := &v1beta1.PodNetworking{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-podnetworking",
+		},
+		Spec: v1beta1.PodNetworkingSpec{
+			SecurityGroupIDs: []string{}, // Empty
+			VSwitchOptions:   []string{"vsw-1"},
+		},
+	}
+	original, _ := json.Marshal(podNetworking)
+
+	req := webhook.AdmissionRequest{
+		AdmissionRequest: v1.AdmissionRequest{
+			Kind: metav1.GroupVersionKind{
+				Kind: "PodNetworking",
+			},
+			Object: runtime.RawExtension{
+				Raw: original,
+			},
+		},
+	}
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	// Mock ConfigFromConfigMap to return config
+	mockConfig := &daemon.Config{
+		SecurityGroups: []string{"sg-1", "sg-2"},
+		VSwitches: map[string][]string{
+			"zone-1": {"vsw-1"},
+		},
+	}
+	patches.ApplyFunc(daemon.ConfigFromConfigMap, func(ctx context.Context, client client.Client, nodeName string) (*daemon.Config, error) {
+		return mockConfig, nil
+	})
+
+	ctx := context.Background()
+	resp := podNetworkingWebhook(ctx, req, fakeClient)
+
+	assert.True(t, resp.Allowed)
+	assert.NotEmpty(t, resp.Patches)
+}
+
+func TestPodNetworkingWebhook_FillVSwitchOptions(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta1.AddToScheme(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	podNetworking := &v1beta1.PodNetworking{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-podnetworking",
+		},
+		Spec: v1beta1.PodNetworkingSpec{
+			SecurityGroupIDs: []string{"sg-1"},
+			VSwitchOptions:   []string{}, // Empty
+		},
+	}
+	original, _ := json.Marshal(podNetworking)
+
+	req := webhook.AdmissionRequest{
+		AdmissionRequest: v1.AdmissionRequest{
+			Kind: metav1.GroupVersionKind{
+				Kind: "PodNetworking",
+			},
+			Object: runtime.RawExtension{
+				Raw: original,
+			},
+		},
+	}
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	// Mock ConfigFromConfigMap to return config
+	mockConfig := &daemon.Config{
+		SecurityGroups: []string{"sg-1"},
+		VSwitches: map[string][]string{
+			"zone-1": {"vsw-1", "vsw-2"},
+			"zone-2": {"vsw-3"},
+		},
+	}
+	patches.ApplyFunc(daemon.ConfigFromConfigMap, func(ctx context.Context, client client.Client, nodeName string) (*daemon.Config, error) {
+		return mockConfig, nil
+	})
+
+	ctx := context.Background()
+	resp := podNetworkingWebhook(ctx, req, fakeClient)
+
+	assert.True(t, resp.Allowed)
+	assert.NotEmpty(t, resp.Patches)
+}
+
+func TestPodNetworkingWebhook_FillBothSecurityGroupIDsAndVSwitchOptions(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta1.AddToScheme(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	podNetworking := &v1beta1.PodNetworking{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-podnetworking",
+		},
+		Spec: v1beta1.PodNetworkingSpec{
+			SecurityGroupIDs: []string{}, // Empty
+			VSwitchOptions:   []string{}, // Empty
+		},
+	}
+	original, _ := json.Marshal(podNetworking)
+
+	req := webhook.AdmissionRequest{
+		AdmissionRequest: v1.AdmissionRequest{
+			Kind: metav1.GroupVersionKind{
+				Kind: "PodNetworking",
+			},
+			Object: runtime.RawExtension{
+				Raw: original,
+			},
+		},
+	}
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	// Mock ConfigFromConfigMap to return config
+	mockConfig := &daemon.Config{
+		SecurityGroups: []string{"sg-1", "sg-2"},
+		VSwitches: map[string][]string{
+			"zone-1": {"vsw-1", "vsw-2"},
+		},
+	}
+	patches.ApplyFunc(daemon.ConfigFromConfigMap, func(ctx context.Context, client client.Client, nodeName string) (*daemon.Config, error) {
+		return mockConfig, nil
+	})
+
+	ctx := context.Background()
+	resp := podNetworkingWebhook(ctx, req, fakeClient)
+
+	assert.True(t, resp.Allowed)
+	assert.NotEmpty(t, resp.Patches)
+}
+
+func TestPodNetworkingWebhook_JsonMarshalError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta1.AddToScheme(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	podNetworking := &v1beta1.PodNetworking{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-podnetworking",
+		},
+		Spec: v1beta1.PodNetworkingSpec{
+			SecurityGroupIDs: []string{},
+			VSwitchOptions:   []string{},
+		},
+	}
+	original, _ := json.Marshal(podNetworking)
+
+	req := webhook.AdmissionRequest{
+		AdmissionRequest: v1.AdmissionRequest{
+			Kind: metav1.GroupVersionKind{
+				Kind: "PodNetworking",
+			},
+			Object: runtime.RawExtension{
+				Raw: original,
+			},
+		},
+	}
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	// Mock ConfigFromConfigMap to return config
+	mockConfig := &daemon.Config{
+		SecurityGroups: []string{"sg-1"},
+		VSwitches: map[string][]string{
+			"zone-1": {"vsw-1"},
+		},
+	}
+	patches.ApplyFunc(daemon.ConfigFromConfigMap, func(ctx context.Context, client client.Client, nodeName string) (*daemon.Config, error) {
+		return mockConfig, nil
+	})
+
+	// Mock json.Marshal to return error
+	patches.ApplyFunc(json.Marshal, func(v interface{}) ([]byte, error) {
+		// Only fail for PodNetworking type
+		if _, ok := v.(*v1beta1.PodNetworking); ok {
+			return nil, errors.New("marshal error")
+		}
+		// Use original implementation for other types
+		return json.Marshal(v)
+	})
+
+	ctx := context.Background()
+	resp := podNetworkingWebhook(ctx, req, fakeClient)
+
+	assert.False(t, resp.Allowed)
+	assert.Equal(t, int32(1), resp.Result.Code)
+}
+
+func TestPodNetworkingWebhook_SuccessfulPatch(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta1.AddToScheme(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	podNetworking := &v1beta1.PodNetworking{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-podnetworking",
+		},
+		Spec: v1beta1.PodNetworkingSpec{
+			SecurityGroupIDs: []string{},
+			VSwitchOptions:   []string{},
+		},
+	}
+	original, _ := json.Marshal(podNetworking)
+
+	req := webhook.AdmissionRequest{
+		AdmissionRequest: v1.AdmissionRequest{
+			Kind: metav1.GroupVersionKind{
+				Kind: "PodNetworking",
+			},
+			Object: runtime.RawExtension{
+				Raw: original,
+			},
+		},
+	}
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	// Mock ConfigFromConfigMap to return config
+	mockConfig := &daemon.Config{
+		SecurityGroups: []string{"sg-1", "sg-2"},
+		VSwitches: map[string][]string{
+			"zone-1": {"vsw-1", "vsw-2"},
+			"zone-2": {"vsw-3"},
+		},
+	}
+	patches.ApplyFunc(daemon.ConfigFromConfigMap, func(ctx context.Context, client client.Client, nodeName string) (*daemon.Config, error) {
+		return mockConfig, nil
+	})
+
+	ctx := context.Background()
+	resp := podNetworkingWebhook(ctx, req, fakeClient)
+
+	assert.True(t, resp.Allowed)
+	assert.NotEmpty(t, resp.Patches)
+	assert.Equal(t, "ok", resp.Result.Message)
+}
+
+func TestPodNetworkingWebhook_AllSet_NoPatch(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta1.AddToScheme(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	podNetworking := &v1beta1.PodNetworking{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-podnetworking",
+		},
+		Spec: v1beta1.PodNetworkingSpec{
+			SecurityGroupIDs: []string{"sg-1"},
+			VSwitchOptions:   []string{"vsw-1"},
+		},
+	}
+	original, _ := json.Marshal(podNetworking)
+
+	req := webhook.AdmissionRequest{
+		AdmissionRequest: v1.AdmissionRequest{
+			Kind: metav1.GroupVersionKind{
+				Kind: "PodNetworking",
+			},
+			Object: runtime.RawExtension{
+				Raw: original,
+			},
+		},
+	}
+
+	ctx := context.Background()
+	resp := podNetworkingWebhook(ctx, req, fakeClient)
+
+	assert.True(t, resp.Allowed)
+	assert.Equal(t, "podNetworking all set", resp.Result.Message)
+	assert.Empty(t, resp.Patches)
 }

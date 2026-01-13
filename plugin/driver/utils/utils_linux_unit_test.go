@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"testing"
 
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
+	k8snet "k8s.io/apimachinery/pkg/util/net"
 
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 )
@@ -148,6 +151,9 @@ func TestSetupTC_InputValidation(t *testing.T) {
 		t.Skip("Skipping test that requires root privileges")
 	}
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	testNS := createTestNetNS(t)
 	defer cleanupTestNetNS(t, testNS)
 
@@ -193,6 +199,9 @@ func TestDelEgressPriority_NilInputs(t *testing.T) {
 		t.Skip("Skipping test that requires root privileges")
 	}
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	testNS := createTestNetNS(t)
 	defer cleanupTestNetNS(t, testNS)
 
@@ -236,6 +245,9 @@ func TestCleanIPRules_Basic(t *testing.T) {
 		t.Skip("Skipping test that requires root privileges")
 	}
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	testNS := createTestNetNS(t)
 	defer cleanupTestNetNS(t, testNS)
 
@@ -254,6 +266,9 @@ func TestGetERdmaFromLink_DummyLink(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("Skipping test that requires root privileges")
 	}
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
 	testNS := createTestNetNS(t)
 	defer cleanupTestNetNS(t, testNS)
@@ -329,6 +344,9 @@ func TestEnsureLinkUp(t *testing.T) {
 		t.Skip("Skipping test that requires root privileges")
 	}
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	testNS := createTestNetNS(t)
 	defer cleanupTestNetNS(t, testNS)
 
@@ -358,6 +376,9 @@ func TestEnsureLinkMTU(t *testing.T) {
 		t.Skip("Skipping test that requires root privileges")
 	}
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	testNS := createTestNetNS(t)
 	defer cleanupTestNetNS(t, testNS)
 
@@ -386,6 +407,9 @@ func TestEnsureLinkName(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("Skipping test that requires root privileges")
 	}
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
 	testNS := createTestNetNS(t)
 	defer cleanupTestNetNS(t, testNS)
@@ -423,6 +447,9 @@ func TestEnsureLinkMAC(t *testing.T) {
 		t.Skip("Skipping test that requires root privileges")
 	}
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	testNS := createTestNetNS(t)
 	defer cleanupTestNetNS(t, testNS)
 
@@ -449,6 +476,9 @@ func TestDelLinkByName(t *testing.T) {
 		t.Skip("Skipping test that requires root privileges")
 	}
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	testNS := createTestNetNS(t)
 	defer cleanupTestNetNS(t, testNS)
 
@@ -468,4 +498,22 @@ func TestDelLinkByName(t *testing.T) {
 		return err
 	})
 	assert.Error(t, err) // Should not find the link
+}
+
+func TestGetHostIP(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	patches.ApplyFunc(k8snet.ResolveBindAddress, func(bindAddress net.IP) (net.IP, error) {
+		if bindAddress.Equal(net.ParseIP("::1")) {
+			return net.ParseIP("2001:db8::1"), nil
+		}
+		return net.ParseIP("192.168.1.1"), nil
+
+	})
+	ipNetSet, err := GetHostIP(true, true)
+	assert.NoError(t, err)
+	assert.NotNil(t, ipNetSet)
+	assert.NotNil(t, ipNetSet.IPv4)
+	assert.NotNil(t, ipNetSet.IPv6)
 }

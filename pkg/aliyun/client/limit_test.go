@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -370,7 +371,7 @@ func TestProvider_GetLimit_Concurrency(t *testing.T) {
 			InstanceBandwidthTx:         500,
 			EniTrunkSupported:           false,
 		},
-	}, nil)
+	}, nil).Once() // Ensure it's only called once
 
 	provider := client.NewProvider()
 
@@ -379,8 +380,15 @@ func TestProvider_GetLimit_Concurrency(t *testing.T) {
 	results := make(chan *client.Limits, numGoroutines)
 	errors := make(chan error, numGoroutines)
 
+	// Use a barrier to ensure all goroutines start at roughly the same time
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+	start := make(chan struct{})
+
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
+			defer wg.Done()
+			<-start // Wait for start signal
 			limit, err := provider.GetLimit(mockECS, "ecs.g7.large")
 			if err != nil {
 				errors <- err
@@ -389,6 +397,10 @@ func TestProvider_GetLimit_Concurrency(t *testing.T) {
 			results <- limit
 		}()
 	}
+
+	// Start all goroutines at once to maximize concurrency
+	close(start)
+	wg.Wait()
 
 	// Collect results
 	var limits []*client.Limits

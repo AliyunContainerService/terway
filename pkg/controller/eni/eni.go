@@ -31,7 +31,6 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
-	"github.com/AliyunContainerService/terway/types/controlplane"
 )
 
 // ReconcileNetworkInterface reconciles a AutoRepair object
@@ -55,7 +54,7 @@ func init() {
 		err := builder.ControllerManagedBy(mgr).
 			Named(ControllerName).
 			WithOptions(controller.Options{
-				MaxConcurrentReconciles: controlplane.GetConfig().ENIMaxConcurrent,
+				MaxConcurrentReconciles: ctrlCtx.Config.ENIMaxConcurrent,
 				LogConstructor: func(request *reconcile.Request) logr.Logger {
 					log := mgr.GetLogger()
 					if request != nil {
