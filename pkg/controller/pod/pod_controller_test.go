@@ -65,7 +65,7 @@ var _ = Describe("Pod controller", func() {
 
 	Context("Test init", func() {
 		It("register should succeed", func() {
-			v, ok := register.Controllers[controllerName]
+			v, ok := register.Controllers[ControllerName]
 			Expect(ok).To(BeTrue())
 
 			mgr, ctx := testutil.NewManager(cfg, openAPI, k8sClient)

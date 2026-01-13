@@ -56,11 +56,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-const controllerName = "pod"
+const ControllerName = "pod"
 const defaultInterface = "eth0"
 
 func init() {
-	register.Add(controllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
+	register.Add(ControllerName, func(mgr manager.Manager, ctrlCtx *register.ControllerCtx) error {
 		ctrlCtx.RegisterResource = append(ctrlCtx.RegisterResource, &corev1.Pod{})
 
 		crdMode := ctrlCtx.Config.IPAMType == types.IPAMTypeCRD
@@ -68,14 +68,14 @@ func init() {
 		r := &ReconcilePod{
 			client:    mgr.GetClient(),
 			scheme:    mgr.GetScheme(),
-			record:    mgr.GetEventRecorderFor("TerwayPodController"),
+			record:    mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
 			aliyun:    ctrlCtx.AliyunClient,
 			swPool:    ctrlCtx.VSwitchPool,
 			trunkMode: *ctrlCtx.Config.EnableTrunk,
 			crdMode:   crdMode,
 		}
 
-		c, err := controller.NewUnmanaged(controllerName, controller.Options{
+		c, err := controller.NewUnmanaged(ControllerName, controller.Options{
 			Reconciler:              r,
 			MaxConcurrentReconciles: ctrlCtx.Config.PodMaxConcurrent,
 		})

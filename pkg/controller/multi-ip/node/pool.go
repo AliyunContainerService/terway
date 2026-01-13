@@ -142,7 +142,7 @@ func init() {
 			Reconciler: &ReconcileNode{
 				client:             mgr.GetClient(),
 				scheme:             mgr.GetScheme(),
-				record:             mgr.GetEventRecorderFor(ControllerName),
+				record:             mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
 				aliyun:             ctrlCtx.AliyunClient,
 				vswpool:            ctrlCtx.VSwitchPool,
 				fullSyncNodePeriod: fullSyncPeriod,

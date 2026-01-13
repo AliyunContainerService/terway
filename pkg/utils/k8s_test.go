@@ -443,3 +443,41 @@ func TestPodInfoKey(t *testing.T) {
 		require.Equal(t, expected, result, "Expected %s, got %s", expected, result)
 	})
 }
+
+func TestEventName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "normal case",
+			input:    "test-event",
+			expected: "terway-controlplane/test-event",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "terway-controlplane/",
+		},
+		{
+			name:     "with special characters",
+			input:    "event-with-dash",
+			expected: "terway-controlplane/event-with-dash",
+		},
+		{
+			name:     "with numbers",
+			input:    "event123",
+			expected: "terway-controlplane/event123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := EventName(tt.input)
+			if result != tt.expected {
+				t.Errorf("EventName(%s) = %s; expected %s", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
