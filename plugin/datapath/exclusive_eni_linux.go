@@ -316,6 +316,10 @@ func (r *ExclusiveENI) Setup(ctx context.Context, cfg *types.SetupConfig, netNS 
 	}
 	defer hostNetNS.Close()
 
+	err = utils.LinkSetDown(ctx, nicLink)
+	if err != nil {
+		return fmt.Errorf("error set nic %s down, %w", nicLink.Attrs().Name, err)
+	}
 	randomName, err := ip.RandomVethName()
 	if err != nil {
 		return fmt.Errorf("error get random veth name, %w", err)
@@ -340,6 +344,12 @@ func (r *ExclusiveENI) Setup(ctx context.Context, cfg *types.SetupConfig, netNS 
 					if err1 != nil {
 						return err1
 					}
+
+					err = utils.LinkSetDown(ctx, nicLink)
+					if err != nil {
+						return fmt.Errorf("error set nic %s down, %w", nicLink.Attrs().Name, err)
+					}
+
 					err = utils.LinkSetName(ctx, nicLink, nicName)
 					if err != nil {
 						return err
