@@ -107,6 +107,13 @@ var _ = Describe("Node controller", func() {
 						InstanceType: "ecs",
 						ZoneID:       "cn-hangzhou-i",
 					},
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:           2,
+						IPv4PerAdapter:     10,
+						IPv6PerAdapter:     10,
+						EriQuantity:        2,
+						MemberAdapterLimit: 2,
+					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, node)).Should(Succeed())

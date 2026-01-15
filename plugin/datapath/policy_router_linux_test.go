@@ -11,7 +11,9 @@ import (
 	"github.com/AliyunContainerService/terway/plugin/driver/types"
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
+	cniTypes "github.com/containernetworking/cni/pkg/types"
 
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/stretchr/testify/assert"
@@ -476,4 +478,103 @@ func TestDataPathPolicyRouteMultiNetwork(t *testing.T) {
 		ENIIndex: 0,
 	}, containerNS)
 	assert.NoError(t, err)
+}
+
+func TestEnsureMQFQ(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// Mock link
+	link := &netlink.Dummy{
+		LinkAttrs: netlink.LinkAttrs{Index: 10, Name: "eth0"},
+	}
+
+	// Mock utils.EnsureMQQdisc
+	patches := gomonkey.ApplyFunc(utils.EnsureMQQdisc, func(ctx context.Context, link netlink.Link) error {
+		return nil
+	})
+	defer patches.Reset()
+
+	// Mock netlink.QdiscList
+	patches.ApplyFunc(netlink.QdiscList, func(link netlink.Link) ([]netlink.Qdisc, error) {
+		return []netlink.Qdisc{
+			&netlink.GenericQdisc{
+				QdiscAttrs: netlink.QdiscAttrs{
+					LinkIndex: 10,
+					Parent:    netlink.MakeHandle(1, 1), // Parent is mq leaf
+					Handle:    netlink.MakeHandle(10, 0),
+				},
+				QdiscType: "pfifo_fast",
+			},
+		}, nil
+	})
+
+	// Mock utils.QdiscReplace
+	replaceCalled := false
+	patches.ApplyFunc(utils.QdiscReplace, func(ctx context.Context, qdisc netlink.Qdisc) error {
+		replaceCalled = true
+		assert.Equal(t, "fq", qdisc.Type())
+		return nil
+	})
+
+	err := ensureMQFQ(context.Background(), link)
+	assert.NoError(t, err)
+	assert.True(t, replaceCalled, "QdiscReplace should be called")
+}
+
+func TestGenerateContCfgForPolicy_ExtraRoutes(t *testing.T) {
+	// No need for LockOSThread or real links here
+
+	link := &netlink.Dummy{
+		LinkAttrs: netlink.LinkAttrs{Index: 123, Name: "dummy0"},
+	}
+
+	mac, _ := net.ParseMAC("00:00:00:00:00:01")
+
+	cfg := &types.SetupConfig{
+		ContainerIfName: "eth0",
+		ContainerIPNet: &terwayTypes.IPNetSet{
+			IPv4: &net.IPNet{
+				IP:   net.ParseIP("192.168.1.10"),
+				Mask: net.CIDRMask(24, 32),
+			},
+		},
+		GatewayIP: &terwayTypes.IPSet{
+			IPv4: net.ParseIP("192.168.1.1"),
+		},
+		ExtraRoutes: []cniTypes.Route{
+			{
+				Dst: net.IPNet{
+					IP:   net.ParseIP("10.0.0.0"),
+					Mask: net.CIDRMask(8, 32),
+				},
+				GW: net.ParseIP("192.168.1.254"),
+			},
+			{
+				Dst: net.IPNet{
+					IP:   net.ParseIP("172.16.0.0"),
+					Mask: net.CIDRMask(12, 32),
+				},
+			},
+		},
+	}
+
+	conf := generateContCfgForPolicy(cfg, link, mac)
+
+	assert.NotNil(t, conf)
+	assert.NotNil(t, conf.Routes)
+
+	var foundGW, foundLink bool
+	for _, r := range conf.Routes {
+		if r.Dst != nil && r.Dst.String() == "10.0.0.0/8" {
+			assert.Equal(t, r.Gw.String(), "192.168.1.254")
+			foundGW = true
+		}
+		if r.Dst != nil && r.Dst.String() == "172.16.0.0/12" {
+			assert.Nil(t, r.Gw)
+			foundLink = true
+		}
+	}
+	assert.True(t, foundGW)
+	assert.True(t, foundLink)
 }

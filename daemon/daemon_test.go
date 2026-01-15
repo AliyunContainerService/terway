@@ -2,11 +2,17 @@ package daemon
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
+	"github.com/AliyunContainerService/terway/deviceplugin"
 	"github.com/AliyunContainerService/terway/pkg/eni"
 	"github.com/AliyunContainerService/terway/pkg/k8s/mocks"
+	k8smocks "github.com/AliyunContainerService/terway/pkg/k8s/mocks"
+	"github.com/AliyunContainerService/terway/pkg/storage"
+	storagemocks "github.com/AliyunContainerService/terway/pkg/storage/mocks"
 	"github.com/AliyunContainerService/terway/rpc"
 	"github.com/agiledragon/gomonkey/v2"
 	"github.com/stretchr/testify/assert"
@@ -14,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -226,7 +232,7 @@ func TestCleanRuntimeNode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup fake client
-			scheme := runtime.NewScheme()
+			scheme := k8sruntime.NewScheme()
 			_ = corev1.AddToScheme(scheme)
 			_ = networkv1beta1.AddToScheme(scheme)
 
@@ -892,63 +898,60 @@ func TestNetworkService_Config(t *testing.T) {
 func TestNetworkService_Trace(t *testing.T) {
 	tests := []struct {
 		name          string
-		setupMocks    func(*gomonkey.Patches, *networkService)
+		setupStorage  func(t *testing.T) storage.Storage
+		setupPending  func(ns *networkService)
 		expectedError bool
 	}{
 		{
 			name: "trace with no pending pods and no resources",
-			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
-				// Mock resourceDB.List to return empty list
-				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
-					return []interface{}{}, nil
-				})
+			setupStorage: func(t *testing.T) storage.Storage {
+				mockStorage := storagemocks.NewStorage(t)
+				mockStorage.On("List").Return([]interface{}{}, nil)
+				return mockStorage
 			},
 			expectedError: false,
 		},
 		{
 			name: "trace with pending pods",
-			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
-				// Add pending pods
+			setupStorage: func(t *testing.T) storage.Storage {
+				mockStorage := storagemocks.NewStorage(t)
+				mockStorage.On("List").Return([]interface{}{}, nil)
+				return mockStorage
+			},
+			setupPending: func(ns *networkService) {
 				ns.pendingPods.Store("default/pod1", struct{}{})
 				ns.pendingPods.Store("default/pod2", struct{}{})
-
-				// Mock resourceDB.List to return empty list
-				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
-					return []interface{}{}, nil
-				})
 			},
 			expectedError: false,
 		},
 		{
 			name: "trace with resources",
-			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
-				// Mock resourceDB.List to return pod resources
-				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
-					return []interface{}{
-						daemon.PodResources{
-							PodInfo: &daemon.PodInfo{
-								Namespace: "default",
-								Name:      "test-pod",
-							},
-							Resources: []daemon.ResourceItem{
-								{
-									Type: daemon.ResourceTypeENIIP,
-									ID:   "eni-123.192.168.1.10",
-								},
+			setupStorage: func(t *testing.T) storage.Storage {
+				mockStorage := storagemocks.NewStorage(t)
+				mockStorage.On("List").Return([]interface{}{
+					daemon.PodResources{
+						PodInfo: &daemon.PodInfo{
+							Namespace: "default",
+							Name:      "test-pod",
+						},
+						Resources: []daemon.ResourceItem{
+							{
+								Type: daemon.ResourceTypeENIIP,
+								ID:   "eni-123.192.168.1.10",
 							},
 						},
-					}, nil
-				})
+					},
+				}, nil)
+				return mockStorage
 			},
 			expectedError: false,
 		},
 		{
 			name: "trace with resourceDB error",
-			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
-				// Mock resourceDB.List to return error
-				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
-					return nil, assert.AnError
-				})
+			setupStorage: func(t *testing.T) storage.Storage {
+				mockStorage := storagemocks.NewStorage(t)
+				mockStorage.On("List").Return(nil, assert.AnError)
+				return mockStorage
 			},
 			expectedError: true,
 		},
@@ -956,15 +959,12 @@ func TestNetworkService_Trace(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			patches := gomonkey.NewPatches()
-			defer patches.Reset()
-
 			ns := &networkService{
-				resourceDB: newMockStorage(t),
+				resourceDB: tt.setupStorage(t),
 			}
 
-			if tt.setupMocks != nil {
-				tt.setupMocks(patches, ns)
+			if tt.setupPending != nil {
+				tt.setupPending(ns)
 			}
 
 			trace := ns.Trace()
@@ -1152,8 +1152,12 @@ func TestNetworkService_GetResourceMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			runtime.GC()
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			ns := &networkService{
 				eniMgr: &eni.Manager{},
@@ -1180,4 +1184,67 @@ func TestNetworkService_GetResourceMapping(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecordEvent(t *testing.T) {
+
+	k8s := k8smocks.NewKubernetes(t)
+	n := &networkService{
+		k8s: k8s,
+	}
+	k8s.On("RecordNodeEvent", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	k8s.On("RecordPodEvent", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	_, err := n.RecordEvent(nil, &rpc.EventRequest{
+		EventTarget:     rpc.EventTarget_EventTargetNode,
+		K8SPodName:      "",
+		K8SPodNamespace: "",
+		EventType:       rpc.EventType_EventTypeWarning,
+		Reason:          "",
+		Message:         "",
+	})
+
+	require.NoError(t, err)
+	_, err = n.RecordEvent(nil, &rpc.EventRequest{
+		EventTarget:     rpc.EventTarget_EventTargetPod,
+		K8SPodName:      "",
+		K8SPodNamespace: "",
+		EventType:       rpc.EventType_EventTypeNormal,
+		Reason:          "",
+		Message:         "",
+	})
+	require.NoError(t, err)
+}
+
+func TestRunDevicePlugin(t *testing.T) {
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	dp := deviceplugin.NewENIDevicePlugin(0, deviceplugin.ENITypeMember)
+	patches.ApplyFunc(deviceplugin.NewENIDevicePlugin, func() *deviceplugin.ENIDevicePlugin {
+		return dp
+	})
+	patches.ApplyMethod(dp, "Serve", func() {})
+
+	runDevicePlugin("ENIMultiIP", &daemon.Config{
+		EnableENITrunking: true,
+		EnableERDMA:       true,
+	}, &daemon.PoolConfig{})
+}
+
+func TestNewServer(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	patches.ApplyFunc(NewNetworkServiceBuilder, func() *NetworkServiceBuilder {
+		return &NetworkServiceBuilder{
+			err: fmt.Errorf("some error"),
+		}
+	})
+	_, err := newCRDV2Service(context.Background(), "", "")
+	require.Error(t, err)
+
+	_, err = newLegacyService(context.Background(), "", "")
+	require.Error(t, err)
 }

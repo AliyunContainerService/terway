@@ -14,6 +14,7 @@ import (
 	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 	"github.com/agiledragon/gomonkey/v2"
+	cniTypes "github.com/containernetworking/cni/pkg/types"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
@@ -80,6 +81,14 @@ func TestDataPathExclusiveENI(t *testing.T) {
 			IPv6: eth0IPNetIPv6,
 		},
 		DefaultRoute: true,
+		ExtraRoutes: []cniTypes.Route{
+			{
+				Dst: net.IPNet{
+					IP:   net.ParseIP("169.10.0.10"),
+					Mask: net.CIDRMask(32, 32),
+				},
+			},
+		},
 	}
 
 	d := NewExclusiveENIDriver()
@@ -648,4 +657,3 @@ func TestDataPathExclusiveENI_DeferLogic(t *testing.T) {
 	}
 	assert.True(t, found, "dummy link should be back in host NS")
 }
-

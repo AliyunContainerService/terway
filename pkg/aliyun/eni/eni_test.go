@@ -2,12 +2,17 @@ package eni
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"runtime"
 	"testing"
 
+	"github.com/agiledragon/gomonkey/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 )
@@ -158,3 +163,161 @@ var _ = Describe("Metadata BDD Tests", func() {
 		})
 	})
 })
+
+func TestGetENIPrivateAddressesByMACv2(t *testing.T) {
+	tests := []struct {
+		name        string
+		mac         string
+		mockResult  []netip.Addr
+		mockError   error
+		expectError bool
+	}{
+		{
+			name: "success - single IPv4",
+			mac:  "00:11:22:33:44:55",
+			mockResult: []netip.Addr{
+				netip.MustParseAddr("192.168.1.10"),
+			},
+			mockError:   nil,
+			expectError: false,
+		},
+		{
+			name: "success - multiple IPv4",
+			mac:  "00:11:22:33:44:66",
+			mockResult: []netip.Addr{
+				netip.MustParseAddr("192.168.1.10"),
+				netip.MustParseAddr("192.168.1.11"),
+				netip.MustParseAddr("192.168.1.12"),
+			},
+			mockError:   nil,
+			expectError: false,
+		},
+		{
+			name:        "error - metadata call failure",
+			mac:         "00:11:22:33:44:77",
+			mockResult:  nil,
+			mockError:   errors.New("metadata service unavailable"),
+			expectError: true,
+		},
+		{
+			name:        "success - empty result",
+			mac:         "00:11:22:33:44:88",
+			mockResult:  []netip.Addr{},
+			mockError:   nil,
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt // capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			runtime.GC() // Force GC to help reset gomonkey state
+
+			// Create patch for metadata.GetIPv4ByMac with proper closure
+			patches := gomonkey.ApplyFunc(metadata.GetIPv4ByMac,
+				func(mac string) ([]netip.Addr, error) {
+					return tt.mockResult, tt.mockError
+				})
+			defer func() {
+				patches.Reset()
+				runtime.GC() // Force GC after reset
+			}()
+
+			eniMeta := NewENIMetadata(true, false)
+			result, err := eniMeta.GetENIPrivateAddressesByMACv2(tt.mac)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Equal(t, tt.mockError, err)
+				assert.Nil(t, result)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, len(tt.mockResult), len(result))
+				for i, addr := range tt.mockResult {
+					assert.Equal(t, addr, result[i])
+				}
+			}
+		})
+	}
+}
+
+func TestGetENIPrivateIPv6AddressesByMACv2(t *testing.T) {
+	tests := []struct {
+		name        string
+		mac         string
+		mockResult  []netip.Addr
+		mockError   error
+		expectError bool
+	}{
+		{
+			name: "success - single IPv6",
+			mac:  "00:11:22:33:44:55",
+			mockResult: []netip.Addr{
+				netip.MustParseAddr("fd00:4004:400::1"),
+			},
+			mockError:   nil,
+			expectError: false,
+		},
+		{
+			name: "success - multiple IPv6",
+			mac:  "00:11:22:33:44:66",
+			mockResult: []netip.Addr{
+				netip.MustParseAddr("fd00:4004:400::1"),
+				netip.MustParseAddr("fd00:4004:400::2"),
+				netip.MustParseAddr("fd00:4004:400::3"),
+			},
+			mockError:   nil,
+			expectError: false,
+		},
+		{
+			name:        "error - metadata call failure",
+			mac:         "00:11:22:33:44:77",
+			mockResult:  nil,
+			mockError:   errors.New("IPv6 not configured"),
+			expectError: true,
+		},
+		{
+			name:        "success - no IPv6 addresses",
+			mac:         "00:11:22:33:44:88",
+			mockResult:  nil,
+			mockError:   nil,
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt // capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			runtime.GC() // Force GC to help reset gomonkey state
+
+			// Create patch for metadata.GetIPv6ByMac with proper closure
+			patches := gomonkey.ApplyFunc(metadata.GetIPv6ByMac,
+				func(mac string) ([]netip.Addr, error) {
+					return tt.mockResult, tt.mockError
+				})
+			defer func() {
+				patches.Reset()
+				runtime.GC() // Force GC after reset
+			}()
+
+			eniMeta := NewENIMetadata(false, true)
+			result, err := eniMeta.GetENIPrivateIPv6AddressesByMACv2(tt.mac)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Equal(t, tt.mockError, err)
+				assert.Nil(t, result)
+			} else {
+				assert.NoError(t, err)
+				if tt.mockResult == nil {
+					assert.Nil(t, result)
+				} else {
+					assert.Equal(t, len(tt.mockResult), len(result))
+					for i, addr := range tt.mockResult {
+						assert.Equal(t, addr, result[i])
+					}
+				}
+			}
+		})
+	}
+}

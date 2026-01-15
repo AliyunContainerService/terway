@@ -1,10 +1,13 @@
 package daemon
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	k8smocks "github.com/AliyunContainerService/terway/pkg/k8s/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
@@ -810,4 +813,14 @@ func TestGetENIConfigWithTagFilter(t *testing.T) {
 	eniConfig := getENIConfig(cfg, "zoneID")
 
 	assert.Equal(t, map[string]string{"filter-key": "filter-value"}, eniConfig.TagFilter)
+}
+
+func TestDetDynamicConfig(t *testing.T) {
+	m := k8smocks.NewKubernetes(t)
+	m.On("GetDynamicConfigWithName", mock.Anything, mock.Anything).Return("", nil)
+	m.On("GetNodeDynamicConfigLabel").Return("foo")
+	cfg, label, err := getDynamicConfig(context.Background(), m)
+	assert.Empty(t, cfg)
+	assert.Equal(t, "foo", label)
+	assert.Nil(t, err)
 }

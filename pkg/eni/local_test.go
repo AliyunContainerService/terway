@@ -1395,11 +1395,18 @@ func TestLocal_errorHandleLocked_InvalidVSwitchIDIPNotEnough(t *testing.T) {
 	})
 	defer patches.Reset()
 
+	// Record time before calling errorHandleLocked to avoid timing issues
+	beforeTime := time.Now()
 	local.errorHandleLocked(err)
+	afterTime := time.Now()
 
 	// Should set ipAllocInhibitExpireAt to approximately 10 minutes from now
 	assert.True(t, local.ipAllocInhibitExpireAt.After(initialExpireAt))
-	assert.True(t, local.ipAllocInhibitExpireAt.After(time.Now().Add(9*time.Minute)))
+	// The expire time should be at least 10 minutes from when errorHandleLocked was called
+	// We use beforeTime to ensure we account for the time taken to execute errorHandleLocked
+	assert.True(t, local.ipAllocInhibitExpireAt.After(beforeTime.Add(9*time.Minute)))
+	// And it should be at most 10 minutes plus a small buffer for execution time
+	assert.True(t, local.ipAllocInhibitExpireAt.Before(afterTime.Add(11*time.Minute)))
 }
 
 func TestLocal_errorHandleLocked_QuotaExceededPrivateIPAddress(t *testing.T) {
@@ -1419,11 +1426,18 @@ func TestLocal_errorHandleLocked_QuotaExceededPrivateIPAddress(t *testing.T) {
 	})
 	defer patches.Reset()
 
+	// Record time before calling errorHandleLocked to avoid timing issues
+	beforeTime := time.Now()
 	local.errorHandleLocked(err)
+	afterTime := time.Now()
 
 	// Should set ipAllocInhibitExpireAt to approximately 10 minutes from now
 	assert.True(t, local.ipAllocInhibitExpireAt.After(initialExpireAt))
-	assert.True(t, local.ipAllocInhibitExpireAt.After(time.Now().Add(9*time.Minute)))
+	// The expire time should be at least 10 minutes from when errorHandleLocked was called
+	// We use beforeTime to ensure we account for the time taken to execute errorHandleLocked
+	assert.True(t, local.ipAllocInhibitExpireAt.After(beforeTime.Add(9*time.Minute)))
+	// And it should be at most 10 minutes plus a small buffer for execution time
+	assert.True(t, local.ipAllocInhibitExpireAt.Before(afterTime.Add(11*time.Minute)))
 }
 
 func TestLocal_errorHandleLocked_OtherError(t *testing.T) {
@@ -1463,4 +1477,244 @@ func TestLocal_errorHandleLocked_AlreadyInhibited(t *testing.T) {
 
 	// Should not reduce the existing inhibit time
 	assert.Equal(t, futureTime, local.ipAllocInhibitExpireAt)
+}
+
+// ==============================================================================
+// sync() Tests
+// ==============================================================================
+
+func TestLocal_sync_NilENI(t *testing.T) {
+	mockFactory := factorymocks.NewFactory(t)
+	local := NewLocalTest(nil, mockFactory, &daemon.PoolConfig{}, "")
+	local.status = statusInUse
+
+	// sync should return early when eni is nil
+	local.sync()
+
+	// LoadNetworkInterface should not be called
+	mockFactory.AssertNotCalled(t, "LoadNetworkInterface", mock.Anything)
+}
+
+func TestLocal_sync_StatusNotInUse(t *testing.T) {
+	mockFactory := factorymocks.NewFactory(t)
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+	}
+	local := NewLocalTest(eni, mockFactory, &daemon.PoolConfig{}, "")
+	local.status = statusInit // Not statusInUse
+
+	// sync should return early when status is not statusInUse
+	local.sync()
+
+	// LoadNetworkInterface should not be called
+	mockFactory.AssertNotCalled(t, "LoadNetworkInterface", mock.Anything)
+}
+
+// mockFactory is a simple factory implementation for testing
+type mockFactory struct{}
+
+func (m *mockFactory) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon.ENI, []netip.Addr, []netip.Addr, error) {
+	return nil, nil, nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockFactory) AssignNIPv4(eniID string, count int, mac string) ([]netip.Addr, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockFactory) AssignNIPv6(eniID string, count int, mac string) ([]netip.Addr, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockFactory) UnAssignNIPv4(eniID string, ips []netip.Addr, mac string) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (m *mockFactory) UnAssignNIPv6(eniID string, ips []netip.Addr, mac string) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (m *mockFactory) DeleteNetworkInterface(eniID string) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (m *mockFactory) LoadNetworkInterface(mac string) ([]netip.Addr, []netip.Addr, error) {
+	return nil, nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockFactory) GetAttachedNetworkInterface(preferTrunkID string) ([]*daemon.ENI, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func TestLocal_sync_LoadNetworkInterfaceError(t *testing.T) {
+	sf := &mockFactory{}
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+	}
+	local := NewLocalTest(eni, sf, &daemon.PoolConfig{}, "")
+	local.status = statusInUse
+
+	// Use gomonkey to mock LoadNetworkInterface to return an error
+	expectedErr := fmt.Errorf("failed to load network interface")
+	patches := gomonkey.ApplyMethod(sf, "LoadNetworkInterface", func(_ *mockFactory, mac string) ([]netip.Addr, []netip.Addr, error) {
+		return nil, nil, expectedErr
+	})
+	defer patches.Reset()
+
+	// sync should handle the error gracefully
+	local.sync()
+
+	// Verify that sync completed without panicking
+	// The error is logged but sync returns early
+	assert.Equal(t, statusInUse, local.status)
+}
+
+func TestLocal_sync_Success(t *testing.T) {
+	sf := &mockFactory{}
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+	}
+	local := NewLocalTest(eni, sf, &daemon.PoolConfig{
+		EnableIPv4: true,
+		EnableIPv6: true,
+	}, "")
+	local.status = statusInUse
+
+	// Add some existing IPs
+	existingIPv4 := netip.MustParseAddr("192.0.2.1")
+	existingIPv6 := netip.MustParseAddr("2001:db8::1")
+	local.ipv4.Add(NewValidIP(existingIPv4, false))
+	local.ipv6.Add(NewValidIP(existingIPv6, false))
+
+	// Remote IPs: one existing, one new, one missing
+	remoteIPv4 := []netip.Addr{
+		existingIPv4,                     // existing
+		netip.MustParseAddr("192.0.2.2"), // new
+		// 192.0.2.3 is missing (will be marked as invalid if it exists)
+	}
+	remoteIPv6 := []netip.Addr{
+		existingIPv6,                       // existing
+		netip.MustParseAddr("2001:db8::2"), // new
+	}
+
+	// Use gomonkey to mock LoadNetworkInterface
+	patches := gomonkey.ApplyMethod(sf, "LoadNetworkInterface", func(_ *mockFactory, mac string) ([]netip.Addr, []netip.Addr, error) {
+		assert.Equal(t, "00:00:00:00:00:01", mac)
+		return remoteIPv4, remoteIPv6, nil
+	})
+	defer patches.Reset()
+
+	// Reset invalidIPCache before test
+	invalidIPCache = cache.NewLRUExpireCache(100)
+
+	// Call sync
+	local.sync()
+
+	// Verify that existing IPs are still valid
+	assert.True(t, local.ipv4[existingIPv4].Valid())
+	assert.True(t, local.ipv6[existingIPv6].Valid())
+
+	// Verify that new IPs from remote are tracked (orphanIP adds them to cache)
+	// The orphanIP function will add new IPs to invalidIPCache
+	newIPv4 := netip.MustParseAddr("192.0.2.2")
+	newIPv6 := netip.MustParseAddr("2001:db8::2")
+	count, ok := invalidIPCache.Get(newIPv4)
+	if ok {
+		assert.Equal(t, 1, count.(int))
+	}
+	count, ok = invalidIPCache.Get(newIPv6)
+	if ok {
+		assert.Equal(t, 1, count.(int))
+	}
+}
+
+func TestLocal_sync_IPMarkedAsInvalid(t *testing.T) {
+	sf := &mockFactory{}
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+	}
+	local := NewLocalTest(eni, sf, &daemon.PoolConfig{
+		EnableIPv4: true,
+		EnableIPv6: true,
+	}, "")
+	local.status = statusInUse
+
+	// Add IPs that exist locally
+	localIPv4 := netip.MustParseAddr("192.0.2.1")
+	localIPv6 := netip.MustParseAddr("2001:db8::1")
+	local.ipv4.Add(NewValidIP(localIPv4, false))
+	local.ipv6.Add(NewValidIP(localIPv6, false))
+
+	// Remote IPs don't include the local IPs (they should be marked as invalid)
+	remoteIPv4 := []netip.Addr{
+		netip.MustParseAddr("192.0.2.2"), // different IP
+	}
+	remoteIPv6 := []netip.Addr{
+		netip.MustParseAddr("2001:db8::2"), // different IP
+	}
+
+	// Use gomonkey to mock LoadNetworkInterface
+	patches := gomonkey.ApplyMethod(sf, "LoadNetworkInterface", func(_ *mockFactory, mac string) ([]netip.Addr, []netip.Addr, error) {
+		return remoteIPv4, remoteIPv6, nil
+	})
+	defer patches.Reset()
+
+	// Reset invalidIPCache before test
+	invalidIPCache = cache.NewLRUExpireCache(100)
+
+	// Call sync
+	local.sync()
+
+	// Verify that local IPs are marked as invalid
+	assert.False(t, local.ipv4[localIPv4].Valid())
+	assert.Equal(t, ipStatusInvalid, local.ipv4[localIPv4].status)
+	assert.False(t, local.ipv6[localIPv6].Valid())
+	assert.Equal(t, ipStatusInvalid, local.ipv6[localIPv6].status)
+}
+
+func TestLocal_sync_BroadcastCalled(t *testing.T) {
+	sf := &mockFactory{}
+
+	eni := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+	}
+	local := NewLocalTest(eni, sf, &daemon.PoolConfig{}, "")
+	local.status = statusInUse
+
+	remoteIPv4 := []netip.Addr{netip.MustParseAddr("192.0.2.1")}
+	remoteIPv6 := []netip.Addr{}
+
+	// Use gomonkey to mock LoadNetworkInterface
+	patches := gomonkey.ApplyMethod(sf, "LoadNetworkInterface", func(_ *mockFactory, mac string) ([]netip.Addr, []netip.Addr, error) {
+		return remoteIPv4, remoteIPv6, nil
+	})
+	defer patches.Reset()
+
+	// Reset invalidIPCache before test
+	invalidIPCache = cache.NewLRUExpireCache(100)
+
+	// Use gomonkey to verify Broadcast is called by patching sync.Cond.Broadcast
+	broadcastCalled := make(chan struct{}, 1)
+	broadcastPatches := gomonkey.ApplyMethod(local.cond, "Broadcast", func(_ *sync.Cond) {
+		broadcastCalled <- struct{}{}
+	})
+	defer broadcastPatches.Reset()
+
+	// Call sync
+	local.sync()
+
+	// Verify that Broadcast was called
+	select {
+	case <-broadcastCalled:
+		// Success - Broadcast was called
+	case <-time.After(1 * time.Second):
+		t.Fatal("Broadcast was not called")
+	}
 }
