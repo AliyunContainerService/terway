@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	clientmocks "github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	instancemocks "github.com/AliyunContainerService/terway/pkg/aliyun/instance/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
@@ -29,7 +32,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 func TestNewNetworkServiceBuilder(t *testing.T) {
@@ -307,6 +311,13 @@ func TestNetworkServiceBuilder_Build_WithError(t *testing.T) {
 }
 
 func Test_setupAliyunClient(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
 	builder := &NetworkServiceBuilder{
 		config: &daemon.Config{
 			Version:      "1",
@@ -318,6 +329,11 @@ func Test_setupAliyunClient(t *testing.T) {
 	metadata := instancemocks.NewInterface(t)
 	metadata.On("GetRegionID").Return("cn-hangzhou", nil)
 	instance.Init(metadata)
+
+	// Mock credential.InitializeClientMgr to prevent goroutine leak from credential provider
+	patches.ApplyFunc(credential.InitializeClientMgr, func(regionID string, credProvider provider.CredentialsProvider) (*credential.ClientMgr, error) {
+		return &credential.ClientMgr{}, nil
+	})
 
 	err := builder.setupAliyunClient()
 	assert.NoError(t, err)
@@ -477,7 +493,10 @@ func TestNetworkServiceBuilder_LoadDynamicConfig(t *testing.T) {
 
 			// Setup gomonkey patches
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			// Mock getDynamicConfig function
 			patches.ApplyFunc(getDynamicConfig, func(ctx context.Context, k8s interface{}) (string, string, error) {
@@ -577,8 +596,12 @@ func TestNetworkServiceBuilder_initInstanceLimit(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			runtime.GC()
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			mockK8s := k8smocks.NewKubernetes(t)
 			mockLimitProvider := clientmocks.NewLimitProvider(t)
@@ -671,12 +694,22 @@ func TestNetworkServiceBuilder_PostInitForLegacyMode(t *testing.T) {
 			eniMgrRunErr:  errors.New("eni manager run error"),
 			expectedError: true,
 		},
+		{
+			name:          "normal mode",
+			eflo:          true,
+			eniMgrRunErr:  nil,
+			expectedError: false,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			runtime.GC()
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			mockK8s := k8smocks.NewKubernetes(t)
 
@@ -711,6 +744,10 @@ func TestNetworkServiceBuilder_PostInitForLegacyMode(t *testing.T) {
 				service:    &networkService{k8s: mockK8s, resourceDB: mockResourceDB},
 				eflo:       tc.eflo,
 			}
+
+			patches.ApplyPrivateMethod(builder, "setupAliyunClient", func() error { return nil })
+			patches.ApplyPrivateMethod(builder, "initInstanceLimit", func() error { return nil })
+			patches.ApplyPrivateMethod(builder, "setupENIManager", func() error { return nil })
 
 			if tc.hasExistingError {
 				builder.err = errors.New("existing error")
@@ -839,8 +876,12 @@ func TestNetworkServiceBuilder_setupENIManager_ErrorPaths(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			runtime.GC()
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			mockMeta := instancemocks.NewInterface(t)
 			mockMeta.On("GetZoneID").Return(tc.zoneID, tc.zoneIDErr).Maybe()
@@ -1217,8 +1258,12 @@ func TestNetworkServiceBuilder_RunENIMgr(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			runtime.GC()
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			patches.ApplyMethodFunc(&eni.Manager{}, "Run", func(ctx context.Context, wg *sync.WaitGroup, podResources []daemon.PodResources) error {
 				return tc.runErr
@@ -1288,8 +1333,12 @@ func TestNetworkServiceBuilder_RegisterTracing(t *testing.T) {
 }
 
 func Test_InitK8S(t *testing.T) {
+	runtime.GC()
 	patches := gomonkey.NewPatches()
-	defer patches.Reset()
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
 
 	mockK8s := k8smocks.NewKubernetes(t)
 	mockK8s.On("Node").Return(&corev1.Node{
@@ -1376,13 +1425,28 @@ func TestNetworkServiceBuilder_ReportDatapath(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			runtime.GC()
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			// Mock getDatapath function
 			patches.ApplyFunc(getDatapath, func() string {
 				return tc.datapathValue
 			})
+
+			// Mock backoff to avoid actual retry delays for error test cases
+			if tc.getErr != nil || tc.updateErr != nil {
+				patches.ApplyFunc(backoff.ExponentialBackoffWithInitialDelay, func(ctx context.Context, bo backoff.ExtendedBackoff, condition wait.ConditionWithContextFunc) error {
+					done, _ := condition(ctx)
+					if !done {
+						return wait.ErrWaitTimeout
+					}
+					return nil
+				})
+			}
 
 			// Create mock k8s client
 			mockK8s := k8smocks.NewKubernetes(t)
@@ -1392,7 +1456,7 @@ func TestNetworkServiceBuilder_ReportDatapath(t *testing.T) {
 				mockK8s.On("NodeName").Return(tc.nodeName)
 
 				// Create mock controller-runtime client
-				scheme := runtime.NewScheme()
+				scheme := k8sruntime.NewScheme()
 				_ = networkv1beta1.AddToScheme(scheme)
 
 				node := &networkv1beta1.Node{
@@ -1478,8 +1542,12 @@ func TestGetDatapath(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			runtime.GC()
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			// Mock nodecap.GetNodeCapabilities
 			patches.ApplyFunc(nodecap.GetNodeCapabilities, func(capName string) string {

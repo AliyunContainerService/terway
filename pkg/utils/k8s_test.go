@@ -91,6 +91,106 @@ func TestFinalStatus(t *testing.T) {
 	}
 }
 
+// TestSetStsKinds tests the SetStsKinds function
+func TestSetStsKinds(t *testing.T) {
+	// Test case 1: Add single custom kind
+	t.Run("Add single custom kind", func(t *testing.T) {
+		// Save original state
+		originalKinds := make([]string, len(stsKinds))
+		copy(originalKinds, stsKinds)
+		defer func() {
+			// Restore original state
+			stsKinds = originalKinds
+		}()
+
+		SetStsKinds([]string{"CustomStatefulSet"})
+
+		// Verify the custom kind was added
+		found := false
+		for _, kind := range stsKinds {
+			if kind == "CustomStatefulSet" {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "Expected CustomStatefulSet to be added to stsKinds")
+	})
+
+	// Test case 2: Add multiple custom kinds
+	t.Run("Add multiple custom kinds", func(t *testing.T) {
+		// Save original state
+		originalKinds := make([]string, len(stsKinds))
+		copy(originalKinds, stsKinds)
+		defer func() {
+			// Restore original state
+			stsKinds = originalKinds
+		}()
+
+		customKinds := []string{"CustomKind1", "CustomKind2", "CustomKind3"}
+		SetStsKinds(customKinds)
+
+		// Verify all custom kinds were added
+		for _, customKind := range customKinds {
+			found := false
+			for _, kind := range stsKinds {
+				if kind == customKind {
+					found = true
+					break
+				}
+			}
+			require.True(t, found, "Expected %s to be added to stsKinds", customKind)
+		}
+	})
+
+	// Test case 3: Add empty slice
+	t.Run("Add empty slice", func(t *testing.T) {
+		// Save original state
+		originalKinds := make([]string, len(stsKinds))
+		copy(originalKinds, stsKinds)
+		originalLen := len(stsKinds)
+		defer func() {
+			// Restore original state
+			stsKinds = originalKinds
+		}()
+
+		SetStsKinds([]string{})
+
+		// Verify length didn't change
+		require.Equal(t, originalLen, len(stsKinds), "Expected stsKinds length to remain unchanged")
+	})
+
+	// Test case 4: Verify integration with IsFixedNamePod
+	t.Run("Integration with IsFixedNamePod", func(t *testing.T) {
+		// Save original state
+		originalKinds := make([]string, len(stsKinds))
+		copy(originalKinds, stsKinds)
+		defer func() {
+			// Restore original state
+			stsKinds = originalKinds
+		}()
+
+		// Add a custom kind
+		SetStsKinds([]string{"CustomWorkload"})
+
+		// Create a pod with the custom kind as owner
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-pod",
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "CustomWorkload",
+						Name: "test-custom-workload",
+					},
+				},
+			},
+		}
+
+		// Verify the pod is recognized as fixed name pod
+		result := IsFixedNamePod(pod)
+		require.True(t, result, "Expected pod with custom workload owner to be recognized as fixed name pod")
+	})
+}
+
 // TestIsFixedNamePod tests the IsFixedNamePod function
 func TestIsFixedNamePod(t *testing.T) {
 	// Test case 1: Pod without owner references should return true

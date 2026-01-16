@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -315,9 +316,13 @@ func TestAllocIP(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			runtime.GC()
 			// Create patches for mocking
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			// Create mock k8s client
 			mockK8s := &k8smocks.Kubernetes{}
@@ -781,9 +786,13 @@ func TestReleaseIP(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			runtime.GC()
 			// Create patches for mocking
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			// Create mock k8s client
 			mockK8s := &k8smocks.Kubernetes{}
@@ -1075,9 +1084,13 @@ func TestGetIPInfo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			runtime.GC()
 			// Create patches for mocking
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			// Create mock k8s client
 			mockK8s := &k8smocks.Kubernetes{}
@@ -1505,9 +1518,13 @@ func TestGcPods(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			runtime.GC()
 			// Create patches for mocking
 			patches := gomonkey.NewPatches()
-			defer patches.Reset()
+			defer func() {
+				patches.Reset()
+				runtime.GC()
+			}()
 
 			// Create mock k8s client
 			mockK8s := &k8smocks.Kubernetes{}
@@ -1744,20 +1761,16 @@ func TestCniInterceptor(t *testing.T) {
 
 // TestStackTriger tests the stackTriger function
 func TestStackTriger(t *testing.T) {
-	// This test just ensures stackTriger doesn't panic
-	// We can't easily test the signal handling without actually sending signals
-	patches := gomonkey.NewPatches()
-	defer patches.Reset()
+	stackTriger()
 
-	// Mock signal.Notify to prevent actual signal registration
-	patches.ApplyFunc(signal.Notify, func(c chan<- os.Signal, sig ...os.Signal) {
-		// Do nothing
-	})
+	// Test that stackTriggerSignals is defined (may be empty on unsupported platforms)
+	assert.NotNil(t, stackTriggerSignals, "stackTriggerSignals should be defined")
 
-	// Call stackTriger - it should not panic
-	assert.NotPanics(t, func() {
-		stackTriger()
-	})
+	// Test that signal.Notify works with a channel (basic verification)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
+	signal.Stop(sigChan)
+	close(sigChan)
 }
 
 // TestEnsureCNIConfig tests the ensureCNIConfig function with mocking

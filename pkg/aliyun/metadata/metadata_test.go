@@ -346,4 +346,150 @@ var _ = Describe("Metadata BDD Tests", func() {
 			Expect(strings.Contains(err.Error(), "404")).To(BeTrue())
 		})
 	})
+
+	Context("When metadata server returns 429 Too Many Requests", func() {
+		var retryServer *httptest.Server
+		var requestCount int
+
+		BeforeEach(func() {
+			requestCount = 0
+			retryServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/latest/api/token":
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte("test-token"))
+				case "/latest/meta-data/instance-id":
+					requestCount++
+					if requestCount <= 3 {
+						w.WriteHeader(http.StatusTooManyRequests)
+						return
+					}
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte("test-instance-id"))
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			metadata.MetadataBase = retryServer.URL + "/latest/meta-data/"
+			metadata.TokenURL = retryServer.URL + "/latest/api/token"
+		})
+
+		AfterEach(func() {
+			retryServer.Close()
+		})
+
+		It("should retry and eventually succeed", func() {
+			instanceID, err := metadata.GetLocalInstanceID()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(instanceID).To(Equal("test-instance-id"))
+			Expect(requestCount).To(Equal(4))
+		})
+	})
+
+	Context("When metadata server returns 500 Internal Server Error", func() {
+		var retryServer *httptest.Server
+		var requestCount int
+
+		BeforeEach(func() {
+			requestCount = 0
+			retryServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/latest/api/token":
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte("test-token"))
+				case "/latest/meta-data/region-id":
+					requestCount++
+					if requestCount <= 2 {
+						w.WriteHeader(http.StatusInternalServerError)
+						return
+					}
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte("cn-test"))
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			metadata.MetadataBase = retryServer.URL + "/latest/meta-data/"
+			metadata.TokenURL = retryServer.URL + "/latest/api/token"
+		})
+
+		AfterEach(func() {
+			retryServer.Close()
+		})
+
+		It("should retry and eventually succeed", func() {
+			regionID, err := metadata.GetLocalRegion()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(regionID).To(Equal("cn-test"))
+			Expect(requestCount).To(Equal(3))
+		})
+	})
+
+	Context("When metadata server returns 503 Service Unavailable", func() {
+		var retryServer *httptest.Server
+		var requestCount int
+
+		BeforeEach(func() {
+			requestCount = 0
+			retryServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/latest/api/token":
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte("test-token"))
+				case "/latest/meta-data/vpc-id":
+					requestCount++
+					w.WriteHeader(http.StatusServiceUnavailable)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			metadata.MetadataBase = retryServer.URL + "/latest/meta-data/"
+			metadata.TokenURL = retryServer.URL + "/latest/api/token"
+		})
+
+		AfterEach(func() {
+			retryServer.Close()
+		})
+
+		It("should retry and return error after all retries exhausted", func() {
+			_, err := metadata.GetLocalVPC()
+			Expect(err).To(HaveOccurred())
+			Expect(strings.Contains(err.Error(), "503")).To(BeTrue())
+			Expect(requestCount).To(Equal(4)) // Initial attempt + 3 retries
+		})
+	})
+
+	Context("When metadata server continuously returns 429", func() {
+		var retryServer *httptest.Server
+		var requestCount int
+
+		BeforeEach(func() {
+			requestCount = 0
+			retryServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/latest/api/token":
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte("test-token"))
+				case "/latest/meta-data/zone-id":
+					requestCount++
+					w.WriteHeader(http.StatusTooManyRequests)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			metadata.MetadataBase = retryServer.URL + "/latest/meta-data/"
+			metadata.TokenURL = retryServer.URL + "/latest/api/token"
+		})
+
+		AfterEach(func() {
+			retryServer.Close()
+		})
+
+		It("should return error after exhausting all retries", func() {
+			_, err := metadata.GetLocalZone()
+			Expect(err).To(HaveOccurred())
+			Expect(strings.Contains(err.Error(), "429")).To(BeTrue())
+			Expect(requestCount).To(Equal(4)) // Initial attempt + 3 retries
+		})
+	})
 })

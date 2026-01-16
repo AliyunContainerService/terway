@@ -8,14 +8,18 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/AliyunContainerService/terway/plugin/datapath"
 	"github.com/AliyunContainerService/terway/plugin/driver/types"
+	"github.com/AliyunContainerService/terway/plugin/driver/utils"
 	"github.com/AliyunContainerService/terway/rpc"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/go-logr/logr"
@@ -673,4 +677,289 @@ func TestRuleSync_MultipleNetConf(t *testing.T) {
 
 	// Verify routes and rules
 	// because of we verify link type , this check can not be done
+}
+
+// TestRuleSyncWithGomonkey tests ruleSync function with gomonkey mocks
+func TestRuleSyncWithGomonkey(t *testing.T) {
+	tests := []struct {
+		name          string
+		podResources  daemon.PodResources
+		setupMocks    func() *gomonkey.Patches
+		expectedError bool
+	}{
+		{
+			name: "success_case",
+			podResources: daemon.PodResources{
+				PodInfo: &daemon.PodInfo{
+					Name:           "test-pod",
+					Namespace:      "default",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				},
+				NetConf: `[{"BasicInfo":{"PodIP":{"IPv4":"10.0.0.2"}},"ENIInfo":{"MAC":"00:11:22:33:44:55"}}]`,
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock nodecap.GetNodeCapabilities
+				patches.ApplyFunc(nodecap.GetNodeCapabilities, func(key string) string {
+					return "veth"
+				})
+
+				// Mock netlink.LinkList
+				patches.ApplyFunc(netlink.LinkList, func() ([]netlink.Link, error) {
+					hostVeth := &netlink.Veth{
+						LinkAttrs: netlink.LinkAttrs{
+							Index: 10,
+							Name:  "cali12345678901",
+						},
+					}
+					eni := &netlink.Device{
+						LinkAttrs: netlink.LinkAttrs{
+							Index:        20,
+							Name:         "eth1",
+							HardwareAddr: net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+						},
+					}
+					return []netlink.Link{hostVeth, eni}, nil
+				})
+
+				// Mock utils.GetRouteTableID
+				patches.ApplyFunc(utils.GetRouteTableID, func(index int) int {
+					return 1000 + index
+				})
+
+				// Mock utils.EnsureRoute
+				patches.ApplyFunc(utils.EnsureRoute, func(ctx context.Context, route *netlink.Route) (bool, error) {
+					return true, nil
+				})
+
+				// Mock utils.EnsureIPRule
+				patches.ApplyFunc(utils.EnsureIPRule, func(ctx context.Context, rule *netlink.Rule) (bool, error) {
+					return true, nil
+				})
+
+				return patches
+			},
+			expectedError: false,
+		},
+		{
+			name: "unsupported_datapath",
+			podResources: daemon.PodResources{
+				PodInfo: &daemon.PodInfo{
+					Name:           "test-pod",
+					Namespace:      "default",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				},
+				NetConf: `[]`,
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock nodecap.GetNodeCapabilities to return unsupported datapath
+				patches.ApplyFunc(nodecap.GetNodeCapabilities, func(key string) string {
+					return "ipvlan"
+				})
+
+				return patches
+			},
+			expectedError: false,
+		},
+		{
+			name: "netlink_LinkList_error",
+			podResources: daemon.PodResources{
+				PodInfo: &daemon.PodInfo{
+					Name:           "test-pod",
+					Namespace:      "default",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				},
+				NetConf: `[{"BasicInfo":{"PodIP":{"IPv4":"10.0.0.2"}},"ENIInfo":{"MAC":"00:11:22:33:44:55"}}]`,
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock nodecap.GetNodeCapabilities
+				patches.ApplyFunc(nodecap.GetNodeCapabilities, func(key string) string {
+					return "veth"
+				})
+
+				// Mock netlink.LinkList to return error
+				patches.ApplyFunc(netlink.LinkList, func() ([]netlink.Link, error) {
+					return nil, fmt.Errorf("failed to list links")
+				})
+
+				return patches
+			},
+			expectedError: true,
+		},
+		{
+			name: "trunk_mode_without_gateway",
+			podResources: daemon.PodResources{
+				PodInfo: &daemon.PodInfo{
+					Name:           "test-pod",
+					Namespace:      "default",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				},
+				NetConf: `[{"BasicInfo":{"PodIP":{"IPv4":"10.0.0.2"},"GatewayIP":{"IPv4":"10.0.0.1"}},"ENIInfo":{"MAC":"00:11:22:33:44:55","Trunk":true}}]`,
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock nodecap.GetNodeCapabilities
+				patches.ApplyFunc(nodecap.GetNodeCapabilities, func(key string) string {
+					return "veth"
+				})
+
+				// Mock netlink.LinkList
+				patches.ApplyFunc(netlink.LinkList, func() ([]netlink.Link, error) {
+					hostVeth := &netlink.Veth{
+						LinkAttrs: netlink.LinkAttrs{
+							Index: 10,
+							Name:  "cali12345678901",
+						},
+					}
+					eni := &netlink.Device{
+						LinkAttrs: netlink.LinkAttrs{
+							Index:        20,
+							Name:         "eth1",
+							HardwareAddr: net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+						},
+					}
+					return []netlink.Link{hostVeth, eni}, nil
+				})
+
+				return patches
+			},
+			expectedError: false,
+		},
+		{
+			name: "trunk_mode_with_gateway",
+			podResources: daemon.PodResources{
+				PodInfo: &daemon.PodInfo{
+					Name:           "test-pod",
+					Namespace:      "default",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				},
+				NetConf: `[{"BasicInfo":{"PodIP":{"IPv4":"10.0.0.2"},"GatewayIP":{"IPv4":"10.0.0.1"}},"ENIInfo":{"MAC":"00:11:22:33:44:55","Trunk":true,"GatewayIP":{"IPv4":"10.0.0.254"}}}]`,
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock nodecap.GetNodeCapabilities
+				patches.ApplyFunc(nodecap.GetNodeCapabilities, func(key string) string {
+					return "veth"
+				})
+
+				// Mock netlink.LinkList
+				patches.ApplyFunc(netlink.LinkList, func() ([]netlink.Link, error) {
+					hostVeth := &netlink.Veth{
+						LinkAttrs: netlink.LinkAttrs{
+							Index: 10,
+							Name:  "cali12345678901",
+						},
+					}
+					eni := &netlink.Device{
+						LinkAttrs: netlink.LinkAttrs{
+							Index:        20,
+							Name:         "eth1",
+							HardwareAddr: net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+						},
+					}
+					return []netlink.Link{hostVeth, eni}, nil
+				})
+
+				// Mock utils.GetRouteTableID
+				patches.ApplyFunc(utils.GetRouteTableID, func(index int) int {
+					return 1000 + index
+				})
+
+				// Mock utils.EnsureRoute
+				patches.ApplyFunc(utils.EnsureRoute, func(ctx context.Context, route *netlink.Route) (bool, error) {
+					return true, nil
+				})
+
+				// Mock utils.EnsureIPRule
+				patches.ApplyFunc(utils.EnsureIPRule, func(ctx context.Context, rule *netlink.Rule) (bool, error) {
+					return true, nil
+				})
+
+				return patches
+			},
+			expectedError: false,
+		},
+		{
+			name: "ipv6_support",
+			podResources: daemon.PodResources{
+				PodInfo: &daemon.PodInfo{
+					Name:           "test-pod",
+					Namespace:      "default",
+					PodNetworkType: daemon.PodNetworkTypeENIMultiIP,
+				},
+				NetConf: `[{"BasicInfo":{"PodIP":{"IPv6":"2001:db8::2"},"GatewayIP":{"IPv6":"2001:db8::1"}},"ENIInfo":{"MAC":"00:11:22:33:44:55"}}]`,
+			},
+			setupMocks: func() *gomonkey.Patches {
+				patches := gomonkey.NewPatches()
+
+				// Mock nodecap.GetNodeCapabilities
+				patches.ApplyFunc(nodecap.GetNodeCapabilities, func(key string) string {
+					return "veth"
+				})
+
+				// Mock netlink.LinkList
+				patches.ApplyFunc(netlink.LinkList, func() ([]netlink.Link, error) {
+					hostVeth := &netlink.Veth{
+						LinkAttrs: netlink.LinkAttrs{
+							Index: 10,
+							Name:  "cali12345678901",
+						},
+					}
+					eni := &netlink.Device{
+						LinkAttrs: netlink.LinkAttrs{
+							Index:        20,
+							Name:         "eth1",
+							HardwareAddr: net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+						},
+					}
+					return []netlink.Link{hostVeth, eni}, nil
+				})
+
+				// Mock utils.GetRouteTableID
+				patches.ApplyFunc(utils.GetRouteTableID, func(index int) int {
+					return 1000 + index
+				})
+
+				// Mock utils.EnsureRoute
+				patches.ApplyFunc(utils.EnsureRoute, func(ctx context.Context, route *netlink.Route) (bool, error) {
+					return true, nil
+				})
+
+				// Mock utils.EnsureIPRule
+				patches.ApplyFunc(utils.EnsureIPRule, func(ctx context.Context, rule *netlink.Rule) (bool, error) {
+					return true, nil
+				})
+
+				return patches
+			},
+			expectedError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup mocks
+			patches := tt.setupMocks()
+			defer patches.Reset()
+			defer runtime.GC()
+
+			// Execute test
+			ctx := context.Background()
+			err := ruleSync(ctx, tt.podResources)
+
+			// Verify results
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

@@ -63,6 +63,10 @@ var _ = Describe("Utils", func() {
 
 			err = EnsureVlanUntagger(context.Background(), eni)
 			Expect(err).NotTo(HaveOccurred())
+
+			// should not have error
+			err = EnsureVlanUntagger(context.Background(), eni)
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
@@ -1215,7 +1219,40 @@ var _ = Describe("Utils", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})
+
+			It("should add rule when exists", func() {
+				var err error
+				var changed bool
+
+				err = hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					rule := netlink.NewRule()
+					rule.Src = &net.IPNet{
+						IP:   net.ParseIP("192.168.5.0"),
+						Mask: net.CIDRMask(24, 32),
+					}
+					rule.Table = 200
+					rule.Priority = 2000
+
+					changed, err = EnsureIPRule(context.Background(), rule)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(changed).To(BeTrue())
+
+					changed, err = EnsureIPRule(context.Background(), rule)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(changed).To(BeFalse())
+					// Verify rule is added
+					rules, err := FindIPRule(rule)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(rules)).To(BeNumerically(">", 0))
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
 		})
+
 	})
 
 	Describe("GenerateIPv6Sysctl", func() {
