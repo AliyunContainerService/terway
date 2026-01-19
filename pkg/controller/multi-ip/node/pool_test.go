@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.opentelemetry.io/otel/trace/noop"
 	corev1 "k8s.io/api/core/v1"
+	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -4005,6 +4006,71 @@ var _ = Describe("Test ReconcileNode", func() {
 				Expect(err).To(Not(HaveOccurred()))
 			})
 		}
+	})
+
+	Context("Node deletion", func() {
+		It("Should remove finalizer and clean up cache and tasks when node is deleted", func() {
+			ctx := context.TODO()
+			nodeName := "deleted-node"
+
+			// 1. Create a node in k8s with a finalizer
+			node := NewNodeFactory(nodeName).
+				WithECS().
+				WithExistingENIs(NewENIFactory().WithBaseID("eni").WithCount(1).Build()...).
+				Build()
+			node.Finalizers = []string{finalizer}
+
+			err := k8sClient.Create(ctx, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			// 2. Mark for deletion by calling Delete
+			// It won't actually be deleted from the API server because of the finalizer
+			err = k8sClient.Delete(ctx, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			// 3. Refresh node to see deletion timestamp
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.DeletionTimestamp.IsZero()).To(BeFalse())
+
+			// 4. Setup reconciler
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, _, _ = mockHelper.GetMocks()
+			openAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil).Maybe()
+
+			reconciler := NewReconcilerBuilder().
+				WithClient(k8sClient).
+				WithAliyun(openAPI).
+				WithDefaults().
+				Build()
+
+			// 5. Add node to cache and task queue to verify cleanup
+			reconciler.cache.Store(nodeName, &NodeStatus{})
+			reconciler.eniTaskQueue.SubmitAttach(ctx, "eni-1", "instance-1", "", nodeName, 1, 0)
+			Expect(reconciler.eniTaskQueue.GetAttachingCount(nodeName)).To(Equal(1))
+
+			// 6. Reconcile
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Name: nodeName}}
+			_, err = reconciler.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+
+			// 7. Verify finalizer removal and cleanup
+			By("Verifying finalizer is removed or node is gone")
+			updatedNode := &networkv1beta1.Node{}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, updatedNode)
+			if err == nil {
+				Expect(updatedNode.Finalizers).NotTo(ContainElement(finalizer))
+			} else {
+				Expect(k8sErr.IsNotFound(err)).To(BeTrue())
+			}
+
+			By("Verifying cache is cleared")
+			_, ok := reconciler.cache.Load(nodeName)
+			Expect(ok).To(BeFalse())
+
+			By("Verifying task queue is cleared")
+			Expect(reconciler.eniTaskQueue.GetAttachingCount(nodeName)).To(Equal(0))
+		})
 	})
 })
 

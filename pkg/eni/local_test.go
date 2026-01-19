@@ -860,6 +860,232 @@ func TestAllocFromFactory(t *testing.T) {
 	assert.Equal(t, req1, local.allocatingV6[0])
 }
 
+func TestFactoryAllocWorker_CreateENI(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	dummyENI := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+		PrimaryIP: types.IPSet{
+			IPv4: net.ParseIP("192.0.2.1"),
+		},
+	}
+	ipv4Set := []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")}
+	f.On("CreateNetworkInterface", 2, 0, "eniType").Return(dummyENI, ipv4Set, nil, nil).Once()
+
+	local := NewLocalTest(nil, f, &daemon.PoolConfig{
+		EnableIPv4: true,
+		BatchSize:  2,
+	}, "eniType")
+	local.status = statusInit
+
+	req1 := NewLocalIPRequest()
+	req2 := NewLocalIPRequest()
+	local.allocatingV4 = append(local.allocatingV4, req1, req2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go local.factoryAllocWorker(ctx)
+
+	// Trigger worker
+	local.cond.Broadcast()
+
+	err := wait.ExponentialBackoff(wait.Backoff{
+		Duration: 100 * time.Millisecond,
+		Steps:    20,
+	}, func() (done bool, err error) {
+		local.cond.L.Lock()
+		defer local.cond.L.Unlock()
+
+		if local.eni != nil && local.status == statusInUse && len(local.ipv4) == 2 {
+			return true, nil
+		}
+		return false, nil
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, "eni-1", local.eni.ID)
+	assert.Equal(t, statusInUse, local.status)
+	assert.Len(t, local.ipv4, 2)
+}
+
+func TestFactoryAllocWorker_CreateENI_IPv6(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	dummyENI := &daemon.ENI{
+		ID:  "eni-1",
+		MAC: "00:00:00:00:00:01",
+		PrimaryIP: types.IPSet{
+			IPv4: net.ParseIP("192.0.2.1"),
+		},
+	}
+	ipv4Set := []netip.Addr{netip.MustParseAddr("192.0.2.1")}
+	ipv6Set := []netip.Addr{netip.MustParseAddr("fd00::1"), netip.MustParseAddr("fd00::2")}
+	f.On("CreateNetworkInterface", 1, 2, "eniType").Return(dummyENI, ipv4Set, ipv6Set, nil).Once()
+
+	local := NewLocalTest(nil, f, &daemon.PoolConfig{
+		EnableIPv4: true,
+		EnableIPv6: true,
+		BatchSize:  2,
+	}, "eniType")
+	local.status = statusInit
+
+	req1 := NewLocalIPRequest()
+	req2 := NewLocalIPRequest()
+	local.allocatingV4 = append(local.allocatingV4, req1)
+	local.allocatingV6 = append(local.allocatingV6, req1, req2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go local.factoryAllocWorker(ctx)
+
+	// Trigger worker
+	local.cond.Broadcast()
+
+	err := wait.ExponentialBackoff(wait.Backoff{
+		Duration: 100 * time.Millisecond,
+		Steps:    20,
+	}, func() (done bool, err error) {
+		local.cond.L.Lock()
+		defer local.cond.L.Unlock()
+
+		if local.eni != nil && local.status == statusInUse && len(local.ipv4) == 1 && len(local.ipv6) == 2 {
+			return true, nil
+		}
+		return false, nil
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, "eni-1", local.eni.ID)
+	assert.Equal(t, statusInUse, local.status)
+	assert.Len(t, local.ipv4, 1)
+	assert.Len(t, local.ipv6, 2)
+}
+
+func TestFactoryAllocWorker_CreateENIFailed(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	called := make(chan struct{})
+	f.On("CreateNetworkInterface", 1, 0, "eniType").Return(nil, nil, nil, fmt.Errorf("create failed")).Run(func(args mock.Arguments) {
+		close(called)
+	}).Once()
+
+	local := NewLocalTest(nil, f, &daemon.PoolConfig{
+		EnableIPv4: true,
+		BatchSize:  2,
+	}, "eniType")
+	local.status = statusInit
+
+	local.cond.L.Lock()
+	local.allocatingV4 = append(local.allocatingV4, NewLocalIPRequest())
+	local.cond.L.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go local.factoryAllocWorker(ctx)
+
+	// Trigger worker
+	local.cond.Broadcast()
+
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for CreateNetworkInterface call")
+	}
+
+	err := wait.ExponentialBackoff(wait.Backoff{
+		Duration: 100 * time.Millisecond,
+		Steps:    20,
+	}, func() (done bool, err error) {
+		local.cond.L.Lock()
+		defer local.cond.L.Unlock()
+
+		// status should go back to statusInit if eni is nil
+		if local.status == statusInit {
+			return true, nil
+		}
+		return false, nil
+	})
+
+	assert.NoError(t, err)
+	assert.Nil(t, local.eni)
+}
+
+func TestFactoryAllocWorker_CreateENIPartialFailed(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	dummyENI := &daemon.ENI{ID: "eni-1"}
+	f.On("CreateNetworkInterface", 1, 0, "eniType").Return(dummyENI, nil, nil, fmt.Errorf("partial failed")).Once()
+
+	local := NewLocalTest(nil, f, &daemon.PoolConfig{
+		EnableIPv4: true,
+		BatchSize:  2,
+	}, "eniType")
+	local.status = statusInit
+
+	req1 := NewLocalIPRequest()
+	local.allocatingV4 = append(local.allocatingV4, req1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go local.factoryAllocWorker(ctx)
+
+	// Trigger worker
+	local.cond.Broadcast()
+
+	err := wait.ExponentialBackoff(wait.Backoff{
+		Duration: 100 * time.Millisecond,
+		Steps:    20,
+	}, func() (done bool, err error) {
+		local.cond.L.Lock()
+		defer local.cond.L.Unlock()
+
+		// status should be statusDeleting
+		if local.status == statusDeleting {
+			return true, nil
+		}
+		return false, nil
+	})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, local.eni)
+	assert.Equal(t, statusDeleting, local.status)
+}
+
+func TestFactoryAllocWorker_RateLimitEni(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	local := NewLocalTest(nil, f, &daemon.PoolConfig{
+		EnableIPv4: true,
+		BatchSize:  2,
+	}, "eniType")
+	local.status = statusInit
+	// Set rate limit to 0 to trigger error
+	local.rateLimitEni = rate.NewLimiter(0, 0)
+
+	local.cond.L.Lock()
+	local.allocatingV4 = append(local.allocatingV4, NewLocalIPRequest())
+	local.cond.L.Unlock()
+
+	// Use a context that will cancel immediately or timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	go local.factoryAllocWorker(ctx)
+
+	// Trigger worker
+	local.cond.Broadcast()
+
+	// Wait for context to be done
+	<-ctx.Done()
+
+	// Give it a bit of time to return from factoryAllocWorker
+	time.Sleep(100 * time.Millisecond)
+
+	local.cond.L.Lock()
+	defer local.cond.L.Unlock()
+	assert.Nil(t, local.eni)
+}
+
 func Test_factoryDisposeWorker_unAssignIP(t *testing.T) {
 	f := factorymocks.NewFactory(t)
 	// even we have two jobs ,we only get one ip

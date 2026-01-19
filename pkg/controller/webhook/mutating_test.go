@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/controlplane"
 	"github.com/AliyunContainerService/terway/types/daemon"
 	v1 "k8s.io/api/admission/v1"
@@ -1480,4 +1481,177 @@ func TestPodNetworkingWebhook_AllSet_NoPatch(t *testing.T) {
 	assert.True(t, resp.Allowed)
 	assert.Equal(t, "podNetworking all set", resp.Result.Message)
 	assert.Empty(t, resp.Patches)
+}
+
+func TestPodWebhook_FillDefaultConfig_Success(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = v1beta1.AddToScheme(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "test-pod-success",
+			Annotations: map[string]string{
+				"existing": "true",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "test-container",
+					Image: "busybox",
+				},
+			},
+		},
+	}
+	original, _ := json.Marshal(pod)
+
+	req := &webhook.AdmissionRequest{
+		AdmissionRequest: v1.AdmissionRequest{
+			Namespace: "default",
+			Name:      "test-pod",
+			Kind: metav1.GroupVersionKind{
+				Kind: "Pod",
+			},
+			Object: runtime.RawExtension{
+				Raw: original,
+			},
+		},
+	}
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	mockConfig := &daemon.Config{
+		SecurityGroups: []string{"sg-1"},
+		VSwitches: map[string][]string{
+			"zone-1": {"vsw-1"},
+		},
+	}
+	patches.ApplyFunc(daemon.ConfigFromConfigMap, func(ctx context.Context, client client.Client, nodeName string) (*daemon.Config, error) {
+		return mockConfig, nil
+	})
+
+	ctx := context.Background()
+	enable := true
+	resp := podWebhook(ctx, req, fakeClient, &controlplane.Config{
+		IPAMType:                    "crd",
+		EnableWebhookInjectResource: &enable,
+		EnableTrunk:                 &enable,
+	})
+
+	assert.True(t, resp.Allowed)
+	assert.NotEmpty(t, resp.Patches)
+
+	for _, p := range resp.Patches {
+		t.Logf("patch: %+v", p)
+	}
+
+	// Verify the patch contains the default config
+	patchFound := false
+	for _, p := range resp.Patches {
+		if p.Path == "/metadata/annotations/k8s.aliyun.com~1pod-networks" {
+			patchFound = true
+			var val string
+			switch v := p.Value.(type) {
+			case string:
+				val = v
+			case []byte:
+				_ = json.Unmarshal(v, &val)
+			default:
+				b, _ := json.Marshal(v)
+				_ = json.Unmarshal(b, &val)
+			}
+			networks := &controlplane.PodNetworksAnnotation{}
+			err := json.Unmarshal([]byte(val), networks)
+			assert.NoError(t, err)
+			assert.Equal(t, []string{"vsw-1"}, networks.PodNetworks[0].VSwitchOptions)
+			assert.Equal(t, []string{"sg-1"}, networks.PodNetworks[0].SecurityGroupIDs)
+		} else if p.Path == "/metadata/annotations" {
+			patchFound = true
+			annotations, ok := p.Value.(map[string]interface{})
+			if ok {
+				podNetworksVal, exists := annotations[types.PodNetworks]
+				if exists {
+					var val string
+					switch v := podNetworksVal.(type) {
+					case string:
+						val = v
+					case []byte:
+						_ = json.Unmarshal(v, &val)
+					default:
+						valBytes, _ := json.Marshal(v)
+						_ = json.Unmarshal(valBytes, &val)
+					}
+					networks := &controlplane.PodNetworksAnnotation{}
+					err := json.Unmarshal([]byte(val), networks)
+					assert.NoError(t, err)
+					assert.Equal(t, []string{"vsw-1"}, networks.PodNetworks[0].VSwitchOptions)
+					assert.Equal(t, []string{"sg-1"}, networks.PodNetworks[0].SecurityGroupIDs)
+				}
+			}
+		}
+	}
+	if !patchFound {
+		for _, p := range resp.Patches {
+			t.Logf("patch: %+v", p)
+		}
+	}
+	assert.True(t, patchFound)
+}
+
+func TestPodWebhook_FillDefaultConfig_Error(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = v1beta1.AddToScheme(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "test-pod-error",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "test-container",
+					Image: "busybox",
+				},
+			},
+		},
+	}
+	original, _ := json.Marshal(pod)
+
+	req := &webhook.AdmissionRequest{
+		AdmissionRequest: v1.AdmissionRequest{
+			Namespace: "default",
+			Name:      "test-pod",
+			Kind: metav1.GroupVersionKind{
+				Kind: "Pod",
+			},
+			Object: runtime.RawExtension{
+				Raw: original,
+			},
+		},
+	}
+
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	patches.ApplyFunc(daemon.ConfigFromConfigMap, func(ctx context.Context, client client.Client, nodeName string) (*daemon.Config, error) {
+		return nil, errors.New("config error")
+	})
+
+	ctx := context.Background()
+	enable := true
+	resp := podWebhook(ctx, req, fakeClient, &controlplane.Config{
+		IPAMType:                    "crd",
+		EnableWebhookInjectResource: &enable,
+		EnableTrunk:                 &enable,
+	})
+
+	assert.False(t, resp.Allowed)
+	assert.Equal(t, int32(1), resp.Result.Code)
 }
