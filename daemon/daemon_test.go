@@ -254,14 +254,9 @@ func TestCleanRuntimeNode(t *testing.T) {
 			mockK8s.On("GetClient").Return(fakeClient).Maybe()
 			mockK8s.On("NodeName").Return("test-node").Maybe()
 			if tt.mockPodExist != nil {
-				mockK8s.On("PodExist", mock.Anything, mock.Anything).Return(
-					func(namespace string, name string) bool {
-						result, _ := tt.mockPodExist(namespace, name)
-						return result
-					},
-					func(namespace string, name string) error {
-						_, err := tt.mockPodExist(namespace, name)
-						return err
+				mockK8s.On("PodExist", mock.Anything, mock.Anything, mock.Anything).Return(
+					func(ctx context.Context, namespace string, name string) (bool, error) {
+						return tt.mockPodExist(namespace, name)
 					}).Maybe()
 			}
 
@@ -1217,20 +1212,32 @@ func TestRecordEvent(t *testing.T) {
 }
 
 func TestRunDevicePlugin(t *testing.T) {
-
 	patches := gomonkey.NewPatches()
 	defer patches.Reset()
 
 	dp := deviceplugin.NewENIDevicePlugin(0, deviceplugin.ENITypeMember)
+
+	serveCalled := make(chan struct{}, 1)
+
 	patches.ApplyFunc(deviceplugin.NewENIDevicePlugin, func() *deviceplugin.ENIDevicePlugin {
 		return dp
 	})
-	patches.ApplyMethod(dp, "Serve", func() {})
+	patches.ApplyMethod(dp, "Serve", func() {
+		serveCalled <- struct{}{}
+	})
 
 	runDevicePlugin("ENIMultiIP", &daemon.Config{
 		EnableENITrunking: true,
 		EnableERDMA:       true,
 	}, &daemon.PoolConfig{})
+
+	// 等待 goroutine 执行并验证 patch 被调用
+	select {
+	case <-serveCalled:
+		// Patch 被成功调用
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for Serve to be called")
+	}
 }
 
 func TestNewServer(t *testing.T) {

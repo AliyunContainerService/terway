@@ -79,15 +79,15 @@ var (
 
 // Kubernetes operation set
 type Kubernetes interface {
-	GetLocalPods() ([]*daemon.PodInfo, error)
+	GetLocalPods(ctx context.Context) ([]*daemon.PodInfo, error)
 	GetPod(ctx context.Context, namespace, name string, cache bool) (*daemon.PodInfo, error)
-	PodExist(namespace, name string) (bool, error)
+	PodExist(ctx context.Context, namespace, name string) (bool, error)
 
 	GetServiceCIDR() *types.IPNetSet
 	SetNodeAllocatablePod(count int) error
 
-	PatchNodeAnnotations(anno map[string]string) error
-	PatchPodIPInfo(info *daemon.PodInfo, ips string) error
+	PatchNodeAnnotations(ctx context.Context, anno map[string]string) error
+	PatchPodIPInfo(ctx context.Context, info *daemon.PodInfo, ips string) error
 	PatchNodeIPResCondition(status corev1.ConditionStatus, reason, message string) error
 	RecordNodeEvent(eventType, reason, message string)
 	RecordPodEvent(podName, podNamespace, eventType, reason, message string) error
@@ -246,12 +246,12 @@ func (k *k8s) PatchNodeIPResCondition(status corev1.ConditionStatus, reason, mes
 	return k.client.Status().Patch(context.Background(), node, client.RawPatch(k8stypes.StrategicMergePatchType, patch))
 }
 
-func (k *k8s) PatchNodeAnnotations(anno map[string]string) error {
+func (k *k8s) PatchNodeAnnotations(ctx context.Context, anno map[string]string) error {
 	if len(anno) == 0 {
 		return nil
 	}
 
-	node, err := getNode(context.Background(), k.client, k.nodeName)
+	node, err := getNode(ctx, k.client, k.nodeName)
 	if err != nil || node == nil {
 		return err
 	}
@@ -279,7 +279,7 @@ func (k *k8s) PatchNodeAnnotations(anno map[string]string) error {
 	}
 
 	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":%s}}`, string(out))
-	return k.client.Patch(context.Background(), node, client.RawPatch(k8stypes.MergePatchType, []byte(annotationPatchStr)))
+	return k.client.Patch(ctx, node, client.RawPatch(k8stypes.MergePatchType, []byte(annotationPatchStr)))
 }
 
 func (k *k8s) SetCustomStatefulWorkloadKinds(kinds []string) error {
@@ -314,8 +314,8 @@ func (k *k8s) setSvcCIDR(svcCidr *types.IPNetSet) error {
 	return nil
 }
 
-func (k *k8s) PatchPodIPInfo(info *daemon.PodInfo, ips string) error {
-	pod, err := getPod(context.Background(), k.client, info.Namespace, info.Name, true)
+func (k *k8s) PatchPodIPInfo(ctx context.Context, info *daemon.PodInfo, ips string) error {
+	pod, err := getPod(ctx, k.client, info.Namespace, info.Name, true)
 	if err != nil || pod == nil {
 		return err
 	}
@@ -324,7 +324,7 @@ func (k *k8s) PatchPodIPInfo(info *daemon.PodInfo, ips string) error {
 	}
 
 	annotationPatchStr := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, types.PodIPs, ips)
-	return k.client.Patch(context.Background(), pod, client.RawPatch(k8stypes.MergePatchType, []byte(annotationPatchStr)))
+	return k.client.Patch(ctx, pod, client.RawPatch(k8stypes.MergePatchType, []byte(annotationPatchStr)))
 }
 
 func (k *k8s) GetTrunkID() string {
@@ -372,8 +372,8 @@ func (k *k8s) GetPod(ctx context.Context, namespace, name string, cache bool) (*
 	return podInfo, nil
 }
 
-func (k *k8s) PodExist(namespace, name string) (bool, error) {
-	pod, err := getPod(context.Background(), k.client, namespace, name, false)
+func (k *k8s) PodExist(ctx context.Context, namespace, name string) (bool, error) {
+	pod, err := getPod(ctx, k.client, namespace, name, false)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return false, nil
@@ -387,7 +387,7 @@ func (k *k8s) PodExist(namespace, name string) (bool, error) {
 	return true, nil
 }
 
-func (k *k8s) GetLocalPods() ([]*daemon.PodInfo, error) {
+func (k *k8s) GetLocalPods(ctx context.Context) ([]*daemon.PodInfo, error) {
 	options := metav1.ListOptions{
 		FieldSelector: fields.AndSelectors(
 			fields.OneTermEqualSelector("spec.nodeName", k.nodeName),
@@ -397,7 +397,7 @@ func (k *k8s) GetLocalPods() ([]*daemon.PodInfo, error) {
 		ResourceVersion: "0",
 	}
 	podList := &corev1.PodList{}
-	err := k.client.List(context.Background(), podList, &client.ListOptions{Raw: &options})
+	err := k.client.List(ctx, podList, &client.ListOptions{Raw: &options})
 
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving pod list for '%s': %w", k.nodeName, err)
@@ -433,7 +433,7 @@ func (k *k8s) clean() error {
 		return err
 	}
 
-	localPods, err := k.GetLocalPods()
+	localPods, err := k.GetLocalPods(context.Background())
 	if err != nil {
 		return fmt.Errorf("error get local pods: %w", err)
 	}

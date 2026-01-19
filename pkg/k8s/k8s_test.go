@@ -54,7 +54,7 @@ func TestK8s_PodExist(t *testing.T) {
 			nodeName: "test-node",
 		}
 
-		exist, err := k8sObj.PodExist("default", "test-pod")
+		exist, err := k8sObj.PodExist(context.Background(), "default", "test-pod")
 		assert.NoError(t, err)
 		assert.True(t, exist, "Pod on same node should exist")
 	})
@@ -68,7 +68,7 @@ func TestK8s_PodExist(t *testing.T) {
 			nodeName: "test-node",
 		}
 
-		exist, err := k8sObj.PodExist("default", "non-existent")
+		exist, err := k8sObj.PodExist(context.Background(), "default", "non-existent")
 		assert.NoError(t, err)
 		assert.False(t, exist, "Non-existent pod should not exist")
 	})
@@ -91,7 +91,7 @@ func TestK8s_PodExist(t *testing.T) {
 			nodeName: "test-node",
 		}
 
-		exist, err := k8sObj.PodExist("default", "other-pod")
+		exist, err := k8sObj.PodExist(context.Background(), "default", "other-pod")
 		assert.NoError(t, err)
 		assert.False(t, exist, "Pod on different node should not exist for this k8s instance")
 	})
@@ -115,7 +115,7 @@ func TestK8s_PodExist(t *testing.T) {
 			nodeName: "test-node",
 		}
 
-		exist, err := k8sObj.PodExist("default", "host-network-pod")
+		exist, err := k8sObj.PodExist(context.Background(), "default", "host-network-pod")
 		assert.NoError(t, err)
 		assert.False(t, exist, "Pod with host network should not exist for terway")
 	})
@@ -141,7 +141,7 @@ func TestK8s_PodExist(t *testing.T) {
 			nodeName: "test-node",
 		}
 
-		exist, err := k8sObj.PodExist("default", "ignored-pod")
+		exist, err := k8sObj.PodExist(context.Background(), "default", "ignored-pod")
 		assert.NoError(t, err)
 		assert.False(t, exist, "Pod with ignore label should not exist for terway")
 	})
@@ -170,7 +170,7 @@ func TestK8s_GetLocalPods_ENIOnlyMode(t *testing.T) {
 		enableErdma: false,
 	}
 
-	pods, err := k8sObj.GetLocalPods()
+	pods, err := k8sObj.GetLocalPods(context.Background())
 	assert.NoError(t, err)
 	assert.Len(t, pods, 1)
 	assert.Equal(t, daemon.PodNetworkTypeVPCENI, pods[0].PodNetworkType)
@@ -207,7 +207,7 @@ func TestK8s_GetLocalPods_BandwidthAnnotations(t *testing.T) {
 		enableErdma: false,
 	}
 
-	pods, err := k8sObj.GetLocalPods()
+	pods, err := k8sObj.GetLocalPods(context.Background())
 	assert.NoError(t, err)
 	assert.Len(t, pods, 1)
 	assert.Equal(t, uint64(10*MEGABYTE), pods[0].TcIngress)
@@ -241,7 +241,7 @@ func TestK8s_GetLocalPods_PodENIAnnotation(t *testing.T) {
 		enableErdma: false,
 	}
 
-	pods, err := k8sObj.GetLocalPods()
+	pods, err := k8sObj.GetLocalPods(context.Background())
 	assert.NoError(t, err)
 	assert.Len(t, pods, 1)
 	assert.True(t, pods[0].PodENI)
@@ -281,7 +281,7 @@ func TestK8s_GetLocalPods_ERDMA(t *testing.T) {
 		enableErdma: true,
 	}
 
-	pods, err := k8sObj.GetLocalPods()
+	pods, err := k8sObj.GetLocalPods(context.Background())
 	assert.NoError(t, err)
 	assert.Len(t, pods, 1)
 	assert.True(t, pods[0].ERdma)
@@ -340,7 +340,7 @@ func TestK8s_GetLocalPods_SandboxExited(t *testing.T) {
 		enableErdma: false,
 	}
 
-	pods, err := k8sObj.GetLocalPods()
+	pods, err := k8sObj.GetLocalPods(context.Background())
 	assert.NoError(t, err)
 	assert.Len(t, pods, 3)
 
@@ -396,7 +396,7 @@ func TestK8s_GetLocalPods_IPStickTime(t *testing.T) {
 		Locker:                  &sync.RWMutex{},
 	}
 
-	pods, err := k8sObj.GetLocalPods()
+	pods, err := k8sObj.GetLocalPods(context.Background())
 	assert.NoError(t, err)
 	assert.Len(t, pods, 2)
 
@@ -1070,7 +1070,7 @@ func TestPatchNodeAnnotations(t *testing.T) {
 			}
 
 			// Execute PatchNodeAnnotations
-			err := k8sObj.PatchNodeAnnotations(tt.newAnnotations)
+			err := k8sObj.PatchNodeAnnotations(context.Background(), tt.newAnnotations)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -1107,7 +1107,7 @@ func TestPatchNodeAnnotations_NodeNotFound(t *testing.T) {
 		nodeName: "non-existent-node",
 	}
 
-	err := k8sObj.PatchNodeAnnotations(map[string]string{"key": "value"})
+	err := k8sObj.PatchNodeAnnotations(context.Background(), map[string]string{"key": "value"})
 	assert.Error(t, err)
 	assert.True(t, apierrors.IsNotFound(err))
 }
@@ -1207,7 +1207,7 @@ func TestPatchPodIPInfo(t *testing.T) {
 				Name:      "test-pod",
 				Namespace: "default",
 			}
-			err := k8sObj.PatchPodIPInfo(podInfo, tt.newPodIPs)
+			err := k8sObj.PatchPodIPInfo(context.Background(), podInfo, tt.newPodIPs)
 
 			if tt.expectError {
 				assert.Error(t, err)

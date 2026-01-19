@@ -344,7 +344,7 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 	runDevicePlugin(b.daemonMode, b.config, poolConfig)
 
 	// ensure node annotations
-	err = b.service.k8s.PatchNodeAnnotations(nodeAnnotations)
+	err = b.service.k8s.PatchNodeAnnotations(b.ctx, nodeAnnotations)
 	if err != nil {
 		return fmt.Errorf("error patch node annotations, %w", err)
 	}
