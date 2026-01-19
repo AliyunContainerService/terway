@@ -91,6 +91,86 @@ func TestFinalStatus(t *testing.T) {
 	}
 }
 
+func TestSlimPod(t *testing.T) {
+	t.Run("Slim normal pod", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-pod",
+				Annotations: map[string]string{"foo": "bar"},
+				Labels:      map[string]string{"app": "test"},
+			},
+			Spec: corev1.PodSpec{
+				HostNetwork: false,
+				Volumes:     []corev1.Volume{{Name: "vol"}},
+			},
+			Status: corev1.PodStatus{
+				ContainerStatuses: []corev1.ContainerStatus{{Name: "container"}},
+			},
+		}
+
+		result, err := SlimPod(pod)
+		require.NoError(t, err)
+
+		slimPod := result.(*corev1.Pod)
+		assert.NotNil(t, slimPod.Annotations)
+		assert.NotNil(t, slimPod.Labels)
+		assert.Nil(t, slimPod.Spec.Volumes)
+		assert.Nil(t, slimPod.Status.ContainerStatuses)
+	})
+
+	t.Run("Slim host network pod", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-pod",
+				Annotations: map[string]string{"foo": "bar"},
+				Labels:      map[string]string{"app": "test"},
+			},
+			Spec: corev1.PodSpec{
+				HostNetwork: true,
+			},
+		}
+
+		result, err := SlimPod(pod)
+		require.NoError(t, err)
+
+		slimPod := result.(*corev1.Pod)
+		assert.Nil(t, slimPod.Annotations)
+		assert.Nil(t, slimPod.Labels)
+	})
+
+	t.Run("Unexpected type", func(t *testing.T) {
+		result, err := SlimPod("not a pod")
+		assert.Error(t, err)
+		assert.Nil(t, result)
+	})
+}
+
+func TestSlimNode(t *testing.T) {
+	t.Run("Slim node", func(t *testing.T) {
+		node := &corev1.Node{
+			Status: corev1.NodeStatus{
+				Images:          []corev1.ContainerImage{{Names: []string{"img"}}},
+				VolumesInUse:    []corev1.UniqueVolumeName{"vol"},
+				VolumesAttached: []corev1.AttachedVolume{{Name: "vol"}},
+			},
+		}
+
+		result, err := SlimNode(node)
+		require.NoError(t, err)
+
+		slimNode := result.(*corev1.Node)
+		assert.Nil(t, slimNode.Status.Images)
+		assert.Nil(t, slimNode.Status.VolumesInUse)
+		assert.Nil(t, slimNode.Status.VolumesAttached)
+	})
+
+	t.Run("Unexpected type", func(t *testing.T) {
+		result, err := SlimNode("not a node")
+		assert.Error(t, err)
+		assert.Nil(t, result)
+	})
+}
+
 // TestSetStsKinds tests the SetStsKinds function
 func TestSetStsKinds(t *testing.T) {
 	// Test case 1: Add single custom kind

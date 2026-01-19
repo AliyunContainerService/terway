@@ -291,33 +291,10 @@ func newOption(cfg *controlplane.Config) ctrl.Options {
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
 				&corev1.Node{}: {
-					Transform: func(i interface{}) (interface{}, error) {
-						if node, ok := i.(*corev1.Node); ok {
-							node.Status.Images = nil
-							node.Status.VolumesInUse = nil
-							node.Status.VolumesAttached = nil
-							return node, nil
-						}
-						return nil, fmt.Errorf("unexpected type %T", i)
-					},
+					Transform: utils.SlimNode,
 				},
 				&corev1.Pod{}: {
-					Transform: func(i interface{}) (interface{}, error) {
-						if pod, ok := i.(*corev1.Pod); ok {
-							pod.Spec.Volumes = nil
-							pod.Spec.EphemeralContainers = nil
-							pod.Spec.SecurityContext = nil
-							pod.Spec.ImagePullSecrets = nil
-							pod.Spec.Tolerations = nil
-							pod.Spec.ReadinessGates = nil
-							pod.Spec.PreemptionPolicy = nil
-							pod.Status.InitContainerStatuses = nil
-							pod.Status.ContainerStatuses = nil
-							pod.Status.EphemeralContainerStatuses = nil
-							return pod, nil
-						}
-						return nil, fmt.Errorf("unexpected type %T", i)
-					},
+					Transform: utils.SlimPod,
 				},
 			},
 		},

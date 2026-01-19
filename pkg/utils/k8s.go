@@ -101,3 +101,35 @@ func RuntimeFinalStatus(status map[v1beta1.CNIStatus]*v1beta1.CNIStatusInfo) (cn
 func EventName(name string) string {
 	return fmt.Sprintf("terway-controlplane/%s", name)
 }
+
+func SlimPod(i interface{}) (interface{}, error) {
+	if pod, ok := i.(*corev1.Pod); ok {
+		if pod.Spec.HostNetwork {
+			pod.Annotations = nil
+			pod.Labels = nil
+		}
+
+		pod.Spec.Volumes = nil
+		pod.Spec.EphemeralContainers = nil
+		pod.Spec.SecurityContext = nil
+		pod.Spec.ImagePullSecrets = nil
+		pod.Spec.Tolerations = nil
+		pod.Spec.ReadinessGates = nil
+		pod.Spec.PreemptionPolicy = nil
+		pod.Status.InitContainerStatuses = nil
+		pod.Status.ContainerStatuses = nil
+		pod.Status.EphemeralContainerStatuses = nil
+		return pod, nil
+	}
+	return nil, fmt.Errorf("unexpected type %T", i)
+}
+
+func SlimNode(i interface{}) (interface{}, error) {
+	if node, ok := i.(*corev1.Node); ok {
+		node.Status.Images = nil
+		node.Status.VolumesInUse = nil
+		node.Status.VolumesAttached = nil
+		return node, nil
+	}
+	return nil, fmt.Errorf("unexpected type %T", i)
+}

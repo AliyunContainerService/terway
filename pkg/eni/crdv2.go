@@ -84,7 +84,7 @@ func NewCRDV2(restConfig *rest.Config, nodeName, namespace string) *CRDV2 {
 					Field: fields.SelectorFromSet(map[string]string{
 						"metadata.name": nodeName,
 					}),
-					Transform: nil,
+					Transform: utils.SlimNode,
 				},
 				&networkv1beta1.PodENI{}: {
 					Label: labels.SelectorFromSet(map[string]string{
@@ -110,27 +110,7 @@ func NewCRDV2(restConfig *rest.Config, nodeName, namespace string) *CRDV2 {
 						fields.OneTermNotEqualSelector("status.phase", string(corev1.PodSucceeded)),
 						fields.OneTermNotEqualSelector("status.phase", string(corev1.PodFailed)),
 					),
-					Transform: func(i interface{}) (interface{}, error) {
-						if pod, ok := i.(*corev1.Pod); ok {
-							if pod.Spec.HostNetwork {
-								pod.Annotations = nil
-								pod.Labels = nil
-							}
-
-							pod.Spec.Volumes = nil
-							pod.Spec.EphemeralContainers = nil
-							pod.Spec.SecurityContext = nil
-							pod.Spec.ImagePullSecrets = nil
-							pod.Spec.Tolerations = nil
-							pod.Spec.ReadinessGates = nil
-							pod.Spec.PreemptionPolicy = nil
-							pod.Status.InitContainerStatuses = nil
-							pod.Status.ContainerStatuses = nil
-							pod.Status.EphemeralContainerStatuses = nil
-							return pod, nil
-						}
-						return nil, fmt.Errorf("unexpected type %T", i)
-					},
+					Transform: utils.SlimPod,
 				},
 				&corev1.ConfigMap{}: {
 					Field: fields.SelectorFromSet(map[string]string{
