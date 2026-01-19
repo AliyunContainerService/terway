@@ -1152,7 +1152,7 @@ func TestGcPods(t *testing.T) {
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return empty list
 				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
-				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+				mockK8s.On("GetLocalPods", mock.Anything).Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return empty list
 				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
@@ -1171,7 +1171,7 @@ func TestGcPods(t *testing.T) {
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return existing pods
 				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
-				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{
+				mockK8s.On("GetLocalPods", mock.Anything).Return([]*daemon.PodInfo{
 					{
 						Namespace:     "default",
 						Name:          "test-pod-1",
@@ -1225,7 +1225,7 @@ func TestGcPods(t *testing.T) {
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return empty list (no existing pods)
 				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
-				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+				mockK8s.On("GetLocalPods", mock.Anything).Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return pod resources that need cleanup
 				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
@@ -1254,7 +1254,7 @@ func TestGcPods(t *testing.T) {
 				})
 
 				// Mock k8s.PodExist to return false (pod doesn't exist)
-				mockK8s.On("PodExist", "default", "test-pod-1").Return(false, nil)
+				mockK8s.On("PodExist", mock.Anything, "default", "test-pod-1").Return(false, nil)
 
 				// Mock gcPolicyRoutes
 				patches.ApplyFunc(gcPolicyRoutes, func(ctx context.Context, mac string, containerIPNet *types.IPNetSet, namespace, name string) error {
@@ -1283,7 +1283,7 @@ func TestGcPods(t *testing.T) {
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return error
 				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
-				mockK8s.On("GetLocalPods").Return(([]*daemon.PodInfo)(nil), assert.AnError)
+				mockK8s.On("GetLocalPods", mock.Anything).Return(([]*daemon.PodInfo)(nil), assert.AnError)
 			},
 		},
 		{
@@ -1292,7 +1292,7 @@ func TestGcPods(t *testing.T) {
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods
 				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
-				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+				mockK8s.On("GetLocalPods", mock.Anything).Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return error
 				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
@@ -1306,7 +1306,7 @@ func TestGcPods(t *testing.T) {
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return empty list
 				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
-				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+				mockK8s.On("GetLocalPods", mock.Anything).Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return pod resources
 				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
@@ -1335,7 +1335,7 @@ func TestGcPods(t *testing.T) {
 				})
 
 				// Mock k8s.PodExist to return false
-				mockK8s.On("PodExist", "default", "test-pod-1").Return(false, nil)
+				mockK8s.On("PodExist", mock.Anything, "default", "test-pod-1").Return(false, nil)
 
 				// Mock gcPolicyRoutes
 				patches.ApplyFunc(gcPolicyRoutes, func(ctx context.Context, mac string, containerIPNet *types.IPNetSet, namespace, name string) error {
@@ -1354,7 +1354,7 @@ func TestGcPods(t *testing.T) {
 			setupMocks: func(patches *gomonkey.Patches, ns *networkService) {
 				// Mock k8s.GetLocalPods to return empty list
 				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
-				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+				mockK8s.On("GetLocalPods", mock.Anything).Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return pod resources
 				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
@@ -1383,7 +1383,7 @@ func TestGcPods(t *testing.T) {
 				})
 
 				// Mock k8s.PodExist to return false
-				mockK8s.On("PodExist", "default", "test-pod-1").Return(false, nil)
+				mockK8s.On("PodExist", mock.Anything, "default", "test-pod-1").Return(false, nil)
 
 				// Mock gcPolicyRoutes
 				patches.ApplyFunc(gcPolicyRoutes, func(ctx context.Context, mac string, containerIPNet *types.IPNetSet, namespace, name string) error {
@@ -1410,7 +1410,7 @@ func TestGcPods(t *testing.T) {
 
 				// Mock k8s.GetLocalPods to return empty list
 				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
-				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+				mockK8s.On("GetLocalPods", mock.Anything).Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return pod resources with IP stick time
 				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
@@ -1439,7 +1439,7 @@ func TestGcPods(t *testing.T) {
 				})
 
 				// Mock k8s.PodExist to return false
-				mockK8s.On("PodExist", "default", "test-pod-1").Return(false, nil)
+				mockK8s.On("PodExist", mock.Anything, "default", "test-pod-1").Return(false, nil)
 
 				// Mock resourceDB.Put to update IP stick time
 				patches.ApplyMethodFunc(ns.resourceDB, "Put", func(key string, value interface{}) error {
@@ -1462,7 +1462,7 @@ func TestGcPods(t *testing.T) {
 
 				// Mock k8s.GetLocalPods to return empty list
 				mockK8s := ns.k8s.(*k8smocks.Kubernetes)
-				mockK8s.On("GetLocalPods").Return([]*daemon.PodInfo{}, nil)
+				mockK8s.On("GetLocalPods", mock.Anything).Return([]*daemon.PodInfo{}, nil)
 
 				// Mock resourceDB.List to return pod resources
 				patches.ApplyMethodFunc(ns.resourceDB, "List", func() ([]interface{}, error) {
@@ -1491,7 +1491,7 @@ func TestGcPods(t *testing.T) {
 				})
 
 				// Mock k8s.PodExist to return false
-				mockK8s.On("PodExist", "default", "test-pod-1").Return(false, nil)
+				mockK8s.On("PodExist", mock.Anything, "default", "test-pod-1").Return(false, nil)
 
 				// Mock gcPolicyRoutes
 				patches.ApplyFunc(gcPolicyRoutes, func(ctx context.Context, mac string, containerIPNet *types.IPNetSet, namespace, name string) error {
@@ -2016,9 +2016,9 @@ func TestNetworkServiceBuilder_setupENIManager_Success(t *testing.T) {
 
 	// 5. Mock K8S and Storage
 	mockK8sReal := k8smocks.NewKubernetes(t)
-	mockK8sReal.On("PatchNodeAnnotations", mock.Anything).Return(nil)
+	mockK8sReal.On("PatchNodeAnnotations", mock.Anything, mock.Anything).Return(nil)
 	// Mock GetLocalPods to handle the GC loop call. Using Maybe() as it happens asynchronously.
-	mockK8sReal.On("GetLocalPods").Return([]*daemon_types.PodInfo{}, nil).Maybe()
+	mockK8sReal.On("GetLocalPods", mock.Anything).Return([]*daemon_types.PodInfo{}, nil).Maybe()
 
 	mockStorage := &builderMockStorage{
 		listResult: []interface{}{},

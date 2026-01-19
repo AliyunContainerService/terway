@@ -42,7 +42,8 @@ import (
 )
 
 const (
-	gcPeriod = 5 * time.Minute
+	gcPeriod    = 5 * time.Minute
+	listTimeout = 60 * time.Second
 
 	networkServiceName       = "default"
 	tracingKeyName           = "name"
@@ -269,7 +270,7 @@ func (n *networkService) AllocIP(ctx context.Context, r *rpc.AllocIPRequest) (*r
 	if n.enablePatchPodIPs {
 		ips := getPodIPs(netConf)
 		if len(ips) > 0 {
-			_ = n.k8s.PatchPodIPInfo(pod, strings.Join(ips, ","))
+			_ = n.k8s.PatchPodIPInfo(ctx, pod, strings.Join(ips, ","))
 		}
 	}
 
@@ -510,7 +511,9 @@ func (n *networkService) gcPods(ctx context.Context) error {
 
 	serviceLog.V(4).WithName("gc").Info("gcPods")
 
-	pods, err := n.k8s.GetLocalPods()
+	ctx, cancel := context.WithTimeout(ctx, listTimeout)
+	defer cancel()
+	pods, err := n.k8s.GetLocalPods(ctx)
 	if err != nil {
 		return err
 	}
@@ -563,7 +566,7 @@ func (n *networkService) gcPods(ctx context.Context) error {
 		}
 
 		// check kube-api again
-		ok, err := n.k8s.PodExist(podRes.PodInfo.Namespace, podRes.PodInfo.Name)
+		ok, err := n.k8s.PodExist(ctx, podRes.PodInfo.Namespace, podRes.PodInfo.Name)
 		if err != nil || ok {
 			continue
 		}
@@ -680,7 +683,7 @@ func (n *networkService) cleanRuntimeNode(ctx context.Context, localUIDs sets.Se
 				l.Info("invalid pod id format", "podID", status.PodID)
 				continue
 			}
-			ok, err := n.k8s.PodExist(list[0], list[1])
+			ok, err := n.k8s.PodExist(ctx, list[0], list[1])
 			if err != nil || ok {
 				continue
 			}

@@ -71,9 +71,9 @@ func (_m *Kubernetes) GetDynamicConfigWithName(ctx context.Context, name string)
 	return r0, r1
 }
 
-// GetLocalPods provides a mock function with no fields
-func (_m *Kubernetes) GetLocalPods() ([]*daemon.PodInfo, error) {
-	ret := _m.Called()
+// GetLocalPods provides a mock function with given fields: ctx
+func (_m *Kubernetes) GetLocalPods(ctx context.Context) ([]*daemon.PodInfo, error) {
+	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetLocalPods")
@@ -81,19 +81,19 @@ func (_m *Kubernetes) GetLocalPods() ([]*daemon.PodInfo, error) {
 
 	var r0 []*daemon.PodInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func() ([]*daemon.PodInfo, error)); ok {
-		return rf()
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*daemon.PodInfo, error)); ok {
+		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func() []*daemon.PodInfo); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(context.Context) []*daemon.PodInfo); ok {
+		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*daemon.PodInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -245,17 +245,17 @@ func (_m *Kubernetes) NodeName() string {
 	return r0
 }
 
-// PatchNodeAnnotations provides a mock function with given fields: anno
-func (_m *Kubernetes) PatchNodeAnnotations(anno map[string]string) error {
-	ret := _m.Called(anno)
+// PatchNodeAnnotations provides a mock function with given fields: ctx, anno
+func (_m *Kubernetes) PatchNodeAnnotations(ctx context.Context, anno map[string]string) error {
+	ret := _m.Called(ctx, anno)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PatchNodeAnnotations")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(map[string]string) error); ok {
-		r0 = rf(anno)
+	if rf, ok := ret.Get(0).(func(context.Context, map[string]string) error); ok {
+		r0 = rf(ctx, anno)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -281,17 +281,17 @@ func (_m *Kubernetes) PatchNodeIPResCondition(status v1.ConditionStatus, reason 
 	return r0
 }
 
-// PatchPodIPInfo provides a mock function with given fields: info, ips
-func (_m *Kubernetes) PatchPodIPInfo(info *daemon.PodInfo, ips string) error {
-	ret := _m.Called(info, ips)
+// PatchPodIPInfo provides a mock function with given fields: ctx, info, ips
+func (_m *Kubernetes) PatchPodIPInfo(ctx context.Context, info *daemon.PodInfo, ips string) error {
+	ret := _m.Called(ctx, info, ips)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PatchPodIPInfo")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*daemon.PodInfo, string) error); ok {
-		r0 = rf(info, ips)
+	if rf, ok := ret.Get(0).(func(context.Context, *daemon.PodInfo, string) error); ok {
+		r0 = rf(ctx, info, ips)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -299,9 +299,9 @@ func (_m *Kubernetes) PatchPodIPInfo(info *daemon.PodInfo, ips string) error {
 	return r0
 }
 
-// PodExist provides a mock function with given fields: namespace, name
-func (_m *Kubernetes) PodExist(namespace string, name string) (bool, error) {
-	ret := _m.Called(namespace, name)
+// PodExist provides a mock function with given fields: ctx, namespace, name
+func (_m *Kubernetes) PodExist(ctx context.Context, namespace string, name string) (bool, error) {
+	ret := _m.Called(ctx, namespace, name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PodExist")
@@ -309,17 +309,17 @@ func (_m *Kubernetes) PodExist(namespace string, name string) (bool, error) {
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (bool, error)); ok {
-		return rf(namespace, name)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (bool, error)); ok {
+		return rf(ctx, namespace, name)
 	}
-	if rf, ok := ret.Get(0).(func(string, string) bool); ok {
-		r0 = rf(namespace, name)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) bool); ok {
+		r0 = rf(ctx, namespace, name)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, name)
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, namespace, name)
 	} else {
 		r1 = ret.Error(1)
 	}
