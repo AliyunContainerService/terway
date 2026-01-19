@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -746,8 +747,16 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 
 	unSucceedPods := map[string]*PodRequest{}
 
+	// Sort pod IDs for deterministic iteration order
+	podIDs := make([]string, 0, len(pendingPods))
+	for podID := range pendingPods {
+		podIDs = append(podIDs, podID)
+	}
+	sort.Strings(podIDs)
+
 	// handle exist pod ip
-	for podID, info := range pendingPods {
+	for _, podID := range podIDs {
+		info := pendingPods[podID]
 		if info.RequireIPv4 && info.ipv4Ref == nil {
 			if info.IPv4 != "" {
 				// for take over case , pod has ip already, we can only assign to previous eni
@@ -776,7 +785,8 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 	}
 
 	// only pending pods is handled
-	for podID, info := range pendingPods {
+	for _, podID := range podIDs {
+		info := pendingPods[podID]
 		// choose eni first ...
 		if info.RequireIPv4 && info.ipv4Ref == nil {
 			if info.IPv4 == "" {
