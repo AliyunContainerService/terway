@@ -120,12 +120,16 @@ func InitViper(configFilePath string, onConfigChange func(e fsnotify.Event)) err
 	viperConfig = viper.New()
 	viperConfig.SetConfigFile(configFilePath)
 	viperConfig.SetConfigType("yaml")
-	viperConfig.WatchConfig()
-	viperConfig.OnConfigChange(onConfigChange)
 
+	// Read config first before starting watch to avoid race condition
 	if err := viperConfig.ReadInConfig(); err != nil {
 		return err
 	}
+
+	// Start watching after initial read is complete
+	viperConfig.WatchConfig()
+	viperConfig.OnConfigChange(onConfigChange)
+
 	var c Config
 	if err := viperConfig.Unmarshal(&c); err != nil {
 		return err
