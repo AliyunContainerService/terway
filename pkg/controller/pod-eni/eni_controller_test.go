@@ -2,6 +2,7 @@ package podeni
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
@@ -2366,4 +2367,297 @@ var _ = Describe("ENI Controller Tests", func() {
 			ecsClient.AssertExpectations(GinkgoT())
 		})
 	})
+
+	Context("getENIIndex", func() {
+		var (
+			r *ReconcilePodENI
+		)
+
+		BeforeEach(func() {
+			r = createTestReconciler(openAPI, false, false)
+		})
+
+		It("should return nil if pod is not found", func() {
+			index := r.getENIIndex(ctx, "default", "non-existent", "eni-1")
+			Expect(index).To(BeNil())
+		})
+
+		It("should return nil if node is not found", func() {
+			podName := "test-index-no-node"
+			pod := testutil.CreateTestPod(podName, "default", "non-existent-node")
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pod) }()
+
+			index := r.getENIIndex(ctx, "default", podName, "eni-1")
+			Expect(index).To(BeNil())
+		})
+
+		It("should return nil if nodeStatus is not in cache", func() {
+			podName := "test-index-no-cache"
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pod) }()
+
+			// Ensure node exists in K8s (already done in BeforeEach)
+			index := r.getENIIndex(ctx, "default", podName, "eni-1")
+			Expect(index).To(BeNil())
+		})
+
+		It("should return nil if not enough network cards", func() {
+			podName := "test-index-not-enough-cards"
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pod) }()
+
+			// Cache nodeStatus with only 1 card
+			nodeStatus := status.NewNodeStatus(1)
+			r.nodeStatusCache.LoadOrStore(testNodeName, nodeStatus)
+
+			index := r.getENIIndex(ctx, "default", podName, "eni-1")
+			Expect(index).To(BeNil())
+		})
+
+		It("should return index with NUMA hint (NUMA 0)", func() {
+			podName := "test-index-numa-0"
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
+			pod.Annotations = map[string]string{
+				"cpuSet": `{"container1": {"0": [0,1]}}`, // NUMA 0
+			}
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pod) }()
+
+			// Cache nodeStatus with 2 cards
+			nodeStatus := status.NewNodeStatus(2)
+			r.nodeStatusCache.LoadOrStore(testNodeName, nodeStatus)
+
+			index := r.getENIIndex(ctx, "default", podName, "eni-1")
+			Expect(index).NotTo(BeNil())
+			Expect(*index).To(Equal(0)) // NUMA 0 maps to CardIndex 0 (since 0 % 2 == 0)
+		})
+
+		It("should return index with NUMA hint (NUMA 1)", func() {
+			podName := "test-index-numa-1"
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
+			pod.Annotations = map[string]string{
+				"cpuSet": `{"container1": {"1": [2,3]}}`, // NUMA 1
+			}
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pod) }()
+
+			// Cache nodeStatus with 2 cards
+			nodeStatus := status.NewNodeStatus(2)
+			r.nodeStatusCache.LoadOrStore(testNodeName, nodeStatus)
+
+			index := r.getENIIndex(ctx, "default", podName, "eni-1")
+			Expect(index).NotTo(BeNil())
+			Expect(*index).To(Equal(1)) // NUMA 1 maps to CardIndex 1 (since 1 % 2 == 1)
+		})
+
+		It("should ignore NUMA hint if multiple NUMA nodes are present", func() {
+			podName := "test-index-multi-numa"
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
+			pod.Annotations = map[string]string{
+				"cpuSet": `{"container1": {"0": [0,1], "1": [2,3]}}`, // NUMA 0 and 1
+			}
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pod) }()
+
+			// Cache nodeStatus with 2 cards
+			nodeStatus := status.NewNodeStatus(2)
+			r.nodeStatusCache.LoadOrStore(testNodeName, nodeStatus)
+
+			index := r.getENIIndex(ctx, "default", podName, "eni-1")
+			Expect(index).NotTo(BeNil())
+			// Should fallback to auto-allocate (least used), likely 0 since both are empty
+			Expect(*index).To(SatisfyAny(Equal(0), Equal(1)))
+		})
+
+		It("should ignore invalid NUMA hint (negative index)", func() {
+			podName := "test-index-invalid-numa"
+			pod := testutil.CreateTestPod(podName, "default", testNodeName)
+			pod.Annotations = map[string]string{
+				"cpuSet": `{"container1": {"-1": [0,1]}}`, // Invalid NUMA -1
+			}
+			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pod) }()
+
+			// Cache nodeStatus with 2 cards
+			nodeStatus := status.NewNodeStatus(2)
+			r.nodeStatusCache.LoadOrStore(testNodeName, nodeStatus)
+
+			index := r.getENIIndex(ctx, "default", podName, "eni-1")
+			Expect(index).NotTo(BeNil())
+			Expect(*index).To(SatisfyAny(Equal(0), Equal(1)))
+		})
+	})
+
+	Context("gcENIs", func() {
+		var (
+			r *ReconcilePodENI
+		)
+
+		BeforeEach(func() {
+			r = createTestReconciler(openAPI, false, false)
+			controlplane.SetConfig(&controlplane.Config{
+				VPCID:     "vpc-test",
+				ClusterID: "test-cluster",
+			})
+		})
+
+		It("should filter out ENIs not created by Terway (different ClusterID)", func() {
+			enis := []*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-1",
+					CreationTime:       time.Now().Add(-20 * time.Minute).UTC().Format(layout),
+					Tags: []ecs.Tag{
+						{TagKey: types.TagKeyClusterID, TagValue: "other-cluster"},
+						{TagKey: types.NetworkInterfaceTagCreatorKey, TagValue: types.TagTerwayController},
+					},
+				},
+			}
+
+			err := r.gcENIs(ctx, enis)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should filter out ENIs not created by Terway (different Creator)", func() {
+			enis := []*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-1",
+					CreationTime:       time.Now().Add(-20 * time.Minute).UTC().Format(layout),
+					Tags: []ecs.Tag{
+						{TagKey: types.TagKeyClusterID, TagValue: "test-cluster"},
+						{TagKey: types.NetworkInterfaceTagCreatorKey, TagValue: "other-creator"},
+					},
+				},
+			}
+
+			err := r.gcENIs(ctx, enis)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should filter out recently created ENIs", func() {
+			enis := []*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-1",
+					CreationTime:       time.Now().Add(-5 * time.Minute).UTC().Format(layout),
+					Tags: []ecs.Tag{
+						{TagKey: types.TagKeyClusterID, TagValue: "test-cluster"},
+						{TagKey: types.NetworkInterfaceTagCreatorKey, TagValue: types.TagTerwayController},
+					},
+				},
+			}
+
+			err := r.gcENIs(ctx, enis)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should detach member ENI that is InUse but not in PodENI", func() {
+			eniID := "eni-leaked-inuse"
+			instanceID := "i-test"
+			trunkID := "eni-trunk"
+			enis := []*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID:      eniID,
+					CreationTime:            time.Now().Add(-20 * time.Minute).UTC().Format(layout),
+					Type:                    aliyunClient.ENITypeMember,
+					Status:                  aliyunClient.ENIStatusInUse,
+					InstanceID:              instanceID,
+					TrunkNetworkInterfaceID: trunkID,
+					Tags: []ecs.Tag{
+						{TagKey: types.TagKeyClusterID, TagValue: "test-cluster"},
+						{TagKey: types.NetworkInterfaceTagCreatorKey, TagValue: types.TagTerwayController},
+					},
+				},
+			}
+
+			ecsClient.On("DetachNetworkInterface", mock.Anything, eniID, instanceID, trunkID).Return(nil).Once()
+
+			err := r.gcENIs(ctx, enis)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should delete available ENI that is not in PodENI", func() {
+			eniID := "eni-leaked-available"
+			enis := []*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: eniID,
+					CreationTime:       time.Now().Add(-20 * time.Minute).UTC().Format(layout),
+					Status:             aliyunClient.ENIStatusAvailable,
+					Tags: []ecs.Tag{
+						{TagKey: types.TagKeyClusterID, TagValue: "test-cluster"},
+						{TagKey: types.NetworkInterfaceTagCreatorKey, TagValue: types.TagTerwayController},
+					},
+				},
+			}
+
+			ecsClient.On("DeleteNetworkInterface", mock.Anything, eniID).Return(nil).Once()
+
+			err := r.gcENIs(ctx, enis)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should do nothing if ENI is in use by PodENI", func() {
+			eniID := "eni-in-use"
+			podName := "test-pod-gc"
+
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      podName,
+					Namespace: "default",
+				},
+				Spec: networkv1beta1.PodENISpec{
+					Allocations: []networkv1beta1.Allocation{
+						{
+							ENI: networkv1beta1.ENI{ID: eniID},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, podENI)).Should(Succeed())
+			defer func() {
+				_ = k8sClient.Delete(ctx, podENI)
+			}()
+
+			enis := []*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: eniID,
+					CreationTime:       time.Now().Add(-20 * time.Minute).UTC().Format(layout),
+					Status:             aliyunClient.ENIStatusAvailable,
+					Tags: []ecs.Tag{
+						{TagKey: types.TagKeyClusterID, TagValue: "test-cluster"},
+						{TagKey: types.NetworkInterfaceTagCreatorKey, TagValue: types.TagTerwayController},
+					},
+				},
+			}
+
+			err := r.gcENIs(ctx, enis)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("Test leader election", func() {
+		It("should return true for NeedLeaderElection", func() {
+			r := createTestReconciler(openAPI, false, false)
+			Expect(r.NeedLeaderElection()).To(BeTrue())
+		})
+
+		It("should return true for NeedLeaderElection", func() {
+			w := &Wrapper{}
+			Expect(w.NeedLeaderElection()).To(BeTrue())
+		})
+	})
+
+	Context("Test record event", func() {
+		It("should record event", func() {
+			r := createTestReconciler(openAPI, false, false)
+			r.recordPodENIDeleteErr(&networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod-eni",
+					Namespace: "default",
+				},
+			}, time.Now(), fmt.Errorf("test"))
+		})
+	})
+
 })

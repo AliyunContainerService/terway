@@ -38,6 +38,7 @@ import (
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	ctrlStatus "github.com/AliyunContainerService/terway/pkg/controller/status"
 	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 )
@@ -72,6 +73,7 @@ var _ = Describe("Node Controller", func() {
 			record:          record.NewFakeRecorder(1000),
 			centralizedIPAM: centralizedIPAM,
 			supportEFLO:     supportEFLO,
+			nodeStatusCache: ctrlStatus.NewCache[ctrlStatus.NodeStatus](),
 		}
 	}
 
@@ -513,6 +515,51 @@ var _ = Describe("Node Controller", func() {
 				Expect(resource.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]).To(Equal("eniOnly"))
 				verifyNetworkCardsCount(ctx, nodeName, 0)
 			})
+		})
+	})
+
+	Context("Delete Node", func() {
+		const nodeName = "test-delete-node"
+
+		AfterEach(func() {
+			cleanupNode(ctx, nodeName)
+		})
+
+		It("should return nil when centralizedIPAM is true", func() {
+			reconciler := createReconciler(true, false)
+			_, err := reconciler.delete(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle node not found", func() {
+			reconciler := createReconciler(false, false)
+			_, err := reconciler.delete(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should remove finalizer when node exists", func() {
+			crNode := testutil.NewNodeCRDBuilder(nodeName).Build()
+			crNode.Finalizers = []string{finalizer}
+			Expect(k8sClient.Create(ctx, crNode)).To(Succeed())
+
+			reconciler := createReconciler(false, false)
+			reconciler.nodeStatusCache.LoadOrStore(nodeName, &ctrlStatus.NodeStatus{})
+
+			_, err := reconciler.delete(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, ok := reconciler.nodeStatusCache.Get(nodeName)
+			Expect(ok).To(BeFalse())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, crNode)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(crNode.Finalizers).NotTo(ContainElement(finalizer))
 		})
 	})
 })

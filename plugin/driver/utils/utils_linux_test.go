@@ -1079,6 +1079,105 @@ var _ = Describe("Utils", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
+
+		Describe("EnsureRoute", func() {
+			It("should add route when not exists", func() {
+				var err error
+				var changed bool
+
+				err = hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					link, err := netlink.LinkByName(nicName)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up first
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add IP address to the link first
+					addr := &netlink.Addr{
+						IPNet: &net.IPNet{
+							IP:   net.ParseIP("192.168.10.2"),
+							Mask: net.CIDRMask(24, 32),
+						},
+						Scope: int(netlink.SCOPE_UNIVERSE),
+					}
+					err = netlink.AddrAdd(link, addr)
+					Expect(err).NotTo(HaveOccurred())
+
+					expected := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("10.0.1.0"),
+							Mask: net.CIDRMask(24, 32),
+						},
+						Gw:        net.ParseIP("192.168.10.1"),
+						LinkIndex: link.Attrs().Index,
+						Flags:     int(netlink.FLAG_ONLINK),
+					}
+
+					changed, err = EnsureRoute(context.Background(), expected)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(changed).To(BeTrue())
+
+					// Verify route exists
+					routes, err := FoundRoutes(expected)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(len(routes)).To(BeNumerically(">", 0))
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should not change when route already exists", func() {
+				var err error
+				var changed bool
+
+				err = hostNS.Do(func(netNS ns.NetNS) error {
+					defer GinkgoRecover()
+
+					link, err := netlink.LinkByName(nicName)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Set link up first
+					err = netlink.LinkSetUp(link)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Add IP address to the link first
+					addr := &netlink.Addr{
+						IPNet: &net.IPNet{
+							IP:   net.ParseIP("192.168.20.2"),
+							Mask: net.CIDRMask(24, 32),
+						},
+						Scope: int(netlink.SCOPE_UNIVERSE),
+					}
+					err = netlink.AddrAdd(link, addr)
+					Expect(err).NotTo(HaveOccurred())
+
+					expected := &netlink.Route{
+						Dst: &net.IPNet{
+							IP:   net.ParseIP("10.0.2.0"),
+							Mask: net.CIDRMask(24, 32),
+						},
+						Gw:        net.ParseIP("192.168.20.1"),
+						LinkIndex: link.Attrs().Index,
+						Flags:     int(netlink.FLAG_ONLINK),
+					}
+
+					// Add route first
+					err = netlink.RouteAdd(expected)
+					Expect(err).NotTo(HaveOccurred())
+
+					changed, err = EnsureRoute(context.Background(), expected)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(changed).To(BeFalse())
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
 	})
 
 	Describe("IP Rule operations", func() {
