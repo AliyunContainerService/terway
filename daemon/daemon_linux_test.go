@@ -410,3 +410,167 @@ func TestGcTCFiltersInvalidIP(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
+
+func TestGcTCFiltersWithExistingFilter(t *testing.T) {
+	testNS := setupTestNS(t)
+	defer cleanupTestNS(t, testNS)
+
+	err := testNS.Do(func(ns.NetNS) error {
+		// Create test device link
+		deviceLink := &netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{Name: "test-device"},
+		}
+		err := netlink.LinkAdd(deviceLink)
+		require.NoError(t, err)
+
+		// Get the link to ensure it's up
+		link, err := netlink.LinkByName("test-device")
+		require.NoError(t, err)
+
+		err = netlink.LinkSetUp(link)
+		require.NoError(t, err)
+
+		// Add clsact qdisc
+		qdisc := &netlink.GenericQdisc{
+			QdiscAttrs: netlink.QdiscAttrs{
+				LinkIndex: link.Attrs().Index,
+				Handle:    netlink.MakeHandle(0xffff, 0),
+				Parent:    netlink.HANDLE_CLSACT,
+			},
+			QdiscType: "clsact",
+		}
+		err = netlink.QdiscAdd(qdisc)
+		require.NoError(t, err)
+
+		// Create a U32 filter with VlanAction for IP 192.168.1.100 that should be GC'd
+		vlanAct := netlink.NewVlanKeyAction()
+		vlanAct.Attrs().Action = netlink.TC_ACT_PIPE
+		vlanAct.Action = netlink.TCA_VLAN_KEY_PUSH
+		vlanAct.Vid = 100
+
+		// IP 192.168.1.100 in big endian u32 format: 0xc0a80164
+		filter := &netlink.U32{
+			FilterAttrs: netlink.FilterAttrs{
+				LinkIndex: link.Attrs().Index,
+				Parent:    netlink.HANDLE_MIN_EGRESS,
+				Priority:  50001,
+				Protocol:  0x0800, // ETH_P_IP
+			},
+			Sel: &netlink.TcU32Sel{
+				Nkeys: 1,
+				Flags: netlink.TC_U32_TERMINAL,
+				Keys: []netlink.TcU32Key{
+					{
+						Mask: 0xffffffff,
+						Val:  0xc0a80164, // 192.168.1.100
+						Off:  12,
+					},
+				},
+			},
+			Actions: []netlink.Action{vlanAct},
+		}
+		err = netlink.FilterAdd(filter)
+		require.NoError(t, err)
+
+		// Verify filter exists before GC
+		filtersBefore, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+		require.NoError(t, err)
+		assert.NotEmpty(t, filtersBefore, "Filter should exist before GC")
+
+		// existIP contains 192.168.1.2 but NOT 192.168.1.100, so the filter should be deleted
+		existIP := sets.New[string]("192.168.1.2")
+
+		// Run GC - should delete the filter for 192.168.1.100
+		gcTCFilters([]netlink.Link{link}, existIP)
+
+		// Verify filter is deleted after GC
+		filtersAfter, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+		require.NoError(t, err)
+		assert.Empty(t, filtersAfter, "Filter for non-existent IP should be deleted")
+
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func TestGcTCFiltersKeepsExistingIP(t *testing.T) {
+	testNS := setupTestNS(t)
+	defer cleanupTestNS(t, testNS)
+
+	err := testNS.Do(func(ns.NetNS) error {
+		// Create test device link
+		deviceLink := &netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{Name: "test-device"},
+		}
+		err := netlink.LinkAdd(deviceLink)
+		require.NoError(t, err)
+
+		// Get the link to ensure it's up
+		link, err := netlink.LinkByName("test-device")
+		require.NoError(t, err)
+
+		err = netlink.LinkSetUp(link)
+		require.NoError(t, err)
+
+		// Add clsact qdisc
+		qdisc := &netlink.GenericQdisc{
+			QdiscAttrs: netlink.QdiscAttrs{
+				LinkIndex: link.Attrs().Index,
+				Handle:    netlink.MakeHandle(0xffff, 0),
+				Parent:    netlink.HANDLE_CLSACT,
+			},
+			QdiscType: "clsact",
+		}
+		err = netlink.QdiscAdd(qdisc)
+		require.NoError(t, err)
+
+		// Create a U32 filter with VlanAction for IP 192.168.1.2 that should be KEPT
+		vlanAct := netlink.NewVlanKeyAction()
+		vlanAct.Attrs().Action = netlink.TC_ACT_PIPE
+		vlanAct.Action = netlink.TCA_VLAN_KEY_PUSH
+		vlanAct.Vid = 100
+
+		// IP 192.168.1.2 in big endian u32 format: 0xc0a80102
+		filter := &netlink.U32{
+			FilterAttrs: netlink.FilterAttrs{
+				LinkIndex: link.Attrs().Index,
+				Parent:    netlink.HANDLE_MIN_EGRESS,
+				Priority:  50001,
+				Protocol:  0x0800, // ETH_P_IP
+			},
+			Sel: &netlink.TcU32Sel{
+				Nkeys: 1,
+				Flags: netlink.TC_U32_TERMINAL,
+				Keys: []netlink.TcU32Key{
+					{
+						Mask: 0xffffffff,
+						Val:  0xc0a80102, // 192.168.1.2
+						Off:  12,
+					},
+				},
+			},
+			Actions: []netlink.Action{vlanAct},
+		}
+		err = netlink.FilterAdd(filter)
+		require.NoError(t, err)
+
+		// Verify filter exists before GC
+		filtersBefore, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+		require.NoError(t, err)
+		assert.NotEmpty(t, filtersBefore, "Filter should exist before GC")
+
+		// existIP contains 192.168.1.2, so the filter should be KEPT
+		existIP := sets.New[string]("192.168.1.2")
+
+		// Run GC - should NOT delete the filter for 192.168.1.2
+		gcTCFilters([]netlink.Link{link}, existIP)
+
+		// Verify filter still exists after GC
+		filtersAfter, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+		require.NoError(t, err)
+		assert.NotEmpty(t, filtersAfter, "Filter for existing IP should be kept")
+
+		return nil
+	})
+	require.NoError(t, err)
+}

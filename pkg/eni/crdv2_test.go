@@ -853,17 +853,17 @@ func TestCRDV2_remote_GetTrunkENISuccess_TrunkNotEnabled(t *testing.T) {
 	})
 
 	// Mock Remote.Allocate to return expected response
-	expectedResp := make(chan *AllocResp, 1)
-	expectedResp <- &AllocResp{
-		Err: nil,
-		NetworkConfigs: NetworkResources{
-			&RemoteIPResource{},
-		},
-	}
-	close(expectedResp)
-
+	// Create the channel inside the mock function to avoid race conditions
 	patches.ApplyMethod(reflect.TypeOf(&Remote{}), "Allocate",
 		func(_ *Remote, _ context.Context, _ *daemon.CNI, _ ResourceRequest) (chan *AllocResp, []Trace) {
+			expectedResp := make(chan *AllocResp, 1)
+			expectedResp <- &AllocResp{
+				Err: nil,
+				NetworkConfigs: NetworkResources{
+					&RemoteIPResource{},
+				},
+			}
+			close(expectedResp)
 			return expectedResp, nil
 		})
 
