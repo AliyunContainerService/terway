@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
@@ -76,7 +77,8 @@ func Test_toPtr(t *testing.T) {
 
 func TestExecutor_AttachAsync_Success(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	mockAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil)
 
@@ -86,7 +88,8 @@ func TestExecutor_AttachAsync_Success(t *testing.T) {
 
 func TestExecutor_AttachAsync_Error(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	mockAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).
 		Return(errors.New("attach failed"))
@@ -98,7 +101,8 @@ func TestExecutor_AttachAsync_Error(t *testing.T) {
 
 func TestExecutor_DetachAsync_Success(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	mockAPI.On("DetachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil)
 
@@ -108,7 +112,8 @@ func TestExecutor_DetachAsync_Success(t *testing.T) {
 
 func TestExecutor_DetachAsync_Error(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	mockAPI.On("DetachNetworkInterfaceV2", mock.Anything, mock.Anything).
 		Return(errors.New("detach failed"))
@@ -120,7 +125,8 @@ func TestExecutor_DetachAsync_Error(t *testing.T) {
 
 func TestExecutor_Delete_Success(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	mockAPI.On("DeleteNetworkInterfaceV2", mock.Anything, "eni-123").Return(nil)
 
@@ -130,7 +136,8 @@ func TestExecutor_Delete_Success(t *testing.T) {
 
 func TestExecutor_Delete_Error(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	mockAPI.On("DeleteNetworkInterfaceV2", mock.Anything, "eni-123").
 		Return(errors.New("delete failed"))
@@ -142,7 +149,8 @@ func TestExecutor_Delete_Error(t *testing.T) {
 
 func TestExecutor_CheckStatus_Success(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	expectedENI := &aliyunClient.NetworkInterface{
 		NetworkInterfaceID: "eni-123",
@@ -160,7 +168,8 @@ func TestExecutor_CheckStatus_Success(t *testing.T) {
 
 func TestExecutor_CheckStatus_NotFound(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	mockAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).
 		Return([]*aliyunClient.NetworkInterface{}, nil)
@@ -173,7 +182,8 @@ func TestExecutor_CheckStatus_NotFound(t *testing.T) {
 
 func TestExecutor_CheckStatus_Error(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	mockAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).
 		Return(nil, errors.New("describe failed"))
@@ -186,7 +196,8 @@ func TestExecutor_CheckStatus_Error(t *testing.T) {
 
 func TestExecutor_WaitForStatus_Success(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	expectedENI := &aliyunClient.NetworkInterface{
 		NetworkInterfaceID: "eni-123",
@@ -208,7 +219,8 @@ func TestExecutor_WaitForStatus_Success(t *testing.T) {
 
 func TestExecutor_WaitForStatus_Timeout(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	// Always return Attaching status to cause timeout
 	attachingENI := &aliyunClient.NetworkInterface{
@@ -229,7 +241,8 @@ func TestExecutor_WaitForStatus_Timeout(t *testing.T) {
 
 func TestExecutor_AttachAndWait_AttachError(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	mockAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).
 		Return(errors.New("attach failed"))
@@ -242,7 +255,8 @@ func TestExecutor_AttachAndWait_AttachError(t *testing.T) {
 
 func TestExecutor_DetachAndWait_DetachError(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	mockAPI.On("DetachNetworkInterfaceV2", mock.Anything, mock.Anything).
 		Return(errors.New("detach failed"))
@@ -254,7 +268,8 @@ func TestExecutor_DetachAndWait_DetachError(t *testing.T) {
 
 func TestExecutor_DetachAndWait_Success(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	// Mock successful detach
 	mockAPI.On("DetachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil)
@@ -276,7 +291,8 @@ func TestExecutor_DetachAndWait_Success(t *testing.T) {
 
 func TestExecutor_AttachAndWait_Success(t *testing.T) {
 	mockAPI := mocks.NewOpenAPI(t)
-	exec := NewExecutor(mockAPI, nil)
+	tp := noop.NewTracerProvider()
+	exec := NewExecutor(mockAPI, tp.Tracer("none"))
 
 	// Mock successful attach
 	mockAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil)

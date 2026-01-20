@@ -491,6 +491,8 @@ func TestManager(t *testing.T) {
 		},
 	})
 	assert.NoError(t, err)
+
+	mgr.Status()
 }
 
 type NoOpNetworkInterface struct {

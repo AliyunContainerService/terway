@@ -521,13 +521,164 @@ func TestTryAllocatePodENI_PodENINotInBindPhase(t *testing.T) {
 	assert.Nil(t, allocResp)
 }
 
-func TestTryAllocatePodENI_EmptyAllocations(t *testing.T) {
+func TestRemote_Release(t *testing.T) {
+	r := &Remote{}
+	ok, err := r.Release(context.Background(), &daemon.CNI{}, nil)
+	assert.False(t, ok)
+	assert.NoError(t, err)
+}
+
+func TestRemote_Dispose(t *testing.T) {
+	r := &Remote{}
+	assert.Equal(t, 0, r.Dispose(10))
+}
+
+func TestRemote_Run(t *testing.T) {
+	r := &Remote{}
+	assert.NoError(t, r.Run(context.Background(), nil, nil))
+}
+
+func TestRemote_Priority(t *testing.T) {
+	r := &Remote{}
+	assert.Equal(t, 100, r.Priority())
+}
+
+func TestRemoteIPResource_ToStore(t *testing.T) {
+	res := &RemoteIPResource{}
+	assert.Nil(t, res.ToStore())
+}
+
+func TestAllocateWithBackoff_VariousScenarios(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = networkv1beta1.AddToScheme(scheme)
 
-	client := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(&networkv1beta1.PodENI{
+	t.Run("PodENI Not Found (Retry and Timeout)", func(t *testing.T) {
+		client := fake.NewClientBuilder().WithScheme(scheme).Build()
+		r := NewRemote(client, nil, nil)
+		cni := &daemon.CNI{PodNamespace: "default", PodName: "pod-1"}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		resp, _ := r.Allocate(ctx, cni, &RemoteIPRequest{})
+		select {
+		case result := <-resp:
+			if result != nil {
+				assert.Error(t, result.Err)
+			}
+		case <-time.After(200 * time.Millisecond):
+			// Timeout is fine too, as long as it doesn't panic
+		}
+	})
+
+	t.Run("PodENI Being Deleted (Retry and Timeout)", func(t *testing.T) {
+		now := metav1.Now()
+		podENI := &networkv1beta1.PodENI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "pod-1",
+				Namespace:         "default",
+				DeletionTimestamp: &now,
+				Finalizers:        []string{"test"},
+			},
+		}
+		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(podENI).Build()
+		r := NewRemote(client, nil, nil)
+		cni := &daemon.CNI{PodNamespace: "default", PodName: "pod-1"}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		resp, _ := r.Allocate(ctx, cni, &RemoteIPRequest{})
+		select {
+		case result := <-resp:
+			if result != nil {
+				assert.Error(t, result.Err)
+			}
+		case <-time.After(200 * time.Millisecond):
+		}
+	})
+
+	t.Run("PodENI Phase Not Bind (Retry and Timeout)", func(t *testing.T) {
+		podENI := &networkv1beta1.PodENI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod-1",
+				Namespace: "default",
+			},
+			Status: networkv1beta1.PodENIStatus{
+				Phase: networkv1beta1.ENIPhaseBinding,
+			},
+		}
+		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(podENI).Build()
+		r := NewRemote(client, nil, nil)
+		cni := &daemon.CNI{PodNamespace: "default", PodName: "pod-1"}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		resp, _ := r.Allocate(ctx, cni, &RemoteIPRequest{})
+		select {
+		case result := <-resp:
+			if result != nil {
+				assert.Error(t, result.Err)
+			}
+		case <-time.After(200 * time.Millisecond):
+		}
+	})
+
+	t.Run("Pod UID Mismatch (Retry and Timeout)", func(t *testing.T) {
+		podENI := &networkv1beta1.PodENI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod-1",
+				Namespace: "default",
+				Annotations: map[string]string{
+					types.PodUID: "wrong-uid",
+				},
+			},
+			Status: networkv1beta1.PodENIStatus{
+				Phase: networkv1beta1.ENIPhaseBind,
+			},
+		}
+		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(podENI).Build()
+		r := NewRemote(client, nil, nil)
+		cni := &daemon.CNI{PodNamespace: "default", PodName: "pod-1", PodUID: "expected-uid"}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		resp, _ := r.Allocate(ctx, cni, &RemoteIPRequest{})
+		select {
+		case result := <-resp:
+			if result != nil {
+				assert.Error(t, result.Err)
+			}
+		case <-time.After(200 * time.Millisecond):
+		}
+	})
+
+	t.Run("Trunk Mismatch (Fatal Error)", func(t *testing.T) {
+		podENI := &networkv1beta1.PodENI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod-1",
+				Namespace: "default",
+			},
+			Status: networkv1beta1.PodENIStatus{
+				Phase:      networkv1beta1.ENIPhaseBind,
+				TrunkENIID: "eni-trunk-wrong",
+			},
+		}
+		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(podENI).Build()
+		r := NewRemote(client, &daemon.ENI{ID: "eni-trunk-expected"}, nil)
+		cni := &daemon.CNI{PodNamespace: "default", PodName: "pod-1"}
+
+		resp, _ := r.Allocate(context.Background(), cni, &RemoteIPRequest{})
+		result := <-resp
+		assert.NotNil(t, result)
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "used a different trunk")
+	})
+
+	t.Run("Empty Allocations (Fatal Error)", func(t *testing.T) {
+		podENI := &networkv1beta1.PodENI{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "pod-1",
 				Namespace: "default",
@@ -538,15 +689,15 @@ func TestTryAllocatePodENI_EmptyAllocations(t *testing.T) {
 			Status: networkv1beta1.PodENIStatus{
 				Phase: networkv1beta1.ENIPhaseBind,
 			},
-		}).
-		Build()
+		}
+		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(podENI).Build()
+		r := NewRemote(client, nil, nil)
+		cni := &daemon.CNI{PodNamespace: "default", PodName: "pod-1"}
 
-	r := NewRemote(client, nil, NewNotifier())
-	cni := &daemon.CNI{PodNamespace: "default", PodName: "pod-1"}
-
-	allocResp, success := r.tryAllocatePodENI(context.Background(), cni, logr.Discard())
-	assert.True(t, success)
-	assert.NotNil(t, allocResp)
-	assert.Error(t, allocResp.Err)
-	assert.Contains(t, allocResp.Err.Error(), "empty allocations")
+		resp, _ := r.Allocate(context.Background(), cni, &RemoteIPRequest{})
+		result := <-resp
+		assert.NotNil(t, result)
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "empty allocations")
+	})
 }

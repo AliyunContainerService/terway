@@ -5,60 +5,16 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"testing"
 	"time"
 
 	"github.com/agiledragon/gomonkey/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
-
-// Mock gRPC server for testing
-type mockDevicePluginServer struct {
-	pluginapi.DevicePluginServer
-}
-
-func (m *mockDevicePluginServer) GetDevicePluginOptions(ctx context.Context, req *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
-	return &pluginapi.DevicePluginOptions{}, nil
-}
-
-func (m *mockDevicePluginServer) PreStartContainer(ctx context.Context, req *pluginapi.PreStartContainerRequest) (*pluginapi.PreStartContainerResponse, error) {
-	return &pluginapi.PreStartContainerResponse{}, nil
-}
-
-func (m *mockDevicePluginServer) ListAndWatch(req *pluginapi.Empty, stream pluginapi.DevicePlugin_ListAndWatchServer) error {
-	devices := []*pluginapi.Device{
-		{ID: "eni-0", Health: pluginapi.Healthy},
-		{ID: "eni-1", Health: pluginapi.Healthy},
-	}
-	return stream.Send(&pluginapi.ListAndWatchResponse{Devices: devices})
-}
-
-func (m *mockDevicePluginServer) Allocate(ctx context.Context, req *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
-	response := &pluginapi.AllocateResponse{
-		ContainerResponses: []*pluginapi.ContainerAllocateResponse{
-			{Devices: []*pluginapi.DeviceSpec{}},
-		},
-	}
-	return response, nil
-}
-
-func (m *mockDevicePluginServer) GetPreferredAllocation(ctx context.Context, req *pluginapi.PreferredAllocationRequest) (*pluginapi.PreferredAllocationResponse, error) {
-	return nil, fmt.Errorf("unsupported")
-}
-
-// Mock registration client
-type mockRegistrationClient struct {
-	registerFunc func(ctx context.Context, req *pluginapi.RegisterRequest, opts ...grpc.CallOption) (*pluginapi.Empty, error)
-}
-
-func (m *mockRegistrationClient) Register(ctx context.Context, req *pluginapi.RegisterRequest, opts ...grpc.CallOption) (*pluginapi.Empty, error) {
-	if m.registerFunc != nil {
-		return m.registerFunc(ctx, req, opts...)
-	}
-	return &pluginapi.Empty{}, nil
-}
 
 func TestNewENIDevicePlugin(t *testing.T) {
 	tests := []struct {
@@ -462,53 +418,6 @@ func TestENIDevicePlugin_Serve_WithGomonkey(t *testing.T) {
 	assert.NotNil(t, plugin.Serve)
 }
 
-// Mock implementations
-type mockConn struct {
-	net.Conn
-}
-
-func (m *mockConn) Read(b []byte) (n int, err error) {
-	return 0, nil
-}
-
-func (m *mockConn) Write(b []byte) (n int, err error) {
-	return 0, nil
-}
-
-func (m *mockConn) Close() error {
-	return nil
-}
-
-func (m *mockConn) LocalAddr() net.Addr {
-	return &mockAddr{}
-}
-
-func (m *mockConn) RemoteAddr() net.Addr {
-	return &mockAddr{}
-}
-
-func (m *mockConn) SetDeadline(t time.Time) error {
-	return nil
-}
-
-func (m *mockConn) SetReadDeadline(t time.Time) error {
-	return nil
-}
-
-func (m *mockConn) SetWriteDeadline(t time.Time) error {
-	return nil
-}
-
-type mockAddr struct{}
-
-func (m *mockAddr) Network() string {
-	return "unix"
-}
-
-func (m *mockAddr) String() string {
-	return "mock-addr"
-}
-
 type mockListAndWatchServer struct {
 	pluginapi.DevicePlugin_ListAndWatchServer
 	sendFunc func(*pluginapi.ListAndWatchResponse) error
@@ -601,18 +510,105 @@ func (m *mockFileInfo) Sys() interface{} {
 	return nil
 }
 
-type mockListener struct {
-	net.Listener
+func TestServe(t *testing.T) {
+	p := &ENIDevicePlugin{}
+
+	called := make(chan struct{})
+	patches := gomonkey.ApplyMethod(
+		p, "Start",
+		func() error {
+			return nil
+		},
+	)
+	defer patches.Reset()
+
+	register := gomonkey.ApplyMethod(
+		p, "Register",
+		func() error { return nil },
+	)
+	defer register.Reset()
+
+	stop := gomonkey.ApplyMethod(
+		p, "Stop",
+		func() error {
+			return nil
+		},
+	)
+	defer stop.Reset()
+
+	watchKubeletRestart := gomonkey.ApplyPrivateMethod(
+		p, "watchKubeletRestart",
+		func() {
+			close(called)
+		},
+	)
+	defer watchKubeletRestart.Reset()
+	p.Serve()
+
+	<-called
 }
 
-func (m *mockListener) Accept() (net.Conn, error) {
-	return &mockConn{}, nil
+func TestCleanUp(t *testing.T) {
+	p := &ENIDevicePlugin{
+		eniRes: eniRes{
+			re:      regexp.MustCompile("test"),
+			resName: "test",
+			sock:    "test",
+		},
+	}
+
+	entry := &mockDirEntry{}
+	patches := gomonkey.ApplyFunc(
+		os.ReadDir,
+		func() ([]os.DirEntry, error) {
+			return []os.DirEntry{entry}, nil
+		},
+	)
+	defer patches.Reset()
+	err := p.cleanup()
+	require.NoError(t, err)
 }
 
-func (m *mockListener) Close() error {
-	return nil
-}
+func TestStart(t *testing.T) {
+	rpcServer := &grpc.Server{}
 
-func (m *mockListener) Addr() net.Addr {
-	return &mockAddr{}
+	p := &ENIDevicePlugin{
+		server: rpcServer,
+		stop:   make(chan struct{}),
+
+		socket: "/tmp/test.sock",
+	}
+
+	called := make(chan struct{})
+	rpcServerServe := gomonkey.ApplyMethod(rpcServer, "Serve", func(_ *grpc.Server, _ net.Listener) error {
+		close(called)
+		return nil
+	})
+	defer rpcServerServe.Reset()
+
+	rpcServerStop := gomonkey.ApplyMethod(rpcServer, "Stop", func(_ *grpc.Server) {})
+	defer rpcServerStop.Reset()
+
+	cleanupPatch := gomonkey.ApplyPrivateMethod(p, "cleanup", func(_ *ENIDevicePlugin) error {
+		return nil
+	})
+	defer cleanupPatch.Reset()
+
+	patches := gomonkey.ApplyFunc(net.Listen, func(_, _ string) (net.Listener, error) {
+		return nil, nil
+	})
+	defer patches.Reset()
+
+	regPatch := gomonkey.ApplyFunc(pluginapi.RegisterDevicePluginServer, func(_ *grpc.Server, _ pluginapi.DevicePluginServer) {})
+	defer regPatch.Reset()
+
+	serverPatch := gomonkey.ApplyFunc(grpc.NewServer, func(_ ...grpc.ServerOption) *grpc.Server {
+		return rpcServer
+	})
+	defer serverPatch.Reset()
+
+	err := p.Start()
+	require.NoError(t, err)
+
+	<-called
 }

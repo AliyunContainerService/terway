@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	. "github.com/onsi/ginkgo/v2"
@@ -2185,7 +2186,6 @@ var _ = Describe("Utils", func() {
 
 	Describe("GenericTearDown", func() {
 		var hostNS, containerNS ns.NetNS
-		const nicName = "test-nic-teardown"
 
 		BeforeEach(func() {
 			var err error
@@ -2426,6 +2426,31 @@ var _ = Describe("Utils", func() {
 
 				return nil
 			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("test GetERdmaFromLink with mock RDMA link", func() {
+
+			link := &netlink.Dummy{
+				LinkAttrs: netlink.LinkAttrs{
+					Name:         "mock-rdma-link",
+					HardwareAddr: net.HardwareAddr{0xb9, 0xaa, 0x99, 0x66, 0x1c, 0x02},
+				},
+			}
+			rdmaLink := &netlink.RdmaLink{
+				Attrs: netlink.RdmaLinkAttrs{
+					Name:     "mock-rdma-link",
+					NodeGuid: "02:1c:66:77:88:99:aa:bb",
+				},
+			}
+			patches := gomonkey.ApplyFunc(netlink.RdmaLinkList, func() ([]*netlink.RdmaLink, error) {
+				return []*netlink.RdmaLink{
+					rdmaLink,
+				}, nil
+			})
+
+			defer patches.Reset()
+			_, err := GetERdmaFromLink(link)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})

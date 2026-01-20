@@ -205,6 +205,13 @@ func assessWarmUpBasic(ctx context.Context, t *testing.T, config *envconf.Config
 		t.Fatalf("failed to restart terway: %v", err)
 	}
 
+	// Step 4.1: Wait for node spec to be synchronized
+	t.Log("Step 4.1: Wait for node spec to be synchronized (WarmUpSize=10)")
+	err = waitForNodeSpecSyncByQualifiedNodes(ctx, t, config, qualifiedNodes, 10, 2*time.Minute)
+	if err != nil {
+		t.Fatalf("failed to wait for node spec sync: %v", err)
+	}
+
 	// Step 5: Clear warm-up state to trigger warm-up on qualified nodes
 	t.Log("Step 5: Clear warm-up state to trigger warm-up on qualified nodes")
 	err = clearWarmUpStateByQualifiedNodes(ctx, t, config, qualifiedNodes)
@@ -285,6 +292,13 @@ func assessWarmUpLargerThanMaxPoolSize(ctx context.Context, t *testing.T, config
 	err = restartTerway(ctx, config)
 	if err != nil {
 		t.Fatalf("failed to restart terway: %v", err)
+	}
+
+	// Step 4.1: Wait for node spec to be synchronized
+	t.Log("Step 4.1: Wait for node spec to be synchronized (WarmUpSize=10)")
+	err = waitForNodeSpecSyncByQualifiedNodes(ctx, t, config, qualifiedNodes, 10, 2*time.Minute)
+	if err != nil {
+		t.Fatalf("failed to wait for node spec sync: %v", err)
 	}
 
 	// Step 5: Clear warm-up state to trigger warm-up on qualified nodes
@@ -388,7 +402,7 @@ func pauseWarmUpByQualifiedNodes(ctx context.Context, t *testing.T, config *envc
 			},
 		})
 
-		err = config.Client().Resources().Patch(ctx, &node, k8s.Patch{
+		err = config.Client().Resources().PatchStatus(ctx, &node, k8s.Patch{
 			PatchType: types.MergePatchType,
 			Data:      mergePatch,
 		})
@@ -430,7 +444,7 @@ func clearWarmUpStateByQualifiedNodes(ctx context.Context, t *testing.T, config 
 			},
 		})
 
-		err = config.Client().Resources().Patch(ctx, &node, k8s.Patch{
+		err = config.Client().Resources().PatchStatus(ctx, &node, k8s.Patch{
 			PatchType: types.MergePatchType,
 			Data:      mergePatch,
 		})
@@ -568,170 +582,6 @@ func verifyWarmUpStatusByQualifiedNodes(ctx context.Context, t *testing.T, confi
 	return nil
 }
 
-// pauseWarmUpByNodeType sets warmUpCompleted=true on Node CRs of specific type
-func pauseWarmUpByNodeType(ctx context.Context, t *testing.T, config *envconf.Config, nodeType NodeType) error {
-	t.Logf("Pausing warm-up by setting warmUpCompleted=true on nodes of type %s", nodeType)
-
-	nodes := &networkv1beta1.NodeList{}
-	err := config.Client().Resources().List(ctx, nodes)
-	if err != nil {
-		return err
-	}
-
-	for _, node := range nodes.Items {
-		if !isNodeOfType(&node, nodeType) {
-			continue
-		}
-
-		mergePatch, _ := json.Marshal(map[string]interface{}{
-			"status": map[string]interface{}{
-				"warmUpCompleted": true,
-			},
-		})
-
-		err = config.Client().Resources().Patch(ctx, &node, k8s.Patch{
-			PatchType: types.MergePatchType,
-			Data:      mergePatch,
-		})
-		if err != nil {
-			t.Logf("Warning: failed to pause warm-up for node %s: %v", node.Name, err)
-		} else {
-			t.Logf("Paused warm-up for node %s", node.Name)
-		}
-	}
-
-	return nil
-}
-
-// clearWarmUpStateByNodeType clears warm-up status from Node CRs of specific type
-func clearWarmUpStateByNodeType(ctx context.Context, t *testing.T, config *envconf.Config, nodeType NodeType) error {
-	t.Logf("Clearing warm-up state from nodes of type %s to trigger warm-up", nodeType)
-
-	nodes := &networkv1beta1.NodeList{}
-	err := config.Client().Resources().List(ctx, nodes)
-	if err != nil {
-		return err
-	}
-
-	for _, node := range nodes.Items {
-		if !isNodeOfType(&node, nodeType) {
-			continue
-		}
-
-		mergePatch, _ := json.Marshal(map[string]interface{}{
-			"status": map[string]interface{}{
-				"warmUpTarget":         0,
-				"warmUpAllocatedCount": 0,
-				"warmUpCompleted":      false,
-			},
-		})
-
-		err = config.Client().Resources().PatchStatus(ctx, &node, k8s.Patch{
-			PatchType: types.MergePatchType,
-			Data:      mergePatch,
-		})
-		if err != nil {
-			t.Logf("Warning: failed to clear warm-up state for node %s: %v", node.Name, err)
-		} else {
-			t.Logf("Cleared warm-up state for node %s", node.Name)
-		}
-	}
-
-	return nil
-}
-
-// isIPPoolReleasedForNode checks if the IP pool has been fully released on a node
-func isIPPoolReleasedForNode(node *networkv1beta1.Node) bool {
-	for _, eni := range node.Status.NetworkInterfaces {
-		if eni.Status != aliyunClient.ENIStatusInUse {
-			continue
-		}
-
-		if node.Spec.ENISpec != nil && node.Spec.ENISpec.EnableIPv4 {
-			for _, ip := range eni.IPv4 {
-				if ip.Primary {
-					continue
-				}
-				if ip.Status == networkv1beta1.IPStatusValid && ip.PodID == "" {
-					return false
-				}
-			}
-		}
-
-		if node.Spec.ENISpec != nil && node.Spec.ENISpec.EnableIPv6 && !node.Spec.ENISpec.EnableIPv4 {
-			for _, ip := range eni.IPv6 {
-				if ip.Status == networkv1beta1.IPStatusValid && ip.PodID == "" {
-					return false
-				}
-			}
-		}
-	}
-	return true
-}
-
-// clearIPPoolByNodeType releases all idle IPs on nodes of specific type
-func clearIPPoolByNodeType(ctx context.Context, t *testing.T, config *envconf.Config, nodeType NodeType) error {
-	t.Logf("Clearing IP pool for nodes of type %s", nodeType)
-
-	cm := &corev1.ConfigMap{}
-	err := config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
-	if err != nil {
-		return err
-	}
-
-	eniJson, err := gabs.ParseJSON([]byte(cm.Data["eni_conf"]))
-	if err != nil {
-		return err
-	}
-
-	eniJson.Delete("ip_warm_up_size")
-	_, err = eniJson.Set(0, "max_pool_size")
-	if err != nil {
-		return err
-	}
-	_, err = eniJson.Set(0, "min_pool_size")
-	if err != nil {
-		return err
-	}
-	_, err = eniJson.Set("30s", "ip_pool_sync_period")
-	if err != nil {
-		return err
-	}
-
-	cm.Data["eni_conf"] = eniJson.String()
-	err = config.Client().Resources().Update(ctx, cm)
-	if err != nil {
-		return err
-	}
-
-	err = restartTerway(ctx, config)
-	if err != nil {
-		return err
-	}
-
-	t.Log("Waiting for IP pool to be released (primary IPs will be retained)")
-	err = wait.For(func(ctx context.Context) (done bool, err error) {
-		nodes := &networkv1beta1.NodeList{}
-		err = config.Client().Resources().List(ctx, nodes)
-		if err != nil {
-			return false, err
-		}
-
-		for _, node := range nodes.Items {
-			if !isNodeOfType(&node, nodeType) {
-				continue
-			}
-			if !isIPPoolReleasedForNode(&node) {
-				t.Logf("Node %s IP pool not fully released yet, triggering update", node.Name)
-				_ = triggerNodeCR(ctx, config, t, &node)
-				return false, nil
-			}
-		}
-		return true, nil
-	}, wait.WithTimeout(5*time.Minute), wait.WithInterval(5*time.Second))
-
-	return err
-}
 
 // configureWarmUp configures warm-up settings in eni-config
 func configureWarmUp(ctx context.Context, t *testing.T, config *envconf.Config, warmUpSize, maxPoolSize, minPoolSize int) error {
@@ -770,80 +620,6 @@ func configureWarmUp(ctx context.Context, t *testing.T, config *envconf.Config, 
 	return config.Client().Resources().Update(ctx, cm)
 }
 
-// waitForWarmUpCompletionByNodeType waits for warm-up to complete on nodes of specific type
-func waitForWarmUpCompletionByNodeType(ctx context.Context, t *testing.T, config *envconf.Config,
-	nodeType NodeType, expectedTarget int, timeout time.Duration) error {
-
-	return wait.For(func(ctx context.Context) (done bool, err error) {
-		nodes := &networkv1beta1.NodeList{}
-		err = config.Client().Resources().List(ctx, nodes)
-		if err != nil {
-			return false, err
-		}
-
-		allCompleted := true
-		hasTargetNode := false
-		for _, node := range nodes.Items {
-			if !isNodeOfType(&node, nodeType) {
-				continue
-			}
-			hasTargetNode = true
-
-			t.Logf("Node %s: warmUpTarget=%d, warmUpAllocatedCount=%d, warmUpCompleted=%v",
-				node.Name, node.Status.WarmUpTarget, node.Status.WarmUpAllocatedCount, node.Status.WarmUpCompleted)
-
-			if !node.Status.WarmUpCompleted {
-				allCompleted = false
-			}
-		}
-
-		if !hasTargetNode {
-			return true, nil // Skip if no nodes of this type
-		}
-
-		return allCompleted, nil
-	}, wait.WithTimeout(timeout), wait.WithInterval(5*time.Second))
-}
-
-// verifyWarmUpStatusByNodeType verifies warm-up status fields on nodes of specific type
-func verifyWarmUpStatusByNodeType(ctx context.Context, t *testing.T, config *envconf.Config,
-	nodeType NodeType, expectedTarget int) error {
-
-	nodes := &networkv1beta1.NodeList{}
-	err := config.Client().Resources().List(ctx, nodes)
-	if err != nil {
-		return err
-	}
-
-	for _, node := range nodes.Items {
-		if !isNodeOfType(&node, nodeType) {
-			continue
-		}
-
-		t.Logf("Verifying node %s: warmUpTarget=%d, warmUpAllocatedCount=%d, warmUpCompleted=%v",
-			node.Name, node.Status.WarmUpTarget, node.Status.WarmUpAllocatedCount, node.Status.WarmUpCompleted)
-
-		if node.Status.WarmUpTarget != expectedTarget {
-			t.Errorf("Node %s: expected warmUpTarget=%d, got %d",
-				node.Name, expectedTarget, node.Status.WarmUpTarget)
-		}
-
-		if !node.Status.WarmUpCompleted {
-			t.Errorf("Node %s: expected warmUpCompleted=true, got false", node.Name)
-		}
-
-		if node.Status.WarmUpAllocatedCount < expectedTarget {
-			t.Errorf("Node %s: expected warmUpAllocatedCount >= %d, got %d",
-				node.Name, expectedTarget, node.Status.WarmUpAllocatedCount)
-		}
-
-		idleCount := countIdleIPs(&node)
-		t.Logf("Node %s: idle IPs = %d", node.Name, idleCount)
-	}
-
-	return nil
-}
-
 // triggerNodeCR triggers a node CR update to force reconciliation
 func triggerNodeCR(ctx context.Context, config *envconf.Config, t *testing.T, node *networkv1beta1.Node) error {
 	mergePatch, _ := json.Marshal(map[string]interface{}{
@@ -854,6 +630,43 @@ func triggerNodeCR(ctx context.Context, config *envconf.Config, t *testing.T, no
 		},
 	})
 	return config.Client().Resources().Patch(ctx, node, k8s.Patch{PatchType: types.MergePatchType, Data: mergePatch})
+}
+
+// waitForNodeSpecSyncByQualifiedNodes waits for node spec to be synchronized with expected warm-up size
+func waitForNodeSpecSyncByQualifiedNodes(ctx context.Context, t *testing.T, config *envconf.Config,
+	qualifiedNodes []string, expectedWarmUpSize int, timeout time.Duration) error {
+
+	qualifiedSet := make(map[string]bool)
+	for _, name := range qualifiedNodes {
+		qualifiedSet[name] = true
+	}
+
+	return wait.For(func(ctx context.Context) (done bool, err error) {
+		nodes := &networkv1beta1.NodeList{}
+		err = config.Client().Resources().List(ctx, nodes)
+		if err != nil {
+			return false, err
+		}
+
+		allSynced := true
+		for _, node := range nodes.Items {
+			if !qualifiedSet[node.Name] {
+				continue
+			}
+
+			if node.Spec.Pool == nil || node.Spec.Pool.WarmUpSize != expectedWarmUpSize {
+				currentSize := 0
+				if node.Spec.Pool != nil {
+					currentSize = node.Spec.Pool.WarmUpSize
+				}
+				t.Logf("Node %s: waiting for spec sync (expected WarmUpSize=%d, got=%d)",
+					node.Name, expectedWarmUpSize, currentSize)
+				allSynced = false
+			}
+		}
+
+		return allSynced, nil
+	}, wait.WithTimeout(timeout), wait.WithInterval(5*time.Second))
 }
 
 // countTotalIPs counts the total number of valid IPs (both idle and in-use) in a node

@@ -108,6 +108,7 @@ func TestMain(m *testing.M) {
 		checkENIConfig,
 		configureKubeClientQPS,
 		printClusterEnvironment,
+		labelExternalIPNodes,
 	)
 	testenv.AfterEachFeature(func(ctx context.Context, config *envconf.Config, t *testing.T, feature features.Feature) (context.Context, error) {
 		// If test was skipped, don't do anything
@@ -354,6 +355,42 @@ func configureKubeClientQPS(ctx context.Context, config *envconf.Config) (contex
 	}
 
 	fmt.Printf("Configured kube_client_qps=50, kube_client_burst=100\n")
+	return ctx, nil
+}
+
+func labelExternalIPNodes(ctx context.Context, config *envconf.Config) (context.Context, error) {
+	nodes := &corev1.NodeList{}
+	err := config.Client().Resources().List(ctx, nodes)
+	if err != nil {
+		return ctx, err
+	}
+
+	for _, node := range nodes.Items {
+		hasExternalIP := false
+		for _, stack := range []string{"ipv4", "ipv6"} {
+			_, externalIP := getNodeIPs(&node, stack == "ipv6")
+			if externalIP != "" {
+				hasExternalIP = true
+				break
+			}
+		}
+
+		if hasExternalIP {
+			fmt.Printf("Labeling node %s with e2e.aliyun.com/external-ip=true\n", node.Name)
+			patch, _ := json.Marshal(map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"labels": map[string]interface{}{
+						"e2e.aliyun.com/external-ip": "true",
+					},
+				},
+			})
+			err = config.Client().Resources().Patch(ctx, &node, k8s.Patch{PatchType: types.StrategicMergePatchType, Data: patch})
+			if err != nil {
+				fmt.Printf("Warning: failed to label node %s: %v\n", node.Name, err)
+			}
+		}
+	}
+
 	return ctx, nil
 }
 

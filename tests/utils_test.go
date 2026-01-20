@@ -536,9 +536,9 @@ func restartTerway(ctx context.Context, config *envconf.Config) error {
 		return err
 	}
 
-	annotationPatchStr := fmt.Sprintf(`{ "spec": { "template": { "metadata": { "annotations": { "%v": "%v" } } } } }`, "e2e/restartedAt", time.Now().Format(time.RFC3339))
+	patchStr := fmt.Sprintf(`{"spec": {"updateStrategy": {"rollingUpdate": {"maxUnavailable": "100%%"}}, "template": {"metadata": {"annotations": {"%v": "%v"}}}}}`, "e2e/restartedAt", time.Now().Format(time.RFC3339))
 
-	err = config.Client().Resources().Patch(ctx, ds, k8s.Patch{PatchType: types.StrategicMergePatchType, Data: []byte(annotationPatchStr)})
+	err = config.Client().Resources().Patch(ctx, ds, k8s.Patch{PatchType: types.StrategicMergePatchType, Data: []byte(patchStr)})
 	if err != nil {
 		return err
 	}
@@ -1389,8 +1389,23 @@ func IsDatapathV2Enabled(ctx context.Context, config *envconf.Config) (bool, err
 	}
 
 	// Check in 10-terway.conf
-	if strings.Contains(cm.Data["10-terway.conf"], "datapathv2") {
+	confStr := cm.Data["10-terway.conf"]
+	if strings.Contains(confStr, "datapathv2") {
 		return true, nil
+	}
+
+	// For ebpf network policy provider, it's equivalent to datapathv2
+	terwayJSON, err := gabs.ParseJSON([]byte(confStr))
+	if err == nil {
+		provider := terwayJSON.Path("network_policy_provider").Data()
+		disablePolicy := terwayJSON.Path("disable_network_policy").Data()
+
+		// If provider is ebpf and policy is NOT disabled
+		if provider == "ebpf" {
+			if disablePolicy != true && cm.Data["disable_network_policy"] != "true" {
+				return true, nil
+			}
+		}
 	}
 
 	// Check in 10-terway.conflist if exists
