@@ -1,10 +1,13 @@
 package vf
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -385,5 +388,217 @@ func TestSetDriverOverrideWithBasePath(t *testing.T) {
 		content, err := os.ReadFile(overridePath)
 		assert.NoError(t, err)
 		assert.Empty(t, string(content))
+	})
+}
+
+func TestSetupDriver(t *testing.T) {
+	ctx := context.Background()
+	bdfID := "0000:01:10.0"
+
+	t.Run("Device already bound", func(t *testing.T) {
+		patches := gomonkey.ApplyFunc(os.Stat, func(name string) (os.FileInfo, error) {
+			return nil, nil
+		})
+		defer patches.Reset()
+
+		err := SetupDriver(ctx, bdfID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Device not bound, autoprobe enabled", func(t *testing.T) {
+		patches := gomonkey.ApplyFunc(os.Stat, func(name string) (os.FileInfo, error) {
+			return nil, os.ErrNotExist
+		})
+		defer patches.Reset()
+
+		patches.ApplyFunc(getPFBDF, func(vfBDF string) string {
+			return "0000:01:00.0"
+		})
+		patches.ApplyFunc(checkSRIOVAutoprobe, func(pfBDF string) (bool, error) {
+			return true, nil
+		})
+		patches.ApplyFunc(os.WriteFile, func(name string, data []byte, perm os.FileMode) error {
+			return nil
+		})
+
+		err := SetupDriver(ctx, bdfID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Device not bound, autoprobe disabled", func(t *testing.T) {
+		patches := gomonkey.ApplyFunc(os.Stat, func(name string) (os.FileInfo, error) {
+			return nil, os.ErrNotExist
+		})
+		defer patches.Reset()
+
+		patches.ApplyFunc(getPFBDF, func(vfBDF string) string {
+			return "0000:01:00.0"
+		})
+		patches.ApplyFunc(checkSRIOVAutoprobe, func(pfBDF string) (bool, error) {
+			return false, nil
+		})
+		patches.ApplyFunc(setDriverOverride, func(vfBDF, driverName string) error {
+			return nil
+		})
+		patches.ApplyFunc(os.WriteFile, func(name string, data []byte, perm os.FileMode) error {
+			return nil
+		})
+
+		err := SetupDriver(ctx, bdfID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Device not bound, pfBDF empty", func(t *testing.T) {
+		patches := gomonkey.ApplyFunc(os.Stat, func(name string) (os.FileInfo, error) {
+			return nil, os.ErrNotExist
+		})
+		defer patches.Reset()
+
+		patches.ApplyFunc(getPFBDF, func(vfBDF string) string {
+			return ""
+		})
+		patches.ApplyFunc(os.WriteFile, func(name string, data []byte, perm os.FileMode) error {
+			return nil
+		})
+
+		err := SetupDriver(ctx, bdfID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Bind fails", func(t *testing.T) {
+		patches := gomonkey.ApplyFunc(os.Stat, func(name string) (os.FileInfo, error) {
+			return nil, os.ErrNotExist
+		})
+		defer patches.Reset()
+
+		patches.ApplyFunc(getPFBDF, func(vfBDF string) string {
+			return ""
+		})
+		patches.ApplyFunc(os.WriteFile, func(name string, data []byte, perm os.FileMode) error {
+			return errors.New("write error")
+		})
+
+		err := SetupDriver(ctx, bdfID)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to bind device")
+	})
+
+	t.Run("setDriverOverride fails", func(t *testing.T) {
+		patches := gomonkey.ApplyFunc(os.Stat, func(name string) (os.FileInfo, error) {
+			return nil, os.ErrNotExist
+		})
+		defer patches.Reset()
+
+		patches.ApplyFunc(getPFBDF, func(vfBDF string) string {
+			return "0000:01:00.0"
+		})
+		patches.ApplyFunc(checkSRIOVAutoprobe, func(pfBDF string) (bool, error) {
+			return false, nil
+		})
+		patches.ApplyFunc(setDriverOverride, func(vfBDF, driverName string) error {
+			return errors.New("override error")
+		})
+
+		err := SetupDriver(ctx, bdfID)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to set driver_override")
+	})
+}
+
+func TestSetupDriverAndGetNetInterface(t *testing.T) {
+	ctx := context.Background()
+	vfID := 9
+	configPath := "/fake/path"
+	bdfID := "0000:01:10.0"
+
+	t.Run("Success", func(t *testing.T) {
+		patches := gomonkey.ApplyFunc(GetBDFbyVFID, func(path string, id int) (string, error) {
+			return bdfID, nil
+		})
+		defer patches.Reset()
+
+		patches.ApplyFunc(SetupDriver, func(c context.Context, id string) error {
+			return nil
+		})
+
+		patches.ApplyFunc(filepath.Glob, func(pattern string) (matches []string, err error) {
+			return []string{"/sys/bus/pci/drivers/virtio-pci/0000:01:10.0/virtio0/net/eth0/ifindex"}, nil
+		})
+
+		patches.ApplyFunc(os.ReadFile, func(name string) ([]byte, error) {
+			return []byte("123\n"), nil
+		})
+
+		ifindex, err := SetupDriverAndGetNetInterface(ctx, vfID, configPath)
+		assert.NoError(t, err)
+		assert.Equal(t, 123, ifindex)
+	})
+
+	t.Run("GetBDFbyVFID fails", func(t *testing.T) {
+		patches := gomonkey.ApplyFunc(GetBDFbyVFID, func(path string, id int) (string, error) {
+			return "", errors.New("get bdf error")
+		})
+		defer patches.Reset()
+
+		_, err := SetupDriverAndGetNetInterface(ctx, vfID, configPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get BDF by VFID")
+	})
+
+	t.Run("SetupDriver fails", func(t *testing.T) {
+		patches := gomonkey.ApplyFunc(GetBDFbyVFID, func(path string, id int) (string, error) {
+			return bdfID, nil
+		})
+		defer patches.Reset()
+
+		patches.ApplyFunc(SetupDriver, func(c context.Context, id string) error {
+			return errors.New("setup driver error")
+		})
+
+		_, err := SetupDriverAndGetNetInterface(ctx, vfID, configPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to setup driver for BDF")
+	})
+
+	t.Run("No network interface found", func(t *testing.T) {
+		patches := gomonkey.ApplyFunc(GetBDFbyVFID, func(path string, id int) (string, error) {
+			return bdfID, nil
+		})
+		defer patches.Reset()
+
+		patches.ApplyFunc(SetupDriver, func(c context.Context, id string) error {
+			return nil
+		})
+
+		patches.ApplyFunc(filepath.Glob, func(pattern string) (matches []string, err error) {
+			return []string{}, nil
+		})
+
+		_, err := SetupDriverAndGetNetInterface(ctx, vfID, configPath)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no network interface found for BDF")
+	})
+
+	t.Run("os.ReadFile fails", func(t *testing.T) {
+		patches := gomonkey.ApplyFunc(GetBDFbyVFID, func(path string, id int) (string, error) {
+			return bdfID, nil
+		})
+		defer patches.Reset()
+
+		patches.ApplyFunc(SetupDriver, func(c context.Context, id string) error {
+			return nil
+		})
+
+		patches.ApplyFunc(filepath.Glob, func(pattern string) (matches []string, err error) {
+			return []string{"/some/path"}, nil
+		})
+
+		patches.ApplyFunc(os.ReadFile, func(name string) ([]byte, error) {
+			return nil, errors.New("read error")
+		})
+
+		_, err := SetupDriverAndGetNetInterface(ctx, vfID, configPath)
+		assert.Error(t, err)
+		assert.Equal(t, "read error", err.Error())
 	})
 }

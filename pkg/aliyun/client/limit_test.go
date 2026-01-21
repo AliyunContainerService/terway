@@ -424,3 +424,35 @@ func TestProvider_GetLimit_Concurrency(t *testing.T) {
 	// Verify API was only called once (singleflight mechanism)
 	mockECS.AssertNumberOfCalls(t, "DescribeInstanceTypes", 1)
 }
+
+func TestLimitsMethods(t *testing.T) {
+	l := &client.Limits{
+		Adapters:              4,
+		IPv4PerAdapter:        5,
+		IPv6PerAdapter:        5,
+		MemberAdapterLimit:    2,
+		MaxMemberAdapterLimit: 4,
+	}
+
+	assert.True(t, l.SupportMultiIPIPv6())
+	assert.True(t, l.SupportIPv6())
+	assert.Equal(t, 2, l.TrunkPod())
+	assert.Equal(t, 4, l.MaximumTrunkPod())
+	assert.Equal(t, 15, l.MultiIPPod()) // (4-1) * 5
+
+	l.IPv6PerAdapter = 0
+	assert.False(t, l.SupportMultiIPIPv6())
+	assert.False(t, l.SupportIPv6())
+
+	l.IPv6PerAdapter = 10
+	assert.False(t, l.SupportMultiIPIPv6())
+	assert.True(t, l.SupportIPv6())
+}
+
+func TestGetLimitProvider(t *testing.T) {
+	p1 := client.GetLimitProvider()
+	assert.NotNil(t, p1)
+
+	p2 := client.GetLimitProvider()
+	assert.Equal(t, p1, p2)
+}

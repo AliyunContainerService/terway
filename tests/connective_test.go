@@ -883,7 +883,8 @@ func createHostPortExternalIPTest(nodeType NodeType) features.Feature {
 			server := NewPod(serverName, config.Namespace()).
 				WithLabels(map[string]string{"app": "server-hostport-ext", "node-type": string(nodeType)}).
 				WithContainer("server", nginxImage, nil).
-				WithHostPort(80, int32(hostPort))
+				WithHostPort(80, int32(hostPort)).
+				WithNodeAffinity(map[string]string{"e2e.aliyun.com/external-ip": "true"})
 			server = applyNodeAffinityAndTolerations(server, nodeType)
 
 			err = config.Client().Resources().Create(ctx, server.Pod)
@@ -894,7 +895,8 @@ func createHostPortExternalIPTest(nodeType NodeType) features.Feature {
 			client := NewPod(clientName, config.Namespace()).
 				WithLabels(map[string]string{"app": "client-hostport-ext", "node-type": string(nodeType)}).
 				WithContainer("client", nginxImage, nil).
-				WithPodAntiAffinity(map[string]string{"app": "server-hostport-ext", "node-type": string(nodeType)})
+				WithPodAntiAffinity(map[string]string{"app": "server-hostport-ext", "node-type": string(nodeType)}).
+				WithNodeAffinity(map[string]string{"e2e.aliyun.com/external-ip": "true"})
 			client = applyNodeAffinityAndTolerations(client, nodeType)
 
 			err = config.Client().Resources().Create(ctx, client.Pod)
