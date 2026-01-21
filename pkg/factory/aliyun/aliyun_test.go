@@ -12,6 +12,7 @@ import (
 	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types/daemon"
 
+	sdkErr "github.com/aliyun/alibaba-cloud-sdk-go/sdk/errors"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/jarcoal/httpmock"
 	"github.com/stretchr/testify/assert"
@@ -303,4 +304,221 @@ func TestAliyun_GetAttachedNetworkInterface(t *testing.T) {
 	assert.Equal(t, eniID, enis[0].ID)
 	assert.True(t, enis[0].Trunk)
 	assert.True(t, enis[0].ERdma)
+}
+
+func TestAliyun_CreateNetworkInterface_InvalidVSwitchIDIPNotEnough(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+	vpcClient := mockclient.NewVPC(t)
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	mac := "00:11:22:33:44:55"
+	primaryIP := "192.168.1.10"
+	privateIP1 := "192.168.1.11"
+	eniID := "eni-id"
+	vswID1 := "vsw-id-1"
+	vswID2 := "vsw-id-2"
+
+	openAPI.On("GetVPC").Return(vpcClient).Maybe()
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	vpcClient.On("DescribeVSwitchByID", mock.Anything, vswID1).Return(&vpc.VSwitch{
+		VSwitchId:               vswID1,
+		ZoneId:                  "zone-id",
+		AvailableIpAddressCount: 100,
+	}, nil).Maybe()
+	vpcClient.On("DescribeVSwitchByID", mock.Anything, vswID2).Return(&vpc.VSwitch{
+		VSwitchId:               vswID2,
+		ZoneId:                  "zone-id",
+		AvailableIpAddressCount: 100,
+	}, nil).Maybe()
+
+	// First call returns InvalidVSwitchIDIPNotEnough error
+	ecsClient.On("CreateNetworkInterface", mock.Anything, mock.MatchedBy(func(opt *client.CreateNetworkInterfaceOptions) bool {
+		return opt.NetworkInterfaceOptions != nil && opt.NetworkInterfaceOptions.VSwitchID == vswID1
+	})).Return(nil, sdkErr.NewServerError(400, `{"Code":"InvalidVSwitchId.IpNotEnough"}`, "test-request-id")).Once()
+
+	// Second call with different vswitch succeeds
+	createResp := &client.NetworkInterface{
+		NetworkInterfaceID: eniID,
+		MacAddress:         mac,
+		PrivateIPAddress:   primaryIP,
+		PrivateIPSets: []client.IPSet{
+			{IPAddress: privateIP1},
+		},
+		VSwitchID: vswID2,
+	}
+	ecsClient.On("CreateNetworkInterface", mock.Anything, mock.MatchedBy(func(opt *client.CreateNetworkInterfaceOptions) bool {
+		return opt.NetworkInterfaceOptions != nil && opt.NetworkInterfaceOptions.VSwitchID == vswID2
+	})).Return(createResp, nil).Once()
+
+	ecsClient.On("AttachNetworkInterface", mock.Anything, mock.Anything).Return(nil)
+
+	describeResp := []*client.NetworkInterface{
+		{
+			NetworkInterfaceID: eniID,
+			Status:             client.ENIStatusInUse,
+		},
+	}
+	ecsClient.On("DescribeNetworkInterface", mock.Anything, mock.Anything, []string{eniID}, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(describeResp, nil)
+
+	// mock metadata
+	metadataBase := "http://100.100.100.200/latest/meta-data"
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/private-ipv4s", metadataBase, mac),
+		httpmock.NewStringResponder(200, fmt.Sprintf(`["%s","%s"]`, primaryIP, privateIP1)))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/", metadataBase),
+		httpmock.NewStringResponder(200, mac+"/"))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/vswitch-cidr-block", metadataBase, mac),
+		httpmock.NewStringResponder(200, "192.168.1.0/24"))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/gateway", metadataBase, mac),
+		httpmock.NewStringResponder(200, "192.168.1.1"))
+	httpmock.RegisterResponder("PUT", "http://100.100.100.200/latest/api/token",
+		httpmock.NewStringResponder(200, "token"))
+
+	cfg := &daemon.ENIConfig{
+		EnableIPv4:       true,
+		InstanceID:       "instance-id",
+		ZoneID:           "zone-id",
+		VSwitchOptions:   []string{vswID1, vswID2},
+		SecurityGroupIDs: []string{"sg-id"},
+	}
+
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+
+	a := NewAliyun(context.Background(), openAPI, nil, vswPool, cfg)
+
+	eni, v4, _, err := a.CreateNetworkInterface(1, 0, "Secondary")
+	assert.NoError(t, err)
+	assert.NotNil(t, eni)
+	assert.Equal(t, eniID, eni.ID)
+	assert.Equal(t, vswID2, eni.VSwitchID)
+	assert.Len(t, v4, 1)
+}
+
+func TestAliyun_CreateNetworkInterface_QuotaExceededPrivateIPAddress(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+	vpcClient := mockclient.NewVPC(t)
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	mac := "00:11:22:33:44:55"
+	primaryIP := "192.168.1.10"
+	eniID := "eni-id"
+	vswID1 := "vsw-id-1"
+	vswID2 := "vsw-id-2"
+
+	openAPI.On("GetVPC").Return(vpcClient).Maybe()
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	vpcClient.On("DescribeVSwitchByID", mock.Anything, vswID1).Return(&vpc.VSwitch{
+		VSwitchId:               vswID1,
+		ZoneId:                  "zone-id",
+		AvailableIpAddressCount: 100,
+	}, nil).Maybe()
+	vpcClient.On("DescribeVSwitchByID", mock.Anything, vswID2).Return(&vpc.VSwitch{
+		VSwitchId:               vswID2,
+		ZoneId:                  "zone-id",
+		AvailableIpAddressCount: 100,
+	}, nil).Maybe()
+
+	// First call returns QuotaExceededPrivateIPAddress error
+	ecsClient.On("CreateNetworkInterface", mock.Anything, mock.MatchedBy(func(opt *client.CreateNetworkInterfaceOptions) bool {
+		return opt.NetworkInterfaceOptions != nil && opt.NetworkInterfaceOptions.VSwitchID == vswID1
+	})).Return(nil, sdkErr.NewServerError(400, `{"Code":"QuotaExceeded.PrivateIpAddress"}`, "test-request-id")).Once()
+
+	// Second call with different vswitch succeeds
+	createResp := &client.NetworkInterface{
+		NetworkInterfaceID: eniID,
+		MacAddress:         mac,
+		PrivateIPAddress:   primaryIP,
+		PrivateIPSets: []client.IPSet{
+			{IPAddress: primaryIP},
+		},
+		VSwitchID: vswID2,
+	}
+	ecsClient.On("CreateNetworkInterface", mock.Anything, mock.MatchedBy(func(opt *client.CreateNetworkInterfaceOptions) bool {
+		return opt.NetworkInterfaceOptions != nil && opt.NetworkInterfaceOptions.VSwitchID == vswID2
+	})).Return(createResp, nil).Once()
+
+	ecsClient.On("AttachNetworkInterface", mock.Anything, mock.Anything).Return(nil)
+
+	describeResp := []*client.NetworkInterface{
+		{
+			NetworkInterfaceID: eniID,
+			Status:             client.ENIStatusInUse,
+		},
+	}
+	ecsClient.On("DescribeNetworkInterface", mock.Anything, mock.Anything, []string{eniID}, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(describeResp, nil)
+
+	// mock metadata
+	metadataBase := "http://100.100.100.200/latest/meta-data"
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/private-ipv4s", metadataBase, mac),
+		httpmock.NewStringResponder(200, fmt.Sprintf(`["%s"]`, primaryIP)))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/", metadataBase),
+		httpmock.NewStringResponder(200, mac+"/"))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/vswitch-cidr-block", metadataBase, mac),
+		httpmock.NewStringResponder(200, "192.168.1.0/24"))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/gateway", metadataBase, mac),
+		httpmock.NewStringResponder(200, "192.168.1.1"))
+	httpmock.RegisterResponder("PUT", "http://100.100.100.200/latest/api/token",
+		httpmock.NewStringResponder(200, "token"))
+
+	cfg := &daemon.ENIConfig{
+		EnableIPv4:       true,
+		InstanceID:       "instance-id",
+		ZoneID:           "zone-id",
+		VSwitchOptions:   []string{vswID1, vswID2},
+		SecurityGroupIDs: []string{"sg-id"},
+	}
+
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+
+	a := NewAliyun(context.Background(), openAPI, nil, vswPool, cfg)
+
+	eni, v4, _, err := a.CreateNetworkInterface(0, 0, "Secondary")
+	assert.NoError(t, err)
+	assert.NotNil(t, eni)
+	assert.Equal(t, eniID, eni.ID)
+	assert.Equal(t, vswID2, eni.VSwitchID)
+	assert.Len(t, v4, 1)
+}
+
+func TestAliyun_CreateNetworkInterface_PersistentError(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+	vpcClient := mockclient.NewVPC(t)
+
+	vswID := "vsw-id-1"
+
+	openAPI.On("GetVPC").Return(vpcClient).Maybe()
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	vpcClient.On("DescribeVSwitchByID", mock.Anything, vswID).Return(&vpc.VSwitch{
+		VSwitchId:               vswID,
+		ZoneId:                  "zone-id",
+		AvailableIpAddressCount: 100,
+	}, nil).Maybe()
+
+	// Persistent error that should cause eventual failure
+	ecsClient.On("CreateNetworkInterface", mock.Anything, mock.Anything).Return(nil, sdkErr.NewServerError(403, `{"Code":"Forbidden.RAM"}`, "test-request-id"))
+
+	cfg := &daemon.ENIConfig{
+		EnableIPv4:       true,
+		InstanceID:       "instance-id",
+		ZoneID:           "zone-id",
+		VSwitchOptions:   []string{vswID},
+		SecurityGroupIDs: []string{"sg-id"},
+	}
+
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+
+	a := NewAliyun(context.Background(), openAPI, nil, vswPool, cfg)
+
+	_, _, _, err := a.CreateNetworkInterface(0, 0, "Secondary")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Forbidden")
 }
