@@ -1546,6 +1546,38 @@ var _ = Describe("Utils", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
+		It("should replace qdisc mq", func() {
+			var err error
+			err = hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+				eni, err := netlink.LinkByName(nicName)
+				Expect(err).NotTo(HaveOccurred())
+
+				err = EnsureMQQdisc(context.Background(), eni)
+				Expect(err).NotTo(HaveOccurred())
+
+				err = EnsureMQQdisc(context.Background(), eni)
+				Expect(err).NotTo(HaveOccurred())
+
+				qds, err := netlink.QdiscList(eni)
+				Expect(err).NotTo(HaveOccurred())
+
+				found := false
+				for _, qd := range qds {
+					if qd.Type() != "mq" {
+						continue
+					}
+					Expect(qd.Attrs().Parent).Should(Equal(uint32(netlink.HANDLE_ROOT)))
+					Expect(qd.Attrs().Handle).Should(Equal(netlink.MakeHandle(1, 0)))
+					found = true
+					break
+				}
+				Expect(found).Should(BeTrue())
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 		It("should set egress filter", func() {
 			var err error
 			err = hostNS.Do(func(netNS ns.NetNS) error {
@@ -2329,6 +2361,44 @@ var _ = Describe("Utils", func() {
 					Mask: net.CIDRMask(12, 32),
 				}
 				rule1000.Table = 300
+
+				_ = netlink.RuleAdd(rule1000)
+
+				// Clean the rules
+				err := CleanIPRules(context.Background())
+				Expect(err).NotTo(HaveOccurred())
+
+				// Verify rule with priority 1000 still exists
+				rules, err := netlink.RuleList(netlink.FAMILY_V4)
+				Expect(err).NotTo(HaveOccurred())
+
+				found := false
+				for _, r := range rules {
+					if r.Priority == 1000 {
+						found = true
+						break
+					}
+				}
+				Expect(found).To(BeTrue())
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle rules with different oif", func() {
+			err := hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+
+				// Add rule with different priority (should not be cleaned)
+				rule1000 := netlink.NewRule()
+				rule1000.Priority = 1000
+				rule1000.Dst = &net.IPNet{
+					IP:   net.ParseIP("172.16.0.0"),
+					Mask: net.CIDRMask(12, 32),
+				}
+				rule1000.Table = 300
+				rule1000.OifName = "dummy"
 
 				_ = netlink.RuleAdd(rule1000)
 

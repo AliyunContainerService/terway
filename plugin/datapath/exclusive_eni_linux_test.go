@@ -243,6 +243,21 @@ func TestDataPathExclusiveENI_PreSetUP(t *testing.T) {
 			IPv4: eth0IPNet,
 			IPv6: eth0IPNetIPv6,
 		},
+		HostStackCIDRs: []*net.IPNet{defaultRoute, defaultRouteIPv6},
+		ExtraRoutes: []cniTypes.Route{
+			{
+				Dst: net.IPNet{
+					IP:   net.ParseIP("169.10.0.10"),
+					Mask: net.CIDRMask(32, 32),
+				},
+			},
+			{
+				Dst: net.IPNet{
+					IP:   net.ParseIP("fd00::10"),
+					Mask: net.CIDRMask(128, 128),
+				},
+			},
+		},
 		DefaultRoute: true,
 	}
 	d := NewExclusiveENIDriver()
@@ -270,12 +285,13 @@ func TestDataPathExclusiveENI_PreSetUP(t *testing.T) {
 			assert.True(t, ok)
 		}
 		// default via gw dev eth0
+		// Note: When HostStackCIDRs includes default route, the gateway is LinkIP (169.254.1.1) not ipv4GW
 		routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{
 			Dst: nil,
 		}, netlink.RT_FILTER_DST)
 		if assert.NoError(t, err) {
 			assert.Equal(t, len(routes), 1)
-			assert.Equal(t, ipv4GW.String(), routes[0].Gw.String())
+			assert.Equal(t, LinkIP.String(), routes[0].Gw.String())
 		}
 		// extra routes
 		return nil

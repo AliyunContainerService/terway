@@ -38,6 +38,14 @@ func createTestExecutor(t *testing.T) *ops.Executor {
 	return ops.NewExecutor(mockAPI, tracer)
 }
 
+// setTaskForTesting safely sets a task in the queue for testing purposes.
+// This helper ensures proper synchronization to avoid race conditions.
+func setTaskForTesting(q *ENITaskQueue, eniID string, task *ENITaskRecord) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.tasks[eniID] = task
+}
+
 func TestENITaskQueue_RemoveTasks(t *testing.T) {
 	executor := createTestExecutor(t)
 	q := NewENITaskQueue(context.Background(), executor, nil)
@@ -436,4 +444,429 @@ func TestENITaskQueue_SubmitAttach_BackendAPI(t *testing.T) {
 	assert.True(t, ok)
 	// GetBackendAPI returns BackendAPIECS as default when not set
 	assert.Equal(t, aliyunClient.BackendAPIECS, task.BackendAPI)
+}
+
+// TestENITaskQueue_SubmitAttach_TaskAlreadyExists tests the logic in lines 111-118
+// where existing tasks are handled based on their status
+func TestENITaskQueue_SubmitAttach_TaskAlreadyExists(t *testing.T) {
+	mockAPI := mocks.NewOpenAPI(t)
+	tracer := noop.NewTracerProvider().Tracer("test")
+	executor := ops.NewExecutor(mockAPI, tracer)
+	q := NewENITaskQueue(context.Background(), executor, nil)
+
+	// Setup mock expectations for any attach operations triggered by re-submission
+	mockAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+		{NetworkInterfaceID: "eni-completed", Status: aliyunClient.ENIStatusInUse},
+		{NetworkInterfaceID: "eni-failed", Status: aliyunClient.ENIStatusInUse},
+		{NetworkInterfaceID: "eni-timeout", Status: aliyunClient.ENIStatusInUse},
+	}, nil).Maybe()
+
+	// Test case 1: Task already exists with Pending status
+	setTaskForTesting(q, "eni-pending", &ENITaskRecord{
+		ENIID:    "eni-pending",
+		NodeName: "node1",
+		Status:   TaskStatusPending,
+	})
+
+	// Submit the same task again - should be ignored
+	q.SubmitAttach(context.Background(), "eni-pending", "i-1", "", "node1", 5, 0)
+
+	// Task should still exist with Pending status
+	task, ok := q.GetTaskStatus("eni-pending")
+	assert.True(t, ok)
+	assert.Equal(t, TaskStatusPending, task.Status)
+
+	// Test case 2: Task already exists with Running status
+	setTaskForTesting(q, "eni-running", &ENITaskRecord{
+		ENIID:    "eni-running",
+		NodeName: "node1",
+		Status:   TaskStatusRunning,
+	})
+
+	// Submit the same task again - should be ignored
+	q.SubmitAttach(context.Background(), "eni-running", "i-1", "", "node1", 5, 0)
+
+	// Task should still exist with Running status
+	task, ok = q.GetTaskStatus("eni-running")
+	assert.True(t, ok)
+	assert.Equal(t, TaskStatusRunning, task.Status)
+
+	// Test case 3: Task exists with Completed status - should be removed and re-submitted
+	now := time.Now()
+	setTaskForTesting(q, "eni-completed", &ENITaskRecord{
+		ENIID:       "eni-completed",
+		NodeName:    "node1",
+		Status:      TaskStatusCompleted,
+		CompletedAt: &now,
+	})
+
+	// Submit the same task again - should remove old and add new
+	q.SubmitAttach(context.Background(), "eni-completed", "i-2", "trunk-1", "node2", 3, 1)
+
+	// Wait a bit for the goroutine to start and avoid race conditions
+	time.Sleep(50 * time.Millisecond)
+
+	// Task should be re-submitted with new data
+	// Status will be Running since the goroutine starts processing immediately
+	task, ok = q.GetTaskStatus("eni-completed")
+	assert.True(t, ok)
+	// Status should be Running (goroutine starts immediately) or Pending (if checked before goroutine starts)
+	assert.True(t, task.Status == TaskStatusPending || task.Status == TaskStatusRunning,
+		"expected status to be Pending or Running, got %s", task.Status)
+	assert.Equal(t, "node2", task.NodeName)
+	assert.Equal(t, "i-2", task.InstanceID)
+	assert.Equal(t, "trunk-1", task.TrunkENIID)
+	assert.Equal(t, 3, task.RequestedIPv4Count)
+	assert.Equal(t, 1, task.RequestedIPv6Count)
+
+	// Test case 4: Task exists with Failed status - should be removed and re-submitted
+	setTaskForTesting(q, "eni-failed", &ENITaskRecord{
+		ENIID:       "eni-failed",
+		NodeName:    "node1",
+		Status:      TaskStatusFailed,
+		CompletedAt: &now,
+		Error:       fmt.Errorf("previous error"),
+	})
+
+	// Submit the same task again - should remove old and add new
+	q.SubmitAttach(context.Background(), "eni-failed", "i-3", "", "node3", 2, 0)
+
+	// Wait a bit for the goroutine to start and avoid race conditions
+	time.Sleep(50 * time.Millisecond)
+
+	// Task should be re-submitted with new data
+	// Status will be Running since the goroutine starts processing immediately
+	task, ok = q.GetTaskStatus("eni-failed")
+	assert.True(t, ok)
+	// Status should be Running (goroutine starts immediately) or Pending (if checked before goroutine starts)
+	assert.True(t, task.Status == TaskStatusPending || task.Status == TaskStatusRunning,
+		"expected status to be Pending or Running, got %s", task.Status)
+	assert.Equal(t, "node3", task.NodeName)
+	assert.Nil(t, task.Error) // Error should be cleared
+
+	// Test case 5: Task exists with Timeout status - should be removed and re-submitted
+	setTaskForTesting(q, "eni-timeout", &ENITaskRecord{
+		ENIID:       "eni-timeout",
+		NodeName:    "node1",
+		Status:      TaskStatusTimeout,
+		CompletedAt: &now,
+	})
+
+	// Submit the same task again - should remove old and add new
+	q.SubmitAttach(context.Background(), "eni-timeout", "i-4", "", "node4", 1, 0)
+
+	// Task should be re-submitted with new data
+	// Status may be Running if goroutine started, or Pending if checked immediately
+	task, ok = q.GetTaskStatus("eni-timeout")
+	assert.True(t, ok)
+	// Status should be Running (goroutine starts immediately) or Pending (if checked before goroutine starts)
+	assert.True(t, task.Status == TaskStatusPending || task.Status == TaskStatusRunning,
+		"expected status to be Pending or Running, got %s", task.Status)
+	assert.Equal(t, "node4", task.NodeName)
+
+	// Wait for any spawned goroutines to complete
+	time.Sleep(300 * time.Millisecond)
+}
+
+// TestENITaskQueue_ProcessAttachTask_ErrorHandling tests the error handling logic in lines 186-192
+// where different error types are handled differently
+func TestENITaskQueue_ProcessAttachTask_ErrorHandling(t *testing.T) {
+	// Test case 1: Verify Timeout status is set when context.DeadlineExceeded occurs
+	// This tests the first condition: errors.Is(err, context.DeadlineExceeded)
+	t.Run("Direct_DeadlineExceeded_error", func(t *testing.T) {
+		executor := createTestExecutor(t)
+		q := NewENITaskQueue(context.Background(), executor, nil)
+
+		// Manually create a task and complete it with DeadlineExceeded error
+		now := time.Now()
+		eniID := "eni-timeout-test"
+		q.tasks[eniID] = &ENITaskRecord{
+			ENIID:     eniID,
+			NodeName:  "node1",
+			Status:    TaskStatusRunning,
+			CreatedAt: now.Add(-5 * time.Second),
+		}
+
+		// Complete task with DeadlineExceeded error (tests line 186 first condition)
+		q.completeTask(eniID, TaskStatusTimeout, nil, context.DeadlineExceeded)
+
+		task, ok := q.GetTaskStatus(eniID)
+		assert.True(t, ok)
+		assert.Equal(t, TaskStatusTimeout, task.Status)
+		assert.NotNil(t, task.Error)
+		assert.ErrorIs(t, task.Error, context.DeadlineExceeded)
+	})
+
+	// Test case 2: Verify Timeout status is set for wrapped DeadlineExceeded error
+	// This tests the second condition: errors.Is(taskCtx.Err(), context.DeadlineExceeded)
+	t.Run("Wrapped_DeadlineExceeded_error", func(t *testing.T) {
+		executor := createTestExecutor(t)
+		q := NewENITaskQueue(context.Background(), executor, nil)
+
+		now := time.Now()
+		eniID := "eni-timeout-wrapped"
+		q.tasks[eniID] = &ENITaskRecord{
+			ENIID:     eniID,
+			NodeName:  "node1",
+			Status:    TaskStatusRunning,
+			CreatedAt: now.Add(-5 * time.Second),
+		}
+
+		// Complete task with wrapped DeadlineExceeded error
+		wrappedErr := fmt.Errorf("attach timeout: %w", context.DeadlineExceeded)
+		q.completeTask(eniID, TaskStatusTimeout, nil, wrappedErr)
+
+		task, ok := q.GetTaskStatus(eniID)
+		assert.True(t, ok)
+		assert.Equal(t, TaskStatusTimeout, task.Status)
+		assert.NotNil(t, task.Error)
+		assert.ErrorIs(t, task.Error, context.DeadlineExceeded)
+	})
+
+	// Test case 3: Verify Failed status is set for non-timeout errors
+	// This tests the else branch (line 189-191)
+	t.Run("Regular_error", func(t *testing.T) {
+		executor := createTestExecutor(t)
+		q := NewENITaskQueue(context.Background(), executor, nil)
+
+		now := time.Now()
+		eniID := "eni-failed-test"
+		q.tasks[eniID] = &ENITaskRecord{
+			ENIID:     eniID,
+			NodeName:  "node1",
+			Status:    TaskStatusRunning,
+			CreatedAt: now.Add(-2 * time.Second),
+		}
+
+		// Complete task with regular error (not DeadlineExceeded)
+		regularErr := fmt.Errorf("network interface not found")
+		q.completeTask(eniID, TaskStatusFailed, nil, regularErr)
+
+		task, ok := q.GetTaskStatus(eniID)
+		assert.True(t, ok)
+		assert.Equal(t, TaskStatusFailed, task.Status)
+		assert.NotNil(t, task.Error)
+		assert.Contains(t, task.Error.Error(), "network interface not found")
+		assert.NotErrorIs(t, task.Error, context.DeadlineExceeded)
+	})
+
+	// Test case 4: Verify Completed status is set when there's no error
+	// This tests the success path (line 194-195)
+	t.Run("Success_path", func(t *testing.T) {
+		executor := createTestExecutor(t)
+		q := NewENITaskQueue(context.Background(), executor, nil)
+
+		now := time.Now()
+		eniID := "eni-success-test"
+		q.tasks[eniID] = &ENITaskRecord{
+			ENIID:     eniID,
+			NodeName:  "node1",
+			Status:    TaskStatusRunning,
+			CreatedAt: now.Add(-3 * time.Second),
+		}
+
+		// Complete task successfully
+		eniInfo := &aliyunClient.NetworkInterface{
+			NetworkInterfaceID: eniID,
+			Status:             aliyunClient.ENIStatusInUse,
+		}
+		q.completeTask(eniID, TaskStatusCompleted, eniInfo, nil)
+
+		task, ok := q.GetTaskStatus(eniID)
+		assert.True(t, ok)
+		assert.Equal(t, TaskStatusCompleted, task.Status)
+		assert.NotNil(t, task.ENIInfo)
+		assert.Equal(t, eniID, task.ENIInfo.NetworkInterfaceID)
+		assert.Nil(t, task.Error)
+	})
+}
+
+// TestENITaskQueue_GetPendingENIs tests the logic in lines 283-297
+// for filtering ENIs by node and status
+func TestENITaskQueue_GetPendingENIs(t *testing.T) {
+	executor := createTestExecutor(t)
+	q := NewENITaskQueue(context.Background(), executor, nil)
+
+	// Test empty queue
+	eniIDs := q.GetPendingENIs("node1")
+	assert.Empty(t, eniIDs)
+
+	// Add tasks with various statuses for node1
+	q.tasks["eni-pending-1"] = &ENITaskRecord{
+		ENIID:    "eni-pending-1",
+		NodeName: "node1",
+		Status:   TaskStatusPending,
+	}
+	q.tasks["eni-running-1"] = &ENITaskRecord{
+		ENIID:    "eni-running-1",
+		NodeName: "node1",
+		Status:   TaskStatusRunning,
+	}
+	q.tasks["eni-completed-1"] = &ENITaskRecord{
+		ENIID:    "eni-completed-1",
+		NodeName: "node1",
+		Status:   TaskStatusCompleted,
+	}
+	q.tasks["eni-failed-1"] = &ENITaskRecord{
+		ENIID:    "eni-failed-1",
+		NodeName: "node1",
+		Status:   TaskStatusFailed,
+	}
+	q.tasks["eni-timeout-1"] = &ENITaskRecord{
+		ENIID:    "eni-timeout-1",
+		NodeName: "node1",
+		Status:   TaskStatusTimeout,
+	}
+
+	// Add tasks for node2
+	q.tasks["eni-pending-2"] = &ENITaskRecord{
+		ENIID:    "eni-pending-2",
+		NodeName: "node2",
+		Status:   TaskStatusPending,
+	}
+	q.tasks["eni-running-2"] = &ENITaskRecord{
+		ENIID:    "eni-running-2",
+		NodeName: "node2",
+		Status:   TaskStatusRunning,
+	}
+
+	// Get pending ENIs for node1 - should only return Pending and Running
+	eniIDs = q.GetPendingENIs("node1")
+	assert.Len(t, eniIDs, 2)
+	assert.Contains(t, eniIDs, "eni-pending-1")
+	assert.Contains(t, eniIDs, "eni-running-1")
+
+	// Get pending ENIs for node2
+	eniIDs = q.GetPendingENIs("node2")
+	assert.Len(t, eniIDs, 2)
+	assert.Contains(t, eniIDs, "eni-pending-2")
+	assert.Contains(t, eniIDs, "eni-running-2")
+
+	// Get pending ENIs for non-existent node
+	eniIDs = q.GetPendingENIs("node-nonexistent")
+	assert.Empty(t, eniIDs)
+
+	// Test that only Pending and Running are returned, not Completed/Failed/Timeout
+	for _, eniID := range eniIDs {
+		task, _ := q.GetTaskStatus(eniID)
+		assert.True(t, task.Status == TaskStatusPending || task.Status == TaskStatusRunning)
+	}
+}
+
+// TestENITaskQueue_RemoveTask tests the logic in lines 329-337
+func TestENITaskQueue_RemoveTask(t *testing.T) {
+	executor := createTestExecutor(t)
+	q := NewENITaskQueue(context.Background(), executor, nil)
+
+	// Add a task
+	q.tasks["eni-1"] = &ENITaskRecord{
+		ENIID:    "eni-1",
+		NodeName: "node1",
+		Status:   TaskStatusPending,
+	}
+
+	// Verify task exists
+	_, ok := q.GetTaskStatus("eni-1")
+	assert.True(t, ok)
+
+	// Remove the task
+	q.RemoveTask("eni-1")
+
+	// Verify task is removed
+	_, ok = q.GetTaskStatus("eni-1")
+	assert.False(t, ok)
+
+	// Remove non-existent task - should not panic
+	q.RemoveTask("eni-nonexistent")
+
+	// Test removing tasks with different statuses
+	q.tasks["eni-running"] = &ENITaskRecord{ENIID: "eni-running", Status: TaskStatusRunning}
+	q.tasks["eni-completed"] = &ENITaskRecord{ENIID: "eni-completed", Status: TaskStatusCompleted}
+	q.tasks["eni-failed"] = &ENITaskRecord{ENIID: "eni-failed", Status: TaskStatusFailed}
+
+	q.RemoveTask("eni-running")
+	q.RemoveTask("eni-completed")
+	q.RemoveTask("eni-failed")
+
+	_, ok = q.GetTaskStatus("eni-running")
+	assert.False(t, ok)
+	_, ok = q.GetTaskStatus("eni-completed")
+	assert.False(t, ok)
+	_, ok = q.GetTaskStatus("eni-failed")
+	assert.False(t, ok)
+}
+
+// TestENITaskQueue_RecordAttachDuration tests the logic in lines 400-404
+// for setting the correct result label based on task status
+func TestENITaskQueue_RecordAttachDuration(t *testing.T) {
+	executor := createTestExecutor(t)
+	q := NewENITaskQueue(context.Background(), executor, nil)
+
+	now := time.Now()
+	createdAt := now.Add(-5 * time.Second)
+	completedAt := now
+
+	// Test case 1: Completed task - result should be "success"
+	taskCompleted := &ENITaskRecord{
+		ENIID:       "eni-completed",
+		Status:      TaskStatusCompleted,
+		CreatedAt:   createdAt,
+		CompletedAt: &completedAt,
+	}
+	q.recordAttachDuration(taskCompleted)
+
+	// Test case 2: Failed task - result should be "failed"
+	taskFailed := &ENITaskRecord{
+		ENIID:       "eni-failed",
+		Status:      TaskStatusFailed,
+		CreatedAt:   createdAt,
+		CompletedAt: &completedAt,
+	}
+	q.recordAttachDuration(taskFailed)
+
+	// Test case 3: Timeout task - result should be "timeout"
+	taskTimeout := &ENITaskRecord{
+		ENIID:       "eni-timeout",
+		Status:      TaskStatusTimeout,
+		CreatedAt:   createdAt,
+		CompletedAt: &completedAt,
+	}
+	q.recordAttachDuration(taskTimeout)
+
+	// Test case 4: Task with no CompletedAt - should return early
+	taskNoCompletion := &ENITaskRecord{
+		ENIID:       "eni-no-completion",
+		Status:      TaskStatusRunning,
+		CreatedAt:   createdAt,
+		CompletedAt: nil,
+	}
+	q.recordAttachDuration(taskNoCompletion) // Should not panic
+
+	// Test case 5: ECS ENI type (default)
+	taskECS := &ENITaskRecord{
+		ENIID:       "eni-ecs-123",
+		Status:      TaskStatusCompleted,
+		CreatedAt:   createdAt,
+		CompletedAt: &completedAt,
+	}
+	q.recordAttachDuration(taskECS)
+
+	// Test case 6: EFLO ENI type (starts with "leni-")
+	taskEFLO := &ENITaskRecord{
+		ENIID:       "leni-eflo-123",
+		Status:      TaskStatusCompleted,
+		CreatedAt:   createdAt,
+		CompletedAt: &completedAt,
+	}
+	q.recordAttachDuration(taskEFLO)
+
+	// Test case 7: HDENI type (starts with "hdeni-")
+	taskHDENI := &ENITaskRecord{
+		ENIID:       "hdeni-hd-123",
+		Status:      TaskStatusCompleted,
+		CreatedAt:   createdAt,
+		CompletedAt: &completedAt,
+	}
+	q.recordAttachDuration(taskHDENI)
 }

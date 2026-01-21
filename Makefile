@@ -134,16 +134,21 @@ LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
-## Tool Binaries
-KUBECTL ?= kubectl
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen-$(CONTROLLER_TOOLS_VERSION)
-ENVTEST ?= $(LOCALBIN)/setup-envtest-$(ENVTEST_VERSION)
-GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
+## Platform Information
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
+PLATFORM_SUFFIX ?= $(GOOS)-$(GOARCH)
 
 ## Tool Versions
 CONTROLLER_TOOLS_VERSION ?= v0.17.2
 ENVTEST_VERSION ?= release-0.20
 GOLANGCI_LINT_VERSION ?= v2.7.2
+
+## Tool Binaries
+KUBECTL ?= kubectl
+CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen-$(CONTROLLER_TOOLS_VERSION)-$(PLATFORM_SUFFIX)
+ENVTEST ?= $(LOCALBIN)/setup-envtest-$(ENVTEST_VERSION)-$(PLATFORM_SUFFIX)
+GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)-$(PLATFORM_SUFFIX)
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
@@ -165,7 +170,7 @@ golangci-lint-docker:
 
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
-# $1 - target path with name of binary (ideally with version)
+# $1 - target path with name of binary (ideally with version and platform)
 # $2 - package url which can be installed
 # $3 - specific version of package
 define go-install-tool
@@ -174,6 +179,7 @@ set -e; \
 package=$(2)@$(3) ;\
 echo "Downloading $${package}" ;\
 GOBIN=$(LOCALBIN) go install $${package} ;\
-mv "$$(echo "$(1)" | sed "s/-$(3)$$//")" $(1) ;\
+binary_name=$$(basename $(2)) ;\
+mv "$(LOCALBIN)/$${binary_name}" $(1) ;\
 }
 endef
