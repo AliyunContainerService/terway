@@ -1567,4 +1567,196 @@ var _ = Describe("Pod controller", func() {
 			})
 		})
 	})
+
+	Context("pod sandbox exited", func() {
+		It("should delete pod eni", func() {
+			ctx := context.Background()
+			name := "sandbox-exited-pod"
+			ns := "default"
+			key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+			request := reconcile.Request{
+				NamespacedName: key,
+			}
+			var err error
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      key.Name,
+					Namespace: key.Namespace,
+					Annotations: map[string]string{
+						types.PodENI:      "true",
+						types.PodNetworks: "{\"podNetworks\":[{\"vSwitchOptions\":[\"vsw-0\",\"vsw-1\",\"vsw-2\"],\"securityGroupIDs\":[\"sg-1\"],\"interface\":\"eth0\",\"eniOptions\":{\"eniType\":\"Default\"},\"vSwitchSelectOptions\":{\"vSwitchSelectionPolicy\":\"ordered\"},\"resourceGroupID\":\"\",\"networkInterfaceTrafficMode\":\"\",\"defaultRoute\":false,\"allocationType\":{\"type\":\"Elastic\",\"releaseStrategy\":\"\",\"releaseAfter\":\"\"}}]}",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: nodeName,
+					Containers: []corev1.Container{
+						{
+							Name:  "foo",
+							Image: "busybox",
+						},
+					},
+				},
+				Status: corev1.PodStatus{
+					Phase:   corev1.PodFailed,
+					Reason:  "Evicted",
+					Message: "Pod was evicted because it was not making progress.",
+				},
+			}
+
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Labels: map[string]string{
+						"topology.kubernetes.io/region":    "cn-hangzhou",
+						"topology.kubernetes.io/zone":      "cn-hangzhou-a",
+						"node.kubernetes.io/instance-type": "instanceType",
+					},
+				},
+				Spec: corev1.NodeSpec{ProviderID: "cn-hangzhou.i-xxx"},
+			}
+
+			err = testutil.CreateResource(ctx, k8sClient, pod)
+			Expect(err).NotTo(HaveOccurred())
+			err = testutil.CreateResource(ctx, k8sClient, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			controlplane.SetConfig(&controlplane.Config{})
+
+			r := &ReconcilePod{
+				client:    k8sClient,
+				scheme:    scheme.Scheme,
+				aliyun:    openAPI,
+				swPool:    switchPool,
+				record:    record.NewFakeRecorder(1000),
+				trunkMode: false,
+				crdMode:   false,
+			}
+
+			_, err = r.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("create fixed ip pod", func() {
+		ctx := context.Background()
+		name := "fixed-ip-pod-detach-first"
+		ns := "default"
+		eniID := "eni-detach-first"
+		key := k8stypes.NamespacedName{Name: name, Namespace: ns}
+		request := reconcile.Request{
+			NamespacedName: key,
+		}
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      key.Name,
+				Namespace: key.Namespace,
+				Annotations: map[string]string{
+					types.PodENI:      "true",
+					types.PodNetworks: "{\"podNetworks\":[{\"vSwitchOptions\":[\"vsw-0\",\"vsw-1\",\"vsw-2\"],\"securityGroupIDs\":[\"sg-1\"],\"interface\":\"eth0\",\"eniOptions\":{\"eniType\":\"Default\"},\"vSwitchSelectOptions\":{\"vSwitchSelectionPolicy\":\"ordered\"},\"resourceGroupID\":\"\",\"networkInterfaceTrafficMode\":\"\",\"defaultRoute\":false,\"allocationType\":{\"type\":\"Fixed\",\"releaseStrategy\":\"TTL\",\"releaseAfter\":\"20m\"}}]}",
+				},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: nodeName,
+				Containers: []corev1.Container{
+					{
+						Name:  "foo",
+						Image: "busybox",
+					},
+				},
+			},
+		}
+
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Labels: map[string]string{
+					"topology.kubernetes.io/region":    "cn-hangzhou",
+					"topology.kubernetes.io/zone":      "cn-hangzhou-a",
+					"node.kubernetes.io/instance-type": "instanceType",
+				},
+			},
+			Spec: corev1.NodeSpec{ProviderID: "cn-hangzhou.i-xxx"},
+		}
+
+		podENI := &networkv1beta1.PodENI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      key.Name,
+				Namespace: key.Namespace,
+				Labels: map[string]string{
+					types.ENIRelatedNodeName: "pev-node",
+				},
+			},
+			Spec: networkv1beta1.PodENISpec{
+				Allocations: []networkv1beta1.Allocation{
+					{
+						AllocationType: networkv1beta1.AllocationType{
+							Type:            networkv1beta1.IPAllocTypeFixed,
+							ReleaseStrategy: networkv1beta1.ReleaseStrategyNever,
+						},
+						ENI: networkv1beta1.ENI{
+							ID:               eniID,
+							MAC:              "mac",
+							Zone:             "zone",
+							VSwitchID:        "vsw-0",
+							ResourceGroupID:  "rg-0",
+							SecurityGroupIDs: []string{"sg-0"},
+							AttachmentOptions: networkv1beta1.AttachmentOptions{
+								Trunk: nil,
+							},
+						},
+						IPv4:         "",
+						IPv6:         "",
+						IPv4CIDR:     "",
+						IPv6CIDR:     "",
+						Interface:    "eth0",
+						DefaultRoute: true,
+						ExtraRoutes:  nil,
+						ExtraConfig:  nil,
+					},
+				},
+			},
+			Status: networkv1beta1.PodENIStatus{
+				ENIInfos: map[string]networkv1beta1.ENIInfo{
+					eniID: {
+						ID:               eniID,
+						Type:             "",
+						Vid:              0,
+						Status:           networkv1beta1.ENIPhaseBind,
+						NetworkCardIndex: nil,
+					},
+				},
+				Phase: networkv1beta1.ENIPhaseBind,
+			},
+		}
+
+		It("should detach first", func() {
+			Expect(testutil.CreateResource(ctx, k8sClient, pod)).Should(Succeed())
+			Expect(testutil.CreateResource(ctx, k8sClient, podENI)).Should(Succeed())
+			Expect(testutil.CreateResource(ctx, k8sClient, node)).Should(Succeed())
+
+			controlplane.SetConfig(&controlplane.Config{})
+
+			r := &ReconcilePod{
+				client:    k8sClient,
+				scheme:    scheme.Scheme,
+				aliyun:    openAPI,
+				swPool:    switchPool,
+				record:    record.NewFakeRecorder(1000),
+				trunkMode: false,
+				crdMode:   false,
+			}
+
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+
+			podENI := &networkv1beta1.PodENI{}
+			err = k8sClient.Get(ctx, key, podENI)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(podENI.Status.Phase).Should(BeEquivalentTo(networkv1beta1.ENIPhaseDetaching))
+		})
+	})
+
 })

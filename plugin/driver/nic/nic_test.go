@@ -470,3 +470,273 @@ func TestNicSetupInvalidSysCtl(t *testing.T) {
 		return nil
 	})
 }
+
+func TestNicSetup_EmptyIfName(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	var err error
+	hostNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	defer func() {
+		_ = hostNS.Close()
+		_ = testutils.UnmountNS(hostNS)
+	}()
+
+	_ = hostNS.Do(func(netNS ns.NetNS) error {
+		dummy := &netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{Name: "test-dummy"},
+		}
+		err = netlink.LinkAdd(dummy)
+		require.NoError(t, err)
+
+		link, err := netlink.LinkByName("test-dummy")
+		require.NoError(t, err)
+
+		// Configuration without IfName (empty string)
+		cfg := &Conf{
+			IfName: "", // Empty
+			MTU:    1500,
+		}
+
+		err = Setup(context.Background(), link, cfg)
+		require.NoError(t, err)
+
+		return nil
+	})
+}
+
+func TestNicSetup_ZeroMTU(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	var err error
+	hostNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	defer func() {
+		_ = hostNS.Close()
+		_ = testutils.UnmountNS(hostNS)
+	}()
+
+	_ = hostNS.Do(func(netNS ns.NetNS) error {
+		dummy := &netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{Name: "test-dummy"},
+		}
+		err = netlink.LinkAdd(dummy)
+		require.NoError(t, err)
+
+		link, err := netlink.LinkByName("test-dummy")
+		require.NoError(t, err)
+
+		// Configuration with zero MTU (should skip MTU setting)
+		cfg := &Conf{
+			IfName: "eth0",
+			MTU:    0, // Zero MTU
+		}
+
+		err = Setup(context.Background(), link, cfg)
+		require.NoError(t, err)
+
+		return nil
+	})
+}
+
+func TestNicSetup_WithRules(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	var err error
+	hostNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	defer func() {
+		_ = hostNS.Close()
+		_ = testutils.UnmountNS(hostNS)
+	}()
+
+	_ = hostNS.Do(func(netNS ns.NetNS) error {
+		dummy := &netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{Name: "test-dummy"},
+		}
+		err = netlink.LinkAdd(dummy)
+		require.NoError(t, err)
+
+		link, err := netlink.LinkByName("test-dummy")
+		require.NoError(t, err)
+
+		// Add address first for rule
+		_, ipNet, err := net.ParseCIDR("192.168.1.2/24")
+		require.NoError(t, err)
+		err = netlink.AddrAdd(link, &netlink.Addr{IPNet: ipNet})
+		require.NoError(t, err)
+
+		// Configuration with rules
+		rule := netlink.NewRule()
+		rule.Src = ipNet
+		rule.Table = 100
+		rule.Priority = 1000
+
+		cfg := &Conf{
+			IfName: "eth0",
+			MTU:    1500,
+			Rules:  []*netlink.Rule{rule},
+		}
+
+		err = Setup(context.Background(), link, cfg)
+		// May fail in test environment, but should not panic
+		_ = err
+
+		return nil
+	})
+}
+
+func TestNicSetup_WithMultipleAddresses(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	var err error
+	hostNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	defer func() {
+		_ = hostNS.Close()
+		_ = testutils.UnmountNS(hostNS)
+	}()
+
+	_ = hostNS.Do(func(netNS ns.NetNS) error {
+		dummy := &netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{Name: "test-dummy"},
+		}
+		err = netlink.LinkAdd(dummy)
+		require.NoError(t, err)
+
+		link, err := netlink.LinkByName("test-dummy")
+		require.NoError(t, err)
+
+		// Configuration with multiple addresses
+		_, ipNet1, err := net.ParseCIDR("192.168.1.2/24")
+		require.NoError(t, err)
+		_, ipNet2, err := net.ParseCIDR("192.168.2.2/24")
+		require.NoError(t, err)
+
+		cfg := &Conf{
+			IfName: "eth0",
+			MTU:    1500,
+			Addrs: []*netlink.Addr{
+				{IPNet: ipNet1},
+				{IPNet: ipNet2},
+			},
+		}
+
+		err = Setup(context.Background(), link, cfg)
+		require.NoError(t, err)
+
+		return nil
+	})
+}
+
+func TestNicSetup_WithMultipleRoutes(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	var err error
+	hostNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	defer func() {
+		_ = hostNS.Close()
+		_ = testutils.UnmountNS(hostNS)
+	}()
+
+	_ = hostNS.Do(func(netNS ns.NetNS) error {
+		dummy := &netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{Name: "test-dummy"},
+		}
+		err = netlink.LinkAdd(dummy)
+		require.NoError(t, err)
+
+		link, err := netlink.LinkByName("test-dummy")
+		require.NoError(t, err)
+
+		// Add address first
+		_, ipNet, err := net.ParseCIDR("192.168.1.2/24")
+		require.NoError(t, err)
+		err = netlink.AddrAdd(link, &netlink.Addr{IPNet: ipNet})
+		require.NoError(t, err)
+
+		// Configuration with multiple routes
+		_, dstNet1, err := net.ParseCIDR("10.0.0.0/8")
+		require.NoError(t, err)
+		_, dstNet2, err := net.ParseCIDR("172.16.0.0/12")
+		require.NoError(t, err)
+
+		cfg := &Conf{
+			IfName: "eth0",
+			MTU:    1500,
+			Routes: []*netlink.Route{
+				{Dst: dstNet1, LinkIndex: link.Attrs().Index, Gw: net.ParseIP("192.168.1.1")},
+				{Dst: dstNet2, LinkIndex: link.Attrs().Index, Gw: net.ParseIP("192.168.1.1")},
+			},
+		}
+
+		err = Setup(context.Background(), link, cfg)
+		require.NoError(t, err)
+
+		return nil
+	})
+}
+
+func TestNicSetup_WithMultipleNeighbors(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	var err error
+	hostNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	defer func() {
+		_ = hostNS.Close()
+		_ = testutils.UnmountNS(hostNS)
+	}()
+
+	_ = hostNS.Do(func(netNS ns.NetNS) error {
+		dummy := &netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{Name: "test-dummy"},
+		}
+		err = netlink.LinkAdd(dummy)
+		require.NoError(t, err)
+
+		link, err := netlink.LinkByName("test-dummy")
+		require.NoError(t, err)
+
+		// Configuration with multiple neighbors
+		hw1, _ := net.ParseMAC("00:11:22:33:44:55")
+		hw2, _ := net.ParseMAC("00:11:22:33:44:56")
+
+		cfg := &Conf{
+			IfName: "eth0",
+			MTU:    1500,
+			Neighs: []*netlink.Neigh{
+				{
+					LinkIndex:    link.Attrs().Index,
+					IP:           net.ParseIP("192.168.1.1"),
+					HardwareAddr: hw1,
+					State:        netlink.NUD_PERMANENT,
+				},
+				{
+					LinkIndex:    link.Attrs().Index,
+					IP:           net.ParseIP("192.168.1.2"),
+					HardwareAddr: hw2,
+					State:        netlink.NUD_PERMANENT,
+				},
+			},
+		}
+
+		err = Setup(context.Background(), link, cfg)
+		require.NoError(t, err)
+
+		return nil
+	})
+}

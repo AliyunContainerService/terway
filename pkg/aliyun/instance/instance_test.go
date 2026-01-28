@@ -155,5 +155,56 @@ var _ = Describe("Metadata BDD Tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(instanceType).To(Equal("test-instance-type"))
 		})
+
+		It("Test cached values are returned", func() {
+			Init(&ECS{})
+			instance := GetInstanceMeta()
+
+			// First call to populate cache
+			instanceID1, err := instance.GetInstanceID()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(instanceID1).To(Equal("test-instance-id"))
+
+			// Second call should use cached value
+			instanceID2, err := instance.GetInstanceID()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(instanceID2).To(Equal("test-instance-id"))
+		})
+	})
+
+	Context("Error handling", func() {
+		It("Test error when metadata server returns 500", func() {
+			errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer errorServer.Close()
+
+			originalBase := metadata.MetadataBase
+			metadata.MetadataBase = errorServer.URL + "/latest/meta-data/"
+			defer func() {
+				metadata.MetadataBase = originalBase
+			}()
+
+			Init(&ECS{})
+			instance := GetInstanceMeta()
+
+			_, err := instance.GetRegionID()
+			Expect(err).To(HaveOccurred())
+
+			_, err = instance.GetZoneID()
+			Expect(err).To(HaveOccurred())
+
+			_, err = instance.GetVSwitchID()
+			Expect(err).To(HaveOccurred())
+
+			_, err = instance.GetPrimaryMAC()
+			Expect(err).To(HaveOccurred())
+
+			_, err = instance.GetInstanceID()
+			Expect(err).To(HaveOccurred())
+
+			_, err = instance.GetInstanceType()
+			Expect(err).To(HaveOccurred())
+		})
 	})
 })

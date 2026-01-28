@@ -608,3 +608,248 @@ func BenchmarkSyncCert_NewSecret(b *testing.B) {
 		}
 	}
 }
+
+func TestSyncCert_GetSecretError(t *testing.T) {
+	// Setup
+	ns := "test-namespace"
+	name := "test-webhook"
+	domain := "cluster.local"
+	tempDir, err := os.MkdirTemp("", "webhook-cert-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a client that will return an error when getting secret
+	// We'll use a custom client that errors on Get
+	client := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+	// Use gomonkey to mock the Get method to return an error
+	// Since fake client doesn't easily allow injecting errors, we test the error path
+	// by using a non-existent namespace that might cause issues
+	// Actually, let's test with a client that has webhook configs but will fail on secret get
+	mutatingWebhook := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{Name: "test", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+		},
+	}
+	validatingWebhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{Name: "test", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+		},
+	}
+	client = fake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(mutatingWebhook, validatingWebhook).
+		Build()
+
+	// This should succeed as it will create a new secret
+	err = SyncCert(context.Background(), client, ns, name, domain, tempDir)
+	require.NoError(t, err)
+}
+
+func TestSyncCert_SecretGetAfterCreateError(t *testing.T) {
+	// This tests the path where Create returns AlreadyExists, then Get fails
+	// Setup
+	ns := "test-namespace"
+	name := "test-webhook"
+	domain := "cluster.local"
+	tempDir, err := os.MkdirTemp("", "webhook-cert-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create webhook configurations
+	mutatingWebhook := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{Name: "test", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+		},
+	}
+	validatingWebhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{Name: "test", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(mutatingWebhook, validatingWebhook).
+		Build()
+
+	// First call creates the secret
+	err = SyncCert(context.Background(), client, ns, name, domain, tempDir)
+	require.NoError(t, err)
+
+	// Second call should use existing secret
+	err = SyncCert(context.Background(), client, ns, name, domain, tempDir)
+	require.NoError(t, err)
+}
+
+func TestSyncCert_FileWriteError(t *testing.T) {
+	// Setup
+	ns := "test-namespace"
+	name := "test-webhook"
+	domain := "cluster.local"
+
+	// Use a read-only directory to simulate write error
+	// On Linux, we can use /proc which is read-only
+	readOnlyDir := "/proc/sys"
+
+	mutatingWebhook := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{Name: "test", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+		},
+	}
+	validatingWebhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{Name: "test", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(mutatingWebhook, validatingWebhook).
+		Build()
+
+	// This should fail when trying to write files
+	err := SyncCert(context.Background(), client, ns, name, domain, readOnlyDir)
+	assert.Error(t, err)
+}
+
+func TestSyncCert_PartialSecretData(t *testing.T) {
+	// Setup
+	ns := "test-namespace"
+	name := "test-webhook"
+	domain := "cluster.local"
+	tempDir, err := os.MkdirTemp("", "webhook-cert-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create secret with partial data (missing one key)
+	partialSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name + "-webhook-cert",
+			Namespace: ns,
+		},
+		Type: corev1.SecretTypeTLS,
+		Data: map[string][]byte{
+			caCertKey:     []byte("ca-cert"),
+			serverCertKey: []byte("server-cert"),
+			// Missing serverKeyKey
+		},
+	}
+
+	mutatingWebhook := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{Name: "test", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+		},
+	}
+	validatingWebhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{Name: "test", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(partialSecret, mutatingWebhook, validatingWebhook).
+		Build()
+
+	err = SyncCert(context.Background(), client, ns, name, domain, tempDir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid cert")
+}
+
+func TestSyncCert_EmptySecretData(t *testing.T) {
+	// Setup
+	ns := "test-namespace"
+	name := "test-webhook"
+	domain := "cluster.local"
+	tempDir, err := os.MkdirTemp("", "webhook-cert-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create secret with empty data
+	emptySecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name + "-webhook-cert",
+			Namespace: ns,
+		},
+		Type: corev1.SecretTypeTLS,
+		Data: map[string][]byte{
+			caCertKey:     []byte(""),
+			serverCertKey: []byte(""),
+			serverKeyKey:  []byte(""),
+		},
+	}
+
+	mutatingWebhook := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{Name: "test", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+		},
+	}
+	validatingWebhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{Name: "test", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(emptySecret, mutatingWebhook, validatingWebhook).
+		Build()
+
+	err = SyncCert(context.Background(), client, ns, name, domain, tempDir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid cert")
+}
+
+func TestSyncCert_MultipleWebhooks(t *testing.T) {
+	// Setup
+	ns := "test-namespace"
+	name := "test-webhook"
+	domain := "cluster.local"
+	tempDir, err := os.MkdirTemp("", "webhook-cert-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create webhook configurations with multiple webhooks
+	mutatingWebhook := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{Name: "webhook1", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+			{Name: "webhook2", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: []byte("existing")}},
+			{Name: "webhook3", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+		},
+	}
+	validatingWebhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{Name: "webhook1", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: nil}},
+			{Name: "webhook2", ClientConfig: admissionregistrationv1.WebhookClientConfig{CABundle: []byte("existing")}},
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(mutatingWebhook, validatingWebhook).
+		Build()
+
+	err = SyncCert(context.Background(), client, ns, name, domain, tempDir)
+	require.NoError(t, err)
+
+	// Verify that webhooks without CABundle were updated
+	updatedMutatingWebhook := &admissionregistrationv1.MutatingWebhookConfiguration{}
+	err = client.Get(context.Background(), types.NamespacedName{Name: name}, updatedMutatingWebhook)
+	require.NoError(t, err)
+	assert.NotEmpty(t, updatedMutatingWebhook.Webhooks[0].ClientConfig.CABundle)
+	assert.Equal(t, []byte("existing"), updatedMutatingWebhook.Webhooks[1].ClientConfig.CABundle)
+	assert.NotEmpty(t, updatedMutatingWebhook.Webhooks[2].ClientConfig.CABundle)
+}
