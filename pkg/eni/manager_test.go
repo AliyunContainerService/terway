@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
+	corev1 "k8s.io/api/core/v1"
 
 	k8smocks "github.com/AliyunContainerService/terway/pkg/k8s/mocks"
 	"github.com/AliyunContainerService/terway/types"
@@ -520,4 +522,150 @@ func (n *NoOpNetworkInterface) Dispose(int) int {
 
 func (n *NoOpNetworkInterface) Run(ctx context.Context, podResources []daemon.PodResources, wg *sync.WaitGroup) error {
 	return nil
+}
+
+func TestNodeCondition_SetIPExhaustive(t *testing.T) {
+	t.Run("handler is nil - should return early", func(t *testing.T) {
+		n := &NodeCondition{
+			factoryIPExhaustive:      atomic.NewBool(false),
+			factoryIPExhaustiveTimer: time.NewTimer(time.Hour),
+			handler:                  nil,
+		}
+
+		n.SetIPExhaustive()
+
+		// Should remain false since handler is nil
+		assert.False(t, n.factoryIPExhaustive.Load(), "factoryIPExhaustive should remain false when handler is nil")
+	})
+
+	t.Run("factoryIPExhaustive is false - should set to true and call handler", func(t *testing.T) {
+		handlerCalled := false
+		var capturedStatus corev1.ConditionStatus
+		var capturedReason string
+		var capturedMessage string
+
+		handler := func(status corev1.ConditionStatus, reason, message string) error {
+			handlerCalled = true
+			capturedStatus = status
+			capturedReason = reason
+			capturedMessage = message
+			return nil
+		}
+
+		n := &NodeCondition{
+			factoryIPExhaustive:      atomic.NewBool(false),
+			factoryIPExhaustiveTimer: time.NewTimer(time.Hour),
+			handler:                  handler,
+		}
+
+		n.SetIPExhaustive()
+
+		assert.True(t, n.factoryIPExhaustive.Load(), "factoryIPExhaustive should be set to true")
+		assert.True(t, handlerCalled, "handler should be called")
+		assert.Equal(t, corev1.ConditionFalse, capturedStatus, "handler should be called with ConditionFalse")
+		assert.Equal(t, types.IPResInsufficientReason, capturedReason, "handler should be called with IPResInsufficientReason")
+		assert.Equal(t, "node has insufficient IP", capturedMessage, "handler should be called with correct message")
+	})
+
+	t.Run("factoryIPExhaustive is true - should not call handler again", func(t *testing.T) {
+		handlerCallCount := 0
+
+		handler := func(status corev1.ConditionStatus, reason, message string) error {
+			handlerCallCount++
+			return nil
+		}
+
+		n := &NodeCondition{
+			factoryIPExhaustive:      atomic.NewBool(true), // Already true
+			factoryIPExhaustiveTimer: time.NewTimer(time.Hour),
+			handler:                  handler,
+		}
+
+		n.SetIPExhaustive()
+
+		assert.True(t, n.factoryIPExhaustive.Load(), "factoryIPExhaustive should remain true")
+		assert.Equal(t, 0, handlerCallCount, "handler should not be called when already exhaustive")
+	})
+
+	t.Run("handler returns error - should still set factoryIPExhaustive and reset timer", func(t *testing.T) {
+		handlerCalled := false
+		expectedErr := assert.AnError
+
+		handler := func(status corev1.ConditionStatus, reason, message string) error {
+			handlerCalled = true
+			return expectedErr
+		}
+
+		n := &NodeCondition{
+			factoryIPExhaustive:      atomic.NewBool(false),
+			factoryIPExhaustiveTimer: time.NewTimer(time.Hour),
+			handler:                  handler,
+		}
+
+		n.SetIPExhaustive()
+
+		assert.True(t, n.factoryIPExhaustive.Load(), "factoryIPExhaustive should be set to true even if handler returns error")
+		assert.True(t, handlerCalled, "handler should be called")
+	})
+
+	t.Run("timer should be reset when setting exhaustive", func(t *testing.T) {
+		handler := func(status corev1.ConditionStatus, reason, message string) error {
+			return nil
+		}
+
+		timer := time.NewTimer(100 * time.Millisecond)
+		// Drain the timer to simulate it has fired
+		<-timer.C
+
+		n := &NodeCondition{
+			factoryIPExhaustive:      atomic.NewBool(false),
+			factoryIPExhaustiveTimer: timer,
+			handler:                  handler,
+		}
+
+		n.SetIPExhaustive()
+
+		// Timer should be reset to ipExhaustiveConditionPeriod (10 minutes)
+		// We can't directly check the timer's value, but we can verify it hasn't fired immediately
+		select {
+		case <-timer.C:
+			t.Fatal("timer should not fire immediately after reset")
+		case <-time.After(50 * time.Millisecond):
+			// Timer correctly reset and not fired
+		}
+	})
+
+	t.Run("concurrent calls should be thread-safe", func(t *testing.T) {
+		handlerCallCount := 0
+		mu := sync.Mutex{}
+
+		handler := func(status corev1.ConditionStatus, reason, message string) error {
+			mu.Lock()
+			handlerCallCount++
+			mu.Unlock()
+			return nil
+		}
+
+		n := &NodeCondition{
+			factoryIPExhaustive:      atomic.NewBool(false),
+			factoryIPExhaustiveTimer: time.NewTimer(time.Hour),
+			handler:                  handler,
+		}
+
+		wg := sync.WaitGroup{}
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				n.SetIPExhaustive()
+			}()
+		}
+		wg.Wait()
+
+		mu.Lock()
+		defer mu.Unlock()
+		// Handler should be called exactly once due to atomic check
+		assert.Equal(t, 1, handlerCallCount, "handler should be called exactly once despite concurrent calls")
+		assert.True(t, n.factoryIPExhaustive.Load(), "factoryIPExhaustive should be true")
+	})
 }

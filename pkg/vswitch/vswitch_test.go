@@ -347,3 +347,149 @@ func TestSwitchPool_Block_AffectsSelection(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "vsw-2", sw.ID)
 }
+
+// TestSwitchPool_GetOne_WithMostPolicy_GetByIDError tests the scenario where GetByID returns errors
+// during the sorting phase with VSwitchSelectionPolicyMost. This covers lines 90-92 in vswitch.go
+// where errors are logged and processing continues with the next vSwitch.
+func TestSwitchPool_GetOne_WithMostPolicy_GetByIDError(t *testing.T) {
+	openAPI := mocks.NewVPC(t)
+
+	// Mock vswitches: one will fail, others will succeed
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-error").Return(nil, fmt.Errorf("api error")).Maybe()
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+		VSwitchId:               "vsw-1",
+		ZoneId:                  "zone-1",
+		AvailableIpAddressCount: 10,
+	}, nil).Maybe()
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-2").Return(&vpc.VSwitch{
+		VSwitchId:               "vsw-2",
+		ZoneId:                  "zone-1",
+		AvailableIpAddressCount: 20,
+	}, nil).Maybe()
+
+	switchPool, err := NewSwitchPool(100, "100m")
+	assert.NoError(t, err)
+
+	// Test with VSwitchSelectionPolicyMost where one vSwitch fails to get
+	// The error should be logged and processing should continue with other vSwitches
+	sw, err := switchPool.GetOne(context.Background(), openAPI, "zone-1", []string{"vsw-error", "vsw-1", "vsw-2"}, &SelectOptions{
+		IgnoreZone:          false,
+		VSwitchSelectPolicy: VSwitchSelectionPolicyMost,
+	})
+	assert.NoError(t, err)
+	// Should select vsw-2 which has the most available IPs (20)
+	assert.Equal(t, "vsw-2", sw.ID)
+	assert.Equal(t, int64(20), sw.AvailableIPCount)
+}
+
+// TestSwitchPool_GetOne_FallbackSwitches_IPNotEnough tests the scenario where fallback switches
+// have AvailableIPCount == 0. This covers lines 132-134 in vswitch.go where errors are added
+// and processing continues.
+func TestSwitchPool_GetOne_FallbackSwitches_IPNotEnough(t *testing.T) {
+	openAPI := mocks.NewVPC(t)
+
+	// Mock vswitches in different zones with IgnoreZone=true
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-zone1").Return(&vpc.VSwitch{
+		VSwitchId:               "vsw-zone1",
+		ZoneId:                  "zone-1",
+		AvailableIpAddressCount: 0, // No IPs available
+	}, nil).Maybe()
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-zone2").Return(&vpc.VSwitch{
+		VSwitchId:               "vsw-zone2",
+		ZoneId:                  "zone-2",
+		AvailableIpAddressCount: 10, // Has IPs available
+	}, nil).Maybe()
+	openAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-zone3").Return(&vpc.VSwitch{
+		VSwitchId:               "vsw-zone3",
+		ZoneId:                  "zone-3",
+		AvailableIpAddressCount: 0, // No IPs available
+	}, nil).Maybe()
+
+	switchPool, err := NewSwitchPool(100, "100m")
+	assert.NoError(t, err)
+
+	// Test with IgnoreZone=true, requesting zone-0 but switches are in other zones
+	// vsw-zone1 and vsw-zone3 have 0 IPs, should be skipped
+	// vsw-zone2 has IPs, should be selected
+	sw, err := switchPool.GetOne(context.Background(), openAPI, "zone-0", []string{"vsw-zone1", "vsw-zone2", "vsw-zone3"}, &SelectOptions{
+		IgnoreZone:          true,
+		VSwitchSelectPolicy: VSwitchSelectionPolicyOrdered,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, "vsw-zone2", sw.ID)
+	assert.Equal(t, int64(10), sw.AvailableIPCount)
+
+	// Test case where all fallback switches have 0 IPs
+	_, err = switchPool.GetOne(context.Background(), openAPI, "zone-0", []string{"vsw-zone1", "vsw-zone3"}, &SelectOptions{
+		IgnoreZone:          true,
+		VSwitchSelectPolicy: VSwitchSelectionPolicyOrdered,
+	})
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNoAvailableVSwitch))
+	assert.True(t, errors.Is(err, ErrIPNotEnough))
+}
+
+// TestSwitchPool_Del tests the Del method which removes a switch from cache.
+// This covers lines 187-191 in vswitch.go. This is for test purposes.
+func TestSwitchPool_Del(t *testing.T) {
+	openAPI := mocks.NewVPC(t)
+	switchPool, err := NewSwitchPool(100, "100m")
+	assert.NoError(t, err)
+
+	// Add switches to cache
+	switchPool.Add(&Switch{
+		ID:               "vsw-1",
+		Zone:             "zone-1",
+		AvailableIPCount: 10,
+	})
+	switchPool.Add(&Switch{
+		ID:               "vsw-2",
+		Zone:             "zone-2",
+		AvailableIPCount: 20,
+	})
+
+	// Verify switches are in cache
+	sw1, err := switchPool.GetByID(context.Background(), openAPI, "vsw-1")
+	assert.NoError(t, err)
+	assert.NotNil(t, sw1)
+	assert.Equal(t, "vsw-1", sw1.ID)
+
+	sw2, err := switchPool.GetByID(context.Background(), openAPI, "vsw-2")
+	assert.NoError(t, err)
+	assert.NotNil(t, sw2)
+	assert.Equal(t, "vsw-2", sw2.ID)
+
+	// Delete vsw-1 from cache
+	switchPool.Del("vsw-1")
+
+	// Verify vsw-1 is no longer in cache (will need to fetch from API)
+	// Create a new mock to verify API is called after deletion
+	openAPI2 := mocks.NewVPC(t)
+	openAPI2.On("DescribeVSwitchByID", mock.Anything, "vsw-1").Return(&vpc.VSwitch{
+		VSwitchId:               "vsw-1",
+		ZoneId:                  "zone-1",
+		AvailableIpAddressCount: 10,
+	}, nil).Once()
+
+	sw1AfterDel, err := switchPool.GetByID(context.Background(), openAPI2, "vsw-1")
+	assert.NoError(t, err)
+	assert.NotNil(t, sw1AfterDel)
+	assert.Equal(t, "vsw-1", sw1AfterDel.ID)
+	// API should have been called since it's not in cache
+	openAPI2.AssertExpectations(t)
+
+	// Verify vsw-2 is still in cache (API should not be called)
+	openAPI3 := mocks.NewVPC(t)
+	sw2AfterDel, err := switchPool.GetByID(context.Background(), openAPI3, "vsw-2")
+	assert.NoError(t, err)
+	assert.NotNil(t, sw2AfterDel)
+	assert.Equal(t, "vsw-2", sw2AfterDel.ID)
+	// API should not have been called since it's still in cache
+	openAPI3.AssertNotCalled(t, "DescribeVSwitchByID", mock.Anything, "vsw-2")
+
+	// Test deleting a non-existent switch (should not panic)
+	switchPool.Del("vsw-nonexistent")
+
+	// Test deleting with empty string (should not panic)
+	switchPool.Del("")
+}

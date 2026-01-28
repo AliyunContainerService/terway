@@ -13,8 +13,11 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/instance/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
+	terwayTypes "github.com/AliyunContainerService/terway/types"
 )
 
 var _ = Describe("Node controller", func() {
@@ -1151,6 +1154,247 @@ var _ = Describe("Node controller", func() {
 
 			// Verify idle IP reclaim configuration is not set
 			Expect(node.Spec.Pool.Reclaim).To(BeNil())
+		})
+
+		It("GetVSwitchID from metadata when vswitchOptions is empty", func() {
+			ctx := context.Background()
+
+			mockMetadata := &mocks.Interface{}
+			mockMetadata.On("GetVSwitchID").Return("vsw-metadata", nil)
+			oldMetadata := instance.GetInstanceMeta()
+			instance.Init(mockMetadata)
+			defer instance.Init(oldMetadata)
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "i-metadata123",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).Should(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "eni-config",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": `{
+						"vswitches": {},
+						"security_group": "sg-metadata"
+					}`,
+				}}
+			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+			controllerReconciler := &nodeReconcile{
+				client:   k8sClient,
+				nodeName: nodeName,
+				record:   record.NewFakeRecorder(100),
+			}
+			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
+			defer devicePluginPatches.Reset()
+
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "cn-hangzhou",
+						InstanceID:   "i-metadata123",
+						InstanceType: "ecs.c6.large",
+						ZoneID:       "cn-hangzhou-i",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters: 1,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.Spec.ENISpec.VSwitchOptions).To(Equal([]string{"vsw-metadata"}))
+		})
+
+		It("ERDMA boundary conditions", func() {
+			ctx := context.Background()
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "i-erdma-boundary",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).Should(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "eni-config",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": `{
+						"vswitches": {"cn-hangzhou-i":["vsw-1"]},
+						"security_group": "sg-1",
+						"enable_erdma": true
+					}`,
+				}}
+			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+			controllerReconciler := &nodeReconcile{
+				client:   k8sClient,
+				nodeName: nodeName,
+				record:   record.NewFakeRecorder(100),
+			}
+			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
+			defer devicePluginPatches.Reset()
+
+			// Case 1: EriQuantity <= 0
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "cn-hangzhou",
+						InstanceID:   "i-erdma-boundary",
+						InstanceType: "ecs.c6.large",
+						ZoneID:       "cn-hangzhou-i",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:    1,
+						EriQuantity: 0,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+
+			patches := gomonkey.ApplyFunc(nodecap.GetNodeCapabilities, func(cap string) string {
+				if cap == nodecap.NodeCapabilityERDMA {
+					return "erdma"
+				}
+				return ""
+			})
+			defer patches.Reset()
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.Spec.ENISpec.EnableERDMA).To(BeFalse())
+
+			// Case 2: nodecap.GetNodeCapabilities returns empty
+			node.Spec.NodeCap.EriQuantity = 1
+			Expect(k8sClient.Update(ctx, node)).Should(Succeed())
+
+			patches.Reset()
+			patches = gomonkey.ApplyFunc(nodecap.GetNodeCapabilities, func(cap string) string {
+				return ""
+			})
+			defer patches.Reset()
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.Spec.ENISpec.EnableERDMA).To(BeFalse())
+		})
+
+		It("Trunking boundary conditions", func() {
+			ctx := context.Background()
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "i-trunk-boundary",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).Should(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "eni-config",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": `{
+						"vswitches": {"cn-hangzhou-i":["vsw-1"]},
+						"security_group": "sg-1",
+						"enable_eni_trunking": true
+					}`,
+				}}
+			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+			controllerReconciler := &nodeReconcile{
+				client:   k8sClient,
+				nodeName: nodeName,
+				record:   record.NewFakeRecorder(100),
+			}
+			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
+			defer devicePluginPatches.Reset()
+
+			// Case 1: MemberAdapterLimit <= 0
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "cn-hangzhou",
+						InstanceID:   "i-trunk-boundary",
+						InstanceType: "ecs.c6.large",
+						ZoneID:       "cn-hangzhou-i",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:           1,
+						MemberAdapterLimit: 0,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.Spec.ENISpec.EnableTrunk).To(BeFalse())
+
+			// Case 2: ExclusiveENIOnly label
+			node.Spec.NodeCap.MemberAdapterLimit = 10
+			node.Labels = map[string]string{
+				terwayTypes.ExclusiveENIModeLabel: string(terwayTypes.ExclusiveENIOnly),
+			}
+			Expect(k8sClient.Update(ctx, node)).Should(Succeed())
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.Spec.ENISpec.EnableTrunk).To(BeFalse())
 		})
 	})
 })

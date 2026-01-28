@@ -63,3 +63,82 @@ func TestIPVlanDataPath(t *testing.T) {
 		return nil
 	})
 }
+
+func TestIPVlan_ErrorCases(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	var err error
+	hostNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	containerNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	defer func() {
+		_ = containerNS.Close()
+		_ = testutils.UnmountNS(containerNS)
+		_ = hostNS.Close()
+		_ = testutils.UnmountNS(hostNS)
+	}()
+
+	_ = hostNS.Do(func(netNS ns.NetNS) error {
+		// Test with non-existent parent
+		cfg := &IPVlan{
+			Parent:  "nonexistent",
+			PreName: "tmp_eth0",
+			IfName:  "eth0",
+			MTU:     1500,
+		}
+
+		err = Setup(context.Background(), cfg, containerNS)
+		assert.Error(t, err)
+
+		return nil
+	})
+}
+
+func TestIPVlan_WithExistingPreLink(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	var err error
+	hostNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	containerNS, err := testutils.NewNS()
+	assert.NoError(t, err)
+
+	defer func() {
+		_ = containerNS.Close()
+		_ = testutils.UnmountNS(containerNS)
+		_ = hostNS.Close()
+		_ = testutils.UnmountNS(hostNS)
+	}()
+
+	_ = hostNS.Do(func(netNS ns.NetNS) error {
+		// Create parent link
+		err = netlink.LinkAdd(&netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{Name: "eni"},
+		})
+		require.NoError(t, err)
+
+		// Create a pre-existing link with the same name
+		err = netlink.LinkAdd(&netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{Name: "tmp_eth0"},
+		})
+		require.NoError(t, err)
+
+		cfg := &IPVlan{
+			Parent:  "eni",
+			PreName: "tmp_eth0",
+			IfName:  "eth0",
+			MTU:     1500,
+		}
+
+		err = Setup(context.Background(), cfg, containerNS)
+		require.NoError(t, err)
+
+		return nil
+	})
+}

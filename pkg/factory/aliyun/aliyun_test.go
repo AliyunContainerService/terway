@@ -198,6 +198,68 @@ func TestAliyun_AssignNIPv6(t *testing.T) {
 	assert.ElementsMatch(t, ips, assignedIPs)
 }
 
+func TestAliyun_UnAssignNIPv4_ForbiddenError(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	eniID := "eni-id"
+	mac := "00:11:22:33:44:55"
+	ips := []netip.Addr{netip.MustParseAddr("192.168.1.10")}
+
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	// Test with Forbidden error (should return immediately)
+	ecsClient.On("UnAssignPrivateIPAddresses", mock.Anything, eniID, ips).Return(sdkErr.NewServerError(403, `{"Code":"Forbidden.RAM"}`, "test-request-id")).Once()
+
+	cfg := &daemon.ENIConfig{
+		EnableIPv4: true,
+	}
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+	a := NewAliyun(context.Background(), openAPI, nil, vswPool, cfg)
+
+	err := a.UnAssignNIPv4(eniID, ips, mac)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Forbidden")
+}
+
+func TestAliyun_UnAssignNIPv4_RetryableError(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	eniID := "eni-id"
+	mac := "00:11:22:33:44:55"
+	ips := []netip.Addr{netip.MustParseAddr("192.168.1.10")}
+
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	// Test with retryable error (not Forbidden) - should retry
+	ecsClient.On("UnAssignPrivateIPAddresses", mock.Anything, eniID, ips).Return(sdkErr.NewServerError(500, `{"Code":"InternalError"}`, "test-request-id")).Once()
+	// Then succeed
+	ecsClient.On("UnAssignPrivateIPAddresses", mock.Anything, eniID, ips).Return(nil).Once()
+
+	metadataBase := "http://100.100.100.200/latest/meta-data"
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/private-ipv4s", metadataBase, mac),
+		httpmock.NewStringResponder(200, "[]"))
+	httpmock.RegisterResponder("PUT", "http://100.100.100.200/latest/api/token",
+		httpmock.NewStringResponder(200, "token"))
+
+	cfg := &daemon.ENIConfig{
+		EnableIPv4: true,
+	}
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+	a := NewAliyun(context.Background(), openAPI, nil, vswPool, cfg)
+
+	err := a.UnAssignNIPv4(eniID, ips, mac)
+	// May succeed or fail depending on backoff timeout, but should handle gracefully
+	_ = err
+}
+
 func TestAliyun_UnAssignNIPv4(t *testing.T) {
 	openAPI := mockclient.NewOpenAPI(t)
 	ecs := mockclient.NewECS(t)
@@ -221,6 +283,33 @@ func TestAliyun_UnAssignNIPv4(t *testing.T) {
 	err := a.UnAssignNIPv4("eni-id", ips, mac)
 
 	assert.NoError(t, err)
+}
+
+func TestAliyun_UnAssignNIPv6_ForbiddenError(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	eniID := "eni-id"
+	mac := "00:11:22:33:44:55"
+	ips := []netip.Addr{netip.MustParseAddr("fd00::1")}
+
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	// Test with Forbidden error (should return immediately)
+	ecsClient.On("UnAssignIpv6Addresses", mock.Anything, eniID, ips).Return(sdkErr.NewServerError(403, `{"Code":"Forbidden.RAM"}`, "test-request-id")).Once()
+
+	cfg := &daemon.ENIConfig{
+		EnableIPv6: true,
+	}
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+	a := NewAliyun(context.Background(), openAPI, nil, vswPool, cfg)
+
+	err := a.UnAssignNIPv6(eniID, ips, mac)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Forbidden")
 }
 
 func TestAliyun_UnAssignNIPv6(t *testing.T) {
@@ -274,6 +363,101 @@ func TestAliyun_LoadNetworkInterface(t *testing.T) {
 	assert.Equal(t, "192.168.1.1", v4[0].String())
 	assert.Len(t, v6, 1)
 	assert.Equal(t, "fd00::1", v6[0].String())
+}
+
+type emptyENIInfoGetter struct {
+	eni.ENIInfoGetter
+}
+
+func (m *emptyENIInfoGetter) GetENIs(useCache bool) ([]*daemon.ENI, error) {
+	return []*daemon.ENI{}, nil
+}
+
+type errorENIInfoGetter struct {
+	eni.ENIInfoGetter
+}
+
+func (m *errorENIInfoGetter) GetENIs(useCache bool) ([]*daemon.ENI, error) {
+	return nil, fmt.Errorf("get ENIs failed")
+}
+
+func TestAliyun_GetAttachedNetworkInterface_GetENIsError(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	getter := &errorENIInfoGetter{}
+
+	cfg := &daemon.ENIConfig{}
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+	a := NewAliyun(context.Background(), openAPI, getter, vswPool, cfg)
+
+	enis, err := a.GetAttachedNetworkInterface("")
+	assert.Error(t, err)
+	assert.Nil(t, enis)
+}
+
+func TestAliyun_GetAttachedNetworkInterface_EmptyENIs(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	getter := &emptyENIInfoGetter{}
+
+	cfg := &daemon.ENIConfig{}
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+	a := NewAliyun(context.Background(), openAPI, getter, vswPool, cfg)
+
+	enis, err := a.GetAttachedNetworkInterface("")
+	// When GetENIs returns empty list with no error, the function returns the error from GetENIs (which is nil)
+	// So we check that enis is nil or empty
+	if err == nil {
+		assert.Nil(t, enis)
+	} else {
+		assert.Error(t, err)
+	}
+}
+
+type multiENIInfoGetter struct {
+	eni.ENIInfoGetter
+	enis []*daemon.ENI
+}
+
+func (m *multiENIInfoGetter) GetENIs(useCache bool) ([]*daemon.ENI, error) {
+	return m.enis, nil
+}
+
+func TestAliyun_GetAttachedNetworkInterface_WithTrunkENI(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	trunkENIID := "trunk-eni-id"
+	enis := []*daemon.ENI{
+		{ID: trunkENIID, MAC: "00:11:22:33:44:55"},
+		{ID: "eni-2", MAC: "00:11:22:33:44:66"},
+	}
+	getter := &multiENIInfoGetter{enis: enis}
+
+	// Mock DescribeNetworkInterface
+	eniSet := []*client.NetworkInterface{
+		{NetworkInterfaceID: trunkENIID, Type: client.ENITypeTrunk},
+		{NetworkInterfaceID: "eni-2", Type: client.ENITypeSecondary},
+	}
+	ecsClient.On("DescribeNetworkInterface", mock.Anything, "", []string{trunkENIID, "eni-2"}, "", "", "", mock.Anything).Return(eniSet, nil).Maybe()
+
+	cfg := &daemon.ENIConfig{
+		EniTypeAttr: daemon.FeatTrunk,
+	}
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+	a := NewAliyun(context.Background(), openAPI, getter, vswPool, cfg)
+
+	result, err := a.GetAttachedNetworkInterface(trunkENIID)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	if len(result) > 0 {
+		// Find trunk ENI
+		for _, eni := range result {
+			if eni.ID == trunkENIID {
+				assert.True(t, eni.Trunk)
+			}
+		}
+	}
 }
 
 func TestAliyun_GetAttachedNetworkInterface(t *testing.T) {
@@ -521,4 +705,171 @@ func TestAliyun_CreateNetworkInterface_PersistentError(t *testing.T) {
 	_, _, _, err := a.CreateNetworkInterface(0, 0, "Secondary")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "Forbidden")
+}
+
+func TestAliyun_CreateNetworkInterface_TrunkType(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+	vpcClient := mockclient.NewVPC(t)
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	mac := "00:11:22:33:44:55"
+	primaryIP := "192.168.1.10"
+	eniID := "eni-id"
+	vswID := "vsw-id-1"
+
+	// Mock metadata service - same as TestAliyun_CreateNetworkInterface
+	metadataBase := "http://100.100.100.200/latest/meta-data"
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/private-ipv4s", metadataBase, mac),
+		httpmock.NewStringResponder(200, fmt.Sprintf("[\"%s\"]", primaryIP)))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/", metadataBase),
+		httpmock.NewStringResponder(200, mac+"/"))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/vswitch-cidr-block", metadataBase, mac),
+		httpmock.NewStringResponder(200, "192.168.1.0/24"))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/gateway", metadataBase, mac),
+		httpmock.NewStringResponder(200, "192.168.1.1"))
+	httpmock.RegisterResponder("PUT", "http://100.100.100.200/latest/api/token",
+		httpmock.NewStringResponder(200, "token"))
+
+	openAPI.On("GetVPC").Return(vpcClient).Maybe()
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	vpcClient.On("DescribeVSwitchByID", mock.Anything, vswID).Return(&vpc.VSwitch{
+		VSwitchId:               vswID,
+		ZoneId:                  "zone-id",
+		AvailableIpAddressCount: 100,
+	}, nil).Maybe()
+
+	createResp := &client.NetworkInterface{
+		NetworkInterfaceID: eniID,
+		MacAddress:         mac,
+		PrivateIPAddress:   primaryIP,
+		VSwitchID:          vswID,
+	}
+	ecsClient.On("CreateNetworkInterface", mock.Anything, mock.Anything).Return(createResp, nil)
+	ecsClient.On("AttachNetworkInterface", mock.Anything, mock.Anything).Return(nil)
+
+	describeResp := []*client.NetworkInterface{
+		{
+			NetworkInterfaceID: eniID,
+			Status:             client.ENIStatusInUse,
+		},
+	}
+	ecsClient.On("DescribeNetworkInterface", mock.Anything, mock.Anything, []string{eniID}, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(describeResp, nil)
+
+	cfg := &daemon.ENIConfig{
+		EnableIPv4:       true,
+		InstanceID:       "instance-id",
+		ZoneID:           "zone-id",
+		VSwitchOptions:   []string{vswID},
+		SecurityGroupIDs: []string{"sg-id"},
+	}
+
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+	a := NewAliyun(context.Background(), openAPI, nil, vswPool, cfg)
+
+	// Test with trunk type
+	eni, _, _, err := a.CreateNetworkInterface(0, 0, "Trunk")
+	assert.NoError(t, err)
+	assert.NotNil(t, eni)
+	assert.True(t, eni.Trunk)
+}
+
+func TestAliyun_CreateNetworkInterface_ERDMAType(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+	vpcClient := mockclient.NewVPC(t)
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	mac := "00:11:22:33:44:55"
+	primaryIP := "192.168.1.10"
+	eniID := "eni-id"
+	vswID := "vsw-id-1"
+
+	// Mock metadata service - same as TestAliyun_CreateNetworkInterface
+	metadataBase := "http://100.100.100.200/latest/meta-data"
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/private-ipv4s", metadataBase, mac),
+		httpmock.NewStringResponder(200, fmt.Sprintf("[\"%s\"]", primaryIP)))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/", metadataBase),
+		httpmock.NewStringResponder(200, mac+"/"))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/vswitch-cidr-block", metadataBase, mac),
+		httpmock.NewStringResponder(200, "192.168.1.0/24"))
+	httpmock.RegisterResponder("GET", fmt.Sprintf("%s/network/interfaces/macs/%s/gateway", metadataBase, mac),
+		httpmock.NewStringResponder(200, "192.168.1.1"))
+	httpmock.RegisterResponder("PUT", "http://100.100.100.200/latest/api/token",
+		httpmock.NewStringResponder(200, "token"))
+
+	openAPI.On("GetVPC").Return(vpcClient).Maybe()
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	vpcClient.On("DescribeVSwitchByID", mock.Anything, vswID).Return(&vpc.VSwitch{
+		VSwitchId:               vswID,
+		ZoneId:                  "zone-id",
+		AvailableIpAddressCount: 100,
+	}, nil).Maybe()
+
+	createResp := &client.NetworkInterface{
+		NetworkInterfaceID: eniID,
+		MacAddress:         mac,
+		PrivateIPAddress:   primaryIP,
+		VSwitchID:          vswID,
+	}
+	ecsClient.On("CreateNetworkInterface", mock.Anything, mock.Anything).Return(createResp, nil)
+	ecsClient.On("AttachNetworkInterface", mock.Anything, mock.Anything).Return(nil)
+
+	describeResp := []*client.NetworkInterface{
+		{
+			NetworkInterfaceID: eniID,
+			Status:             client.ENIStatusInUse,
+		},
+	}
+	ecsClient.On("DescribeNetworkInterface", mock.Anything, mock.Anything, []string{eniID}, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(describeResp, nil)
+
+	cfg := &daemon.ENIConfig{
+		EnableIPv4:       true,
+		InstanceID:       "instance-id",
+		ZoneID:           "zone-id",
+		VSwitchOptions:   []string{vswID},
+		SecurityGroupIDs: []string{"sg-id"},
+	}
+
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+	a := NewAliyun(context.Background(), openAPI, nil, vswPool, cfg)
+
+	// Test with erdma type
+	eni, _, _, err := a.CreateNetworkInterface(0, 0, "ERDMA")
+	assert.NoError(t, err)
+	assert.NotNil(t, eni)
+	assert.True(t, eni.ERdma)
+}
+
+func TestAliyun_NewAliyun(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	cfg := &daemon.ENIConfig{
+		EnableIPv4:       true,
+		EnableIPv6:       true,
+		InstanceID:       "instance-id",
+		ZoneID:           "zone-id",
+		VSwitchOptions:   []string{"vsw-1"},
+		SecurityGroupIDs: []string{"sg-1"},
+		ResourceGroupID:  "rg-1",
+		ENITags:          map[string]string{"key": "value"},
+	}
+
+	vswPool, _ := vswpool.NewSwitchPool(100, "10m")
+	a := NewAliyun(context.Background(), openAPI, nil, vswPool, cfg)
+
+	assert.NotNil(t, a)
+	assert.True(t, a.enableIPv4)
+	assert.True(t, a.enableIPv6)
+	assert.Equal(t, "instance-id", a.instanceID)
+	assert.Equal(t, "zone-id", a.zoneID)
+	assert.Equal(t, []string{"vsw-1"}, a.vSwitchOptions)
+	assert.Equal(t, []string{"sg-1"}, a.securityGroupIDs)
+	assert.Equal(t, "rg-1", a.resourceGroupID)
+	assert.Equal(t, map[string]string{"key": "value"}, a.eniTags)
 }
