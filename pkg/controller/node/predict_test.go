@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 func TestPredicateNode(t *testing.T) {
@@ -150,4 +151,38 @@ func TestPredicateNode(t *testing.T) {
 			assert.Equal(t, test.expected, result)
 		})
 	}
+}
+
+func TestPredicateForNodeEvent_CreateDeleteUpdateGeneric(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{"topology.kubernetes.io/region": "region"},
+		},
+	}
+	p := &predicateForNodeEvent{supportEFLO: false}
+
+	t.Run("Create", func(t *testing.T) {
+		e := event.CreateEvent{Object: node}
+		assert.True(t, p.Create(e))
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		e := event.DeleteEvent{Object: node}
+		assert.True(t, p.Delete(e))
+	})
+
+	t.Run("Update", func(t *testing.T) {
+		e := event.UpdateEvent{ObjectNew: node}
+		assert.True(t, p.Update(e))
+	})
+
+	t.Run("Generic", func(t *testing.T) {
+		e := event.GenericEvent{Object: node}
+		assert.True(t, p.Generic(e))
+	})
+
+	t.Run("Create with non-Node object returns false", func(t *testing.T) {
+		e := event.CreateEvent{Object: &corev1.Pod{}}
+		assert.False(t, p.Create(e))
+	})
 }

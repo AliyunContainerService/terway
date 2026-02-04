@@ -12,6 +12,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
+	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
@@ -237,6 +238,37 @@ func TestGetPoolConfigWithPartialIPReclaimConfig(t *testing.T) {
 	assert.Equal(t, 10*time.Minute, poolConfig.ReclaimInterval)
 	assert.Equal(t, time.Duration(0), poolConfig.ReclaimAfter)
 	assert.Equal(t, 0.0, poolConfig.ReclaimFactor)
+}
+
+// TestGetPoolConfigWithIPAMTypeCRD tests getPoolConfig when IPAMType is CRD (MaxPoolSize/MinPoolSize zeroed)
+func TestGetPoolConfigWithIPAMTypeCRD(t *testing.T) {
+	instance.Init(&Mock{
+		regionID:     "regionID",
+		zoneID:       "zoneID",
+		vSwitchID:    "vsw",
+		primaryMAC:   "",
+		instanceID:   "instanceID",
+		instanceType: "",
+	})
+
+	cfg := &daemon.Config{
+		MaxPoolSize: 10,
+		MinPoolSize: 2,
+		EniCapRatio: 1,
+		IPAMType:    types.IPAMTypeCRD,
+	}
+
+	limit := &client.Limits{
+		Adapters:           10,
+		IPv4PerAdapter:     5,
+		MemberAdapterLimit: 5,
+	}
+
+	poolConfig, err := getPoolConfig(cfg, daemon.ModeENIMultiIP, limit)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, poolConfig.MaxPoolSize)
+	assert.Equal(t, 0, poolConfig.MinPoolSize)
+	assert.Equal(t, 45, poolConfig.Capacity) // maxENI * ipPerENI before CRD zeroing
 }
 
 // TestGetPoolConfigWithNilIPReclaimConfig tests getPoolConfig without IP reclaim configurations
@@ -813,6 +845,16 @@ func TestGetENIConfigWithTagFilter(t *testing.T) {
 	eniConfig := getENIConfig(cfg, "zoneID")
 
 	assert.Equal(t, map[string]string{"filter-key": "filter-value"}, eniConfig.TagFilter)
+}
+
+func TestGetDynamicConfig_NoLabel(t *testing.T) {
+	m := k8smocks.NewKubernetes(t)
+	m.On("GetNodeDynamicConfigLabel").Return("")
+	cfg, label, err := getDynamicConfig(context.Background(), m)
+	assert.Empty(t, cfg)
+	assert.Empty(t, label)
+	assert.Nil(t, err)
+	m.AssertNotCalled(t, "GetDynamicConfigWithName")
 }
 
 func TestDetDynamicConfig(t *testing.T) {

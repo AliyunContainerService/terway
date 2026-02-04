@@ -411,6 +411,12 @@ func TestIPNetSet_String(t *testing.T) {
 	}
 }
 
+func TestIPNetSet_String_nilReceiver(t *testing.T) {
+	var nilSet *types.IPNetSet
+	result := nilSet.String()
+	assert.Equal(t, "", result)
+}
+
 func TestIPNetSet_ToRPC(t *testing.T) {
 	_, ipv4Net, _ := net.ParseCIDR("192.0.2.0/24")
 	_, ipv6Net, _ := net.ParseCIDR("2001:db8::/64")

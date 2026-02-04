@@ -365,6 +365,44 @@ func TestAliyun_LoadNetworkInterface(t *testing.T) {
 	assert.Equal(t, "fd00::1", v6[0].String())
 }
 
+func TestAliyun_LoadNetworkInterface_IPv4Only(t *testing.T) {
+	mac := "00:11:22:33:44:55"
+	getter := &mockENIInfoGetter{mac: mac}
+
+	a := NewAliyun(context.Background(), nil, getter, nil, &daemon.ENIConfig{EnableIPv4: true, EnableIPv6: false})
+	v4, v6, err := a.LoadNetworkInterface(mac)
+
+	assert.NoError(t, err)
+	assert.Len(t, v4, 1)
+	assert.Equal(t, "192.168.1.1", v4[0].String())
+	assert.Nil(t, v6)
+}
+
+func TestAliyun_LoadNetworkInterface_IPv6Only(t *testing.T) {
+	mac := "00:11:22:33:44:55"
+	getter := &mockENIInfoGetter{mac: mac}
+
+	a := NewAliyun(context.Background(), nil, getter, nil, &daemon.ENIConfig{EnableIPv4: false, EnableIPv6: true})
+	v4, v6, err := a.LoadNetworkInterface(mac)
+
+	assert.NoError(t, err)
+	assert.Nil(t, v4)
+	assert.Len(t, v6, 1)
+	assert.Equal(t, "fd00::1", v6[0].String())
+}
+
+func TestAliyun_LoadNetworkInterface_GetterError(t *testing.T) {
+	mac := "00:11:22:33:44:55"
+	getter := &mockENIInfoGetter{mac: "other-mac"} // MAC mismatch causes getter to return error
+
+	a := NewAliyun(context.Background(), nil, getter, nil, &daemon.ENIConfig{EnableIPv4: true, EnableIPv6: true})
+	v4, v6, err := a.LoadNetworkInterface(mac)
+
+	assert.Error(t, err)
+	assert.Nil(t, v4)
+	assert.Nil(t, v6)
+}
+
 type emptyENIInfoGetter struct {
 	eni.ENIInfoGetter
 }
@@ -488,6 +526,50 @@ func TestAliyun_GetAttachedNetworkInterface(t *testing.T) {
 	assert.Equal(t, eniID, enis[0].ID)
 	assert.True(t, enis[0].Trunk)
 	assert.True(t, enis[0].ERdma)
+}
+
+func TestAliyun_GetAttachedNetworkInterface_NoFeatNoTags(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	mac := "00:11:22:33:44:55"
+	getter := &mockENIInfoGetter{mac: mac}
+
+	a := NewAliyun(context.Background(), openAPI, getter, nil, &daemon.ENIConfig{})
+	enis, err := a.GetAttachedNetworkInterface("")
+
+	assert.NoError(t, err)
+	assert.Len(t, enis, 1)
+	assert.Equal(t, "eni-id", enis[0].ID)
+}
+
+func TestAliyun_GetAttachedNetworkInterface_DescribeForbidden(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+	getter := &multiENIInfoGetter{enis: []*daemon.ENI{{ID: "eni-1", MAC: "00:11:22:33:44:55"}}}
+
+	openAPI.On("GetECS").Return(ecsClient)
+	ecsClient.On("DescribeNetworkInterface", mock.Anything, "", []string{"eni-1"}, "", "", "", mock.Anything).
+		Return(nil, sdkErr.NewServerError(403, `{"Code":"Forbidden.RAM"}`, "test-request-id")).Once()
+
+	a := NewAliyun(context.Background(), openAPI, getter, nil, &daemon.ENIConfig{EniTypeAttr: daemon.FeatTrunk})
+	enis, err := a.GetAttachedNetworkInterface("")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Forbidden")
+	assert.Nil(t, enis)
+}
+
+func TestAliyun_DeleteNetworkInterface_DetachError(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecs := mockclient.NewECS(t)
+
+	openAPI.On("GetECS").Return(ecs)
+	ecs.On("DetachNetworkInterface", mock.Anything, "eni-id", "instance-id", "").
+		Return(sdkErr.NewServerError(500, `{"Code":"InternalError"}`, "test-request-id"))
+
+	a := NewAliyun(context.Background(), openAPI, nil, nil, &daemon.ENIConfig{InstanceID: "instance-id"})
+	err := a.DeleteNetworkInterface("eni-id")
+
+	assert.Error(t, err)
 }
 
 func TestAliyun_CreateNetworkInterface_InvalidVSwitchIDIPNotEnough(t *testing.T) {

@@ -65,6 +65,36 @@ var _ = Describe("Common ENI Operations", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
+		It("should return error when InstanceID is empty", func() {
+			err := Attach(ctx, k8sClient, &AttachOption{
+				InstanceID:         "",
+				NetworkInterfaceID: "eni-1",
+				NodeName:           "node-1",
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("instance id is empty"))
+		})
+
+		It("should return error when NetworkInterfaceID is empty", func() {
+			err := Attach(ctx, k8sClient, &AttachOption{
+				InstanceID:         "i-1",
+				NetworkInterfaceID: "",
+				NodeName:           "node-1",
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("network interface id is empty"))
+		})
+
+		It("should return error when NodeName is empty", func() {
+			err := Attach(ctx, k8sClient, &AttachOption{
+				InstanceID:         "i-1",
+				NetworkInterfaceID: "eni-1",
+				NodeName:           "",
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("node name is empty"))
+		})
+
 		It("should return error if ENI is in detaching phase", func() {
 			eni := &networkv1beta1.NetworkInterface{
 				ObjectMeta: metav1.ObjectMeta{Name: "eni-detaching"},
@@ -190,6 +220,31 @@ var _ = Describe("Common ENI Operations", func() {
 				NetworkInterfaceID: "eni-unmanaged",
 			})
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should return nil when ENI is not found", func() {
+			err := Detach(ctx, k8sClient, &DetachOption{
+				NetworkInterfaceID: "eni-not-exist-detach",
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should detach ENI in Initial phase", func() {
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "eni-initial-phase"},
+				Spec:       networkv1beta1.NetworkInterfaceSpec{},
+				Status:     networkv1beta1.NetworkInterfaceStatus{Phase: networkv1beta1.ENIPhaseInitial},
+			}
+			Expect(k8sClient.Create(ctx, eni)).To(Succeed())
+
+			err := Detach(ctx, k8sClient, &DetachOption{
+				NetworkInterfaceID: "eni-initial-phase",
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedENI := &networkv1beta1.NetworkInterface{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "eni-initial-phase"}, updatedENI)).To(Succeed())
+			Expect(updatedENI.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseDetaching)))
 		})
 	})
 	Context("Delete ENI", func() {
@@ -378,6 +433,31 @@ var _ = Describe("Common ENI Operations", func() {
 			Expect(err.Error()).To(ContainSubstring("eni cr phase"))
 		})
 
+		It("should default BackOff.Steps to 1 when zero", func() {
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "eni-steps-zero"},
+			}
+			Expect(k8sClient.Create(ctx, eni)).To(Succeed())
+			eni.Status.Phase = networkv1beta1.ENIPhaseUnbind
+			Expect(k8sClient.Status().Update(ctx, eni)).To(Succeed())
+
+			opt := &DescribeOption{
+				NetworkInterfaceID: "eni-steps-zero",
+				ExpectPhase:        ptr.To(networkv1beta1.Phase(networkv1beta1.ENIPhaseUnbind)),
+				BackOff: backoff.ExtendedBackoff{
+					Backoff: wait.Backoff{
+						Duration: 10 * time.Millisecond,
+						Factor:   1.0,
+						Steps:    0, // will be set to 1
+					},
+				},
+			}
+			result, err := WaitStatus(ctx, k8sClient, opt)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).NotTo(BeNil())
+			Expect(result.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseUnbind)))
+		})
+
 		It("should return timeout error if ENI status does not update in time", func() {
 			eni := &networkv1beta1.NetworkInterface{
 				ObjectMeta: metav1.ObjectMeta{Name: "eni-timeout"},
@@ -458,6 +538,12 @@ var _ = Describe("Common ENI Operations", func() {
 			err := WaitCreated(ctx, k8sClient, obj, "", "wait-created-test")
 			Expect(err).NotTo(HaveOccurred())
 		})
+
+		It("should return error when object is never created within timeout", func() {
+			obj := &networkv1beta1.NetworkInterface{}
+			err := WaitCreated(ctx, k8sClient, obj, "", "never-created-name")
+			Expect(err).To(HaveOccurred())
+		})
 	})
 
 	Context("WaitDeleted", func() {
@@ -500,6 +586,18 @@ var _ = Describe("Common ENI Operations", func() {
 			err := WaitRVChanged(ctx, k8sClient, obj, "", "wait-rv-test", initialRV)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(obj.GetResourceVersion()).NotTo(Equal(initialRV))
+		})
+
+		It("should return error when resource version does not change within timeout", func() {
+			obj := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "wait-rv-timeout"},
+			}
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "wait-rv-timeout"}, obj)).To(Succeed())
+			currentRV := obj.GetResourceVersion()
+
+			err := WaitRVChanged(ctx, k8sClient, obj, "", "wait-rv-timeout", currentRV)
+			Expect(err).To(HaveOccurred())
 		})
 	})
 })

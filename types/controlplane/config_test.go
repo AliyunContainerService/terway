@@ -28,6 +28,11 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+func TestInitViper_FileNotFound(t *testing.T) {
+	err := InitViper("/nonexistent/config.yaml", nil)
+	assert.Error(t, err)
+}
+
 func TestInitViper(t *testing.T) {
 	content := `
 leaseLockName: test-lock
@@ -70,6 +75,36 @@ vpcID: vpc-12345
 	assert.Eventually(t, func() bool {
 		return called.Load()
 	}, 5*time.Second, 1*time.Second)
+}
+
+func TestParseAndValidateCredential_FromFile(t *testing.T) {
+	t.Run("file not found", func(t *testing.T) {
+		_, err := ParseAndValidateCredential("/nonexistent/path")
+		assert.Error(t, err)
+	})
+	t.Run("invalid yaml", func(t *testing.T) {
+		f, err := os.CreateTemp("", "cred-*.yaml")
+		assert.NoError(t, err)
+		defer os.Remove(f.Name())
+		_, err = f.WriteString("invalid: yaml: [")
+		assert.NoError(t, err)
+		f.Close()
+		_, err = ParseAndValidateCredential(f.Name())
+		assert.Error(t, err)
+	})
+	t.Run("valid credential", func(t *testing.T) {
+		f, err := os.CreateTemp("", "cred-*.yaml")
+		assert.NoError(t, err)
+		defer os.Remove(f.Name())
+		_, err = f.WriteString("accessKey: foo\naccessSecret: bar\n")
+		assert.NoError(t, err)
+		f.Close()
+		c, err := ParseAndValidateCredential(f.Name())
+		assert.NoError(t, err)
+		assert.NotNil(t, c)
+		assert.Equal(t, "foo", string(c.AccessKey))
+		assert.Equal(t, "bar", string(c.AccessSecret))
+	})
 }
 
 func TestParseAndValidateCredential(t *testing.T) {
@@ -135,6 +170,18 @@ func TestParseAndValidateCredential(t *testing.T) {
 	}
 }
 
+func TestGetConfig_SetConfig(t *testing.T) {
+	orig := GetConfig()
+	defer func() { SetConfig(orig) }()
+
+	SetConfig(nil)
+	assert.Nil(t, GetConfig())
+
+	c := &Config{RegionID: "cn-test"}
+	SetConfig(c)
+	assert.Equal(t, c, GetConfig())
+}
+
 func TestIsControllerEnabled(t *testing.T) {
 	type args struct {
 		name        string
@@ -195,6 +242,62 @@ func TestIsControllerEnabled(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseAndValidate_ConfigFileNotFound(t *testing.T) {
+	credFile, err := os.CreateTemp("", "cred-*.yaml")
+	assert.NoError(t, err)
+	defer os.Remove(credFile.Name())
+	_, _ = credFile.WriteString("accessKey: foo\naccessSecret: bar\n")
+	credFile.Close()
+
+	_, err = ParseAndValidate("/nonexistent/config.yaml", credFile.Name())
+	assert.Error(t, err)
+}
+
+func TestParseAndValidate_CredentialFileNotFound(t *testing.T) {
+	configFile, err := os.CreateTemp("", "config-*.yaml")
+	assert.NoError(t, err)
+	defer os.Remove(configFile.Name())
+	_, _ = configFile.WriteString("regionID: cn-hangzhou\nclusterID: c1\nvpcID: vpc-1\n")
+	configFile.Close()
+
+	_, err = ParseAndValidate(configFile.Name(), "/nonexistent/cred.yaml")
+	assert.Error(t, err)
+}
+
+func TestParseAndValidate_InvalidConfigYaml(t *testing.T) {
+	configFile, err := os.CreateTemp("", "config-*.yaml")
+	assert.NoError(t, err)
+	defer os.Remove(configFile.Name())
+	_, _ = configFile.WriteString("regionID: [invalid\n")
+	configFile.Close()
+
+	credFile, err := os.CreateTemp("", "cred-*.yaml")
+	assert.NoError(t, err)
+	defer os.Remove(credFile.Name())
+	_, _ = credFile.WriteString("accessKey: foo\naccessSecret: bar\n")
+	credFile.Close()
+
+	_, err = ParseAndValidate(configFile.Name(), credFile.Name())
+	assert.Error(t, err)
+}
+
+func TestParseAndValidate_InvalidCredentialValidation(t *testing.T) {
+	configFile, err := os.CreateTemp("", "config-*.yaml")
+	assert.NoError(t, err)
+	defer os.Remove(configFile.Name())
+	_, _ = configFile.WriteString("regionID: cn-hangzhou\nclusterID: c1\nvpcID: vpc-1\n")
+	configFile.Close()
+
+	credFile, err := os.CreateTemp("", "cred-*.yaml")
+	assert.NoError(t, err)
+	defer os.Remove(credFile.Name())
+	_, _ = credFile.WriteString("accessKey: foo\naccessSecret: \n")
+	credFile.Close()
+
+	_, err = ParseAndValidate(configFile.Name(), credFile.Name())
+	assert.Error(t, err)
 }
 
 func TestParseAndValidate(t *testing.T) {

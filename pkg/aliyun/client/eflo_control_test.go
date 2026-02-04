@@ -160,3 +160,41 @@ func WithNodeTypeID(nodeTypeID string) DescribeNodeTypeRequestOption {
 		NodeType: &nodeTypeID,
 	}
 }
+
+func TestNewEFLOControlService(t *testing.T) {
+	rateLimiter := NewRateLimiter(nil)
+	svc := NewEFLOControlService(nil, rateLimiter, nil)
+	assert.NotNil(t, svc)
+	assert.Equal(t, rateLimiter, svc.RateLimiter)
+	assert.NotNil(t, svc.IdempotentKeyGen)
+}
+
+func TestEFLOControlService_DescribeNode_NilBody(t *testing.T) {
+	svc := createTestEFLOControlServiceForAPI()
+	patches := gomonkey.ApplyFunc(
+		(*eflocontroller20221215.Client).DescribeNode,
+		func(_ *eflocontroller20221215.Client, _ *eflocontroller20221215.DescribeNodeRequest) (*eflocontroller20221215.DescribeNodeResponse, error) {
+			return &eflocontroller20221215.DescribeNodeResponse{Body: nil}, nil
+		},
+	)
+	defer patches.Reset()
+
+	_, err := svc.DescribeNode(context.Background(), WithNodeID("n-1"))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "nil")
+}
+
+func TestEFLOControlService_DescribeNodeType_NilBody(t *testing.T) {
+	svc := createTestEFLOControlServiceForAPI()
+	patches := gomonkey.ApplyFunc(
+		(*eflocontroller20221215.Client).DescribeNodeType,
+		func(_ *eflocontroller20221215.Client, _ *eflocontroller20221215.DescribeNodeTypeRequest) (*eflocontroller20221215.DescribeNodeTypeResponse, error) {
+			return &eflocontroller20221215.DescribeNodeTypeResponse{Body: nil}, nil
+		},
+	)
+	defer patches.Reset()
+
+	_, err := svc.DescribeNodeType(context.Background(), WithNodeTypeID("t-1"))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "nil")
+}

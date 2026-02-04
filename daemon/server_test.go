@@ -31,7 +31,6 @@ import (
 	daemon_types "github.com/AliyunContainerService/terway/types/daemon"
 	"github.com/agiledragon/gomonkey/v2"
 	"github.com/alexflint/go-filemutex"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
@@ -1395,8 +1394,8 @@ func TestGcPods(t *testing.T) {
 					return nil
 				})
 
-				// Mock deletePodResource private method to return error
-				patches.ApplyPrivateMethod(ns, "deletePodResource", func(info *daemon.PodInfo) error {
+				// Mock resourceDB.Delete to return error so deletePodResource fails
+				patches.ApplyMethodFunc(ns.resourceDB, "Delete", func(podID string) error {
 					return assert.AnError
 				})
 			},
@@ -1637,7 +1636,8 @@ func TestRunDebugServer(t *testing.T) {
 	patches := gomonkey.NewPatches()
 	defer patches.Reset()
 
-	patches.ApplyFunc(prometheus.MustRegister, func() {})
+	// Avoid duplicate metrics registration when tests run in same process
+	patches.ApplyFunc(registerPrometheus, func() {})
 
 	patches.ApplyMethod(http.DefaultServeMux, "Handle", func() {})
 

@@ -534,6 +534,49 @@ func TestFilterENINotFound(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "eniip resource with eniID not in attached - removed",
+			podResources: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{
+							Type:  "eniIp",
+							ENIID: "eni-missing",
+						},
+					},
+				},
+			},
+			attachedENIID: map[string]*daemon.ENI{
+				"eni-1": {ID: "eni-1"},
+			},
+			expectedResult: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{},
+				},
+			},
+		},
+		{
+			name: "eniip resource with empty eniID and mac not in attached - removed",
+			podResources: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{
+						{
+							Type:  "eniIp",
+							ENIID: "",
+							ID:    "mac-unknown.ip-1",
+						},
+					},
+				},
+			},
+			attachedENIID: map[string]*daemon.ENI{
+				"eni-1": {MAC: "mac-1"},
+			},
+			expectedResult: []daemon.PodResources{
+				{
+					Resources: []daemon.ResourceItem{},
+				},
+			},
+		},
 
 		{
 			name: "multiple resources with mixed conditions",
@@ -739,6 +782,79 @@ func TestSetRequest(t *testing.T) {
 			assert.Equal(t, expectedENIID, req.NetworkInterfaceID)
 		})
 	}
+}
+
+func TestDefaultForNetConf(t *testing.T) {
+	tests := []struct {
+		name        string
+		netConf     []*rpc.NetConf
+		expectedErr bool
+		errContains string
+	}{
+		{
+			name:        "empty netConf returns nil",
+			netConf:     []*rpc.NetConf{},
+			expectedErr: false,
+		},
+		{
+			name: "duplicate default route returns error",
+			netConf: []*rpc.NetConf{
+				{DefaultRoute: true, IfName: "eth0"},
+				{DefaultRoute: true, IfName: "eth1"},
+			},
+			expectedErr: true,
+			errContains: "dumplicated",
+		},
+		{
+			name: "default interface not set returns error",
+			netConf: []*rpc.NetConf{
+				{IfName: "eth1", BasicInfo: &rpc.BasicInfo{}},
+			},
+			expectedErr: true,
+			errContains: "default interface is not set",
+		},
+		{
+			name: "no default route sets first eth0 to default",
+			netConf: []*rpc.NetConf{
+				{IfName: IfEth0, DefaultRoute: false},
+			},
+			expectedErr: false,
+		},
+		{
+			name: "no default route sets first empty ifname to default",
+			netConf: []*rpc.NetConf{
+				{IfName: "", DefaultRoute: false},
+			},
+			expectedErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := defaultForNetConf(tt.netConf)
+			if tt.expectedErr {
+				require.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestDefaultIf(t *testing.T) {
+	assert.True(t, defaultIf(""))
+	assert.True(t, defaultIf(IfEth0))
+	assert.False(t, defaultIf("eth1"))
+	assert.False(t, defaultIf("cali0"))
+}
+
+func TestParseNetworkResource_UnknownType(t *testing.T) {
+	// Unknown type returns nil
+	item := daemon.ResourceItem{Type: "unknown"}
+	res := parseNetworkResource(item)
+	assert.Nil(t, res)
 }
 
 func TestToRPCMapping(t *testing.T) {

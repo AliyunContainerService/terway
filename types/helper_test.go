@@ -199,3 +199,22 @@ func TestToIPSet(t *testing.T) {
 	assert.Equal(t, "192.168.0.1", set.IPv4.String())
 	assert.Equal(t, "fd00::1", set.IPv6.String())
 }
+
+func TestToIPSet_NilInput(t *testing.T) {
+	set, err := ToIPSet(nil)
+	assert.Error(t, err)
+	assert.Nil(t, set)
+	assert.Contains(t, err.Error(), "nil")
+}
+
+func TestToIPSet_InvalidIPv4(t *testing.T) {
+	set, err := ToIPSet(&rpc.IPSet{IPv4: "invalid"})
+	assert.Error(t, err)
+	assert.Nil(t, set)
+}
+
+func TestToIPSet_InvalidIPv6(t *testing.T) {
+	set, err := ToIPSet(&rpc.IPSet{IPv6: "invalid"})
+	assert.Error(t, err)
+	assert.Nil(t, set)
+}

@@ -73,6 +73,24 @@ var _ = Describe("Pod controller", func() {
 
 			Expect(err).To(Not(HaveOccurred()))
 		})
+
+		It("ReconcilePod NeedLeaderElection returns true", func() {
+			r := &ReconcilePod{}
+			Expect(r.NeedLeaderElection()).To(BeTrue())
+		})
+
+		It("Wrapper NeedLeaderElection returns true", func() {
+			w := &Wrapper{}
+			Expect(w.NeedLeaderElection()).To(BeTrue())
+		})
+
+		It("Wrapper Start returns when context cancelled", func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			w := &Wrapper{runner: nil}
+			err := w.Start(ctx)
+			Expect(err).To(Equal(context.Canceled))
+		})
 	})
 
 	Context("create normal pod use pod-networks anno", func() {
