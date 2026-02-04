@@ -109,3 +109,66 @@ func TestNodeInfoReturnsErrorWhenZoneLabelIsMissing(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Nil(t, nodeInfo)
 }
+
+func TestNodeInfoWithLabelZoneFailureDomain(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+			Labels: map[string]string{
+				corev1.LabelTopologyRegion:     "test-region",
+				corev1.LabelInstanceTypeStable: "test-instance-type",
+				corev1.LabelZoneFailureDomain:  "test-zone-fd",
+			},
+		},
+		Spec: corev1.NodeSpec{
+			ProviderID: "provider.test-instance-id",
+		},
+	}
+
+	nodeInfo, err := NewNodeInfo(node)
+	assert.Nil(t, err)
+	assert.Equal(t, "test-zone-fd", nodeInfo.ZoneID)
+}
+
+func TestNodeInfoWithLingJunNode(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-lingjun-node",
+			Labels: map[string]string{
+				corev1.LabelTopologyRegion:     "test-region",
+				corev1.LabelInstanceTypeStable: "test-instance-type",
+				corev1.LabelTopologyZone:       "test-zone",
+				types.LingJunNodeLabelKey:      "true",
+			},
+		},
+		Spec: corev1.NodeSpec{
+			ProviderID: "lingjun-provider-id-full",
+		},
+	}
+
+	nodeInfo, err := NewNodeInfo(node)
+	assert.Nil(t, err)
+	assert.Equal(t, "lingjun-provider-id-full", nodeInfo.InstanceID)
+}
+
+func TestNodeInfoReturnsErrorWhenInstanceIDEmpty(t *testing.T) {
+	// ProviderID "provider." splits to ["provider",""] so ids[1] is empty and we hit "can not found instanceID"
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+			Labels: map[string]string{
+				corev1.LabelTopologyRegion:     "test-region",
+				corev1.LabelInstanceTypeStable: "test-instance-type",
+				corev1.LabelTopologyZone:       "test-zone",
+			},
+		},
+		Spec: corev1.NodeSpec{
+			ProviderID: "provider.",
+		},
+	}
+
+	nodeInfo, err := NewNodeInfo(node)
+	assert.NotNil(t, err)
+	assert.Nil(t, nodeInfo)
+	assert.Contains(t, err.Error(), "instanceID")
+}

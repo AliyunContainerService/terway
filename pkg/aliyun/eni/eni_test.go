@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/metadata"
 )
 
@@ -161,6 +162,13 @@ var _ = Describe("Metadata BDD Tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(v)).To(Equal(1))
 		})
+
+		It("should get multi enis with containsMainENI true", func() {
+			m := NewENIMetadata(true, true)
+			v, err := m.GetENIs(true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(v)).To(Equal(2))
+		})
 	})
 })
 
@@ -239,6 +247,66 @@ func TestGetENIPrivateAddressesByMACv2(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetENIByMac_ErrorPaths(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.ApplyFunc(metadata.GetENIID, func(mac string) (string, error) {
+		return "", errors.New("get eni id failed")
+	})
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	m := NewENIMetadata(true, false)
+	eni, err := m.GetENIByMac("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, eni)
+	assert.Contains(t, err.Error(), "get eni by id")
+}
+
+type mockInstanceMeta struct{}
+
+func (m *mockInstanceMeta) GetRegionID() (string, error)  { return "", nil }
+func (m *mockInstanceMeta) GetZoneID() (string, error)    { return "", nil }
+func (m *mockInstanceMeta) GetVSwitchID() (string, error) { return "", nil }
+func (m *mockInstanceMeta) GetPrimaryMAC() (string, error) {
+	return "", errors.New("get primary mac failed")
+}
+func (m *mockInstanceMeta) GetInstanceID() (string, error)   { return "", nil }
+func (m *mockInstanceMeta) GetInstanceType() (string, error) { return "", nil }
+
+func TestGetENIs_GetPrimaryMACError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.ApplyFunc(instance.GetInstanceMeta, func() instance.Interface {
+		return &mockInstanceMeta{}
+	})
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	m := NewENIMetadata(true, false)
+	enis, err := m.GetENIs(false)
+	assert.Error(t, err)
+	assert.Nil(t, enis)
+}
+
+func TestGetENIs_GetENIsMACError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.ApplyFunc(metadata.GetENIsMAC, func() ([]string, error) {
+		return nil, errors.New("get macs failed")
+	})
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	m := NewENIMetadata(true, false)
+	enis, err := m.GetENIs(false)
+	assert.Error(t, err)
+	assert.Nil(t, enis)
 }
 
 func TestGetENIPrivateIPv6AddressesByMACv2(t *testing.T) {

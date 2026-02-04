@@ -83,6 +83,31 @@ var _ = Describe("Common ENI Operations", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("eni cr phase"))
 		})
+
+		It("should return nil if ENI is already in Bind phase", func() {
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "eni-already-bind"},
+				Status:     networkv1beta1.NetworkInterfaceStatus{Phase: networkv1beta1.ENIPhaseBind},
+			}
+			Expect(k8sClient.Create(ctx, eni)).To(Succeed())
+
+			err := Attach(ctx, k8sClient, &AttachOption{
+				InstanceID:         "i-1",
+				NetworkInterfaceID: "eni-already-bind",
+				NodeName:           "node-1",
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should return error when ENI is not found", func() {
+			err := Attach(ctx, k8sClient, &AttachOption{
+				InstanceID:         "i-1",
+				NetworkInterfaceID: "eni-not-exist",
+				NodeName:           "node-1",
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(k8sErr.IsNotFound(err)).To(BeTrue())
+		})
 	})
 	Context("Detach ENI", func() {
 		It("should detach ENI successfully", func() {
@@ -135,6 +160,37 @@ var _ = Describe("Common ENI Operations", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 		})
+
+		It("should return error if ENI is in binding phase", func() {
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "eni-binding"},
+			}
+			Expect(k8sClient.Create(ctx, eni)).To(Succeed())
+			eni.Status.Phase = networkv1beta1.ENIPhaseBinding
+			Expect(k8sClient.Status().Update(ctx, eni)).To(Succeed())
+
+			err := Detach(ctx, k8sClient, &DetachOption{
+				NetworkInterfaceID: "eni-binding",
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("eni cr phase"))
+		})
+
+		It("should do nothing if ENI is UnManaged", func() {
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "eni-unmanaged"},
+				Spec: networkv1beta1.NetworkInterfaceSpec{
+					ManagePolicy: networkv1beta1.ManagePolicy{UnManaged: true},
+				},
+				Status: networkv1beta1.NetworkInterfaceStatus{Phase: networkv1beta1.ENIPhaseBind},
+			}
+			Expect(k8sClient.Create(ctx, eni)).To(Succeed())
+
+			err := Detach(ctx, k8sClient, &DetachOption{
+				NetworkInterfaceID: "eni-unmanaged",
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 	Context("Delete ENI", func() {
 		It("should delete ENI successfully", func() {
@@ -184,6 +240,47 @@ var _ = Describe("Common ENI Operations", func() {
 
 			err := Delete(ctx, k8sClient, &DeleteOption{
 				NetworkInterfaceID: "eni-cached-2",
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should use provided Obj when set", func() {
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "eni-delete-obj"},
+				Status:     networkv1beta1.NetworkInterfaceStatus{Phase: networkv1beta1.ENIPhaseBind},
+			}
+			Expect(k8sClient.Create(ctx, eni)).To(Succeed())
+
+			err := Delete(ctx, k8sClient, &DeleteOption{
+				NetworkInterfaceID: "eni-delete-obj",
+				Obj:                eni,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedENI := &networkv1beta1.NetworkInterface{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "eni-delete-obj"}, updatedENI)).To(Succeed())
+			Expect(string(updatedENI.Status.Phase)).To(Equal(networkv1beta1.ENIPhaseDeleting))
+		})
+
+		It("should do nothing if ENI is UnManaged", func() {
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "eni-delete-unmanaged"},
+				Spec: networkv1beta1.NetworkInterfaceSpec{
+					ManagePolicy: networkv1beta1.ManagePolicy{UnManaged: true},
+				},
+				Status: networkv1beta1.NetworkInterfaceStatus{Phase: networkv1beta1.ENIPhaseBind},
+			}
+			Expect(k8sClient.Create(ctx, eni)).To(Succeed())
+
+			err := Delete(ctx, k8sClient, &DeleteOption{
+				NetworkInterfaceID: "eni-delete-unmanaged",
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should return nil when ENI is not found", func() {
+			err := Delete(ctx, k8sClient, &DeleteOption{
+				NetworkInterfaceID: "eni-not-exist-delete",
 			})
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -330,6 +427,22 @@ var _ = Describe("Common ENI Operations", func() {
 			Expect(result.Spec.ENI.MAC).To(Equal("00:11:22:33:44:55"))
 			Expect(result.Spec.IPv4).To(Equal("192.168.1.100"))
 			Expect(result.Spec.IPv6).To(Equal("2001:db8::1"))
+		})
+
+		It("should set empty IPv6 when IPv6Set is empty", func() {
+			aliyunENI := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-456",
+				MacAddress:         "00:11:22:33:44:66",
+				VPCID:              "vpc-123",
+				ZoneID:             "zone-1",
+				VSwitchID:          "vsw-123",
+				PrivateIPAddress:   "192.168.1.101",
+				IPv6Set:            nil,
+			}
+
+			result := ToNetworkInterfaceCR(aliyunENI)
+
+			Expect(result.Spec.IPv6).To(Equal(""))
 		})
 	})
 
