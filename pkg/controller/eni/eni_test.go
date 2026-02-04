@@ -2,6 +2,7 @@ package eni
 
 import (
 	"context"
+	"testing"
 	"time"
 
 	register "github.com/AliyunContainerService/terway/pkg/controller"
@@ -9,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
+	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -1044,6 +1046,64 @@ var _ = Describe("Eni controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 		})
+
+		It("should delete PodENI when leni CreateFailed and PodENIRef is set", func() {
+			ctx := context.Background()
+			podENINs := "default"
+			podENIName := "pod-eni-rollback"
+
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      podENIName,
+					Namespace: podENINs,
+				},
+			}
+			Expect(k8sClient.Create(ctx, podENI)).To(Succeed())
+
+			// Update leni to reference the PodENI
+			Expect(k8sClient.Get(ctx, typeNamespacedName, leni)).To(Succeed())
+			leni.Spec.PodENIRef = &corev1.ObjectReference{
+				Name:      podENIName,
+				Namespace: podENINs,
+			}
+			Expect(k8sClient.Update(ctx, leni)).To(Succeed())
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
+				NetworkInterfaceIDs: &[]string{leniID},
+				RawStatus:           ptr.To(true),
+			}).Return(
+				[]*aliyunClient.NetworkInterface{
+					{NetworkInterfaceID: leniID, Status: aliyunClient.LENIStatusCreateFailed},
+				}, nil).Once()
+
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			// rollBackPodENI should have deleted the PodENI
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: podENIName, Namespace: podENINs}, &networkv1beta1.PodENI{})
+				return k8sErr.IsNotFound(err)
+			}, 5*time.Second, 200*time.Millisecond).Should(BeTrue())
+		})
 	})
 
 })
+
+func TestToPtr(t *testing.T) {
+	if toPtr("") != nil {
+		t.Error("toPtr(\"\") should return nil")
+	}
+	s := "x"
+	if p := toPtr("x"); p == nil || *p != s {
+		t.Errorf("toPtr(\"x\") should return &\"x\", got %v", p)
+	}
+}

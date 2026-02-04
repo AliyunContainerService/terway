@@ -1,31 +1,47 @@
 # Terway Project Development Guide
 
-## Dev environment tips
+## Code Generation & CRDs
 
-- Use `make help` to see all available make targets and their descriptions
-- Run `make generate` to generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations
-- Use `make manifests` to generate CustomResourceDefinition objects
-- Run `make fmt` to format Go code with `go fmt`
-- Use `make vet` to run `go vet` against code with build tags
+- **Trigger**: When modifying Kubernetes API definitions, struct fields, or deepcopy logic.
+- **Action**:
+  - Run `make generate` to update `DeepCopy` methods.
+  - Run `make manifests` to update CustomResourceDefinitions (CRDs).
 
-## Testing instructions
+## Testing Strategy
 
-- Find the CI plan in the `.github/workflows` folder (check.yml, build.yml)
-- Run `make quick-test` to run all tests
-- Run `make lint` to run golangci-lint with the configuration in `.golangci.yml`
-- Run `make lint-fix` to run golangci-lint and perform automatic fixes
-- Fix any test or lint errors until the whole suite passes
-- After moving files or changing imports, run `make fmt` and `make vet` to ensure code quality
-- Add or update tests for the code you change, even if nobody asked
+### 1. Interface Mocking
 
-## PR instructions
+- **Scope**: Interfaces defined within `github.com/AliyunContainerService/terway`.
+- **Tool**: Use `mockery` to generate mock implementations.
 
-- Title format: `[terway] <Title>` or `[component] <Title>`
-- Always run `make lint` and `make test` before committing
-- Ensure `go mod tidy` and `go mod vendor` are run before submitting (checked in CI)
-- Make sure all build tags are properly set (privileged, default_build)
-- Verify that your changes pass the GitHub Actions workflows:
-  - Code formatting and linting (golangci-lint)
-  - Unit tests with coverage
-  - Module vendoring checks
-  - Super-linter for markdown and bash files
+### 2. Low-Level Stubbing
+
+- **Scope**: Hard-to-mock system interactions such as `os` calls, `netlink`, `grpc`, or file system operations.
+- **Tool**: Use `gomonkey` to patch functions or methods inline.
+
+### 3. Controller & K8s Interaction
+
+- **Primary Framework**: Use `sigs.k8s.io/controller-runtime/pkg/envtest` to spin up a real API server environment.
+  - **Why**: To ensure accurate behavior validation that `client/fake` cannot provide.
+- **Discouraged**: Avoid `sigs.k8s.io/controller-runtime/pkg/client/fake` unless the logic is trivial and stateless.
+- **Constraints (Crucial)**:
+  - **Do NOT manually set** server-managed fields: `UID`, `ResourceVersion`, or `DeletionTimestamp`.
+  - To set `DeletionTimestamp`, you must perform a client `Delete` operation on the object.
+
+## Verification & Quality Assurance
+
+- **Linting**:
+  - Strict adherence to `.golangci.yml`. Run `make lint-fix` for auto-fixes.
+  - Run `make vet` to verify build tags.
+- **Test Execution**:
+  - Run `make quick-test` for the standard suite.
+
+## Dependency Management
+
+- **Trigger**: When adding/removing imports.
+- **Action**: Run `go mod tidy && go mod vendor`. CI requires vendor files to be in sync.
+
+## Pull Request Standards
+
+- **Naming**: `[terway] <Title>` or `[component] <Title>`.
+- **Checklist**: Format (`make fmt`) -> Lint (`make lint`) -> Test (`make quick-test`).
