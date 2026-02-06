@@ -493,8 +493,3 @@ func GetSecurityGroupTestConfig(testName string) *SecurityGroupTestConfig {
 
 	return nil
 }
-
-// HasSecurityGroupTestConfig checks if security group test config is available for a test
-func HasSecurityGroupTestConfig(testName string) bool {
-	return GetSecurityGroupTestConfig(testName) != nil
-}

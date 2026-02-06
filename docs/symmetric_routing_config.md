@@ -19,6 +19,7 @@ When using `dataPathv2`, SNAT to node IP is required for proper functionality.
 - `table_id`: 100
 - `rule_priority`: 600
 - `comment`: "terway-symmetric"
+- `backend`: "iptables"
 
 ### Configuration Structure
 
@@ -30,7 +31,8 @@ When using `dataPathv2`, SNAT to node IP is required for proper functionality.
     "mask": 32,
     "table_id": 100,
     "rule_priority": 600,
-    "comment": "custom-terway-symmetric"
+    "comment": "custom-terway-symmetric",
+    "backend": "nftables"
   }
 }
 ```
@@ -43,6 +45,7 @@ When using `dataPathv2`, SNAT to node IP is required for proper functionality.
 - `table_id`: The routing table ID used for symmetric routing (integer)
 - `rule_priority`: The priority of the ip rule (integer)
 - `comment`: The comment for iptables rules (string)
+- `backend`: The firewall backend used for symmetric routing rules (string, "iptables" or "nftables", default "iptables")
 
 ## Example Configuration
 

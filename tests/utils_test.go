@@ -1318,6 +1318,39 @@ func RestoreENIConfig(ctx context.Context, config *envconf.Config, backup *ENICo
 	return nil
 }
 
+// getKubeProxyMode detects the kube-proxy mode from ConfigMaps
+// Returns the mode (e.g., "iptables", "nftables", "ipvs") or empty string if not found
+// Ignores errors if ConfigMap doesn't exist
+func getKubeProxyMode(ctx context.Context, config *envconf.Config) (string, error) {
+	// Try common kube-proxy ConfigMap names
+	configMapNames := []string{"kube-proxy-worker", "kube-proxy"}
+
+	for _, cmName := range configMapNames {
+		cm := &corev1.ConfigMap{}
+		err := config.Client().Resources().Get(ctx, cmName, "kube-system", cm)
+		if err != nil {
+			// Ignore if ConfigMap doesn't exist, try next one
+			continue
+		}
+
+		// Try to parse config.conf
+		if confData, ok := cm.Data["config.conf"]; ok {
+			// Parse YAML to find mode field
+			lines := strings.Split(confData, "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "mode:") {
+					mode := strings.TrimSpace(strings.TrimPrefix(line, "mode:"))
+					return mode, nil
+				}
+			}
+		}
+	}
+
+	// Return empty string if mode not found (will use default)
+	return "", nil
+}
+
 // ConfigureHostPortCNIChain configures the CNI chain with portmap plugin for HostPort support
 // isDatapathV2 indicates whether the cluster is using Datapath V2 (kube-proxy replacement)
 func ConfigureHostPortCNIChain(ctx context.Context, config *envconf.Config, isDatapathV2 bool) error {
@@ -1340,18 +1373,27 @@ func ConfigureHostPortCNIChain(ctx context.Context, config *envconf.Config, isDa
 		return fmt.Errorf("failed to set symmetric_routing: %w", err)
 	}
 
+	// Detect kube-proxy mode
+	iptBackend := "iptables" // default backend
+	if kubeProxyMode, err := getKubeProxyMode(ctx, config); err == nil && kubeProxyMode == "nftables" {
+		iptBackend = "nftables"
+		_, err = terwayJSON.Set("nftables", "symmetric_routing_config", "backend")
+		if err != nil {
+			return fmt.Errorf("failed to set symmetric_routing_config backend: %w", err)
+		}
+	}
+
 	// Build portmap plugin config
 	portmapConfig := map[string]interface{}{
 		"type":         "portmap",
 		"capabilities": map[string]bool{"portMappings": true},
+		"snat":         true,
+		"backend":      iptBackend,
 	}
 
 	// For Datapath V2, add masqAll option
 	if isDatapathV2 {
-		portmapConfig["externalSetMarkChain"] = "KUBE-MARK-MASQ"
 		portmapConfig["masqAll"] = true
-	} else {
-		portmapConfig["externalSetMarkChain"] = "KUBE-MARK-MASQ"
 	}
 
 	// Build the conflist structure
