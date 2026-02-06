@@ -101,3 +101,27 @@ func TestFromDescribeResp(t *testing.T) {
 		t.Errorf("unexpected NetworkInterfaceTrafficMode: %+v", ni)
 	}
 }
+
+func TestFromPtr(t *testing.T) {
+	// nil pointer returns zero value
+	var nilStr *string
+	if got := FromPtr(nilStr); got != "" {
+		t.Errorf("FromPtr(nil *string) = %q, want zero value", got)
+	}
+
+	// non-nil pointer returns dereferenced value
+	s := "hello"
+	if got := FromPtr(&s); got != "hello" {
+		t.Errorf("FromPtr(&s) = %q, want \"hello\"", got)
+	}
+
+	// int pointer
+	var nilInt *int
+	if got := FromPtr(nilInt); got != 0 {
+		t.Errorf("FromPtr(nil *int) = %d, want 0", got)
+	}
+	i := 42
+	if got := FromPtr(&i); got != 42 {
+		t.Errorf("FromPtr(&i) = %d, want 42", got)
+	}
+}

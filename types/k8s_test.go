@@ -158,3 +158,13 @@ func TestIgnoredByTerway(t *testing.T) {
 		assert.False(t, result)
 	})
 }
+
+func TestIPInsufficientError_Error(t *testing.T) {
+	err := types.IPInsufficientError{
+		Err:    assert.AnError,
+		Reason: types.IPResInsufficientReason,
+	}
+	msg := err.Error()
+	assert.Contains(t, msg, "ip insufficient")
+	assert.Contains(t, msg, types.IPResInsufficientReason)
+}

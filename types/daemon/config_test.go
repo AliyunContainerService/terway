@@ -94,6 +94,32 @@ func Test_MergeConfigAndUnmarshal(t *testing.T) {
 	t.Logf("%+v", cfg)
 }
 
+func TestValidate_UnsupportedIPStack(t *testing.T) {
+	cfg := &Config{IPStack: "unsupported"}
+	err := cfg.Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "ipStack")
+}
+
+func TestValidate_TooManySecurityGroups(t *testing.T) {
+	cfg := &Config{
+		IPStack:        string(types.IPStackIPv4),
+		SecurityGroups: make([]string, 11),
+	}
+	err := cfg.Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "10")
+}
+
+func TestValidate_Valid(t *testing.T) {
+	cfg := &Config{
+		IPStack:        string(types.IPStackDual),
+		SecurityGroups: []string{"sg-1", "sg-2"},
+	}
+	err := cfg.Validate()
+	assert.NoError(t, err)
+}
+
 func TestGetAddonSecret(t *testing.T) {
 	dir, err := os.MkdirTemp("", "")
 	assert.NoError(t, err)
@@ -108,6 +134,45 @@ func TestGetAddonSecret(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "key", ak)
 	assert.Equal(t, "secret", sk)
+}
+
+func TestGetAddonSecret_KeyIDIsDirectory(t *testing.T) {
+	dir, err := os.MkdirTemp("", "")
+	assert.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	keyIDPath := filepath.Join(dir, addonSecretKeyID)
+	err = os.Mkdir(keyIDPath, 0700)
+	assert.NoError(t, err)
+
+	orig := addonSecretRootPath
+	addonSecretRootPath = dir
+	defer func() { addonSecretRootPath = orig }()
+
+	ak, sk, err := GetAddonSecret()
+	assert.Error(t, err)
+	assert.Empty(t, ak)
+	assert.Empty(t, sk)
+}
+
+func TestGetAddonSecret_KeySecretIsDirectory(t *testing.T) {
+	dir, err := os.MkdirTemp("", "")
+	assert.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	_ = os.WriteFile(filepath.Join(dir, addonSecretKeyID), []byte("key"), 0600)
+	keySecretPath := filepath.Join(dir, addonSecretKeySecret)
+	err = os.Mkdir(keySecretPath, 0700)
+	assert.NoError(t, err)
+
+	orig := addonSecretRootPath
+	addonSecretRootPath = dir
+	defer func() { addonSecretRootPath = orig }()
+
+	ak, sk, err := GetAddonSecret()
+	assert.Error(t, err)
+	assert.Empty(t, ak)
+	assert.Empty(t, sk)
 }
 
 func TestGetVSwitchIDsReturnsAllVSwitchIDs(t *testing.T) {
@@ -301,6 +366,13 @@ func TestGetConfigFromFileWithMerge(t *testing.T) {
 	_, err = GetConfigFromFileWithMerge("/nonexistent/file.json", []byte(mergeConfig))
 	assert.Error(t, err)
 
+	// Test case 3b: Config file with invalid JSON
+	invalidConfigFile := filepath.Join(tempDir, "invalid.json")
+	err = os.WriteFile(invalidConfigFile, []byte(`{invalid}`), 0644)
+	assert.NoError(t, err)
+	_, err = GetConfigFromFileWithMerge(invalidConfigFile, []byte{})
+	assert.Error(t, err)
+
 	// Test case 4: Invalid JSON in file
 	invalidConfig := `{
 		"version": "1.0",
@@ -316,6 +388,18 @@ func TestGetConfigFromFileWithMerge(t *testing.T) {
 
 	// Test case 5: Invalid merge config
 	_, err = GetConfigFromFileWithMerge(configFile, []byte(`{"invalid": json`))
+	assert.Error(t, err)
+
+	// Test case 6: GetAddonSecret returns error (e.g. keyID path is a directory)
+	secretDir, err := os.MkdirTemp("", "addon-secret")
+	assert.NoError(t, err)
+	defer os.RemoveAll(secretDir)
+	err = os.Mkdir(filepath.Join(secretDir, addonSecretKeyID), 0700)
+	assert.NoError(t, err)
+	origPath := addonSecretRootPath
+	addonSecretRootPath = secretDir
+	defer func() { addonSecretRootPath = origPath }()
+	_, err = GetConfigFromFileWithMerge(configFile, []byte(mergeConfig))
 	assert.Error(t, err)
 }
 

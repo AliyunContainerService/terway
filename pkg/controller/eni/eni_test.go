@@ -2,6 +2,7 @@ package eni
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -37,6 +38,26 @@ var _ = Describe("Eni controller", func() {
 			err := v.Creator(mgr, ctx)
 
 			Expect(err).To(Not(HaveOccurred()))
+		})
+	})
+
+	Context("Reconcile ENI not found", func() {
+		It("should return nil when ENI is not found", func() {
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+			ctx := context.Background()
+
+			result, err := r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "eni-nonexistent"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 		})
 	})
 	Context("delete eni test (eni not found)", func() {
@@ -592,6 +613,227 @@ var _ = Describe("Eni controller", func() {
 		})
 	})
 
+	Context("delete hdeni test", func() {
+		hdeniID := "hdeni-delete"
+		instanceID := "i-hdeni"
+		trunkID := "eni-trunk-hdeni"
+
+		typeNamespacedName := types.NamespacedName{Name: hdeniID}
+		var hdeni *networkv1beta1.NetworkInterface
+
+		It("prepare resources", func() {
+			ctx := context.Background()
+			hdeni = &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: hdeniID,
+					Finalizers: []string{
+						"network.alibabacloud.com/eni",
+					},
+				},
+				Spec: networkv1beta1.NetworkInterfaceSpec{
+					ENI: networkv1beta1.ENI{ID: hdeniID},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hdeni)).To(Succeed())
+			hdeni.Status = networkv1beta1.NetworkInterfaceStatus{
+				Phase:      networkv1beta1.ENIPhaseDeleting,
+				InstanceID: instanceID,
+				TrunkENIID: trunkID,
+			}
+			Expect(k8sClient.Status().Update(ctx, hdeni)).To(Succeed())
+		})
+
+		It("set DeletionTimestamp then delete hdeni via EFLOHDENI backend", func() {
+			ctx := context.Background()
+			Expect(k8sClient.Get(ctx, typeNamespacedName, hdeni)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, hdeni)).To(Succeed())
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			describeOpts := mock.MatchedBy(func(opts *aliyunClient.DescribeNetworkInterfaceOptions) bool {
+				return opts != nil && opts.NetworkInterfaceIDs != nil && len(*opts.NetworkInterfaceIDs) > 0 && (*opts.NetworkInterfaceIDs)[0] == hdeniID
+			})
+			// First Reconcile: detach path for hdeni (Describe returns Unattached, then we clear status to Unbind)
+			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, describeOpts).
+				Return([]*aliyunClient.NetworkInterface{{NetworkInterfaceID: hdeniID, Status: aliyunClient.LENIStatusUnattached}}, nil).Once()
+			// Second Reconcile: delete() calls DeleteNetworkInterfaceV2 with hdeni backend
+			aliyun.On("DeleteNetworkInterfaceV2", mock.Anything, hdeniID).Return(nil).Once()
+
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, &networkv1beta1.NetworkInterface{})
+				return k8sErr.IsNotFound(err)
+			}, 5*time.Second, 500*time.Millisecond).Should(BeTrue())
+		})
+	})
+
+	Context("delete eni when DeleteNetworkInterfaceV2 returns error", func() {
+		eniID := "eni-delete-api-error"
+		instanceID := "i-del-err"
+		trunkID := "eni-trunk-err"
+
+		typeNamespacedName := types.NamespacedName{Name: eniID}
+
+		It("prepare and trigger delete", func() {
+			ctx := context.Background()
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       eniID,
+					Finalizers: []string{"network.alibabacloud.com/eni"},
+				},
+				Spec: networkv1beta1.NetworkInterfaceSpec{ENI: networkv1beta1.ENI{ID: eniID}},
+			}
+			Expect(k8sClient.Create(ctx, eni)).To(Succeed())
+			eni.Status = networkv1beta1.NetworkInterfaceStatus{
+				Phase:      networkv1beta1.ENIPhaseDeleting,
+				InstanceID: instanceID,
+				TrunkENIID: trunkID,
+			}
+			Expect(k8sClient.Status().Update(ctx, eni)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, eni)).To(Succeed())
+		})
+
+		It("should return error when DeleteNetworkInterfaceV2 fails", func() {
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			aliyun.On("DetachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil).Once()
+			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil, nil).Once()
+			aliyun.On("DeleteNetworkInterfaceV2", mock.Anything, eniID).Return(fmt.Errorf("api delete failed")).Once()
+
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+			ctx := context.Background()
+
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("api delete failed"))
+		})
+	})
+
+	Context("delete leni test", func() {
+		leniID := "leni-delete"
+		instanceID := "i-leni-del"
+		trunkID := "eni-trunk-leni-del"
+		typeNamespacedName := types.NamespacedName{Name: leniID}
+		var leni *networkv1beta1.NetworkInterface
+
+		It("prepare and delete leni via EFLO backend", func() {
+			ctx := context.Background()
+			leni = &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       leniID,
+					Finalizers: []string{"network.alibabacloud.com/eni"},
+				},
+				Spec: networkv1beta1.NetworkInterfaceSpec{ENI: networkv1beta1.ENI{ID: leniID}},
+			}
+			Expect(k8sClient.Create(ctx, leni)).To(Succeed())
+			leni.Status = networkv1beta1.NetworkInterfaceStatus{
+				Phase:      networkv1beta1.ENIPhaseDeleting,
+				InstanceID: instanceID,
+				TrunkENIID: trunkID,
+			}
+			Expect(k8sClient.Status().Update(ctx, leni)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, leni)).To(Succeed())
+		})
+
+		It("detach then delete leni", func() {
+			ctx := context.Background()
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			describeOpts := mock.MatchedBy(func(opts *aliyunClient.DescribeNetworkInterfaceOptions) bool {
+				return opts != nil && opts.NetworkInterfaceIDs != nil && len(*opts.NetworkInterfaceIDs) > 0 && (*opts.NetworkInterfaceIDs)[0] == leniID
+			})
+			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, describeOpts).
+				Return([]*aliyunClient.NetworkInterface{{NetworkInterfaceID: leniID, Status: aliyunClient.LENIStatusUnattached}}, nil).Once()
+			aliyun.On("DeleteNetworkInterfaceV2", mock.Anything, leniID).Return(nil).Once()
+
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, &networkv1beta1.NetworkInterface{})
+				return k8sErr.IsNotFound(err)
+			}, 5*time.Second, 500*time.Millisecond).Should(BeTrue())
+		})
+	})
+
+	Context("rollBackPodENI", func() {
+		It("should do nothing when PodENIRef is nil", func() {
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "leni-noref"},
+				Spec:       networkv1beta1.NetworkInterfaceSpec{},
+			}
+			err := r.rollBackPodENI(context.Background(), eni)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should skip delete when PodENI already has DeletionTimestamp", func() {
+			ctx := context.Background()
+			podENIName := "pod-eni-deleting"
+			podENINs := "default"
+			leniID := "leni-rollback-deleting"
+
+			podENI := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{Name: podENIName, Namespace: podENINs},
+			}
+			Expect(k8sClient.Create(ctx, podENI)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, podENI)).To(Succeed())
+
+			eni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: leniID},
+				Spec: networkv1beta1.NetworkInterfaceSpec{
+					PodENIRef: &corev1.ObjectReference{Name: podENIName, Namespace: podENINs},
+				},
+			}
+			Expect(k8sClient.Create(ctx, eni)).To(Succeed())
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			err := r.rollBackPodENI(ctx, eni)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
 	// ==============================================================================
 	// LENI (Lightweight ENI) TESTS
 	// ==============================================================================
@@ -1016,6 +1258,89 @@ var _ = Describe("Eni controller", func() {
 			}
 			err = k8sClient.Status().Update(ctx, leni)
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should return error when DescribeNetworkInterfaceV2 fails for leni", func() {
+			ctx := context.Background()
+			Expect(k8sClient.Get(ctx, typeNamespacedName, leni)).To(Succeed())
+			if leni.Status.Phase != networkv1beta1.ENIPhaseBinding {
+				leni.Status.Phase = networkv1beta1.ENIPhaseBinding
+				leni.Status.InstanceID = instanceID
+				leni.Status.TrunkENIID = trunkID
+				Expect(k8sClient.Status().Update(ctx, leni)).To(Succeed())
+			}
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, mock.MatchedBy(func(opts *aliyunClient.DescribeNetworkInterfaceOptions) bool {
+				return opts != nil && opts.NetworkInterfaceIDs != nil && len(*opts.NetworkInterfaceIDs) > 0 && (*opts.NetworkInterfaceIDs)[0] == leniID
+			})).Return(nil, fmt.Errorf("api describe error")).Once()
+
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("api describe error"))
+		})
+
+		It("should return error when leni not found from Describe", func() {
+			ctx := context.Background()
+			Expect(k8sClient.Get(ctx, typeNamespacedName, leni)).To(Succeed())
+			if leni.Status.Phase != networkv1beta1.ENIPhaseBinding {
+				leni.Status.Phase = networkv1beta1.ENIPhaseBinding
+				leni.Status.InstanceID = instanceID
+				leni.Status.TrunkENIID = trunkID
+				Expect(k8sClient.Status().Update(ctx, leni)).To(Succeed())
+			}
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, mock.MatchedBy(func(opts *aliyunClient.DescribeNetworkInterfaceOptions) bool {
+				return opts != nil && opts.NetworkInterfaceIDs != nil && len(*opts.NetworkInterfaceIDs) > 0 && (*opts.NetworkInterfaceIDs)[0] == leniID
+			})).Return([]*aliyunClient.NetworkInterface{}, nil).Once()
+
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("not found"))
+		})
+
+		It("should return error for leni unsupported status on attach", func() {
+			ctx := context.Background()
+			Expect(k8sClient.Get(ctx, typeNamespacedName, leni)).To(Succeed())
+			if leni.Status.Phase != networkv1beta1.ENIPhaseBinding {
+				leni.Status.Phase = networkv1beta1.ENIPhaseBinding
+				leni.Status.InstanceID = instanceID
+				leni.Status.TrunkENIID = trunkID
+				Expect(k8sClient.Status().Update(ctx, leni)).To(Succeed())
+			}
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, mock.MatchedBy(func(opts *aliyunClient.DescribeNetworkInterfaceOptions) bool {
+				return opts != nil && opts.NetworkInterfaceIDs != nil && len(*opts.NetworkInterfaceIDs) > 0 && (*opts.NetworkInterfaceIDs)[0] == leniID
+			})).Return([]*aliyunClient.NetworkInterface{
+				{NetworkInterfaceID: leniID, Status: aliyunClient.LENIStatusDetachFailed},
+			}, nil).Once()
+
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("unsupported status"))
 		})
 
 		It("should handle leni CreateFailed status", func() {

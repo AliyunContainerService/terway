@@ -166,3 +166,57 @@ func TestNewValidIP(t *testing.T) {
 		t.Errorf("NewValidIP() status = %v, want %v", ip.status, ipStatusValid)
 	}
 }
+
+func TestIP_Release_wrongPodID(t *testing.T) {
+	ip := NewValidIP(netip.MustParseAddr("192.0.2.1"), false)
+	ip.Allocate("pod-a")
+	ip.Release("pod-b")
+	if ip.podID != "pod-a" {
+		t.Errorf("Release with wrong podID should not clear; got podID %q", ip.podID)
+	}
+	ip.Release("pod-a")
+	if ip.podID != "" {
+		t.Errorf("Release with correct podID should clear; got podID %q", ip.podID)
+	}
+}
+
+func TestSet_PutDeleting(t *testing.T) {
+	s := make(Set)
+	a1 := netip.MustParseAddr("192.0.2.1")
+	a2 := netip.MustParseAddr("192.0.2.2")
+	s.PutDeleting(a1, a2)
+	if len(s) != 2 {
+		t.Fatalf("PutDeleting len = %d, want 2", len(s))
+	}
+	for _, a := range []netip.Addr{a1, a2} {
+		if p, ok := s[a]; !ok || !p.Deleting() {
+			t.Errorf("PutDeleting(%s): ok=%v, Deleting=%v", a, ok, p != nil && p.Deleting())
+		}
+	}
+}
+
+func TestSet_ByPodID(t *testing.T) {
+	s := make(Set)
+	a1 := netip.MustParseAddr("192.0.2.1")
+	ip := NewValidIP(a1, false)
+	ip.Allocate("my-pod")
+	s[a1] = ip
+	if got := s.ByPodID("my-pod"); got != ip {
+		t.Errorf("ByPodID(my-pod) = %v, want %v", got, ip)
+	}
+	if got := s.ByPodID("other"); got != nil {
+		t.Errorf("ByPodID(other) = %v, want nil", got)
+	}
+}
+
+func TestSet_PeekAvailable_withPodID(t *testing.T) {
+	s := make(Set)
+	a1 := netip.MustParseAddr("192.0.2.1")
+	a2 := netip.MustParseAddr("192.0.2.2")
+	s.PutValid(a1, a2)
+	s[a1].Allocate("existing-pod")
+	got := s.PeekAvailable("existing-pod")
+	if got == nil || got.ip != a1 {
+		t.Errorf("PeekAvailable(existing-pod) = %v, want IP %s", got, a1)
+	}
+}

@@ -48,6 +48,14 @@ func TestParsePodNetworksFromAnnotation(t *testing.T) {
 			},
 			expectedError: "",
 		},
+		{
+			name: "AnnotationExistsButInvalidJSON",
+			podAnnotations: map[string]string{
+				"k8s.aliyun.com/pod-networks": `{invalid json}`,
+			},
+			expectedResult: nil,
+			expectedError:  "parse",
+		},
 	}
 
 	for _, test := range tests {

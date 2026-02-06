@@ -207,6 +207,27 @@ func TestGetERIRes(t *testing.T) {
 	}
 }
 
+func TestLimits_ExclusiveENIPod(t *testing.T) {
+	l := &client.Limits{Adapters: 5}
+	assert.Equal(t, 4, l.ExclusiveENIPod())
+
+	l.Adapters = 1
+	assert.Equal(t, 0, l.ExclusiveENIPod())
+}
+
+func TestProvider_GetLimit_UnsupportedClient(t *testing.T) {
+	provider := client.NewProvider()
+	_, err := provider.GetLimit("not a client", "ecs.g7.large")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported")
+}
+
+func TestProvider_GetLimitFromAnno_InvalidJSON(t *testing.T) {
+	d := &client.Provider{}
+	_, err := d.GetLimitFromAnno(map[string]string{"alibabacloud.com/instance-type-info": "invalid-json"})
+	assert.Error(t, err)
+}
+
 func TestECSLimitProvider_GetLimitFromAnno(t *testing.T) {
 
 	type args struct {

@@ -49,6 +49,58 @@ var _ = Describe("Networking controller", func() {
 
 			Expect(err).To(Not(HaveOccurred()))
 		})
+
+		It("NeedLeaderElection returns true", func() {
+			r := &ReconcilePodNetworking{}
+			Expect(r.NeedLeaderElection()).To(BeTrue())
+		})
+	})
+
+	Context("Reconcile not found", func() {
+		It("returns nil when PodNetworking is not found", func() {
+			controllerReconciler := &ReconcilePodNetworking{
+				client:       k8sClient,
+				aliyunClient: openAPI,
+				swPool:       switchPool,
+				record:       record.NewFakeRecorder(100),
+			}
+			result, err := controllerReconciler.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "does-not-exist"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+		})
+	})
+
+	Context("Reconcile no change and ready", func() {
+		It("returns early when status is Ready and spec matches status", func() {
+			name := "no-change-ready"
+			created := &networkv1beta1.PodNetworking{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+				Spec: networkv1beta1.PodNetworkingSpec{
+					VSwitchOptions: []string{"vsw-1"},
+					ENIOptions:     networkv1beta1.ENIOptions{ENIAttachType: networkv1beta1.ENIOptionTypeDefault},
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), created)).To(Succeed())
+			created.Status = networkv1beta1.PodNetworkingStatus{
+				Status:    networkv1beta1.NetworkingStatusReady,
+				VSwitches: []networkv1beta1.VSwitch{{ID: "vsw-1", Zone: "cn-hangzhou-k"}},
+			}
+			Expect(k8sClient.Status().Update(context.Background(), created)).To(Succeed())
+
+			controllerReconciler := &ReconcilePodNetworking{
+				client:       k8sClient,
+				aliyunClient: openAPI,
+				swPool:       switchPool,
+				record:       record.NewFakeRecorder(100),
+			}
+			result, err := controllerReconciler.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: name},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+		})
 	})
 
 	Context("Create normal", func() {

@@ -34,7 +34,7 @@
   - Strict adherence to `.golangci.yml`. Run `make lint-fix` for auto-fixes.
   - Run `make vet` to verify build tags.
 - **Test Execution**:
-  - Run `make quick-test` for the standard suite.
+  - Run `make test-quick` for the standard suite (outputs test report and coverage to `coverage.txt`).
 
 ## Dependency Management
 

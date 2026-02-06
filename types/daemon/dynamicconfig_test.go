@@ -131,6 +131,19 @@ func TestConfigFromConfigMapReturnsErrorWhenBaseConfigMapNotFound(t *testing.T) 
 	assert.Error(t, err)
 }
 
+func TestConfigFromConfigMap_InvalidBaseJSON(t *testing.T) {
+	client := fake.NewFakeClient(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "eni-config",
+			Namespace: "kube-system",
+		},
+		Data: map[string]string{"eni_conf": `{invalid json}`},
+	})
+	_, err := ConfigFromConfigMap(context.Background(), client, "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "parse")
+}
+
 func TestConfigFromConfigMapReturnsErrorWhenBaseConfigIsEmpty(t *testing.T) {
 	client := fake.NewFakeClient(&corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
