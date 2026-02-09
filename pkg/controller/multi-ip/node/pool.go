@@ -670,12 +670,15 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	// 6. check and mark warm-up completion
 	n.checkWarmUpCompletion(node)
 
-	if utilerrors.NewAggregate(errList) != nil {
-		return utilerrors.NewAggregate(errList)
-	}
 	// 7. pool management sort eni and find the victim
+	// Always run adjustPool regardless of addIP/handleStatus errors,
+	// pool scale-down and cleanup should not be blocked by allocation failures.
+	err = n.adjustPool(ctx, node)
+	if err != nil {
+		errList = append(errList, err)
+	}
 
-	return n.adjustPool(ctx, node)
+	return utilerrors.NewAggregate(errList)
 }
 
 // releasePodNotFound release ip if there is no pod found
