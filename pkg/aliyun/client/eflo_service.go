@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
@@ -410,7 +411,12 @@ func (a *EFLOService) DetachLeni(ctx context.Context, opts ...DetachNetworkInter
 	resp, err := a.ClientSet.EFLOV2().DetachElasticNetworkInterface(req)
 	metric.OpenAPILatency.WithLabelValues(APIDetachElasticNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
-		return apiErr.WarpError2(err, APIDetachElasticNetworkInterface)
+		err = apiErr.WarpError2(err, APIDetachElasticNetworkInterface)
+		if apiErr.ErrorCodeIsAny(err, strconv.Itoa(apiErr.ErrEfloResourceNotFound)) {
+			l.WithValues("err", err.Error()).Info("return detached or not found")
+			return nil
+		}
+		return err
 	}
 
 	if resp.Body == nil {
@@ -445,7 +451,12 @@ func (a *EFLOService) DeleteElasticNetworkInterface(ctx context.Context, eniID s
 	metric.OpenAPILatency.WithLabelValues(APIDeleteElasticNetworkInterface, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
+		if apiErr.ErrorCodeIsAny(err, strconv.Itoa(apiErr.ErrEfloResourceNotFound)) {
+			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Info("return not found")
+			return nil
+		}
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
+
 		return err
 	}
 
@@ -484,6 +495,10 @@ func (a *EFLOService) UnassignLeniPrivateIPAddress(ctx context.Context, eniID, i
 	metric.OpenAPILatency.WithLabelValues(APIUnassignLeniPrivateIPAddress, fmt.Sprint(err != nil)).Observe(metric.MsSince(start))
 	if err != nil {
 		err = apiErr.WarpError(err)
+		if apiErr.ErrorCodeIsAny(err, strconv.Itoa(apiErr.ErrEfloResourceNotFound)) {
+			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Info("return not found or already unassigned")
+			return nil
+		}
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "failed")
 		return err
 	}

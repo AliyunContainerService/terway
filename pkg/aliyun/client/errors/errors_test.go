@@ -384,3 +384,110 @@ func TestErrNotFound(t *testing.T) {
 	assert.NotNil(t, ErrNotFound)
 	assert.Equal(t, "not found", ErrNotFound.Error())
 }
+
+func TestErrorCodeIsAny(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   error
+		codes []string
+		want  bool
+	}{
+		{
+			name:  "apiErr.Error matching first code",
+			err:   apiErr.NewServerError(403, "{\"Code\": \"err1\"}", ""),
+			codes: []string{"err1", "err2", "err3"},
+			want:  true,
+		},
+		{
+			name:  "apiErr.Error matching second code",
+			err:   apiErr.NewServerError(403, "{\"Code\": \"err2\"}", ""),
+			codes: []string{"err1", "err2", "err3"},
+			want:  true,
+		},
+		{
+			name:  "apiErr.Error matching last code",
+			err:   apiErr.NewServerError(403, "{\"Code\": \"err3\"}", ""),
+			codes: []string{"err1", "err2", "err3"},
+			want:  true,
+		},
+		{
+			name:  "apiErr.Error not matching any code",
+			err:   apiErr.NewServerError(403, "{\"Code\": \"errOther\"}", ""),
+			codes: []string{"err1", "err2", "err3"},
+			want:  false,
+		},
+		{
+			name:  "apiErr.Error with empty codes",
+			err:   apiErr.NewServerError(403, "{\"Code\": \"err1\"}", ""),
+			codes: []string{},
+			want:  false,
+		},
+		{
+			name:  "tea.SDKError matching first code",
+			err:   &tea.SDKError{Code: tea.String("sdk1"), Message: tea.String("test")},
+			codes: []string{"sdk1", "sdk2", "sdk3"},
+			want:  true,
+		},
+		{
+			name:  "tea.SDKError matching second code",
+			err:   &tea.SDKError{Code: tea.String("sdk2"), Message: tea.String("test")},
+			codes: []string{"sdk1", "sdk2", "sdk3"},
+			want:  true,
+		},
+		{
+			name:  "tea.SDKError matching last code",
+			err:   &tea.SDKError{Code: tea.String("sdk3"), Message: tea.String("test")},
+			codes: []string{"sdk1", "sdk2", "sdk3"},
+			want:  true,
+		},
+		{
+			name:  "tea.SDKError not matching any code",
+			err:   &tea.SDKError{Code: tea.String("sdkOther"), Message: tea.String("test")},
+			codes: []string{"sdk1", "sdk2", "sdk3"},
+			want:  false,
+		},
+		{
+			name:  "tea.SDKError with empty codes",
+			err:   &tea.SDKError{Code: tea.String("sdk1"), Message: tea.String("test")},
+			codes: []string{},
+			want:  false,
+		},
+		{
+			name:  "tea.SDKError with nil Code",
+			err:   &tea.SDKError{Code: nil, Message: tea.String("test")},
+			codes: []string{"sdk1"},
+			want:  false,
+		},
+		{
+			name:  "regular error not matching",
+			err:   errors.New("regular error"),
+			codes: []string{"err1", "err2"},
+			want:  false,
+		},
+		{
+			name:  "nil error",
+			err:   nil,
+			codes: []string{"err1", "err2"},
+			want:  false,
+		},
+		{
+			name:  "wrapped apiErr.Error matching",
+			err:   fmt.Errorf("wrapped: %w", apiErr.NewServerError(403, "{\"Code\": \"err1\"}", "")),
+			codes: []string{"err1", "err2"},
+			want:  true,
+		},
+		{
+			name:  "wrapped tea.SDKError matching",
+			err:   fmt.Errorf("wrapped: %w", &tea.SDKError{Code: tea.String("sdk1")}),
+			codes: []string{"sdk1", "sdk2"},
+			want:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ErrorCodeIsAny(tt.err, tt.codes...)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
