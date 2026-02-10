@@ -91,6 +91,34 @@ func ErrorCodeIs(err error, codes ...string) bool {
 	return false
 }
 
+// ErrorCodeIsAny checks if error matches any of the provided error codes.
+// It supports both apiErr.Error and tea.SDKError types.
+func ErrorCodeIsAny(err error, codes ...string) bool {
+	// Try apiErr.Error first
+	var respErr apiErr.Error
+	ok := errors.As(err, &respErr)
+	if ok {
+		for _, code := range codes {
+			if respErr.ErrorCode() == code {
+				return true
+			}
+		}
+	}
+
+	// Try tea.SDKError
+	var sdkErr *tea.SDKError
+	ok = errors.As(err, &sdkErr)
+	if ok {
+		for _, code := range codes {
+			if tea.StringValue(sdkErr.Code) == code {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // ErrRequestID try to get requestID
 func ErrRequestID(err error) string {
 	var respErr *apiErr.ServerError
