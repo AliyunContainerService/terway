@@ -32,6 +32,16 @@ const (
 	APIGetNodeInfoForPod             = "GetNodeInfoForPod"
 )
 
+// getDeleteCheckBackoff returns the backoff configuration for polling ENI deletion status.
+// ~3 retries over ~30s: 4 checks with 10s intervals.
+var getDeleteCheckBackoff = func() wait.Backoff {
+	return wait.Backoff{
+		Duration: 10 * time.Second,
+		Factor:   1,
+		Steps:    4,
+	}
+}
+
 type EFLOService struct {
 	ClientSet        credential.Client
 	IdempotentKeyGen IdempotentKeyGen
@@ -472,9 +482,38 @@ func (a *EFLOService) DeleteElasticNetworkInterface(ctx context.Context, eniID s
 			l.Error(err, "failed")
 			return err
 		}
+		// already deleted, no polling needed
+		l.WithValues(LogFieldRequestID, resp.RequestId).Info("leni already not found")
+		return nil
 	}
 
-	l.WithValues(LogFieldRequestID, resp.RequestId).Info("succeed")
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("delete request accepted, polling for deletion")
+
+	// Async deletion: poll to confirm the LENI is actually deleted
+	rawStatus := true
+	err = wait.ExponentialBackoffWithContext(ctx, getDeleteCheckBackoff(), func(ctx context.Context) (bool, error) {
+		enis, descErr := a.DescribeLeniNetworkInterface(ctx, &DescribeNetworkInterfaceOptions{
+			NetworkInterfaceIDs: &[]string{eniID},
+			RawStatus:           &rawStatus,
+		})
+		if descErr != nil {
+			l.Info("failed to query leni during deletion check, retrying", "err", descErr)
+			return false, nil
+		}
+		if len(enis) == 0 {
+			return true, nil
+		}
+		if enis[0].Status == LENIStatusDeleteFailed {
+			return true, fmt.Errorf("leni %s entered %s status", eniID, LENIStatusDeleteFailed)
+		}
+		l.Info("leni still exists, waiting for deletion", "status", enis[0].Status)
+		return false, nil
+	})
+	if err != nil {
+		return fmt.Errorf("timeout waiting for leni %s to be deleted: %w", eniID, err)
+	}
+
+	l.Info("leni deletion confirmed")
 	return nil
 }
 

@@ -550,66 +550,110 @@ func TestEFLOService_DetachLeni_WithGomonkey_ErrorCode(t *testing.T) {
 func TestEFLOService_DeleteElasticNetworkInterface_WithGomonkey(t *testing.T) {
 	efloService := createTestEFLOServiceForAPI()
 
-	// Mock response
-	mockResponse := &eflo.DeleteElasticNetworkInterfaceResponse{
-		Code:      0,
-		Message:   "Success",
-		RequestId: "test-request-id",
-	}
+	// Controls the polling list mock behavior
+	// "deleted" -> return empty (ENI gone), "deleting" -> return ENI in Deleting, "deleteFailed" -> return ENI in Delete Failed
+	pollResult := "deleted"
 
-	// Mock DeleteElasticNetworkInterface method
-	patches := gomonkey.ApplyFunc(
+	// Use ApplyFuncSeq for all delete call scenarios in a single patches object
+	// This avoids gomonkey ARM64 patch reset issues when patching the same function across tests
+	patches := gomonkey.ApplyFuncSeq(
 		(*eflo.Client).DeleteElasticNetworkInterface,
-		func(client *eflo.Client, request *eflo.DeleteElasticNetworkInterfaceRequest) (*eflo.DeleteElasticNetworkInterfaceResponse, error) {
-			// Verify request parameters
-			assert.Equal(t, "leni-test-001", request.ElasticNetworkInterfaceId)
-
-			return mockResponse, nil
+		[]gomonkey.OutputCell{
+			// Call 1: Success (code 0) -> enters polling, polling confirms deleted
+			{Values: gomonkey.Params{&eflo.DeleteElasticNetworkInterfaceResponse{
+				Code: 0, Message: "Success", RequestId: "req-1",
+			}, nil}, Times: 1},
+			// Call 2: ErrorCode 1001 -> error returned immediately
+			{Values: gomonkey.Params{&eflo.DeleteElasticNetworkInterfaceResponse{
+				Code: 1001, Message: "Internal error", RequestId: "req-2", Content: eflo.Content{},
+			}, nil}, Times: 1},
+			// Call 3: ErrorCode 1011 (not found) -> succeed without polling
+			{Values: gomonkey.Params{&eflo.DeleteElasticNetworkInterfaceResponse{
+				Code: 1011, Message: "Resource not found", RequestId: "req-3", Content: eflo.Content{},
+			}, nil}, Times: 1},
+			// Call 4: Success (code 0) -> enters polling, polling times out
+			{Values: gomonkey.Params{&eflo.DeleteElasticNetworkInterfaceResponse{
+				Code: 0, Message: "Success", RequestId: "req-4",
+			}, nil}, Times: 1},
+			// Call 5: Success (code 0) -> enters polling, ENI enters Delete Failed
+			{Values: gomonkey.Params{&eflo.DeleteElasticNetworkInterfaceResponse{
+				Code: 0, Message: "Success", RequestId: "req-5",
+			}, nil}, Times: 1},
 		},
 	)
 	defer patches.Reset()
 
-	// Execute test
-	ctx := context.Background()
-	err := efloService.DeleteElasticNetworkInterface(
-		ctx,
-		"leni-test-001",
+	// Fast backoff for testing
+	patches.ApplyGlobalVar(&getDeleteCheckBackoff, func() wait.Backoff {
+		return wait.Backoff{Duration: time.Millisecond, Steps: 4}
+	})
+
+	// Mock ListElasticNetworkInterfaces - behavior controlled by pollResult flag
+	// Note: RawStatus=true is passed by the delete polling, so status is NOT mapped
+	patches.ApplyFunc(
+		(*eflo.Client).ListElasticNetworkInterfaces,
+		func(client *eflo.Client, request *eflo.ListElasticNetworkInterfacesRequest) (*eflo.ListElasticNetworkInterfacesResponse, error) {
+			switch pollResult {
+			case "deleted":
+				return &eflo.ListElasticNetworkInterfacesResponse{
+					Code: 0, Message: "Success", RequestId: "req-list",
+					Content: eflo.Content{Data: []eflo.DataItem{}},
+				}, nil
+			case "deleteFailed":
+				return &eflo.ListElasticNetworkInterfacesResponse{
+					Code: 0, Message: "Success", RequestId: "req-list",
+					Content: eflo.Content{Data: []eflo.DataItem{
+						{ElasticNetworkInterfaceId: "leni-test-001", Status: LENIStatusDeleteFailed, Type: "CUSTOM"},
+					}},
+				}, nil
+			default: // "deleting"
+				return &eflo.ListElasticNetworkInterfacesResponse{
+					Code: 0, Message: "Success", RequestId: "req-list",
+					Content: eflo.Content{Data: []eflo.DataItem{
+						{ElasticNetworkInterfaceId: "leni-test-001", Status: LENIStatusDeleting, Type: "CUSTOM"},
+					}},
+				}, nil
+			}
+		},
 	)
 
-	// Verify result
+	// Mock ListLeniPrivateIpAddresses (called by DescribeLeniNetworkInterface for each found ENI)
+	patches.ApplyFunc(
+		(*eflo.Client).ListLeniPrivateIpAddresses,
+		func(client *eflo.Client, request *eflo.ListLeniPrivateIpAddressesRequest) (*eflo.ListLeniPrivateIpAddressesResponse, error) {
+			return &eflo.ListLeniPrivateIpAddressesResponse{
+				Code: 0, Message: "Success", RequestId: "req-ips", Content: eflo.Content{},
+			}, nil
+		},
+	)
+
+	ctx := context.Background()
+
+	// Scenario 1: Delete succeeds, polling confirms deletion
+	pollResult = "deleted"
+	err := efloService.DeleteElasticNetworkInterface(ctx, "leni-test-001")
 	assert.NoError(t, err)
-}
 
-func TestEFLOService_DeleteElasticNetworkInterface_WithGomonkey_ErrorCode(t *testing.T) {
-	efloService := createTestEFLOServiceForAPI()
-
-	// Mock response with non-zero code (not 1011, so it should return error)
-	mockResponse := &eflo.DeleteElasticNetworkInterfaceResponse{
-		Code:      1001,
-		Message:   "Resource not found",
-		RequestId: "test-request-id",
-		Content:   eflo.Content{},
-	}
-
-	// Mock DeleteElasticNetworkInterface method
-	patches := gomonkey.ApplyFunc(
-		(*eflo.Client).DeleteElasticNetworkInterface,
-		func(client *eflo.Client, request *eflo.DeleteElasticNetworkInterfaceRequest) (*eflo.DeleteElasticNetworkInterfaceResponse, error) {
-			return mockResponse, nil
-		},
-	)
-	defer patches.Reset()
-
-	// Execute test
-	ctx := context.Background()
-	err := efloService.DeleteElasticNetworkInterface(
-		ctx,
-		"leni-test-001",
-	)
-
-	// Verify result
+	// Scenario 2: Delete returns error code 1001 (not 1011) - should error
+	err = efloService.DeleteElasticNetworkInterface(ctx, "leni-test-001")
 	assert.Error(t, err)
 	assert.True(t, apiErr.IsEfloCode(err, 1001))
+
+	// Scenario 3: Delete returns 1011 (already not found) - should succeed
+	err = efloService.DeleteElasticNetworkInterface(ctx, "leni-test-001")
+	assert.NoError(t, err)
+
+	// Scenario 4: Delete succeeds but polling times out (ENI still in Deleting)
+	pollResult = "deleting"
+	err = efloService.DeleteElasticNetworkInterface(ctx, "leni-test-001")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "timeout waiting for leni")
+
+	// Scenario 5: Delete succeeds but ENI enters Delete Failed - should error immediately
+	pollResult = "deleteFailed"
+	err = efloService.DeleteElasticNetworkInterface(ctx, "leni-test-001")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), LENIStatusDeleteFailed)
 }
 
 func TestEFLOService_ListLeniPrivateIPAddresses_WithGomonkey(t *testing.T) {
