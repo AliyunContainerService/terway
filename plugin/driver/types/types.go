@@ -59,6 +59,9 @@ type SymmetricRoutingConfig struct {
 	RulePriority int `json:"rule_priority,omitempty"`
 	// Comment is the comment for iptables rules
 	Comment string `json:"comment,omitempty"`
+	// Backend specifies the firewall backend to use: "iptables" or "nftables"
+	// Default is "iptables"
+	Backend string `json:"backend,omitempty"`
 }
 
 func (n *CNIConf) IPVlan() bool {

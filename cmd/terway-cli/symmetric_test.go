@@ -1,3 +1,5 @@
+//go:build linux
+
 package main
 
 import (
@@ -81,6 +83,11 @@ func TestConfigureNetworkRules(t *testing.T) {
 		exists, err := ipt.Exists("mangle", "PREROUTING", "-i", "eth0", "-j", "CONNMARK", "--set-xmark", "0x10/0x10", "-m", "comment", "--comment", "terway-symmetric")
 		assert.NoError(t, err, "Failed to check CONNMARK set rule")
 		assert.True(t, exists, "CONNMARK set rule should exist")
+
+		// Check CONNMARK restore-mark rule
+		exists, err = ipt.Exists("mangle", "PREROUTING", "-j", "CONNMARK", "--restore-mark", "--mask", "0x10", "-m", "comment", "--comment", "terway-symmetric")
+		assert.NoError(t, err, "Failed to check CONNMARK restore-mark rule")
+		assert.True(t, exists, "CONNMARK restore-mark rule should exist")
 
 		return nil
 	})
@@ -194,6 +201,11 @@ func TestConfigureNetworkRulesIPv6(t *testing.T) {
 		assert.NoError(t, err, "Failed to check IPv6 CONNMARK set rule")
 		assert.True(t, exists, "IPv6 CONNMARK set rule should exist")
 
+		// Check CONNMARK restore-mark rule for IPv6
+		exists, err = ipt.Exists("mangle", "PREROUTING", "-j", "CONNMARK", "--restore-mark", "--mask", "0x10", "-m", "comment", "--comment", "terway-symmetric")
+		assert.NoError(t, err, "Failed to check IPv6 CONNMARK restore-mark rule")
+		assert.True(t, exists, "IPv6 CONNMARK restore-mark rule should exist")
+
 		return nil
 	})
 }
@@ -279,6 +291,10 @@ func TestConfigureNetworkRulesDualStack(t *testing.T) {
 		assert.NoError(t, err, "Failed to check IPv4 CONNMARK set rule")
 		assert.True(t, exists, "IPv4 CONNMARK set rule should exist")
 
+		exists, err = ipt4.Exists("mangle", "PREROUTING", "-j", "CONNMARK", "--restore-mark", "--mask", "0x10", "-m", "comment", "--comment", "terway-symmetric")
+		assert.NoError(t, err, "Failed to check IPv4 CONNMARK restore-mark rule")
+		assert.True(t, exists, "IPv4 CONNMARK restore-mark rule should exist")
+
 		// Verify IPv6 iptables rules
 		ipt6, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv6))
 		require.NoError(t, err, "Failed to create IPv6 iptables instance")
@@ -286,6 +302,10 @@ func TestConfigureNetworkRulesDualStack(t *testing.T) {
 		exists, err = ipt6.Exists("mangle", "PREROUTING", "-i", "eth0", "-j", "CONNMARK", "--set-xmark", "0x10/0x10", "-m", "comment", "--comment", "terway-symmetric")
 		assert.NoError(t, err, "Failed to check IPv6 CONNMARK set rule")
 		assert.True(t, exists, "IPv6 CONNMARK set rule should exist")
+
+		exists, err = ipt6.Exists("mangle", "PREROUTING", "-j", "CONNMARK", "--restore-mark", "--mask", "0x10", "-m", "comment", "--comment", "terway-symmetric")
+		assert.NoError(t, err, "Failed to check IPv6 CONNMARK restore-mark rule")
+		assert.True(t, exists, "IPv6 CONNMARK restore-mark rule should exist")
 
 		return nil
 	})
@@ -442,6 +462,11 @@ func TestConfigureNetworkRulesWithConfig(t *testing.T) {
 		exists, err := ipt.Exists("mangle", "PREROUTING", "-i", "eth0", "-j", "CONNMARK", "--set-xmark", "0x40/0x40", "-m", "comment", "--comment", "test-custom-config")
 		assert.NoError(t, err, "Failed to check custom CONNMARK set rule")
 		assert.True(t, exists, "Custom CONNMARK set rule should exist")
+
+		// Check CONNMARK restore-mark rule with custom config
+		exists, err = ipt.Exists("mangle", "PREROUTING", "-j", "CONNMARK", "--restore-mark", "--mask", "0x40", "-m", "comment", "--comment", "test-custom-config")
+		assert.NoError(t, err, "Failed to check custom CONNMARK restore-mark rule")
+		assert.True(t, exists, "Custom CONNMARK restore-mark rule should exist")
 
 		return nil
 	})
