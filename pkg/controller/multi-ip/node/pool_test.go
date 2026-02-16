@@ -1031,6 +1031,10 @@ func Test_assignEniWithOptions(t *testing.T) {
 						},
 					},
 				},
+				// toAdd now represents actual allocation demand (pre-calculated considering existing idle IPs)
+				// In this test, we want to allocate 1 IPv4 (no idle IPv4) but 0 IPv6 (1 idle IPv6)
+				// So toAdd should be 1 for IPv4 only scenario
+				// Since assignEniWithOptions now doesn't subtract idle IPs, we pass exact demand
 				toAdd: 1,
 				options: []*eniOptions{
 					{
@@ -1062,8 +1066,10 @@ func Test_assignEniWithOptions(t *testing.T) {
 				},
 			},
 			checkResult: func(t *testing.T, options []*eniOptions) {
+				// New behavior: toAdd=1 means allocate exactly 1 IP for both IPv4 and IPv6 (if enabled)
+				// The caller (addIP) is responsible for calculating the correct demand
 				assert.Equal(t, 1, options[0].addIPv4N)
-				assert.Equal(t, 0, options[0].addIPv6N)
+				assert.Equal(t, 1, options[0].addIPv6N)
 			},
 		},
 		{
@@ -1083,6 +1089,8 @@ func Test_assignEniWithOptions(t *testing.T) {
 						},
 					},
 				},
+				// toAdd is now the actual allocation demand (not total)
+				// eni-1 is full (4 IPs), so all allocation goes to new ENI
 				toAdd: 3,
 				options: []*eniOptions{
 					{
@@ -1139,10 +1147,12 @@ func Test_assignEniWithOptions(t *testing.T) {
 				},
 			},
 			checkResult: func(t *testing.T, options []*eniOptions) {
-				assert.Equal(t, 0, options[0].addIPv4N, "should reuse prev ip")
-				assert.Equal(t, 0, options[0].addIPv6N, "should reuse prev ip")
-				assert.Equal(t, 2, options[1].addIPv4N, "should reuse prev ip")
-				assert.Equal(t, 2, options[1].addIPv6N, "should reuse prev ip")
+				// eni-1 is full (4 IPs), so no allocation to it
+				assert.Equal(t, 0, options[0].addIPv4N, "eni-1 is full")
+				assert.Equal(t, 0, options[0].addIPv6N, "eni-1 is full")
+				// All 3 go to new ENI
+				assert.Equal(t, 3, options[1].addIPv4N, "new ENI gets all allocation")
+				assert.Equal(t, 3, options[1].addIPv6N, "new ENI gets all allocation")
 			},
 		},
 		{
@@ -4219,133 +4229,93 @@ func TestShouldPerformWarmUp(t *testing.T) {
 	}
 }
 
-func TestCalculateWarmUpDemand(t *testing.T) {
+func TestCountTotalIdleIPs(t *testing.T) {
 	tests := []struct {
 		name     string
 		node     *networkv1beta1.Node
 		expected int
 	}{
 		{
-			name: "Need more IPs for warm-up",
+			name: "Count idle IPs from InUse ENIs only",
 			node: &networkv1beta1.Node{
 				Spec: networkv1beta1.NodeSpec{
-					NodeCap: networkv1beta1.NodeCap{
-						Adapters:       3,
-						IPv4PerAdapter: 10,
-					},
 					ENISpec: &networkv1beta1.ENISpec{
 						EnableIPv4: true,
 					},
 				},
 				Status: networkv1beta1.NodeStatus{
-					WarmUpTarget:         15,
-					WarmUpAllocatedCount: 3,
-					WarmUpCompleted:      false,
 					NetworkInterfaces: map[string]*networkv1beta1.Nic{
 						"eni-1": {
 							Status: aliyunClient.ENIStatusInUse,
 							IPv4: map[string]*networkv1beta1.IP{
-								"10.0.0.1": {Primary: true, Status: networkv1beta1.IPStatusValid},
-								"10.0.0.2": {Primary: false, Status: networkv1beta1.IPStatusValid},
-								"10.0.0.3": {Primary: false, Status: networkv1beta1.IPStatusValid},
+								"10.0.0.1": {Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"},     // primary, not idle
+								"10.0.0.2": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},           // idle
+								"10.0.0.3": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: "pod1"},       // used
+								"10.0.0.4": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},           // idle
+								"10.0.0.5": {Primary: false, Status: networkv1beta1.IPStatusDeleting, PodID: ""},        // deleting, not counted
+							},
+						},
+						"eni-2": {
+							Status: aliyunClient.ENIStatusInUse,
+							IPv4: map[string]*networkv1beta1.IP{
+								"10.0.1.1": {Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"},     // primary, not idle
+								"10.0.1.2": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},           // idle
+							},
+						},
+						"eni-3": {
+							Status: aliyunClient.ENIStatusAttaching,
+							IPv4: map[string]*networkv1beta1.IP{
+								"10.0.2.1": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},           // not counted, ENI not InUse
 							},
 						},
 					},
 				},
 			},
-			expected: 15, // remaining=15-3=12, currentTotal=3, min(3+12, 30)=15
+			expected: 3, // 2 from eni-1 + 1 from eni-2
 		},
 		{
-			name: "Partial warmup progress",
+			name: "No ENIs",
 			node: &networkv1beta1.Node{
 				Spec: networkv1beta1.NodeSpec{
-					NodeCap: networkv1beta1.NodeCap{
-						Adapters:       3,
-						IPv4PerAdapter: 10,
-					},
 					ENISpec: &networkv1beta1.ENISpec{
 						EnableIPv4: true,
 					},
 				},
 				Status: networkv1beta1.NodeStatus{
-					WarmUpTarget:         10,
-					WarmUpAllocatedCount: 8,
-					WarmUpCompleted:      false,
-					NetworkInterfaces: map[string]*networkv1beta1.Nic{
-						"eni-1": {
-							Status: aliyunClient.ENIStatusInUse,
-							IPv4: map[string]*networkv1beta1.IP{
-								"10.0.0.1": {Primary: true, Status: networkv1beta1.IPStatusValid},
-								"10.0.0.2": {Primary: false, Status: networkv1beta1.IPStatusValid},
-								"10.0.0.3": {Primary: false, Status: networkv1beta1.IPStatusValid},
-								"10.0.0.4": {Primary: false, Status: networkv1beta1.IPStatusValid},
-								"10.0.0.5": {Primary: false, Status: networkv1beta1.IPStatusValid},
-								"10.0.0.6": {Primary: false, Status: networkv1beta1.IPStatusValid},
-								"10.0.0.7": {Primary: false, Status: networkv1beta1.IPStatusValid},
-							},
-						},
-					},
-				},
-			},
-			expected: 9, // remaining=10-8=2, currentTotal=7, min(7+2, 30)=9
-		},
-		{
-			name: "Warm-up target already reached by WarmUpAllocatedCount",
-			node: &networkv1beta1.Node{
-				Spec: networkv1beta1.NodeSpec{
-					NodeCap: networkv1beta1.NodeCap{
-						Adapters:       3,
-						IPv4PerAdapter: 10,
-					},
-					ENISpec: &networkv1beta1.ENISpec{
-						EnableIPv4: true,
-					},
-				},
-				Status: networkv1beta1.NodeStatus{
-					WarmUpTarget:         5,
-					WarmUpAllocatedCount: 5,
-					WarmUpCompleted:      false,
-					NetworkInterfaces: map[string]*networkv1beta1.Nic{
-						"eni-1": {
-							Status: aliyunClient.ENIStatusInUse,
-							IPv4: map[string]*networkv1beta1.IP{
-								"10.0.0.1": {Primary: true, Status: networkv1beta1.IPStatusValid},
-								"10.0.0.2": {Primary: false, Status: networkv1beta1.IPStatusValid},
-								"10.0.0.3": {Primary: false, Status: networkv1beta1.IPStatusValid},
-							},
-						},
-					},
-				},
-			},
-			expected: 0, // remaining=5-5=0, return 0
-		},
-		{
-			name: "Warm-up completed",
-			node: &networkv1beta1.Node{
-				Spec: networkv1beta1.NodeSpec{
-					NodeCap: networkv1beta1.NodeCap{
-						Adapters:       3,
-						IPv4PerAdapter: 10,
-					},
-					ENISpec: &networkv1beta1.ENISpec{
-						EnableIPv4: true,
-					},
-				},
-				Status: networkv1beta1.NodeStatus{
-					WarmUpTarget:         10,
-					WarmUpAllocatedCount: 10,
-					WarmUpCompleted:      true,
-					NetworkInterfaces:    map[string]*networkv1beta1.Nic{},
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{},
 				},
 			},
 			expected: 0,
+		},
+		{
+			name: "IPv6 mode",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					ENISpec: &networkv1beta1.ENISpec{
+						EnableIPv4: false,
+						EnableIPv6: true,
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
+						"eni-1": {
+							Status: aliyunClient.ENIStatusInUse,
+							IPv6: map[string]*networkv1beta1.IP{
+								"fd00::1": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"fd00::2": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"fd00::3": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: "pod1"},
+							},
+						},
+					},
+				},
+			},
+			expected: 2, // 2 idle IPv6 IPs
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reconciler := &ReconcileNode{}
-			result := reconciler.calculateWarmUpDemand(tt.node)
+			result := countTotalIdleIPs(tt.node)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
