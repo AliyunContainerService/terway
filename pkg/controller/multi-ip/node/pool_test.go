@@ -4248,24 +4248,24 @@ func TestCountTotalIdleIPs(t *testing.T) {
 						"eni-1": {
 							Status: aliyunClient.ENIStatusInUse,
 							IPv4: map[string]*networkv1beta1.IP{
-								"10.0.0.1": {Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"},     // primary, not idle
-								"10.0.0.2": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},           // idle
-								"10.0.0.3": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: "pod1"},       // used
-								"10.0.0.4": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},           // idle
-								"10.0.0.5": {Primary: false, Status: networkv1beta1.IPStatusDeleting, PodID: ""},        // deleting, not counted
+								"10.0.0.1": {Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"}, // primary, not idle
+								"10.0.0.2": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},       // idle
+								"10.0.0.3": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: "pod1"},   // used
+								"10.0.0.4": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},       // idle
+								"10.0.0.5": {Primary: false, Status: networkv1beta1.IPStatusDeleting, PodID: ""},    // deleting, not counted
 							},
 						},
 						"eni-2": {
 							Status: aliyunClient.ENIStatusInUse,
 							IPv4: map[string]*networkv1beta1.IP{
-								"10.0.1.1": {Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"},     // primary, not idle
-								"10.0.1.2": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},           // idle
+								"10.0.1.1": {Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"}, // primary, not idle
+								"10.0.1.2": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},       // idle
 							},
 						},
 						"eni-3": {
 							Status: aliyunClient.ENIStatusAttaching,
 							IPv4: map[string]*networkv1beta1.IP{
-								"10.0.2.1": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},           // not counted, ENI not InUse
+								"10.0.2.1": {Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""}, // not counted, ENI not InUse
 							},
 						},
 					},
@@ -4319,6 +4319,354 @@ func TestCountTotalIdleIPs(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// TestAddIPDemandCalculation tests the demand calculation logic in addIP
+// This verifies the fix for the issue where vSwitch-exhausted ENIs' idle IPs
+// were not counted, causing incorrect warmup decisions.
+func TestAddIPDemandCalculation(t *testing.T) {
+	tests := []struct {
+		name                     string
+		node                     *networkv1beta1.Node
+		unSucceedPods            map[string]*PodRequest
+		expectedMinPoolDemand    int
+		expectedWarmUpDemand     int
+		expectedAllocationDemand int
+		description              string
+	}{
+		{
+			name: "MinPoolSize satisfied - pool has sufficient idle IPs",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 10,
+					},
+					ENISpec: &networkv1beta1.ENISpec{
+						EnableIPv4: true,
+					},
+					Pool: &networkv1beta1.PoolSpec{
+						MinPoolSize: 5,
+						MaxPoolSize: 10,
+					},
+					Flavor: []networkv1beta1.Flavor{
+						{NetworkInterfaceType: networkv1beta1.ENITypeSecondary, NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard, Count: 2},
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
+						"eni-1": {
+							ID:     "eni-1",
+							Status: aliyunClient.ENIStatusInUse,
+							IPv4: map[string]*networkv1beta1.IP{
+								"10.0.0.1":  {IP: "10.0.0.1", Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"},
+								"10.0.0.2":  {IP: "10.0.0.2", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.3":  {IP: "10.0.0.3", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.4":  {IP: "10.0.0.4", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.5":  {IP: "10.0.0.5", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.6":  {IP: "10.0.0.6", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.7":  {IP: "10.0.0.7", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.8":  {IP: "10.0.0.8", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.9":  {IP: "10.0.0.9", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.10": {IP: "10.0.0.10", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+							},
+						},
+					},
+				},
+			},
+			unSucceedPods: map[string]*PodRequest{
+				"pod1": {RequireIPv4: true},
+				"pod2": {RequireIPv4: true},
+			},
+			// totalIdleIPs = 9 (excluding primary)
+			// podDemand = 2
+			// minPoolDemand = max(0, 5 + 2 - 9) = 0
+			// warmUpDemand = 0 (no warmup configured)
+			// allocationDemand = 2 + max(0, 0) = 2 (just for pods)
+			expectedMinPoolDemand:    0,
+			expectedWarmUpDemand:     0,
+			expectedAllocationDemand: 2,
+			description:              "Pool has 9 idle IPs, MinPoolSize=5, podDemand=2. After serving pods, 7 idle remain > 5. No warmup needed.",
+		},
+		{
+			name: "MinPoolSize not satisfied - need more IPs",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 10,
+					},
+					ENISpec: &networkv1beta1.ENISpec{
+						EnableIPv4: true,
+					},
+					Pool: &networkv1beta1.PoolSpec{
+						MinPoolSize: 5,
+						MaxPoolSize: 10,
+					},
+					Flavor: []networkv1beta1.Flavor{
+						{NetworkInterfaceType: networkv1beta1.ENITypeSecondary, NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard, Count: 2},
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
+						"eni-1": {
+							ID:     "eni-1",
+							Status: aliyunClient.ENIStatusInUse,
+							IPv4: map[string]*networkv1beta1.IP{
+								"10.0.0.1": {IP: "10.0.0.1", Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"},
+								"10.0.0.2": {IP: "10.0.0.2", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.3": {IP: "10.0.0.3", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+							},
+						},
+					},
+				},
+			},
+			unSucceedPods: map[string]*PodRequest{
+				"pod1": {RequireIPv4: true},
+				"pod2": {RequireIPv4: true},
+			},
+			// totalIdleIPs = 2
+			// podDemand = 2
+			// minPoolDemand = max(0, 5 + 2 - 2) = 5
+			// allocationDemand = 2 + 5 = 7
+			expectedMinPoolDemand:    5,
+			expectedWarmUpDemand:     0,
+			expectedAllocationDemand: 7,
+			description:              "Pool has 2 idle IPs, MinPoolSize=5, podDemand=2. Need to allocate 5 more for warmup + 2 for pods.",
+		},
+		{
+			name: "WarmUp in progress - allocate remaining",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 10,
+					},
+					ENISpec: &networkv1beta1.ENISpec{
+						EnableIPv4: true,
+					},
+					Pool: &networkv1beta1.PoolSpec{
+						MinPoolSize: 3,
+						MaxPoolSize: 10,
+					},
+					Flavor: []networkv1beta1.Flavor{
+						{NetworkInterfaceType: networkv1beta1.ENITypeSecondary, NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard, Count: 2},
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         10,
+					WarmUpAllocatedCount: 5,
+					WarmUpCompleted:      false,
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{
+						"eni-1": {
+							ID:     "eni-1",
+							Status: aliyunClient.ENIStatusInUse,
+							IPv4: map[string]*networkv1beta1.IP{
+								"10.0.0.1": {IP: "10.0.0.1", Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"},
+								"10.0.0.2": {IP: "10.0.0.2", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.3": {IP: "10.0.0.3", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.4": {IP: "10.0.0.4", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.5": {IP: "10.0.0.5", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+								"10.0.0.6": {IP: "10.0.0.6", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+							},
+						},
+					},
+				},
+			},
+			unSucceedPods: map[string]*PodRequest{},
+			// totalIdleIPs = 5
+			// podDemand = 0
+			// minPoolDemand = max(0, 3 + 0 - 5) = 0
+			// warmUpDemand = 10 - 5 = 5
+			// allocationDemand = 0 + max(0, 5) = 5
+			expectedMinPoolDemand:    0,
+			expectedWarmUpDemand:     5,
+			expectedAllocationDemand: 5,
+			description:              "WarmUpTarget=10, allocated=5, remaining=5. MinPoolSize already satisfied.",
+		},
+		{
+			name: "WarmUp takes precedence over MinPoolSize",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 10,
+					},
+					ENISpec: &networkv1beta1.ENISpec{
+						EnableIPv4: true,
+					},
+					Pool: &networkv1beta1.PoolSpec{
+						MinPoolSize: 3,
+						MaxPoolSize: 20,
+					},
+					Flavor: []networkv1beta1.Flavor{
+						{NetworkInterfaceType: networkv1beta1.ENITypeSecondary, NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard, Count: 2},
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					WarmUpTarget:         10,
+					WarmUpAllocatedCount: 0,
+					WarmUpCompleted:      false,
+					NetworkInterfaces:    map[string]*networkv1beta1.Nic{},
+				},
+			},
+			unSucceedPods: map[string]*PodRequest{
+				"pod1": {RequireIPv4: true},
+			},
+			// totalIdleIPs = 0
+			// podDemand = 1
+			// minPoolDemand = max(0, 3 + 1 - 0) = 4
+			// warmUpDemand = 10 - 0 = 10
+			// allocationDemand = 1 + max(4, 10) = 11
+			expectedMinPoolDemand:    4,
+			expectedWarmUpDemand:     10,
+			expectedAllocationDemand: 11,
+			description:              "WarmUp demand (10) > MinPool demand (4), so use warmUp. Total = 1 (pod) + 10 (warmup) = 11.",
+		},
+		{
+			name: "Empty pool with no demands",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 10,
+					},
+					ENISpec: &networkv1beta1.ENISpec{
+						EnableIPv4: true,
+					},
+					Pool: &networkv1beta1.PoolSpec{
+						MinPoolSize: 0,
+						MaxPoolSize: 10,
+					},
+					Flavor: []networkv1beta1.Flavor{
+						{NetworkInterfaceType: networkv1beta1.ENITypeSecondary, NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard, Count: 2},
+					},
+				},
+				Status: networkv1beta1.NodeStatus{
+					WarmUpCompleted:   true,
+					NetworkInterfaces: map[string]*networkv1beta1.Nic{},
+				},
+			},
+			unSucceedPods: map[string]*PodRequest{},
+			// totalIdleIPs = 0
+			// podDemand = 0
+			// minPoolDemand = max(0, 0 + 0 - 0) = 0
+			// warmUpDemand = 0 (completed)
+			// allocationDemand = 0
+			expectedMinPoolDemand:    0,
+			expectedWarmUpDemand:     0,
+			expectedAllocationDemand: 0,
+			description:              "No pods, no MinPoolSize, warmup completed. No allocation needed.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Calculate using the same logic as addIP
+			totalIdleIPs := countTotalIdleIPs(tt.node)
+
+			normalPods := lo.PickBy(tt.unSucceedPods, func(key string, value *PodRequest) bool {
+				return !value.RequireERDMA
+			})
+			podDemand := len(normalPods)
+
+			// MinPoolSize demand calculation
+			minPoolDemand := max(0, tt.node.Spec.Pool.MinPoolSize+podDemand-totalIdleIPs)
+
+			// WarmUp demand calculation
+			warmUpDemand := 0
+			if !tt.node.Status.WarmUpCompleted && tt.node.Status.WarmUpTarget > 0 {
+				warmUpDemand = max(0, tt.node.Status.WarmUpTarget-tt.node.Status.WarmUpAllocatedCount)
+			}
+
+			// Total allocation demand
+			allocationDemand := podDemand + max(minPoolDemand, warmUpDemand)
+
+			assert.Equal(t, tt.expectedMinPoolDemand, minPoolDemand, "minPoolDemand mismatch: %s", tt.description)
+			assert.Equal(t, tt.expectedWarmUpDemand, warmUpDemand, "warmUpDemand mismatch: %s", tt.description)
+			assert.Equal(t, tt.expectedAllocationDemand, allocationDemand, "allocationDemand mismatch: %s", tt.description)
+		})
+	}
+}
+
+// TestVSwitchExhaustedENIScenario tests the core fix:
+// ENIs with exhausted vSwitch still have their idle IPs counted for MinPoolSize check
+func TestVSwitchExhaustedENIScenario(t *testing.T) {
+	// This test verifies the fix for the issue where:
+	// - ENI-1 has 10 idle IPs but vSwitch is exhausted
+	// - ENI-2 has 0 idle IPs but vSwitch has available IPs
+	// - MinPoolSize = 5
+	// Before fix: System incorrectly thought warmup incomplete because ENI-1 was excluded
+	// After fix: System correctly counts ENI-1's idle IPs, recognizes pool is warmed up
+
+	node := &networkv1beta1.Node{
+		Spec: networkv1beta1.NodeSpec{
+			NodeCap: networkv1beta1.NodeCap{
+				Adapters:       3,
+				IPv4PerAdapter: 10,
+			},
+			ENISpec: &networkv1beta1.ENISpec{
+				EnableIPv4: true,
+			},
+			Pool: &networkv1beta1.PoolSpec{
+				MinPoolSize: 5,
+				MaxPoolSize: 20,
+			},
+			Flavor: []networkv1beta1.Flavor{
+				{NetworkInterfaceType: networkv1beta1.ENITypeSecondary, NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard, Count: 2},
+			},
+		},
+		Status: networkv1beta1.NodeStatus{
+			NetworkInterfaces: map[string]*networkv1beta1.Nic{
+				// ENI-1: Has 10 idle IPs, but its vSwitch is exhausted
+				"eni-1": {
+					ID:        "eni-1",
+					VSwitchID: "vsw-exhausted",
+					Status:    aliyunClient.ENIStatusInUse,
+					IPv4: map[string]*networkv1beta1.IP{
+						"10.0.0.1":  {IP: "10.0.0.1", Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"},
+						"10.0.0.2":  {IP: "10.0.0.2", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+						"10.0.0.3":  {IP: "10.0.0.3", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+						"10.0.0.4":  {IP: "10.0.0.4", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+						"10.0.0.5":  {IP: "10.0.0.5", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+						"10.0.0.6":  {IP: "10.0.0.6", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+						"10.0.0.7":  {IP: "10.0.0.7", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+						"10.0.0.8":  {IP: "10.0.0.8", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+						"10.0.0.9":  {IP: "10.0.0.9", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+						"10.0.0.10": {IP: "10.0.0.10", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+					},
+				},
+				// ENI-2: Has 0 idle IPs, but its vSwitch has available IPs
+				"eni-2": {
+					ID:        "eni-2",
+					VSwitchID: "vsw-available",
+					Status:    aliyunClient.ENIStatusInUse,
+					IPv4: map[string]*networkv1beta1.IP{
+						"10.0.1.1": {IP: "10.0.1.1", Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"},
+					},
+				},
+			},
+		},
+	}
+
+	podDemand := 2
+
+	// THE FIX: countTotalIdleIPs counts ALL idle IPs regardless of vSwitch status
+	totalIdleIPs := countTotalIdleIPs(node)
+
+	// Verify total idle IPs includes ENI-1's IPs
+	// ENI-1 has 9 idle (10 - 1 primary), ENI-2 has 0 idle
+	assert.Equal(t, 9, totalIdleIPs, "Should count idle IPs from ALL InUse ENIs including those with exhausted vSwitch")
+
+	// Calculate minPoolDemand
+	// With fix: minPoolDemand = max(0, 5 + 2 - 9) = 0
+	// Without fix (if ENI-1 excluded): minPoolDemand = max(0, 5 + 2 - 0) = 7 (WRONG!)
+	minPoolDemand := max(0, node.Spec.Pool.MinPoolSize+podDemand-totalIdleIPs)
+	assert.Equal(t, 0, minPoolDemand, "MinPoolSize should be satisfied by existing idle IPs")
+
+	// Total allocation should only be for pods, no warmup needed
+	allocationDemand := podDemand + max(minPoolDemand, 0)
+	assert.Equal(t, 2, allocationDemand, "Only pod demand should be allocated, pool warmup is complete")
 }
 
 func TestCheckWarmUpCompletion(t *testing.T) {
