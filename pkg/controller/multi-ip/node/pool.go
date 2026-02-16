@@ -670,12 +670,15 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	// 6. check and mark warm-up completion
 	n.checkWarmUpCompletion(node)
 
-	if utilerrors.NewAggregate(errList) != nil {
-		return utilerrors.NewAggregate(errList)
-	}
 	// 7. pool management sort eni and find the victim
+	// Always run adjustPool regardless of addIP/handleStatus errors,
+	// pool scale-down and cleanup should not be blocked by allocation failures.
+	err = n.adjustPool(ctx, node)
+	if err != nil {
+		errList = append(errList, err)
+	}
 
-	return n.adjustPool(ctx, node)
+	return utilerrors.NewAggregate(errList)
 }
 
 // releasePodNotFound release ip if there is no pod found
@@ -1030,17 +1033,48 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	// before create eni , we need to check the quota
 	options := getEniOptions(node)
 
-	// Calculate total demand including warm-up
-	totalDemand := len(normalPods) + node.Spec.Pool.MinPoolSize
-	if n.shouldPerformWarmUp(node) {
-		warmUpDemand := n.calculateWarmUpDemand(node)
-		totalDemand = max(totalDemand, warmUpDemand)
+	// Step 1: Count total idle IPs in ALL valid ENIs (regardless of vSwitch status)
+	// This is used for MinPoolSize check - we check the final pool state
+	totalIdleIPs := countTotalIdleIPs(node)
 
-		logr.FromContextOrDiscard(ctx).Info("warm up", "warmUpDemand", warmUpDemand, "totalDemand", totalDemand)
+	// Step 2: Pod demand (IPs needed by pods that couldn't get from local pool)
+	podDemand := len(normalPods)
+
+	// Step 3: Calculate MinPoolSize demand
+	// MinPoolSize = minimum idle IPs to maintain in pool AFTER serving pods
+	// After serving pods, remaining idle = max(0, totalIdleIPs - podDemand)
+	// Additional needed = max(0, MinPoolSize - (totalIdleIPs - podDemand))
+	//                   = max(0, MinPoolSize + podDemand - totalIdleIPs)
+	minPoolDemand := max(0, node.Spec.Pool.MinPoolSize+podDemand-totalIdleIPs)
+
+	// Step 4: Calculate WarmUp demand (one-time, tracked by allocation count)
+	// WarmUpTarget is independent of MinPoolSize, tracked via WarmUpAllocatedCount
+	warmUpDemand := 0
+	if n.shouldPerformWarmUp(node) {
+		warmUpDemand = max(0, node.Status.WarmUpTarget-node.Status.WarmUpAllocatedCount)
+		logr.FromContextOrDiscard(ctx).Info("warm up calculation",
+			"warmUpTarget", node.Status.WarmUpTarget,
+			"warmUpAllocatedCount", node.Status.WarmUpAllocatedCount,
+			"warmUpDemand", warmUpDemand)
 	}
 
+	// Step 5: Total allocation demand
+	// - minPoolDemand ensures steady-state pool size
+	// - warmUpDemand is one-time initial allocation
+	// Take max because they serve similar purposes (pre-allocation)
+	// Add podDemand for immediate pod needs
+	allocationDemand := podDemand + max(minPoolDemand, warmUpDemand)
+
+	logr.FromContextOrDiscard(ctx).Info("addIP demand calculation",
+		"podDemand", podDemand,
+		"totalIdleIPs", totalIdleIPs,
+		"minPoolSize", node.Spec.Pool.MinPoolSize,
+		"minPoolDemand", minPoolDemand,
+		"warmUpDemand", warmUpDemand,
+		"allocationDemand", allocationDemand)
+
 	// handle trunk/secondary eni
-	assignEniWithOptions(ctx, node, totalDemand, options, n.eniTaskQueue, func(option *eniOptions) bool {
+	assignEniWithOptions(ctx, node, allocationDemand, options, n.eniTaskQueue, func(option *eniOptions) bool {
 		return n.validateENI(ctx, option, []eniTypeKey{secondaryKey, trunkKey})
 	})
 	assignEniWithOptions(ctx, node, len(rdmaPods), options, n.eniTaskQueue, func(option *eniOptions) bool {
@@ -1288,33 +1322,26 @@ func assignEniWithOptions(ctx context.Context, node *networkv1beta1.Node, toAdd 
 				continue // Skip Attaching status ENI
 			}
 
-			// For InUse status ENI, normal processing (existing logic)
+			// For InUse status ENI, allocate IPs without subtracting existing idle IPs
+			// Note: The demand calculation in addIP already accounts for ALL idle IPs,
+			// so we should NOT subtract allocatable IPs here to avoid double-counting
 			if toAddIPv4 > 0 {
-				toAddIPv4 -= len(getAllocatable(option.eniRef.IPv4))
-
-				if toAddIPv4 > 0 {
-					leftQuota := node.Spec.NodeCap.IPv4PerAdapter - len(option.eniRef.IPv4)
-					if leftQuota > 0 {
-						option.addIPv4N = min(leftQuota, toAddIPv4, batchSize(ctx))
-						toAddIPv4 -= option.addIPv4N
-					} else {
-						option.isFull = true
-					}
+				leftQuota := node.Spec.NodeCap.IPv4PerAdapter - len(option.eniRef.IPv4)
+				if leftQuota > 0 {
+					option.addIPv4N = min(leftQuota, toAddIPv4, batchSize(ctx))
+					toAddIPv4 -= option.addIPv4N
+				} else {
+					option.isFull = true
 				}
 			}
 
 			if toAddIPv6 > 0 {
-				// exclude the already assigned count, call this before quota check
-				toAddIPv6 -= len(getAllocatable(option.eniRef.IPv6))
-
-				if toAddIPv6 > 0 {
-					leftQuota := node.Spec.NodeCap.IPv6PerAdapter - len(option.eniRef.IPv6)
-					if leftQuota > 0 {
-						option.addIPv6N = min(leftQuota, toAddIPv6, batchSize(ctx))
-						toAddIPv6 -= option.addIPv6N
-					} else {
-						option.isFull = true
-					}
+				leftQuota := node.Spec.NodeCap.IPv6PerAdapter - len(option.eniRef.IPv6)
+				if leftQuota > 0 {
+					option.addIPv6N = min(leftQuota, toAddIPv6, batchSize(ctx))
+					toAddIPv6 -= option.addIPv6N
+				} else {
+					option.isFull = true
 				}
 			}
 		} else {
@@ -1873,6 +1900,23 @@ func getAllocatable(in map[string]*networkv1beta1.IP) map[string]*networkv1beta1
 	})
 }
 
+// countTotalIdleIPs counts idle IPs across ALL valid ENIs (InUse status)
+// This is used for MinPoolSize check, regardless of vSwitch availability
+func countTotalIdleIPs(node *networkv1beta1.Node) int {
+	count := 0
+	for _, eni := range node.Status.NetworkInterfaces {
+		if eni.Status != aliyunClient.ENIStatusInUse {
+			continue
+		}
+		if node.Spec.ENISpec.EnableIPv4 {
+			count += len(getAllocatable(eni.IPv4))
+		} else if node.Spec.ENISpec.EnableIPv6 {
+			count += len(getAllocatable(eni.IPv6))
+		}
+	}
+	return count
+}
+
 // getEniOptions get the expected eni type and count based on flavor
 func getEniOptions(node *networkv1beta1.Node) []*eniOptions {
 	total := 0
@@ -2213,37 +2257,6 @@ func (n *ReconcileNode) shouldPerformWarmUp(node *networkv1beta1.Node) bool {
 		return false
 	}
 	return true
-}
-
-// calculateWarmUpDemand calculates the total IP demand for warm-up
-// Warmup progress is tracked via WarmUpAllocatedCount, not by counting current IPs
-// Returns total demand (currentIPs + remaining) for assignEniWithOptions
-func (n *ReconcileNode) calculateWarmUpDemand(node *networkv1beta1.Node) int {
-	if !n.shouldPerformWarmUp(node) {
-		return 0
-	}
-
-	// Calculate remaining IPs to allocate based on WarmUpAllocatedCount
-	remaining := node.Status.WarmUpTarget - node.Status.WarmUpAllocatedCount
-	if remaining <= 0 {
-		return 0
-	}
-
-	// Count current IPs to calculate total demand for assignEniWithOptions
-	// (assignEniWithOptions expects total and subtracts existing IPs internally)
-	currentTotal := 0
-	for _, eni := range node.Status.NetworkInterfaces {
-		if eni.Status != aliyunClient.ENIStatusInUse {
-			continue
-		}
-		if node.Spec.ENISpec.EnableIPv4 {
-			currentTotal += len(getAllocatable(eni.IPv4))
-		} else if node.Spec.ENISpec.EnableIPv6 {
-			currentTotal += len(getAllocatable(eni.IPv6))
-		}
-	}
-
-	return currentTotal + remaining
 }
 
 // checkWarmUpCompletion checks if warm-up has been completed and marks it
