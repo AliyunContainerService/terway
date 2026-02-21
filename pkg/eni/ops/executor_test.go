@@ -35,29 +35,48 @@ func TestExecutor_GetTimeout(t *testing.T) {
 	exec := NewExecutor(nil, nil)
 
 	// ECS ENI
-	timeout := exec.GetTimeout("eni-12345")
+	ecsCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIECS)
+	timeout := exec.GetTimeout(ecsCtx, "eni-12345")
 	assert.Equal(t, 2*time.Minute, timeout)
 
-	// LENI (EFLO)
-	timeout = exec.GetTimeout("leni-12345")
+	// LENI (EFLO path)
+	efloCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIEFLO)
+	timeout = exec.GetTimeout(efloCtx, "leni-12345")
 	assert.Equal(t, 5*time.Minute, timeout)
 
-	// HDENI (EFLO)
-	timeout = exec.GetTimeout("hdeni-12345")
+	// HDENI (EFLO path)
+	efloHDCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIEFLOHDENI)
+	timeout = exec.GetTimeout(efloHDCtx, "hdeni-12345")
 	assert.Equal(t, 5*time.Minute, timeout)
+
+	// Migrated LENI on ECS path
+	timeout = exec.GetTimeout(ecsCtx, "leni-12345")
+	assert.Equal(t, 3*time.Minute, timeout)
+
+	// Migrated HDENI on ECS path
+	timeout = exec.GetTimeout(ecsCtx, "hdeni-12345")
+	assert.Equal(t, 3*time.Minute, timeout)
 }
 
 func TestExecutor_GetInitialDelay(t *testing.T) {
 	exec := NewExecutor(nil, nil)
 
 	// ECS ENI should have smaller initial delay
-	ecsDelay := exec.GetInitialDelay("eni-12345")
+	ecsCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIECS)
+	ecsDelay := exec.GetInitialDelay(ecsCtx, "eni-12345")
 
-	// LENI should have larger initial delay
-	leniDelay := exec.GetInitialDelay("leni-12345")
+	// LENI (EFLO path) should have larger initial delay
+	efloCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIEFLO)
+	leniDelay := exec.GetInitialDelay(efloCtx, "leni-12345")
 
 	// EFLO should have larger delay than ECS
 	assert.Less(t, ecsDelay, leniDelay)
+
+	// Migrated LENI on ECS path should have 4s initial delay
+	migratedDelay := exec.GetInitialDelay(ecsCtx, "leni-12345")
+	assert.Equal(t, 4*time.Second, migratedDelay)
+	assert.Less(t, ecsDelay, migratedDelay)
+	assert.Less(t, migratedDelay, leniDelay)
 }
 
 func Test_toPtr(t *testing.T) {
@@ -318,16 +337,29 @@ func TestExecutor_getBackoff(t *testing.T) {
 	exec := NewExecutor(nil, nil)
 
 	// ECS ENI
-	bo := exec.getBackoff("eni-12345")
+	ecsCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIECS)
+	bo := exec.getBackoff(ecsCtx, "eni-12345")
 	assert.NotNil(t, bo)
 
-	// LENI
-	bo = exec.getBackoff("leni-12345")
+	// LENI (EFLO path)
+	efloCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIEFLO)
+	bo = exec.getBackoff(efloCtx, "leni-12345")
 	assert.NotNil(t, bo)
+	assert.Equal(t, 18*time.Second, bo.InitialDelay)
 
-	// HDENI
-	bo = exec.getBackoff("hdeni-12345")
+	// HDENI (EFLO path)
+	efloHDCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIEFLOHDENI)
+	bo = exec.getBackoff(efloHDCtx, "hdeni-12345")
 	assert.NotNil(t, bo)
+	assert.Equal(t, 18*time.Second, bo.InitialDelay)
+
+	// Migrated LENI on ECS path
+	bo = exec.getBackoff(ecsCtx, "leni-12345")
+	assert.Equal(t, 4*time.Second, bo.InitialDelay)
+
+	// Migrated HDENI on ECS path
+	bo = exec.getBackoff(ecsCtx, "hdeni-12345")
+	assert.Equal(t, 4*time.Second, bo.InitialDelay)
 }
 
 func TestNewExecutor(t *testing.T) {
