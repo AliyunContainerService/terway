@@ -97,6 +97,11 @@ rules:
       - ciliumidentities.cilium.io
       - ciliumnetworkpolicies.cilium.io
       - ciliumnodes.cilium.io
+      - ciliumnodeconfigs.cilium.io
+      - ciliumcidrgroups.cilium.io
+      - ciliumpodippools.cilium.io
+      - ciliumloadbalancerippools.cilium.io
+      - ciliuml2announcementpolicies.cilium.io
   - apiGroups:
       - admissionregistration.k8s.io
     resources:

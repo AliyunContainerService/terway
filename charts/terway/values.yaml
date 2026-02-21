@@ -7,7 +7,7 @@ terway:
   image:
     repository: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway
     pullPolicy: IfNotPresent
-    tag: "v1.13.4"
+    tag: "v1.16.7"
     podAnnotations: { }
     #  prometheus.io/path: "/metrics"
     #  prometheus.io/port: "9999"
@@ -26,11 +26,8 @@ terway:
   # ipStack: options [ ipv4, ipv6, dual ]
   ipStack: ipv4
 
-  securityGroupIDs:
-    - sg-1
-  vSwitchIDs:
-    cn-hangzhou-k:
-      - vsw-1
+  securityGroupIDs: []
+  vSwitchIDs: {}
 
   serviceCIDR: "10.96.0.0/12"
 
@@ -38,13 +35,16 @@ terway:
   accessKey: ""
   accessSecret: ""
 
+  # credential path for addon token, empty means use access key/secret directly
+  credentialPath: ""
+
 terwayControlplane:
   replicaCount: 1
 
   image:
     repository: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway-controlplane
     pullPolicy: IfNotPresent
-    tag: "v1.13.4"
+    tag: "v1.16.7"
 
   service:
     type: ClusterIP
@@ -123,5 +123,5 @@ terwayControlplane:
   # secrets
   accessKey: ""
   accessSecret: ""
-
+  credentialPath: ""
 

@@ -8,6 +8,9 @@ data:
       "version": "1",
       "max_pool_size": 5,
       "min_pool_size": 0,
+    {{- if .Values.terway.credentialPath }}
+      "credential_path": "{{.Values.terway.credentialPath}}",
+    {{- end }}
       "enable_eni_trunking": false,
       "access_key": "{{.Values.terway.accessKey}}",
       "access_secret": "{{.Values.terway.accessSecret}}",

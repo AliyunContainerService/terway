@@ -143,14 +143,8 @@ variable "control_plane_log_components" {
   default     = ["apiserver", "kcm", "scheduler", "ccm"]
 }
 
-variable "kubeconfig_duration_minutes" {
-  description = "Duration of kubeconfig validity in minutes."
-  type        = number
-  default     = 3600
-}
-
 variable "kubeconfig_output_file" {
-  description = "File path to save the kubeconfig. Empty string means not to save."
+  description = "File path to save the kubeconfig. Empty string means use default path kubeconfig-<cluster_name>."
   type        = string
   default     = ""
 }
@@ -349,11 +343,10 @@ resource "alicloud_cs_kubernetes_node_pool" "exclusive_eni" {
   }
 }
 
-# 获取集群凭据和 kubeconfig
+# 获取集群凭据和 kubeconfig（长期有效）
 data "alicloud_cs_cluster_credential" "auth" {
-  cluster_id                 = alicloud_cs_managed_kubernetes.default.id
-  temporary_duration_minutes = var.kubeconfig_duration_minutes
-  output_file                = "kubeconfig-${local.k8s_name_terway}"
+  cluster_id  = alicloud_cs_managed_kubernetes.default.id
+  output_file = var.kubeconfig_output_file != "" ? var.kubeconfig_output_file : "kubeconfig-${local.k8s_name_terway}"
 }
 
 # 输出集群信息和 kubeconfig
@@ -374,8 +367,8 @@ output "kubeconfig" {
 }
 
 output "kubeconfig_expiration" {
-  description = "The expiration time of the kubeconfig"
-  value       = data.alicloud_cs_cluster_credential.auth.expiration
+  description = "The expiration time of the kubeconfig (null for long-term kubeconfig)"
+  value       = try(data.alicloud_cs_cluster_credential.auth.expiration, null)
 }
 
 output "kubeconfig_file_path" {
