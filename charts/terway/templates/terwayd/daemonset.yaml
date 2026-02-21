@@ -16,6 +16,11 @@ spec:
     metadata:
       labels:
         app: terway-eniip
+{{- if (semverCompare "<1.30" .Capabilities.KubeVersion.Version) }}
+      annotations:
+        # As of Kubernetes v1.30, this should be set with the appArmorProfile field instead.
+        container.apparmor.security.beta.kubernetes.io/policy: unconfined
+{{- end }}
     spec:
       priorityClassName: system-node-critical
       affinity:
@@ -167,6 +172,12 @@ spec:
             - name: CILIUM_CNI_CHAINING_MODE
               value: terway-chainer
           securityContext:
+{{- if (semverCompare ">=1.30" .Capabilities.KubeVersion.Version) }}
+            appArmorProfile:
+              type: Unconfined
+{{- end }}
+            seccompProfile:
+              type: Unconfined
             privileged: false
             capabilities:
               add:
