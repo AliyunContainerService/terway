@@ -62,6 +62,9 @@ spec:
               readOnly: true
             - name: webhook-vol
               mountPath: /var/run/webhook-cert
+            - name: addon-token
+              mountPath: "/var/addon"
+              readOnly: true
         - name: cilium-operator
           image: "{{ .Values.terwayControlplane.image.repository }}:{{ .Values.terwayControlplane.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.terwayControlplane.image.pullPolicy }}
@@ -90,6 +93,7 @@ spec:
                   fieldPath: status.podIP
           livenessProbe:
             httpGet:
+              host: 127.0.0.1
               path: /healthz
               port: 9234
               scheme: HTTP
@@ -121,6 +125,13 @@ spec:
             secretName: terway-controlplane-credential
         - name: webhook-vol
           emptyDir: { }
+        - name: addon-token
+          secret:
+            secretName: addon.network.token
+            items:
+            - key: addon.token.config
+              path: token-config
+            optional: true
       {{- with .Values.terwayControlplane.nodeSelector }}
       nodeSelector:
       {{- toYaml . | nindent 8 }}

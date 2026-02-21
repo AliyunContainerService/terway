@@ -87,16 +87,6 @@ maintenance_window_time          = "2025-11-07T00:00:00.000+08:00"
 audit_log_enabled = false
 
 # ============================================
-# Kubeconfig 配置
-# ============================================
-
-# kubeconfig 有效期（分钟）
-kubeconfig_duration_minutes = 60
-
-# kubeconfig 输出文件路径（留空表示不输出到文件）
-kubeconfig_output_file = ""
-
-# ============================================
 # 敏感信息配置 (请根据实际情况修改)
 # ============================================
 
@@ -119,12 +109,6 @@ cluster_addons = [
   {
     name     = "kube-flannel-ds"
     disabled = true
-  },
-  {
-    name = "terway-eniip"
-  },
-  {
-    name = "terway-controlplane"
   },
   {
     name     = "csi-plugin"

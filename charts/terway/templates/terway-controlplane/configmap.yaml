@@ -9,6 +9,16 @@ data:
     k8s-namespace: kube-system
     identity-gc-interval: 10m
     identity-heartbeat-timeout: 20m
+    gops-port: 0
+    ipam: delegated-plugin
+    enable-cilium-endpoint-slice: true
+    set-cilium-node-taints: false
+    set-cilium-is-up-condition: false
+    remove-cilium-node-taints: false
+    k8s-client-qps: 20
+    k8s-client-burst: 30
+    operator-api-serve-addr: 127.0.0.1:9234
+    unmanaged-pod-watcher-interval: 0
   ctrl-config.yaml: |
     leaseLockName: "terway-controller-lock"
     leaseLockNamespace: "kube-system"
