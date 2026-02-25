@@ -1402,148 +1402,147 @@ func Test_InitK8S(t *testing.T) {
 }
 
 func TestNetworkServiceBuilder_ReportDatapath(t *testing.T) {
-	tests := []struct {
-		name             string
-		existingError    bool
-		nodeName         string
-		getErr           error
-		updateErr        error
-		datapathValue    string
-		expectedError    bool
-		expectedErrorMsg string
-	}{
-		{
-			name:          "successful datapath report",
-			existingError: false,
-			nodeName:      "test-node",
-			getErr:        nil,
-			updateErr:     nil,
-			datapathValue: "veth",
-			expectedError: false,
-		},
-		{
-			name:          "successful datapath report with datapathv2",
-			existingError: false,
-			nodeName:      "test-node",
-			getErr:        nil,
-			updateErr:     nil,
-			datapathValue: "datapathv2",
-			expectedError: false,
-		},
-		{
-			name:          "skip when existing error",
-			existingError: true,
-			expectedError: true,
-		},
-		{
-			name:             "get node fails then succeeds on retry",
-			existingError:    false,
-			nodeName:         "test-node",
-			getErr:           errors.New("temporary network error"),
-			updateErr:        nil,
-			datapathValue:    "veth",
-			expectedError:    true,
-			expectedErrorMsg: "failed to report node datapath after retries",
-		},
-		{
-			name:             "update node fails",
-			existingError:    false,
-			nodeName:         "test-node",
-			getErr:           nil,
-			updateErr:        errors.New("update conflict"),
-			datapathValue:    "veth",
-			expectedError:    true,
-			expectedErrorMsg: "failed to report node datapath after retries",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	t.Run("successful datapath report", func(t *testing.T) {
+		runtime.GC()
+		patches := gomonkey.NewPatches()
+		defer func() {
+			patches.Reset()
 			runtime.GC()
-			patches := gomonkey.NewPatches()
-			defer func() {
-				patches.Reset()
-				runtime.GC()
-			}()
+		}()
 
-			// Mock getDatapath function
-			patches.ApplyFunc(getDatapath, func() string {
-				return tc.datapathValue
-			})
-
-			// Mock backoff to avoid actual retry delays for error test cases
-			if tc.getErr != nil || tc.updateErr != nil {
-				patches.ApplyFunc(backoff.ExponentialBackoffWithInitialDelay, func(ctx context.Context, bo backoff.ExtendedBackoff, condition wait.ConditionWithContextFunc) error {
-					done, _ := condition(ctx)
-					if !done {
-						return wait.ErrWaitTimeout
-					}
-					return nil
-				})
-			}
-
-			// Create mock k8s client
-			mockK8s := k8smocks.NewKubernetes(t)
-
-			if !tc.existingError {
-				// Mock NodeName
-				mockK8s.On("NodeName").Return(tc.nodeName)
-
-				// Create mock controller-runtime client
-				scheme := k8sruntime.NewScheme()
-				_ = networkv1beta1.AddToScheme(scheme)
-
-				node := &networkv1beta1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: tc.nodeName,
-					},
-				}
-
-				var fakeClient ctrlclient.Client
-				if tc.getErr == nil && tc.updateErr == nil {
-					// Successful case
-					fakeClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
-				} else if tc.getErr != nil {
-					// Get error case
-					fakeClient = fake.NewClientBuilder().WithScheme(scheme).Build()
-				} else {
-					// Update error case - need to mock update failure
-					fakeClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
-					// Patch the Update method to return error
-					patches.ApplyMethod(fakeClient, "Update",
-						func(_ ctrlclient.Client, ctx context.Context, obj ctrlclient.Object, opts ...ctrlclient.UpdateOption) error {
-							return tc.updateErr
-						})
-				}
-
-				mockK8s.On("GetClient").Return(fakeClient)
-			}
-
-			builder := &NetworkServiceBuilder{
-				ctx:     context.Background(),
-				service: &networkService{k8s: mockK8s},
-			}
-
-			if tc.existingError {
-				builder.err = errors.New("existing error")
-			}
-
-			result := builder.ReportDatapath()
-
-			if tc.expectedError {
-				assert.NotNil(t, result.err)
-				if tc.expectedErrorMsg != "" {
-					assert.Contains(t, result.err.Error(), tc.expectedErrorMsg)
-				}
-			} else {
-				assert.Nil(t, result.err)
-			}
-
-			if !tc.existingError {
-				mockK8s.AssertExpectations(t)
-			}
+		patches.ApplyFunc(getDatapath, func() string {
+			return "veth"
 		})
-	}
+
+		mockK8s := k8smocks.NewKubernetes(t)
+		mockK8s.On("NodeName").Return("test-node")
+
+		scheme := k8sruntime.NewScheme()
+		_ = networkv1beta1.AddToScheme(scheme)
+		node := &networkv1beta1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+		mockK8s.On("GetClient").Return(fakeClient)
+
+		done := make(chan struct{})
+		patches.ApplyFunc(backoff.ExponentialBackoffWithInitialDelay, func(ctx context.Context, bo backoff.ExtendedBackoff, condition wait.ConditionWithContextFunc) error {
+			defer close(done)
+			ok, err := condition(ctx)
+			if !ok || err != nil {
+				return wait.ErrWaitTimeout
+			}
+			return nil
+		})
+
+		builder := &NetworkServiceBuilder{
+			ctx:     context.Background(),
+			service: &networkService{k8s: mockK8s},
+		}
+
+		result := builder.ReportDatapath()
+		assert.Nil(t, result.err, "ReportDatapath should never set builder error")
+
+		<-done
+
+		updated := &networkv1beta1.Node{}
+		err := fakeClient.Get(context.Background(), ctrlclient.ObjectKey{Name: "test-node"}, updated)
+		assert.NoError(t, err)
+		assert.NotNil(t, updated.Spec.Datapath)
+		assert.Equal(t, networkv1beta1.DatapathType("veth"), updated.Spec.Datapath.Type)
+	})
+
+	t.Run("skip when existing error", func(t *testing.T) {
+		builder := &NetworkServiceBuilder{
+			ctx:     context.Background(),
+			service: &networkService{},
+			err:     errors.New("existing error"),
+		}
+
+		result := builder.ReportDatapath()
+		assert.NotNil(t, result.err)
+	})
+
+	t.Run("failure is ignored and builder has no error", func(t *testing.T) {
+		runtime.GC()
+		patches := gomonkey.NewPatches()
+		defer func() {
+			patches.Reset()
+			runtime.GC()
+		}()
+
+		patches.ApplyFunc(getDatapath, func() string {
+			return "veth"
+		})
+
+		mockK8s := k8smocks.NewKubernetes(t)
+		mockK8s.On("NodeName").Return("test-node")
+
+		scheme := k8sruntime.NewScheme()
+		_ = networkv1beta1.AddToScheme(scheme)
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		mockK8s.On("GetClient").Return(fakeClient)
+
+		done := make(chan struct{})
+		patches.ApplyFunc(backoff.ExponentialBackoffWithInitialDelay, func(ctx context.Context, bo backoff.ExtendedBackoff, condition wait.ConditionWithContextFunc) error {
+			defer close(done)
+			ok, _ := condition(ctx)
+			if !ok {
+				return wait.ErrWaitTimeout
+			}
+			return nil
+		})
+
+		builder := &NetworkServiceBuilder{
+			ctx:     context.Background(),
+			service: &networkService{k8s: mockK8s},
+		}
+
+		result := builder.ReportDatapath()
+		assert.Nil(t, result.err, "ReportDatapath never propagates errors to builder")
+
+		<-done
+	})
+
+	t.Run("context cancellation stops retry", func(t *testing.T) {
+		runtime.GC()
+		patches := gomonkey.NewPatches()
+		defer func() {
+			patches.Reset()
+			runtime.GC()
+		}()
+
+		patches.ApplyFunc(getDatapath, func() string {
+			return "veth"
+		})
+
+		mockK8s := k8smocks.NewKubernetes(t)
+		mockK8s.On("NodeName").Return("test-node")
+
+		scheme := k8sruntime.NewScheme()
+		_ = networkv1beta1.AddToScheme(scheme)
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		mockK8s.On("GetClient").Return(fakeClient)
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		done := make(chan struct{})
+		patches.ApplyFunc(backoff.ExponentialBackoffWithInitialDelay, func(ctx context.Context, bo backoff.ExtendedBackoff, condition wait.ConditionWithContextFunc) error {
+			defer close(done)
+			cancel()
+			return ctx.Err()
+		})
+
+		builder := &NetworkServiceBuilder{
+			ctx:     ctx,
+			service: &networkService{k8s: mockK8s},
+		}
+
+		result := builder.ReportDatapath()
+		assert.Nil(t, result.err, "ReportDatapath never propagates errors to builder")
+
+		<-done
+	})
 }
 
 func TestGetDatapath(t *testing.T) {

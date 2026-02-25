@@ -529,47 +529,47 @@ func (b *NetworkServiceBuilder) Build() (*networkService, error) {
 	return b.service, nil
 }
 
+// ReportDatapath runs as a best-effort async task so it never blocks the builder chain.
 func (b *NetworkServiceBuilder) ReportDatapath() *NetworkServiceBuilder {
 	if b.err != nil {
 		return b
 	}
 
-	node := &networkv1beta1.Node{}
+	ctx := b.ctx
+	k8sClient := b.service.k8s.GetClient()
 	nodeName := b.service.k8s.NodeName()
 
-	// Retry logic for getting and updating node datapath
-	bo := backoff.ExtendedBackoff{
-		InitialDelay: 0,
-		Backoff: wait.Backoff{
-			Duration: time.Second,
-			Factor:   2.0,
-			Jitter:   0.1,
-			Steps:    6,
-		},
-	}
+	go func() {
+		bo := backoff.ExtendedBackoff{
+			InitialDelay: 0,
+			Backoff: wait.Backoff{
+				Duration: time.Second,
+				Factor:   2.0,
+				Jitter:   0.1,
+				Steps:    10,
+			},
+		}
 
-	err := backoff.ExponentialBackoffWithInitialDelay(b.ctx, bo, func(ctx context.Context) (bool, error) {
-		err := b.service.k8s.GetClient().Get(ctx, ctrlclient.ObjectKey{Name: nodeName}, node)
+		err := backoff.ExponentialBackoffWithInitialDelay(ctx, bo, func(ctx context.Context) (bool, error) {
+			node := &networkv1beta1.Node{}
+			if err := k8sClient.Get(ctx, ctrlclient.ObjectKey{Name: nodeName}, node); err != nil {
+				return false, nil
+			}
+
+			node.Spec.Datapath = &networkv1beta1.Datapath{
+				Type: networkv1beta1.DatapathType(getDatapath()),
+			}
+
+			if err := k8sClient.Update(ctx, node); err != nil {
+				return false, nil
+			}
+
+			return true, nil
+		})
 		if err != nil {
-			return false, nil
+			serviceLog.Error(err, "failed to report node datapath, ignored")
 		}
-
-		node.Spec.Datapath = &networkv1beta1.Datapath{
-			Type: networkv1beta1.DatapathType(getDatapath()),
-		}
-
-		err = b.service.k8s.GetClient().Update(ctx, node)
-		if err != nil {
-			return false, nil
-		}
-
-		return true, nil
-	})
-
-	if err != nil {
-		b.err = fmt.Errorf("failed to report node datapath after retries: %w", err)
-		return b
-	}
+	}()
 
 	return b
 }
