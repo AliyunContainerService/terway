@@ -9,11 +9,11 @@ require (
 	github.com/Microsoft/hcsshim v0.9.9
 	github.com/agiledragon/gomonkey/v2 v2.13.0
 	github.com/alexflint/go-filemutex v1.2.0
-	github.com/alibabacloud-go/darabonba-openapi/v2 v2.1.11
+	github.com/alibabacloud-go/darabonba-openapi/v2 v2.1.13
 	github.com/alibabacloud-go/ecs-20140526/v7 v7.1.3
 	github.com/alibabacloud-go/eflo-20220530/v2 v2.0.9
-	github.com/alibabacloud-go/eflo-controller-20221215/v2 v2.7.0
-	github.com/alibabacloud-go/tea v1.3.11
+	github.com/alibabacloud-go/eflo-controller-20221215/v2 v2.9.0
+	github.com/alibabacloud-go/tea v1.3.13
 	github.com/aliyun/alibaba-cloud-sdk-go v1.63.107
 	github.com/aliyun/credentials-go v1.4.5
 	github.com/containernetworking/cni v1.1.2
