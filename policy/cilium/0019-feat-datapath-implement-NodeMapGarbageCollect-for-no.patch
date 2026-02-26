@@ -1,0 +1,281 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Sun, 15 Feb 2026 13:16:11 +0800
+Subject: feat(datapath): implement NodeMapGarbageCollect for node handlers
+
+- Added NodeMapGarbageCollect method to clean up stale entries in the BPF node map.
+- Implemented the method in linuxNodeHandler, with a detailed description of its functionality.
+- Added no-op implementations for NodeMapGarbageCollect in FakeNodeHandler, hubble peer handler, and WireGuard agent.
+- Updated NodeHandler interface to include the new method.
+
+This enhancement ensures that stale entries are properly managed, preventing potential memory leaks and maintaining the integrity of the node map.
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ daemon/cmd/status.go                |  4 ++
+ pkg/auth/authmap_gc.go              |  5 ++
+ pkg/datapath/fake/types/node.go     |  3 ++
+ pkg/datapath/linux/node_ids.go      | 84 +++++++++++++++++++++++++++++
+ pkg/datapath/types/node.go          |  7 +++
+ pkg/hubble/peer/handler.go          |  5 ++
+ pkg/node/manager/manager.go         | 36 +++++++++++++
+ pkg/node/manager/manager_test.go    |  3 ++
+ pkg/wireguard/agent/node_handler.go |  3 ++
+ 9 files changed, 150 insertions(+)
+
+diff --git a/daemon/cmd/status.go b/daemon/cmd/status.go
+index 4b2c8af5f6..43573667ae 100644
+--- a/daemon/cmd/status.go
++++ b/daemon/cmd/status.go
+@@ -584,6 +584,10 @@ func (c *clusterNodesClient) RestoreNodeIDs() {
+ 	// no-op
+ }
+
++func (c *clusterNodesClient) NodeMapGarbageCollect(validNodeIPs map[string]struct{}) {
++	// no-op
++}
++
+ func (h *getNodes) cleanupClients(d *Daemon) {
+ 	past := time.Now().Add(-clientGCTimeout)
+ 	for k, v := range h.clients {
+diff --git a/pkg/auth/authmap_gc.go b/pkg/auth/authmap_gc.go
+index 312459232b..bcc699e843 100644
+--- a/pkg/auth/authmap_gc.go
++++ b/pkg/auth/authmap_gc.go
+@@ -152,6 +152,11 @@ func (r *authMapGarbageCollector) NodeConfigurationChanged(config datapathTypes.
+ 	return nil
+ }
+
++// NodeMapGarbageCollect implements datapath.NodeHandler.NodeMapGarbageCollect.
++// It is a no-op for the auth map garbage collector (BPF node map GC is done by linuxNodeHandler).
++func (r *authMapGarbageCollector) NodeMapGarbageCollect(_ map[string]struct{}) {
++}
++
+ func (r *authMapGarbageCollector) cleanupNodes(_ context.Context) error {
+ 	r.ciliumNodesMutex.Lock()
+ 	defer r.ciliumNodesMutex.Unlock()
+diff --git a/pkg/datapath/fake/types/node.go b/pkg/datapath/fake/types/node.go
+index d3f95fb991..ef2cc3988b 100644
+--- a/pkg/datapath/fake/types/node.go
++++ b/pkg/datapath/fake/types/node.go
+@@ -64,6 +64,9 @@ func (n *FakeNodeHandler) NodeConfigurationChanged(config datapath.LocalNodeConf
+ 	return nil
+ }
+ 
++func (n *FakeNodeHandler) NodeMapGarbageCollect(_ map[string]struct{}) {
++}
++
+ func (n *FakeNodeHandler) NodeNeighDiscoveryEnabled() bool {
+ 	return false
+ }
+diff --git a/pkg/datapath/linux/node_ids.go b/pkg/datapath/linux/node_ids.go
+index 46e0b0f2e8..7f004c2e14 100644
+--- a/pkg/datapath/linux/node_ids.go
++++ b/pkg/datapath/linux/node_ids.go
+@@ -327,6 +327,90 @@ func (n *linuxNodeHandler) RestoreNodeIDs() {
+ 		logfields.Count, len(nodeValues))
+ }
+ 
++// NodeMapGarbageCollect removes stale entries from the BPF node map that
++// don't correspond to any known node. It iterates through all in-memory
++// node IP to node ID mappings (which mirror the BPF map) and removes any
++// entry whose IP is not in the validNodeIPs set.
++//
++// This function is intended to be called after the initial node listing
++// (NodeSync) is complete, i.e. after all live nodes have been added to
++// the node manager and stale checkpoint nodes have been pruned.
++//
++// Without this GC, BPF node map entries can leak when:
++//   - The agent restarts and misses node deletion events for nodes not
++//     covered by the nodes.json checkpoint.
++//   - Repeated agent restarts with node churn cause orphaned entries to
++//     accumulate, eventually filling the map (max_entries=16384).
++func (n *linuxNodeHandler) NodeMapGarbageCollect(validNodeIPs map[string]struct{}) {
++	n.mutex.Lock()
++	defer n.mutex.Unlock()
++
++	// Collect stale IPs first to avoid modifying the map while iterating.
++	staleIPs := make([]string, 0)
++	for ip := range n.nodeIDsByIPs {
++		if _, valid := validNodeIPs[ip]; !valid {
++			staleIPs = append(staleIPs, ip)
++		}
++	}
++
++	if len(staleIPs) == 0 {
++		n.log.Debug("Node map GC: no stale entries found")
++		return
++	}
++
++	n.log.Info("Node map GC: removing stale entries from BPF node map",
++		logfields.Count, len(staleIPs))
++
++	// Group stale IPs by their node ID so we can return IDs to the pool.
++	staleIDIPs := make(map[uint16][]string)
++	for _, ip := range staleIPs {
++		id := n.nodeIDsByIPs[ip]
++		staleIDIPs[id] = append(staleIDIPs[id], ip)
++	}
++
++	for nodeID, ips := range staleIDIPs {
++		for _, ip := range ips {
++			if err := n.unmapNodeID(ip); err != nil {
++				n.log.Warn("Node map GC: failed to remove stale entry",
++					logfields.Error, err,
++					logfields.IPAddr, ip,
++					logfields.NodeID, nodeID,
++				)
++			} else {
++				n.log.Debug("Node map GC: removed stale entry",
++					logfields.IPAddr, ip,
++					logfields.NodeID, nodeID,
++				)
++			}
++		}
++
++		// Check if there are still any IPs mapped to this node ID.
++		// If not, return the ID to the pool for reuse.
++		idStillInUse := false
++		for _, id := range n.nodeIDsByIPs {
++			if id == nodeID {
++				idStillInUse = true
++				break
++			}
++		}
++		if !idStillInUse {
++			if !n.nodeIDs.Insert(idpool.ID(nodeID)) {
++				n.log.Warn("Node map GC: attempted to return a node ID that wasn't allocated",
++					logfields.NodeID, nodeID,
++				)
++			} else {
++				n.log.Debug("Node map GC: returned node ID to pool",
++					logfields.NodeID, nodeID,
++				)
++			}
++		}
++	}
++
++	n.log.Info("Node map GC: completed",
++		"stale_entries_removed", len(staleIPs),
++		"stale_node_ids", len(staleIDIPs))
++}
++
+ func (n *linuxNodeHandler) registerNodeIDAllocations(allocatedNodeIDs map[string]*nodemap.NodeValueV2) {
+ 	n.mutex.Lock()
+ 	defer n.mutex.Unlock()
+diff --git a/pkg/datapath/types/node.go b/pkg/datapath/types/node.go
+index ce4bf53e18..c10df18333 100644
+--- a/pkg/datapath/types/node.go
++++ b/pkg/datapath/types/node.go
+@@ -199,6 +199,13 @@ type NodeHandler interface {
+ 	// NodeConfigurationChanged is called when the local node configuration
+ 	// has changed
+ 	NodeConfigurationChanged(config LocalNodeConfiguration) error
++
++	// NodeMapGarbageCollect removes stale entries from the BPF node map
++	// that don't correspond to any known node. validNodeIPs is the set of
++	// all IP addresses belonging to nodes currently known to the node manager.
++	// This is called after the initial node listing is complete (NodeSync)
++	// to clean up entries that leaked due to missed node deletion events.
++	NodeMapGarbageCollect(validNodeIPs map[string]struct{})
+ }
+ 
+ type NodeNeighbors interface {
+diff --git a/pkg/hubble/peer/handler.go b/pkg/hubble/peer/handler.go
+index 4fcb7d6043..98d7432cac 100644
+--- a/pkg/hubble/peer/handler.go
++++ b/pkg/hubble/peer/handler.go
+@@ -112,6 +112,11 @@ func (h handler) NodeValidateImplementation(_ types.Node) error {
+ 	return nil
+ }
+ 
++// NodeMapGarbageCollect implements datapath.NodeHandler.NodeMapGarbageCollect.
++// It is a no-op for the hubble peer handler.
++func (h handler) NodeMapGarbageCollect(_ map[string]struct{}) {
++}
++
+ // NodeConfigurationChanged implements
+ // datapath.NodeHandler.NodeValidateImplementation. It is a no-op.
+ func (h handler) NodeConfigurationChanged(_ datapath.LocalNodeConfiguration) error {
+diff --git a/pkg/node/manager/manager.go b/pkg/node/manager/manager.go
+index feccb812a1..a105541c60 100644
+--- a/pkg/node/manager/manager.go
++++ b/pkg/node/manager/manager.go
+@@ -1045,6 +1045,9 @@ func (m *manager) pruneNodes(includeMeshed bool) {
+ 	m.mutex.Lock()
+ 	if len(m.restoredNodes) == 0 {
+ 		m.mutex.Unlock()
++		// Even when no restored nodes to prune, still run GC to clean up
++		// any stale BPF node map entries not covered by the checkpoint.
++		m.garbageCollectNodeMap()
+ 		return
+ 	}
+ 	// Live nodes should not be pruned.
+@@ -1067,6 +1070,39 @@ func (m *manager) pruneNodes(includeMeshed bool) {
+ 			delete(m.restoredNodes, id)
+ 		}
+ 	}
++
++	// After pruning checkpoint-based stale nodes, run GC to clean up any
++	// remaining stale BPF node map entries not covered by the checkpoint.
++	m.garbageCollectNodeMap()
++}
++
++// garbageCollectNodeMap collects all valid node IPs from the current set of
++// known nodes and instructs all node handlers to remove any BPF node map
++// entries that don't match a known node IP.
++//
++// This is necessary because the nodes.json checkpoint mechanism alone cannot
++// clean up all stale entries. Entries may leak when:
++//   - No checkpoint file exists (first deployment, upgrade, file lost).
++//   - The checkpoint doesn't capture nodes deleted before it was written.
++//   - Agent restarts accumulate orphaned entries over time.
++func (m *manager) garbageCollectNodeMap() {
++	m.mutex.RLock()
++	validNodeIPs := make(map[string]struct{})
++	for _, entry := range m.nodes {
++		entry.mutex.Lock()
++		for _, addr := range entry.node.IPAddresses {
++			validNodeIPs[addr.IP.String()] = struct{}{}
++		}
++		entry.mutex.Unlock()
++	}
++	m.mutex.RUnlock()
++
++	log.WithField(logfields.Count, len(validNodeIPs)).
++		Debug("Running node map garbage collection")
++
++	m.Iter(func(nh datapath.NodeHandler) {
++		nh.NodeMapGarbageCollect(validNodeIPs)
++	})
+ }
+ 
+ // GetNodeIdentities returns a list of all node identities store in node
+diff --git a/pkg/node/manager/manager_test.go b/pkg/node/manager/manager_test.go
+index a21ef45041..5462b6920e 100644
+--- a/pkg/node/manager/manager_test.go
++++ b/pkg/node/manager/manager_test.go
+@@ -226,6 +226,9 @@ func (n *signalNodeHandler) NodeConfigurationChanged(config datapath.LocalNodeCo
+ 	return nil
+ }
+ 
++func (n *signalNodeHandler) NodeMapGarbageCollect(_ map[string]struct{}) {
++}
++
+ func setup(tb testing.TB) {
+ 	node.SetTestLocalNodeStore()
+ 
+diff --git a/pkg/wireguard/agent/node_handler.go b/pkg/wireguard/agent/node_handler.go
+index 506c287815..4de01a83af 100644
+--- a/pkg/wireguard/agent/node_handler.go
++++ b/pkg/wireguard/agent/node_handler.go
+@@ -62,3 +62,6 @@ func (a *Agent) nodeUpsert(node nodeTypes.Node) error {
+ // NodeConfigurationChanged is called when the local node configuration
+ // has changed
+ func (a *Agent) NodeConfigurationChanged(config datapath.LocalNodeConfiguration) error { return nil }
++
++// NodeMapGarbageCollect is a no-op for WireGuard agent.
++func (a *Agent) NodeMapGarbageCollect(_ map[string]struct{}) {}
+-- 
+2.50.1 (Apple Git-155)
+
