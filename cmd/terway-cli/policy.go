@@ -238,6 +238,8 @@ func runCilium(cfg *PolicyConfig) error {
 			args = append(args, "--enable-node-port=true")
 			args = append(args, "--enable-host-port=true")
 			args = append(args, "--enable-external-ips=true")
+		} else {
+			args = append(args, "--enable-health-check-nodeport=false")
 		}
 	}
 
