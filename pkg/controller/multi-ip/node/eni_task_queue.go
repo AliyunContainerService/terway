@@ -152,8 +152,8 @@ func (q *ENITaskQueue) processAttachTask(ctx context.Context, task *ENITaskRecor
 	// This ensures attach/query operations use the correct backend (ECS or EFLO)
 	ctx = aliyunClient.SetBackendAPI(ctx, task.BackendAPI)
 
-	// Get timeout based on ENI type
-	timeout := q.executor.GetTimeout(task.ENIID)
+	// Get timeout based on ENI type and backend API
+	timeout := q.executor.GetTimeout(ctx, task.ENIID)
 	taskCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -169,7 +169,7 @@ func (q *ENITaskQueue) processAttachTask(ctx context.Context, task *ENITaskRecor
 	}
 
 	// Wait initial delay
-	initialDelay := q.executor.GetInitialDelay(task.ENIID)
+	initialDelay := q.executor.GetInitialDelay(taskCtx, task.ENIID)
 	select {
 	case <-taskCtx.Done():
 		q.completeTask(task.ENIID, TaskStatusTimeout, nil, taskCtx.Err())

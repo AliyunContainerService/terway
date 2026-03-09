@@ -91,7 +91,7 @@ func (e *Executor) AttachAndWait(ctx context.Context, eniID, instanceID, trunkEN
 	}
 
 	// 2. Wait for ready
-	bo := e.getBackoff(eniID)
+	bo := e.getBackoff(ctx, eniID)
 	time.Sleep(bo.InitialDelay)
 
 	eni, err := e.waitForStatus(ctx, eniID, aliyunClient.ENIStatusInUse, bo.Backoff)
@@ -166,7 +166,7 @@ func (e *Executor) DetachAndWait(ctx context.Context, eniID, instanceID, trunkEN
 	}
 
 	// 2. Wait for available
-	bo := e.getBackoff(eniID)
+	bo := e.getBackoff(ctx, eniID)
 	time.Sleep(bo.InitialDelay)
 
 	_, err = e.waitForStatus(ctx, eniID, aliyunClient.ENIStatusAvailable, bo.Backoff)
@@ -202,7 +202,7 @@ func (e *Executor) Delete(ctx context.Context, eniID string) error {
 
 // WaitForStatus waits for ENI to reach the specified status
 func (e *Executor) WaitForStatus(ctx context.Context, eniID, status string) (*aliyunClient.NetworkInterface, error) {
-	bo := e.getBackoff(eniID)
+	bo := e.getBackoff(ctx, eniID)
 	return e.waitForStatus(ctx, eniID, status, bo.Backoff)
 }
 
@@ -234,8 +234,19 @@ func (e *Executor) waitForStatus(ctx context.Context, eniID, status string, bo w
 	return result, nil
 }
 
-// getBackoff returns the appropriate backoff configuration based on ENI type
-func (e *Executor) getBackoff(eniID string) backoff.ExtendedBackoff {
+// getBackoff returns the appropriate backoff configuration based on ENI type and backend API.
+// For migrated leni-/hdeni- resources on the ECS path, dedicated backoff configs with
+// initialDelay=4s are used instead of the EFLO 18s or standard ECS 3s values.
+func (e *Executor) getBackoff(ctx context.Context, eniID string) backoff.ExtendedBackoff {
+	if aliyunClient.GetBackendAPI(ctx) == aliyunClient.BackendAPIECS {
+		if strings.HasPrefix(eniID, "leni-") {
+			return backoff.Backoff(backoff.WaitECSLENIStatus)
+		}
+		if strings.HasPrefix(eniID, "hdeni-") {
+			return backoff.Backoff(backoff.WaitECSHDENIStatus)
+		}
+		return backoff.Backoff(backoff.WaitENIStatus)
+	}
 	if strings.HasPrefix(eniID, "leni-") {
 		return backoff.Backoff(backoff.WaitLENIStatus)
 	}
@@ -245,17 +256,23 @@ func (e *Executor) getBackoff(eniID string) backoff.ExtendedBackoff {
 	return backoff.Backoff(backoff.WaitENIStatus)
 }
 
-// GetTimeout returns the attach timeout based on ENI type
-func (e *Executor) GetTimeout(eniID string) time.Duration {
-	if strings.HasPrefix(eniID, "leni-") || strings.HasPrefix(eniID, "hdeni-") {
-		return 5 * time.Minute // EFLO timeout
+// GetTimeout returns the attach timeout based on ENI type and backend API.
+func (e *Executor) GetTimeout(ctx context.Context, eniID string) time.Duration {
+	if aliyunClient.GetBackendAPI(ctx) == aliyunClient.BackendAPIECS {
+		if strings.HasPrefix(eniID, "leni-") || strings.HasPrefix(eniID, "hdeni-") {
+			return 3 * time.Minute
+		}
+		return 2 * time.Minute
 	}
-	return 2 * time.Minute // ECS timeout
+	if strings.HasPrefix(eniID, "leni-") || strings.HasPrefix(eniID, "hdeni-") {
+		return 5 * time.Minute
+	}
+	return 2 * time.Minute
 }
 
-// GetInitialDelay returns the initial delay before checking status based on ENI type
-func (e *Executor) GetInitialDelay(eniID string) time.Duration {
-	bo := e.getBackoff(eniID)
+// GetInitialDelay returns the initial delay before checking status based on ENI type and backend API.
+func (e *Executor) GetInitialDelay(ctx context.Context, eniID string) time.Duration {
+	bo := e.getBackoff(ctx, eniID)
 	return bo.InitialDelay
 }
 

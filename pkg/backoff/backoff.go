@@ -19,6 +19,8 @@ const (
 	WaitMemberENIStatus        = "wait_member_eni_status"
 	WaitLENIStatus             = "wait_leni_status"
 	WaitHDENIStatus            = "wait_hdeni_status"
+	WaitECSLENIStatus          = "wait_ecs_leni_status"
+	WaitECSHDENIStatus         = "wait_ecs_hdeni_status"
 	WaitPodENIStatus           = "wait_podeni_status"
 	WaitNetworkInterfaceStatus = "wait_networkinterface_status"
 	MetaAssignPrivateIP        = "meta_assign_private_ip"
@@ -128,6 +130,24 @@ var backoffMap = map[string]ExtendedBackoff{
 		InitialDelay: 18 * time.Second,
 		Backoff: wait.Backoff{
 			Duration: time.Second * 5,
+			Factor:   1.5,
+			Jitter:   0.5,
+			Steps:    8,
+		},
+	},
+	WaitECSLENIStatus: {
+		InitialDelay: 4 * time.Second,
+		Backoff: wait.Backoff{
+			Duration: time.Second * 3,
+			Factor:   1.5,
+			Jitter:   0.5,
+			Steps:    8,
+		},
+	},
+	WaitECSHDENIStatus: {
+		InitialDelay: 4 * time.Second,
+		Backoff: wait.Backoff{
+			Duration: time.Second * 3,
 			Factor:   1.5,
 			Jitter:   0.5,
 			Steps:    8,
