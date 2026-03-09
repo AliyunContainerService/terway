@@ -230,6 +230,8 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 
 					if _switchDataPathV2() {
 						datapath = dataPathV2
+					} else {
+						return "", fmt.Errorf("ipvlan is unsupported")
 					}
 				case dataPathV2:
 					datapath = dataPathV2
