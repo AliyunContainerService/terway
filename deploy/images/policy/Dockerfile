@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.11.1
 FROM --platform=$TARGETPLATFORM golang:1.25.5 AS felix-builder
 ARG GOPROXY
 ARG GIT_VERSION
