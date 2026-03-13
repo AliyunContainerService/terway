@@ -87,13 +87,23 @@ type NetworkInterface struct {
 	NetworkCardIndex            int    `json:"network_card_index,omitempty"`
 
 	VfID *uint32 `json:"vf_id,omitempty"`
+
+	// IPv4PrefixSets holds the IPv4 prefixes (CIDR notation) attached to this ENI.
+	IPv4PrefixSets []Prefix `json:"ipv4_prefix_sets,omitempty"`
+	// IPv6PrefixSets holds the IPv6 prefixes (CIDR notation) attached to this ENI.
+	IPv6PrefixSets []Prefix `json:"ipv6_prefix_sets,omitempty"`
 }
+
+// Prefix represents an IP prefix in CIDR notation (e.g. "192.168.0.0/28").
+type Prefix string
 
 type IPSet struct {
 	Primary   bool
 	IPAddress string
 	IPName    string
 	IPStatus  string
+	// Prefix is non-empty when this entry represents an IP prefix rather than a single address.
+	Prefix Prefix
 }
 
 func FromCreateResp(in *ecs.CreateNetworkInterfaceResponse) *NetworkInterface {
@@ -119,6 +129,12 @@ func FromCreateResp(in *ecs.CreateNetworkInterfaceResponse) *NetworkInterface {
 		Tags:            in.Tags.Tag,
 		Type:            in.Type,
 		ResourceGroupID: in.ResourceGroupId,
+		IPv4PrefixSets: lo.Map(in.Ipv4PrefixSets.Ipv4PrefixSet, func(item ecs.Ipv4PrefixSet, _ int) Prefix {
+			return Prefix(item.Ipv4Prefix)
+		}),
+		IPv6PrefixSets: lo.Map(in.Ipv6PrefixSets.Ipv6PrefixSet, func(item ecs.Ipv6PrefixSet, _ int) Prefix {
+			return Prefix(item.Ipv6Prefix)
+		}),
 	}
 	if r.Type == "" {
 		r.Type = ENITypeSecondary
@@ -158,6 +174,12 @@ func FromDescribeResp(in *ecs.NetworkInterfaceSet) *NetworkInterface {
 		DeviceIndex:                 in.Attachment.DeviceIndex,
 		Type:                        in.Type,
 		CreationTime:                in.CreationTime,
+		IPv4PrefixSets: lo.Map(in.Ipv4PrefixSets.Ipv4PrefixSet, func(item ecs.Ipv4PrefixSet, _ int) Prefix {
+			return Prefix(item.Ipv4Prefix)
+		}),
+		IPv6PrefixSets: lo.Map(in.Ipv6PrefixSets.Ipv6PrefixSet, func(item ecs.Ipv6PrefixSet, _ int) Prefix {
+			return Prefix(item.Ipv6Prefix)
+		}),
 	}
 }
 

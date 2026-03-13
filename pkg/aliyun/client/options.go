@@ -18,6 +18,8 @@ type NetworkInterfaceOptions struct {
 	ResourceGroupID       string
 	IPCount               int
 	IPv6Count             int
+	IPv4PrefixCount       int
+	IPv6PrefixCount       int
 	Tags                  map[string]string
 	InstanceID            string
 	InstanceType          string
@@ -111,6 +113,13 @@ func (c *CreateNetworkInterfaceOptions) Finish(idempotentKeyGen IdempotentKeyGen
 		len(c.NetworkInterfaceOptions.SecurityGroupIDs) == 0 {
 		return nil, nil, ErrInvalidArgs
 	}
+	// ECS does not allow requesting both individual IPs and prefixes in the same request.
+	if c.NetworkInterfaceOptions.IPCount > 1 && c.NetworkInterfaceOptions.IPv4PrefixCount > 0 {
+		return nil, nil, ErrInvalidArgs
+	}
+	if c.NetworkInterfaceOptions.IPv6Count > 0 && c.NetworkInterfaceOptions.IPv6PrefixCount > 0 {
+		return nil, nil, ErrInvalidArgs
+	}
 
 	req := ecs.CreateCreateNetworkInterfaceRequest()
 	req.VSwitchId = c.NetworkInterfaceOptions.VSwitchID
@@ -129,6 +138,12 @@ func (c *CreateNetworkInterfaceOptions) Finish(idempotentKeyGen IdempotentKeyGen
 	}
 	if c.NetworkInterfaceOptions.IPv6Count > 0 {
 		req.Ipv6AddressCount = requests.NewInteger(c.NetworkInterfaceOptions.IPv6Count)
+	}
+	if c.NetworkInterfaceOptions.IPv4PrefixCount > 0 {
+		req.Ipv4PrefixCount = requests.NewInteger(c.NetworkInterfaceOptions.IPv4PrefixCount)
+	}
+	if c.NetworkInterfaceOptions.IPv6PrefixCount > 0 {
+		req.Ipv6PrefixCount = requests.NewInteger(c.NetworkInterfaceOptions.IPv6PrefixCount)
 	}
 
 	if c.NetworkInterfaceOptions.DeleteENIOnECSRelease != nil {
@@ -230,13 +245,23 @@ func (c *AssignPrivateIPAddressOptions) ApplyAssignPrivateIPAddress(options *Ass
 }
 
 func (c *AssignPrivateIPAddressOptions) Finish(idempotentKeyGen IdempotentKeyGen) (*ecs.AssignPrivateIpAddressesRequest, func(), error) {
-	if c.NetworkInterfaceOptions == nil || c.NetworkInterfaceOptions.NetworkInterfaceID == "" || c.NetworkInterfaceOptions.IPCount <= 0 {
+	if c.NetworkInterfaceOptions == nil || c.NetworkInterfaceOptions.NetworkInterfaceID == "" ||
+		(c.NetworkInterfaceOptions.IPCount <= 0 && c.NetworkInterfaceOptions.IPv4PrefixCount <= 0) {
+		return nil, nil, ErrInvalidArgs
+	}
+	// ECS does not allow requesting both individual IPs and prefixes in the same request.
+	if c.NetworkInterfaceOptions.IPCount > 0 && c.NetworkInterfaceOptions.IPv4PrefixCount > 0 {
 		return nil, nil, ErrInvalidArgs
 	}
 
 	req := ecs.CreateAssignPrivateIpAddressesRequest()
 	req.NetworkInterfaceId = c.NetworkInterfaceOptions.NetworkInterfaceID
-	req.SecondaryPrivateIpAddressCount = requests.NewInteger(c.NetworkInterfaceOptions.IPCount)
+	if c.NetworkInterfaceOptions.IPCount > 0 {
+		req.SecondaryPrivateIpAddressCount = requests.NewInteger(c.NetworkInterfaceOptions.IPCount)
+	}
+	if c.NetworkInterfaceOptions.IPv4PrefixCount > 0 {
+		req.Ipv4PrefixCount = requests.NewInteger(c.NetworkInterfaceOptions.IPv4PrefixCount)
+	}
 
 	argsHash := md5Hash(req)
 	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
@@ -294,13 +319,23 @@ func (c *AssignIPv6AddressesOptions) ApplyAssignIPv6Addresses(options *AssignIPv
 }
 
 func (c *AssignIPv6AddressesOptions) Finish(idempotentKeyGen IdempotentKeyGen) (*ecs.AssignIpv6AddressesRequest, func(), error) {
-	if c.NetworkInterfaceOptions == nil || c.NetworkInterfaceOptions.NetworkInterfaceID == "" || c.NetworkInterfaceOptions.IPv6Count <= 0 {
+	if c.NetworkInterfaceOptions == nil || c.NetworkInterfaceOptions.NetworkInterfaceID == "" ||
+		(c.NetworkInterfaceOptions.IPv6Count <= 0 && c.NetworkInterfaceOptions.IPv6PrefixCount <= 0) {
+		return nil, nil, ErrInvalidArgs
+	}
+	// ECS does not allow requesting both individual IPs and prefixes in the same request.
+	if c.NetworkInterfaceOptions.IPv6Count > 0 && c.NetworkInterfaceOptions.IPv6PrefixCount > 0 {
 		return nil, nil, ErrInvalidArgs
 	}
 
 	req := ecs.CreateAssignIpv6AddressesRequest()
 	req.NetworkInterfaceId = c.NetworkInterfaceOptions.NetworkInterfaceID
-	req.Ipv6AddressCount = requests.NewInteger(c.NetworkInterfaceOptions.IPv6Count)
+	if c.NetworkInterfaceOptions.IPv6Count > 0 {
+		req.Ipv6AddressCount = requests.NewInteger(c.NetworkInterfaceOptions.IPv6Count)
+	}
+	if c.NetworkInterfaceOptions.IPv6PrefixCount > 0 {
+		req.Ipv6PrefixCount = requests.NewInteger(c.NetworkInterfaceOptions.IPv6PrefixCount)
+	}
 
 	argsHash := md5Hash(req)
 	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
