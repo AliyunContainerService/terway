@@ -106,7 +106,7 @@ func init() {
 	rootCmd.PersistentFlags().Var(cliflag.NewMapStringBool(&featureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features. "+
 		"Options are:\n"+strings.Join(utilfeature.DefaultFeatureGate.KnownFeatures(), "\n"))
 
-	rootCmd.AddCommand(listCmd, showCmd, mappingCmd, executeCmd, metadataCmd, cniCmd, nodeconfigCmd, policyCmd)
+	rootCmd.AddCommand(listCmd, showCmd, mappingCmd, executeCmd, metadataCmd, cniCmd, nodeconfigCmd, policyCmd, eniCmd)
 }
 
 func main() {
