@@ -27,6 +27,10 @@ spec:
                     operator: NotIn
                     values:
                       - virtual-kubelet
+                  - key: k8s.aliyun.com/ignore-by-terway
+                    operator: NotIn
+                    values:
+                      - "true"
                   - key: kubernetes.io/arch
                     operator: In
                     values:
