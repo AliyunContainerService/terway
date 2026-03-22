@@ -296,6 +296,10 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{}, nil
 	}
 
+	if types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
+		return reconcile.Result{}, nil
+	}
+
 	if utils.ISLingJunNode(node.Labels) {
 		backend := aliyunClient.BackendAPIEFLO
 		switch node.Annotations[types.ENOApi] {
@@ -307,10 +311,6 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 		ctx = aliyunClient.SetBackendAPI(ctx, backend)
 	} else {
 		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIECS)
-	}
-
-	if types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
-		return reconcile.Result{}, nil
 	}
 
 	ctx = logf.IntoContext(ctx, l.WithValues("rv", node.ResourceVersion))
