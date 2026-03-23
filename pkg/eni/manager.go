@@ -49,8 +49,9 @@ func (n *NodeCondition) SetIPExhaustive() {
 		return
 	}
 
-	if !n.factoryIPExhaustive.Load() {
-		n.factoryIPExhaustive.Store(true)
+	// CompareAndSwap ensures only one concurrent caller proceeds past the check,
+	// preventing the TOCTOU race where two goroutines both see false and both invoke the handler.
+	if n.factoryIPExhaustive.CompareAndSwap(false, true) {
 		if err := n.handler(corev1.ConditionFalse, types.IPResInsufficientReason,
 			"node has insufficient IP"); err != nil {
 			mgrLog.Error(err, "set IPExhaustive condition failed")
