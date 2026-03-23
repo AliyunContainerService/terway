@@ -1020,6 +1020,42 @@ func TestCheckInstance(t *testing.T) {
 			expectedIPv4: true,
 			expectedIPv6: false,
 		},
+		{
+			name: "dual stack multi ipv6 not supported - ipv6 disabled",
+			limit: &client.Limits{
+				Adapters:       3,
+				IPv4PerAdapter: 10,
+				IPv6PerAdapter: 5, // != IPv4PerAdapter => SupportMultiIPIPv6() returns false
+			},
+			daemonMode:   daemon.ModeENIMultiIP,
+			config:       &daemon.Config{IPStack: "dual"},
+			expectedIPv4: true,
+			expectedIPv6: false,
+		},
+		{
+			name: "erdma supported by instance but OS capability missing",
+			limit: &client.Limits{
+				Adapters:       5,
+				IPv4PerAdapter: 10,
+				ERdmaAdapters:  2,
+			},
+			daemonMode:   daemon.ModeENIMultiIP,
+			config:       &daemon.Config{IPStack: "ipv4", EnableERDMA: true},
+			expectedIPv4: true,
+			expectedIPv6: false,
+		},
+		{
+			name: "ipv6 only not supported - disabled",
+			limit: &client.Limits{
+				Adapters:       3,
+				IPv4PerAdapter: 10,
+				IPv6PerAdapter: 0,
+			},
+			daemonMode:   daemon.ModeENIMultiIP,
+			config:       &daemon.Config{IPStack: "ipv6"},
+			expectedIPv4: false,
+			expectedIPv6: false,
+		},
 	}
 
 	for _, tc := range tests {
@@ -1031,7 +1067,7 @@ func TestCheckInstance(t *testing.T) {
 			if tc.name == "trunk disabled when TrunkPod is 0" {
 				assert.False(t, tc.config.EnableENITrunking)
 			}
-			if tc.name == "erdma disabled when ERDMARes is 0" {
+			if tc.name == "erdma disabled when ERDMARes is 0" || tc.name == "erdma supported by instance but OS capability missing" {
 				assert.False(t, tc.config.EnableERDMA)
 			}
 		})
@@ -1595,6 +1631,115 @@ func TestGetDatapath(t *testing.T) {
 				t.Skip("getDatapath inlined in this build, nodecap patch not effective")
 			}
 			assert.Equal(t, tc.expectedDatapath, result)
+		})
+	}
+}
+
+func TestValidatePrefixConfig(t *testing.T) {
+	tests := []struct {
+		name          string
+		config        *daemon.Config
+		enableIPv4    bool
+		enableIPv6    bool
+		expectedError bool
+		errorContains string
+	}{
+		{
+			name: "prefix disabled - no error",
+			config: &daemon.Config{
+				EnableIPPrefix:  false,
+				IPv4PrefixCount: 10,
+			},
+			enableIPv4:    true,
+			enableIPv6:    true,
+			expectedError: false,
+		},
+		{
+			name: "ipv4 only with ipv4 prefix - no error",
+			config: &daemon.Config{
+				EnableIPPrefix:  true,
+				IPv4PrefixCount: 10,
+			},
+			enableIPv4:    true,
+			enableIPv6:    false,
+			expectedError: false,
+		},
+		{
+			name: "ipv6 only with ipv6 prefix 1 - no error",
+			config: &daemon.Config{
+				EnableIPPrefix:  true,
+				IPv6PrefixCount: 1,
+			},
+			enableIPv4:    false,
+			enableIPv6:    true,
+			expectedError: false,
+		},
+		{
+			name: "ipv6 only with ipv6 prefix 0 - no error",
+			config: &daemon.Config{
+				EnableIPPrefix:  true,
+				IPv6PrefixCount: 0,
+			},
+			enableIPv4:    false,
+			enableIPv6:    true,
+			expectedError: false,
+		},
+		{
+			name: "ipv6 prefix count exceeds 1 - error",
+			config: &daemon.Config{
+				EnableIPPrefix:  true,
+				IPv6PrefixCount: 2,
+			},
+			enableIPv4:    false,
+			enableIPv6:    true,
+			expectedError: true,
+			errorContains: "ipv6_prefix_count must be 0 or 1",
+		},
+		{
+			name: "dual stack with ipv4 prefix only - no error (ipv6 auto 1 per ENI)",
+			config: &daemon.Config{
+				EnableIPPrefix:  true,
+				IPv4PrefixCount: 10,
+			},
+			enableIPv4:    true,
+			enableIPv6:    true,
+			expectedError: false,
+		},
+		{
+			name: "dual stack with no prefix counts - no error",
+			config: &daemon.Config{
+				EnableIPPrefix: true,
+			},
+			enableIPv4:    true,
+			enableIPv6:    true,
+			expectedError: false,
+		},
+		{
+			name: "dual stack ipv6 prefix count exceeds 1 - error",
+			config: &daemon.Config{
+				EnableIPPrefix:  true,
+				IPv4PrefixCount: 10,
+				IPv6PrefixCount: 3,
+			},
+			enableIPv4:    true,
+			enableIPv6:    true,
+			expectedError: true,
+			errorContains: "ipv6_prefix_count must be 0 or 1",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validatePrefixConfig(tc.config, tc.enableIPv4, tc.enableIPv6)
+
+			if tc.expectedError {
+				assert.Error(t, err)
+				if tc.errorContains != "" {
+					assert.Contains(t, err.Error(), tc.errorContains)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

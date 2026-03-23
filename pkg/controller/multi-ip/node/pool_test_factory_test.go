@@ -40,29 +40,32 @@ const (
 //	    WithIPv6(true).
 //	    Build()
 type NodeFactory struct {
-	name           string
-	nodeType       NodeType
-	instanceID     string
-	instanceType   string
-	regionID       string
-	zone           string
-	adapters       int
-	totalAdapters  int
-	ipv4PerAdapter int
-	ipv6PerAdapter int
-	enableIPv4     bool
-	enableIPv6     bool
-	enableTrunk    bool
-	enableERDMA    bool
-	vswitchOptions []string
-	securityGroups []string
-	minPoolSize    int
-	maxPoolSize    int
-	flavor         []networkv1beta1.Flavor
-	labels         map[string]string
-	existingENIs   map[string]*networkv1beta1.Nic
-	tags           map[string]string
-	tagFilter      map[string]string
+	name            string
+	nodeType        NodeType
+	instanceID      string
+	instanceType    string
+	regionID        string
+	zone            string
+	adapters        int
+	totalAdapters   int
+	ipv4PerAdapter  int
+	ipv6PerAdapter  int
+	enableIPv4      bool
+	enableIPv6      bool
+	enableTrunk     bool
+	enableERDMA     bool
+	vswitchOptions  []string
+	securityGroups  []string
+	minPoolSize     int
+	maxPoolSize     int
+	ipPrefixCount   int
+	ipv6PrefixCount int
+	enableIPPrefix  bool
+	flavor          []networkv1beta1.Flavor
+	labels          map[string]string
+	existingENIs    map[string]*networkv1beta1.Nic
+	tags            map[string]string
+	tagFilter       map[string]string
 }
 
 // NewNodeFactory creates a new NodeFactory with sensible defaults.
@@ -87,6 +90,7 @@ func NewNodeFactory(name string) *NodeFactory {
 		securityGroups: []string{"sg-test"},
 		minPoolSize:    0,
 		maxPoolSize:    0,
+		ipPrefixCount:  0,
 		labels:         make(map[string]string),
 		existingENIs:   make(map[string]*networkv1beta1.Nic),
 		tags:           make(map[string]string),
@@ -181,6 +185,24 @@ func (f *NodeFactory) WithPool(minSize, maxSize int) *NodeFactory {
 	return f
 }
 
+// WithIPPrefixCount configures the IP prefix count for prefix mode.
+// This also sets EnableIPPrefix on the ENISpec.
+func (f *NodeFactory) WithIPPrefixCount(count int) *NodeFactory {
+	f.ipPrefixCount = count
+	if count > 0 {
+		f.enableIPPrefix = true
+	} else {
+		f.enableIPPrefix = false
+	}
+	return f
+}
+
+// WithIPv6PrefixCount configures the IPv6 prefix count for prefix mode.
+func (f *NodeFactory) WithIPv6PrefixCount(count int) *NodeFactory {
+	f.ipv6PrefixCount = count
+	return f
+}
+
 // WithFlavor sets the flavor configuration for ENI types.
 func (f *NodeFactory) WithFlavor(flavor []networkv1beta1.Flavor) *NodeFactory {
 	f.flavor = flavor
@@ -262,6 +284,9 @@ func (f *NodeFactory) Build() *networkv1beta1.Node {
 				EnableIPv6:          f.enableIPv6,
 				EnableERDMA:         f.enableERDMA,
 				EnableTrunk:         f.enableTrunk,
+				EnableIPPrefix:      f.enableIPPrefix,
+				IPv4PrefixCount:     f.ipPrefixCount,
+				IPv6PrefixCount:     f.ipv6PrefixCount,
 				VSwitchSelectPolicy: "most",
 			},
 			Pool: &networkv1beta1.PoolSpec{
@@ -300,34 +325,42 @@ func (f *NodeFactory) Build() *networkv1beta1.Node {
 //	    WithIPv4Count(5).
 //	    Build()
 type ENIFactory struct {
-	baseID      string
-	count       int
-	eniType     networkv1beta1.ENIType
-	trafficMode networkv1beta1.NetworkInterfaceTrafficMode
-	status      string
-	vswitchID   string
-	ipv4Base    string
-	ipv4Count   int
-	ipv6Base    string
-	ipv6Count   int
-	podIDs      []string
-	macBase     string
+	baseID          string
+	count           int
+	eniType         networkv1beta1.ENIType
+	trafficMode     networkv1beta1.NetworkInterfaceTrafficMode
+	status          string
+	vswitchID       string
+	ipv4Base        string
+	ipv4Count       int
+	ipv6Base        string
+	ipv6Count       int
+	ipv4PrefixBase  string
+	ipv4PrefixCount int
+	ipv6PrefixBase  string
+	ipv6PrefixCount int
+	podIDs          []string
+	macBase         string
 }
 
 // NewENIFactory creates a new ENIFactory with defaults.
 func NewENIFactory() *ENIFactory {
 	return &ENIFactory{
-		baseID:      "eni",
-		count:       1,
-		eniType:     networkv1beta1.ENITypeSecondary,
-		trafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
-		status:      aliyunClient.ENIStatusInUse,
-		vswitchID:   "vsw-test",
-		ipv4Base:    "192.168.0",
-		ipv4Count:   1,
-		ipv6Base:    "fd00::",
-		ipv6Count:   0,
-		macBase:     "00:00:00:00:00",
+		baseID:          "eni",
+		count:           1,
+		eniType:         networkv1beta1.ENITypeSecondary,
+		trafficMode:     networkv1beta1.NetworkInterfaceTrafficModeStandard,
+		status:          aliyunClient.ENIStatusInUse,
+		vswitchID:       "vsw-test",
+		ipv4Base:        "192.168.0",
+		ipv4Count:       1,
+		ipv6Base:        "fd00::",
+		ipv6Count:       0,
+		ipv4PrefixBase:  "192.168.100",
+		ipv4PrefixCount: 0,
+		ipv6PrefixBase:  "fd00:100::",
+		ipv6PrefixCount: 0,
+		macBase:         "00:00:00:00:00",
 	}
 }
 
@@ -388,6 +421,30 @@ func (f *ENIFactory) WithIPv6Count(count int) *ENIFactory {
 // WithIPv6Base sets the base IPv6 address for generation (e.g., "fd00::").
 func (f *ENIFactory) WithIPv6Base(base string) *ENIFactory {
 	f.ipv6Base = base
+	return f
+}
+
+// WithIPv4PrefixCount sets the number of IPv4 prefixes to generate per ENI.
+func (f *ENIFactory) WithIPv4PrefixCount(count int) *ENIFactory {
+	f.ipv4PrefixCount = count
+	return f
+}
+
+// WithIPv4PrefixBase sets the base IPv4 prefix for generation (e.g., "192.168.100").
+func (f *ENIFactory) WithIPv4PrefixBase(base string) *ENIFactory {
+	f.ipv4PrefixBase = base
+	return f
+}
+
+// WithIPv6PrefixCount sets the number of IPv6 prefixes to generate per ENI.
+func (f *ENIFactory) WithIPv6PrefixCount(count int) *ENIFactory {
+	f.ipv6PrefixCount = count
+	return f
+}
+
+// WithIPv6PrefixBase sets the base IPv6 prefix for generation (e.g., "fd00:100::").
+func (f *ENIFactory) WithIPv6PrefixBase(base string) *ENIFactory {
+	f.ipv6PrefixBase = base
 	return f
 }
 
@@ -468,6 +525,24 @@ func (f *ENIFactory) Build() []*networkv1beta1.Nic {
 			}
 
 			eni.IPv6[ipAddr] = ip
+		}
+
+		// Generate IPv4 prefixes
+		for j := 0; j < f.ipv4PrefixCount; j++ {
+			prefixCIDR := fmt.Sprintf("%s.%d/28", f.ipv4PrefixBase, (i*100+j)*16)
+			eni.IPv4Prefix = append(eni.IPv4Prefix, networkv1beta1.IPPrefix{
+				Prefix: prefixCIDR,
+				Status: networkv1beta1.IPPrefixStatusValid,
+			})
+		}
+
+		// Generate IPv6 prefixes
+		for j := 0; j < f.ipv6PrefixCount; j++ {
+			prefixCIDR := fmt.Sprintf("%s%x/80", f.ipv6PrefixBase, i*100+j)
+			eni.IPv6Prefix = append(eni.IPv6Prefix, networkv1beta1.IPPrefix{
+				Prefix: prefixCIDR,
+				Status: networkv1beta1.IPPrefixStatusValid,
+			})
 		}
 
 		enis = append(enis, eni)

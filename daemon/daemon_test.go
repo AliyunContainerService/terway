@@ -1297,6 +1297,230 @@ func TestNetworkService_GetResourceMapping(t *testing.T) {
 	}
 }
 
+func TestToPrefixInfoSlice(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []eni.PrefixStatus
+		expected []*rpc.PrefixInfo
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:     "empty input",
+			input:    []eni.PrefixStatus{},
+			expected: nil,
+		},
+		{
+			name: "single prefix no allocations",
+			input: []eni.PrefixStatus{
+				{
+					Prefix:    "10.0.0.0/28",
+					Status:    "Valid",
+					Total:     16,
+					Used:      0,
+					Available: 16,
+				},
+			},
+			expected: []*rpc.PrefixInfo{
+				{
+					Prefix:    "10.0.0.0/28",
+					Status:    "Valid",
+					Total:     16,
+					Used:      0,
+					Available: 16,
+				},
+			},
+		},
+		{
+			name: "prefix with allocations",
+			input: []eni.PrefixStatus{
+				{
+					Prefix:    "10.0.0.0/28",
+					Status:    "Valid",
+					Total:     16,
+					Used:      2,
+					Available: 14,
+					Allocations: []eni.PrefixAllocation{
+						{IP: "10.0.0.0", PodID: "pod-1"},
+						{IP: "10.0.0.1", PodID: "pod-2"},
+					},
+				},
+			},
+			expected: []*rpc.PrefixInfo{
+				{
+					Prefix:    "10.0.0.0/28",
+					Status:    "Valid",
+					Total:     16,
+					Used:      2,
+					Available: 14,
+					Allocations: []*rpc.PrefixIPAllocation{
+						{Ip: "10.0.0.0", PodId: "pod-1"},
+						{Ip: "10.0.0.1", PodId: "pod-2"},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := toPrefixInfoSlice(tt.input)
+			if tt.expected == nil {
+				assert.Nil(t, result)
+			} else {
+				require.Len(t, result, len(tt.expected))
+				for i, exp := range tt.expected {
+					assert.Equal(t, exp.Prefix, result[i].Prefix)
+					assert.Equal(t, exp.Status, result[i].Status)
+					assert.Equal(t, exp.Total, result[i].Total)
+					assert.Equal(t, exp.Used, result[i].Used)
+					assert.Equal(t, exp.Available, result[i].Available)
+					require.Len(t, result[i].Allocations, len(exp.Allocations))
+					for j, a := range exp.Allocations {
+						assert.Equal(t, a.Ip, result[i].Allocations[j].Ip)
+						assert.Equal(t, a.PodId, result[i].Allocations[j].PodId)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestToRPCMapping_WithPrefixes(t *testing.T) {
+	status := eni.Status{
+		NetworkInterfaceID: "eni-prefix-test",
+		MAC:                "aa:bb:cc:dd:ee:ff",
+		Type:               "Prefix",
+		Status:             "InUse",
+		IPv4Prefixes: []eni.PrefixStatus{
+			{
+				Prefix:    "10.0.0.0/28",
+				Status:    "Valid",
+				Total:     16,
+				Used:      1,
+				Available: 15,
+				Allocations: []eni.PrefixAllocation{
+					{IP: "10.0.0.0", PodID: "pod-1"},
+				},
+			},
+		},
+		IPv6Prefixes: []eni.PrefixStatus{
+			{
+				Prefix:    "fd00::/120",
+				Status:    "Valid",
+				Total:     256,
+				Used:      0,
+				Available: 256,
+			},
+		},
+	}
+
+	result := toRPCMapping(status)
+	assert.NotNil(t, result)
+	assert.Equal(t, "eni-prefix-test", result.NetworkInterfaceID)
+
+	require.Len(t, result.Ipv4Prefixes, 1)
+	assert.Equal(t, "10.0.0.0/28", result.Ipv4Prefixes[0].Prefix)
+	assert.Equal(t, uint32(16), result.Ipv4Prefixes[0].Total)
+	assert.Equal(t, uint32(1), result.Ipv4Prefixes[0].Used)
+	require.Len(t, result.Ipv4Prefixes[0].Allocations, 1)
+	assert.Equal(t, "10.0.0.0", result.Ipv4Prefixes[0].Allocations[0].Ip)
+	assert.Equal(t, "pod-1", result.Ipv4Prefixes[0].Allocations[0].PodId)
+
+	require.Len(t, result.Ipv6Prefixes, 1)
+	assert.Equal(t, "fd00::/120", result.Ipv6Prefixes[0].Prefix)
+	assert.Equal(t, uint32(256), result.Ipv6Prefixes[0].Total)
+}
+
+func TestGetResourceMapping_WithResourceDB(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	mockDB := storagemocks.NewStorage(t)
+
+	ns := &networkService{
+		eniMgr:     &eni.Manager{},
+		resourceDB: mockDB,
+	}
+
+	patches.ApplyMethodFunc(ns.eniMgr, "Status", func() []eni.Status {
+		return []eni.Status{
+			{
+				NetworkInterfaceID: "eni-db-test",
+				Type:               "primary",
+				Status:             "InUse",
+			},
+		}
+	})
+
+	mockDB.On("List").Return([]interface{}{
+		daemon.PodResources{
+			PodInfo: &daemon.PodInfo{
+				Name:      "my-pod",
+				Namespace: "default",
+			},
+			Resources: []daemon.ResourceItem{
+				{
+					ENIID:  "eni-db-test",
+					ENIMAC: "aa:bb:cc:dd:ee:ff",
+					IPv4:   "10.0.0.1",
+					Type:   "eni-ip",
+				},
+			},
+		},
+		daemon.PodResources{
+			PodInfo: nil, // should be skipped
+		},
+	}, nil)
+
+	reply, err := ns.GetResourceMapping()
+	assert.NoError(t, err)
+	assert.NotNil(t, reply)
+	assert.Len(t, reply.Info, 1)
+	require.Len(t, reply.ResourceDb, 1)
+	assert.Equal(t, "my-pod", reply.ResourceDb[0].PodName)
+	assert.Equal(t, "default", reply.ResourceDb[0].PodNamespace)
+	assert.Equal(t, "eni-db-test", reply.ResourceDb[0].EniId)
+	assert.Equal(t, "10.0.0.1", reply.ResourceDb[0].Ipv4)
+}
+
+func TestGetResourceMapping_ResourceDBError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	mockDB := storagemocks.NewStorage(t)
+
+	ns := &networkService{
+		eniMgr:     &eni.Manager{},
+		resourceDB: mockDB,
+	}
+
+	patches.ApplyMethodFunc(ns.eniMgr, "Status", func() []eni.Status {
+		return []eni.Status{
+			{NetworkInterfaceID: "eni-1", Status: "InUse"},
+		}
+	})
+
+	mockDB.On("List").Return(nil, fmt.Errorf("db error"))
+
+	reply, err := ns.GetResourceMapping()
+	assert.NoError(t, err, "should return partial reply without error on DB failure")
+	assert.NotNil(t, reply)
+	assert.Len(t, reply.Info, 1)
+	assert.Empty(t, reply.ResourceDb)
+}
+
 func TestRecordEvent(t *testing.T) {
 
 	k8s := k8smocks.NewKubernetes(t)
@@ -1325,6 +1549,70 @@ func TestRecordEvent(t *testing.T) {
 		Message:         "",
 	})
 	require.NoError(t, err)
+}
+
+func TestParseNetworkResource(t *testing.T) {
+	t.Run("ENIIP type - IPv4 only", func(t *testing.T) {
+		res := parseNetworkResource(daemon.ResourceItem{
+			Type:   daemon.ResourceTypeENIIP,
+			ENIID:  "eni-1",
+			ENIMAC: "00:00:00:00:00:01",
+			IPv4:   "10.0.0.1",
+		})
+		require.NotNil(t, res)
+		local := res.(*eni.LocalIPResource)
+		assert.Equal(t, "eni-1", local.ENI.ID)
+		assert.True(t, local.IP.IPv4.IsValid())
+		assert.False(t, local.IP.IPv6.IsValid())
+	})
+
+	t.Run("ENI type - dual stack", func(t *testing.T) {
+		res := parseNetworkResource(daemon.ResourceItem{
+			Type:   daemon.ResourceTypeENI,
+			ENIID:  "eni-2",
+			ENIMAC: "00:00:00:00:00:02",
+			IPv4:   "10.0.0.2",
+			IPv6:   "fd00::2",
+		})
+		require.NotNil(t, res)
+		local := res.(*eni.LocalIPResource)
+		assert.True(t, local.IP.IPv4.IsValid())
+		assert.True(t, local.IP.IPv6.IsValid())
+	})
+
+	t.Run("unknown type returns nil", func(t *testing.T) {
+		res := parseNetworkResource(daemon.ResourceItem{
+			Type: "unknown",
+		})
+		assert.Nil(t, res)
+	})
+}
+
+func TestPreStartResourceManager(t *testing.T) {
+	k8sClient := k8smocks.NewKubernetes(t)
+	err := preStartResourceManager(daemon.ModeENIMultiIP, k8sClient)
+	assert.NoError(t, err)
+}
+
+func TestRecordEvent_PodError(t *testing.T) {
+	k8s := k8smocks.NewKubernetes(t)
+	n := &networkService{
+		k8s: k8s,
+	}
+	k8s.On("RecordPodEvent", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(fmt.Errorf("pod not found")).Maybe()
+
+	reply, err := n.RecordEvent(nil, &rpc.EventRequest{
+		EventTarget:     rpc.EventTarget_EventTargetPod,
+		K8SPodName:      "missing-pod",
+		K8SPodNamespace: "default",
+		EventType:       rpc.EventType_EventTypeNormal,
+		Reason:          "test",
+		Message:         "test",
+	})
+	require.Error(t, err)
+	assert.False(t, reply.Succeed)
+	assert.Contains(t, reply.Error, "pod not found")
 }
 
 func TestRunDevicePlugin(t *testing.T) {

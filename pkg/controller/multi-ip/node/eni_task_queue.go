@@ -68,9 +68,11 @@ type ENITaskRecord struct {
 	CreatedAt   time.Time
 	CompletedAt *time.Time
 
-	// Record the number of IPs requested when creating ENI, used for quota calculation
-	RequestedIPv4Count int
-	RequestedIPv6Count int
+	// Record the number of IPs/prefixes requested when creating ENI, used for quota calculation
+	RequestedIPv4Count       int
+	RequestedIPv6Count       int
+	RequestedIPv4PrefixCount int
+	RequestedIPv6PrefixCount int
 
 	// Result after completion
 	ENIInfo *aliyunClient.NetworkInterface
@@ -100,10 +102,10 @@ func NewENITaskQueue(ctx context.Context, executor *ops.Executor, notifyCh chan 
 	}
 }
 
-// SubmitAttach submits an async attach task with requested IP counts
+// SubmitAttach submits an async attach task with requested IP/prefix counts
 // This method never fails - it only adds a task to in-memory queue
 func (q *ENITaskQueue) SubmitAttach(ctx context.Context, eniID, instanceID, trunkENIID, nodeName string,
-	requestedIPv4, requestedIPv6 int) {
+	requestedIPv4, requestedIPv6, requestedIPv4Prefix, requestedIPv6Prefix int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -121,21 +123,24 @@ func (q *ENITaskQueue) SubmitAttach(ctx context.Context, eniID, instanceID, trun
 	backendAPI := aliyunClient.GetBackendAPI(ctx)
 
 	task := &ENITaskRecord{
-		ENIID:              eniID,
-		Operation:          OpAttach,
-		InstanceID:         instanceID,
-		TrunkENIID:         trunkENIID,
-		NodeName:           nodeName,
-		BackendAPI:         backendAPI,
-		Status:             TaskStatusPending,
-		CreatedAt:          time.Now(),
-		RequestedIPv4Count: requestedIPv4,
-		RequestedIPv6Count: requestedIPv6,
+		ENIID:                    eniID,
+		Operation:                OpAttach,
+		InstanceID:               instanceID,
+		TrunkENIID:               trunkENIID,
+		NodeName:                 nodeName,
+		BackendAPI:               backendAPI,
+		Status:                   TaskStatusPending,
+		CreatedAt:                time.Now(),
+		RequestedIPv4Count:       requestedIPv4,
+		RequestedIPv6Count:       requestedIPv6,
+		RequestedIPv4PrefixCount: requestedIPv4Prefix,
+		RequestedIPv6PrefixCount: requestedIPv6Prefix,
 	}
 
 	q.tasks[eniID] = task
 	q.log.Info("submitted attach task", "eni", eniID, "node", nodeName,
-		"backendAPI", backendAPI, "requestedIPv4", requestedIPv4, "requestedIPv6", requestedIPv6)
+		"backendAPI", backendAPI, "requestedIPv4", requestedIPv4, "requestedIPv6", requestedIPv6,
+		"requestedIPv4Prefix", requestedIPv4Prefix, "requestedIPv6Prefix", requestedIPv6Prefix)
 
 	// Start processing in background
 	go q.processAttachTask(q.ctx, task)

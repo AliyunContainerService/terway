@@ -136,7 +136,7 @@ func TestENITaskQueue_IPSync(t *testing.T) {
 	}, nil).Maybe()
 
 	// 1. Submit a task with 0 IPs (simulating recovery)
-	q.SubmitAttach(context.Background(), "eni-recovery", "i-1", "", "node1", 0, 0)
+	q.SubmitAttach(context.Background(), "eni-recovery", "i-1", "", "node1", 0, 0, 0, 0)
 
 	// Wait a bit for the async task to start
 	time.Sleep(100 * time.Millisecond)
@@ -421,7 +421,7 @@ func TestENITaskQueue_SubmitAttach_BackendAPI(t *testing.T) {
 
 	// Test ECS backend
 	ecsCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIECS)
-	q.SubmitAttach(ecsCtx, "eni-ecs-1", "i-ecs", "", "ecs-node", 5, 0)
+	q.SubmitAttach(ecsCtx, "eni-ecs-1", "i-ecs", "", "ecs-node", 5, 0, 0, 0)
 
 	// Wait for task to be added
 	task, ok := q.GetTaskStatus("eni-ecs-1")
@@ -430,7 +430,7 @@ func TestENITaskQueue_SubmitAttach_BackendAPI(t *testing.T) {
 
 	// Test EFLO backend
 	efloCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIEFLO)
-	q.SubmitAttach(efloCtx, "leni-eflo-1", "i-eflo", "", "eflo-node", 2, 0)
+	q.SubmitAttach(efloCtx, "leni-eflo-1", "i-eflo", "", "eflo-node", 2, 0, 0, 0)
 
 	task, ok = q.GetTaskStatus("leni-eflo-1")
 	assert.True(t, ok)
@@ -438,7 +438,7 @@ func TestENITaskQueue_SubmitAttach_BackendAPI(t *testing.T) {
 
 	// Test default (no backend set in context should default to ECS)
 	defaultCtx := context.Background()
-	q.SubmitAttach(defaultCtx, "eni-default-1", "i-default", "", "default-node", 3, 0)
+	q.SubmitAttach(defaultCtx, "eni-default-1", "i-default", "", "default-node", 3, 0, 0, 0)
 
 	task, ok = q.GetTaskStatus("eni-default-1")
 	assert.True(t, ok)
@@ -470,7 +470,7 @@ func TestENITaskQueue_SubmitAttach_TaskAlreadyExists(t *testing.T) {
 	})
 
 	// Submit the same task again - should be ignored
-	q.SubmitAttach(context.Background(), "eni-pending", "i-1", "", "node1", 5, 0)
+	q.SubmitAttach(context.Background(), "eni-pending", "i-1", "", "node1", 5, 0, 0, 0)
 
 	// Task should still exist with Pending status
 	task, ok := q.GetTaskStatus("eni-pending")
@@ -485,7 +485,7 @@ func TestENITaskQueue_SubmitAttach_TaskAlreadyExists(t *testing.T) {
 	})
 
 	// Submit the same task again - should be ignored
-	q.SubmitAttach(context.Background(), "eni-running", "i-1", "", "node1", 5, 0)
+	q.SubmitAttach(context.Background(), "eni-running", "i-1", "", "node1", 5, 0, 0, 0)
 
 	// Task should still exist with Running status
 	task, ok = q.GetTaskStatus("eni-running")
@@ -502,7 +502,7 @@ func TestENITaskQueue_SubmitAttach_TaskAlreadyExists(t *testing.T) {
 	})
 
 	// Submit the same task again - should remove old and add new
-	q.SubmitAttach(context.Background(), "eni-completed", "i-2", "trunk-1", "node2", 3, 1)
+	q.SubmitAttach(context.Background(), "eni-completed", "i-2", "trunk-1", "node2", 3, 1, 0, 0)
 
 	// Wait a bit for the goroutine to start and avoid race conditions
 	time.Sleep(50 * time.Millisecond)
@@ -530,7 +530,7 @@ func TestENITaskQueue_SubmitAttach_TaskAlreadyExists(t *testing.T) {
 	})
 
 	// Submit the same task again - should remove old and add new
-	q.SubmitAttach(context.Background(), "eni-failed", "i-3", "", "node3", 2, 0)
+	q.SubmitAttach(context.Background(), "eni-failed", "i-3", "", "node3", 2, 0, 0, 0)
 
 	// Wait a bit for the goroutine to start and avoid race conditions
 	time.Sleep(50 * time.Millisecond)
@@ -554,7 +554,7 @@ func TestENITaskQueue_SubmitAttach_TaskAlreadyExists(t *testing.T) {
 	})
 
 	// Submit the same task again - should remove old and add new
-	q.SubmitAttach(context.Background(), "eni-timeout", "i-4", "", "node4", 1, 0)
+	q.SubmitAttach(context.Background(), "eni-timeout", "i-4", "", "node4", 1, 0, 0, 0)
 
 	// Task should be re-submitted with new data
 	// Status may be Running if goroutine started, or Pending if checked immediately

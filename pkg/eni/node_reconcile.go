@@ -77,6 +77,9 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		return reconcile.Result{}, err
 	}
 
+	// Save the existing ENISpec before resetting, for immutability checks.
+	beforeENISpec := node.Spec.ENISpec
+
 	node.Spec.ENISpec = nil
 
 	// the initial setup
@@ -161,6 +164,26 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 	node.Spec.ENISpec.Tag = eniConfig.ENITags
 	node.Spec.ENISpec.TagFilter = eniConfig.ENITagFilter
 	node.Spec.ENISpec.ResourceGroupID = eniConfig.ResourceGroupID
+	node.Spec.ENISpec.IPv4PrefixCount = eniConfig.IPv4PrefixCount
+	if !ipv4 && ipv6 {
+		// IPv6 single-stack: propagate IPv6PrefixCount (validated to be 0 or 1).
+		node.Spec.ENISpec.IPv6PrefixCount = eniConfig.IPv6PrefixCount
+	}
+	// In dual-stack, IPv6PrefixCount is not set; the controller auto-assigns one IPv6 prefix per ENI.
+
+	// EnableIPPrefix is immutable after initial creation.
+	// On first reconcile (ENISpec was nil before), use the config value.
+	// On subsequent reconciles, preserve the existing value and warn if config differs.
+	if beforeENISpec == nil {
+		node.Spec.ENISpec.EnableIPPrefix = eniConfig.EnableIPPrefix
+	} else {
+		node.Spec.ENISpec.EnableIPPrefix = beforeENISpec.EnableIPPrefix
+		if eniConfig.EnableIPPrefix != beforeENISpec.EnableIPPrefix {
+			r.record.Eventf(k8sNode, "Warning", "PrefixModeImmutable",
+				"enable_ip_prefix changed in config (want=%v), but Node CR value (%v) is immutable after creation",
+				eniConfig.EnableIPPrefix, beforeENISpec.EnableIPPrefix)
+		}
+	}
 
 	node.Spec.Flavor = nil
 
@@ -196,6 +219,13 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 
 	if eniConfig.IPWarmUpSize != nil {
 		node.Spec.Pool.WarmUpSize = *eniConfig.IPWarmUpSize
+	}
+
+	// IP Prefix mode and exclusive ENI mode manage resources differently;
+	// pool-based IP pre-allocation is not applicable, so zero out pool sizes.
+	if node.Spec.ENISpec.EnableIPPrefix || types.NodeExclusiveENIMode(node.Labels) == types.ExclusiveENIOnly {
+		node.Spec.Pool.MaxPoolSize = 0
+		node.Spec.Pool.MinPoolSize = 0
 	}
 
 	if eniConfig.IdleIPReclaimAfter != nil {
@@ -254,6 +284,10 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+
+	// Save the existing ENISpec before resetting, for immutability checks.
+	beforeENISpec := node.Spec.ENISpec
+
 	node.Spec.ENISpec = nil
 
 	node.Spec.ENISpec = &networkv1beta1.ENISpec{
@@ -290,6 +324,14 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	node.Spec.ENISpec.Tag = eniConfig.ENITags
 	node.Spec.ENISpec.TagFilter = eniConfig.ENITagFilter
 	node.Spec.ENISpec.ResourceGroupID = eniConfig.ResourceGroupID
+
+	// EFLO nodes do not support prefix mode; always set EnableIPPrefix to false.
+	// Preserve the existing value if Node CR already exists.
+	if beforeENISpec == nil {
+		node.Spec.ENISpec.EnableIPPrefix = false
+	} else {
+		node.Spec.ENISpec.EnableIPPrefix = beforeENISpec.EnableIPPrefix
+	}
 
 	if node.Spec.NodeCap.Adapters > 0 {
 		node.Spec.Flavor = nil

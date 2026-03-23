@@ -582,7 +582,6 @@ func verifyWarmUpStatusByQualifiedNodes(ctx context.Context, t *testing.T, confi
 	return nil
 }
 
-
 // configureWarmUp configures warm-up settings in eni-config
 func configureWarmUp(ctx context.Context, t *testing.T, config *envconf.Config, warmUpSize, maxPoolSize, minPoolSize int) error {
 	t.Logf("Configuring warm-up: ip_warm_up_size=%d, max_pool_size=%d, min_pool_size=%d",
