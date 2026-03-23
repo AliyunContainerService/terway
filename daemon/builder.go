@@ -469,10 +469,43 @@ func (b *NetworkServiceBuilder) PostInitForCRDV2() *NetworkServiceBuilder {
 	if b.err != nil {
 		return b
 	}
-	crdv2 := eni.NewCRDV2(b.service.k8s.GetRestConfig(), b.service.k8s.NodeName(), b.namespace)
-	mgr := eni.NewManager(nil, 0, []eni.NetworkInterface{crdv2}, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), nil)
 
-	svc := b.RunENIMgr(b.ctx, mgr)
+	// Validate prefix configuration in dual stack mode
+	if err := validatePrefixConfig(b.config, b.service.enableIPv4, b.service.enableIPv6); err != nil {
+		b.err = err
+		return b
+	}
+
+	sharedMgr, err := eni.NewSharedCRDManager(b.service.k8s.GetRestConfig(), b.service.k8s.NodeName(), b.namespace)
+	if err != nil {
+		b.err = err
+		return b
+	}
+	sharedMgr.Start(b.ctx, &b.service.wg)
+
+	var eniList []eni.NetworkInterface
+	if b.config.EnableIPPrefix {
+		serviceLog.Info("prefix mode enabled, using LocalDelegate and RemoteV2 for IPAM")
+		localDelegate := eni.NewLocalDelegate(sharedMgr, b.service.k8s.NodeName(), b.service.enableIPv4, b.service.enableIPv6)
+		remoteV2 := eni.NewRemoteV2(sharedMgr, b.service.k8s.NodeName())
+		eniList = append(eniList, localDelegate, remoteV2)
+	} else {
+		serviceLog.Info("prefix mode disabled, using CRDV2 for IPAM")
+		crdv2 := eni.NewCRDV2(sharedMgr, b.service.k8s.NodeName())
+		eniList = append(eniList, crdv2)
+	}
+
+	objList, err := b.service.resourceDB.List()
+	if err != nil {
+		b.err = fmt.Errorf("failed to list resource db: %w", err)
+		return b
+	}
+	podResources := getPodResources(objList)
+	serviceLog.Info(fmt.Sprintf("crdv2 loaded pod res, %v", podResources))
+
+	mgr := eni.NewManager(nil, 0, eniList, daemon.EniSelectionPolicy(b.config.EniSelectionPolicy), nil)
+
+	svc := b.RunENIMgrWithPodResources(b.ctx, mgr, podResources)
 	go b.service.startGarbageCollectionLoop(b.ctx)
 
 	return svc
@@ -505,6 +538,19 @@ func (b *NetworkServiceBuilder) RunENIMgr(ctx context.Context, mgr *eni.Manager)
 	}
 	b.service.eniMgr = mgr
 	err := b.service.eniMgr.Run(ctx, &b.service.wg, nil)
+	if err != nil {
+		b.err = err
+		return b
+	}
+	return b
+}
+
+func (b *NetworkServiceBuilder) RunENIMgrWithPodResources(ctx context.Context, mgr *eni.Manager, podResources []daemon.PodResources) *NetworkServiceBuilder {
+	if b.err != nil {
+		return b
+	}
+	b.service.eniMgr = mgr
+	err := b.service.eniMgr.Run(ctx, &b.service.wg, podResources)
 	if err != nil {
 		b.err = err
 		return b
@@ -589,6 +635,7 @@ func newCRDV2Service(ctx context.Context, configFilePath, daemonMode string) (*n
 		InitService().
 		LoadGlobalConfig().
 		InitK8S().
+		LoadDynamicConfig().
 		InitResourceDB().
 		PostInitForCRDV2().
 		RegisterTracing()
@@ -610,4 +657,21 @@ func newLegacyService(ctx context.Context, configFilePath, daemonMode string) (*
 		RegisterTracing()
 
 	return builder.Build()
+}
+
+// validatePrefixConfig validates prefix configuration.
+// - ipv4_prefix_count: effective in IPv4 single-stack and dual-stack.
+// - ipv6_prefix_count: effective only in IPv6 single-stack; valid range 0 or 1.
+// - In dual-stack, each ENI automatically gets one IPv6 prefix; ipv6_prefix_count is ignored.
+func validatePrefixConfig(config *daemon.Config, enableIPv4, enableIPv6 bool) error {
+	if !config.EnableIPPrefix {
+		return nil
+	}
+
+	// IPv6PrefixCount is only valid in IPv6 single-stack and must be 0 or 1.
+	if config.IPv6PrefixCount > 1 {
+		return fmt.Errorf("ipv6_prefix_count must be 0 or 1, got %d", config.IPv6PrefixCount)
+	}
+
+	return nil
 }

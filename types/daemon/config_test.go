@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -487,4 +488,95 @@ func TestConfig_GetIPStack(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConfig_EnableIPPrefix(t *testing.T) {
+	t.Run("EnableIPPrefix true is parsed correctly", func(t *testing.T) {
+		configJSON := `{
+			"version": "1",
+			"max_pool_size": 10,
+			"min_pool_size": 5,
+			"vswitches": {"cn-hangzhou-i":["vsw-12345"]},
+			"security_group": "sg-12345",
+			"enable_ip_prefix": true
+		}`
+
+		cfg := &Config{}
+		err := json.Unmarshal([]byte(configJSON), cfg)
+		assert.NoError(t, err)
+		assert.True(t, cfg.EnableIPPrefix)
+	})
+
+	t.Run("EnableIPPrefix false is parsed correctly", func(t *testing.T) {
+		configJSON := `{
+			"version": "1",
+			"max_pool_size": 10,
+			"min_pool_size": 5,
+			"vswitches": {"cn-hangzhou-i":["vsw-12345"]},
+			"security_group": "sg-12345",
+			"enable_ip_prefix": false
+		}`
+
+		cfg := &Config{}
+		err := json.Unmarshal([]byte(configJSON), cfg)
+		assert.NoError(t, err)
+		assert.False(t, cfg.EnableIPPrefix)
+	})
+
+	t.Run("EnableIPPrefix defaults to false when missing", func(t *testing.T) {
+		configJSON := `{
+			"version": "1",
+			"max_pool_size": 10,
+			"min_pool_size": 5,
+			"vswitches": {"cn-hangzhou-i":["vsw-12345"]},
+			"security_group": "sg-12345"
+		}`
+
+		cfg := &Config{}
+		err := json.Unmarshal([]byte(configJSON), cfg)
+		assert.NoError(t, err)
+		assert.False(t, cfg.EnableIPPrefix)
+	})
+
+	t.Run("EnableIPPrefix merged correctly in MergeConfigAndUnmarshal", func(t *testing.T) {
+		baseCfg := `{
+			"version": "1",
+			"max_pool_size": 10,
+			"min_pool_size": 5,
+			"vswitches": {"cn-hangzhou-i":["vsw-12345"]},
+			"security_group": "sg-12345",
+			"enable_ip_prefix": false
+		}`
+
+		dynCfg := `{
+			"enable_ip_prefix": true
+		}`
+
+		cfg, err := MergeConfigAndUnmarshal([]byte(dynCfg), []byte(baseCfg))
+		assert.NoError(t, err)
+		assert.Equal(t, "1", cfg.Version)
+		assert.Equal(t, 10, cfg.MaxPoolSize)
+		assert.Equal(t, 5, cfg.MinPoolSize)
+		assert.True(t, cfg.EnableIPPrefix, "Dynamic config should override base config")
+	})
+
+	t.Run("EnableIPPrefix preserved when not in dynamic config", func(t *testing.T) {
+		baseCfg := `{
+			"version": "1",
+			"max_pool_size": 10,
+			"min_pool_size": 5,
+			"vswitches": {"cn-hangzhou-i":["vsw-12345"]},
+			"security_group": "sg-12345",
+			"enable_ip_prefix": true
+		}`
+
+		dynCfg := `{
+			"max_pool_size": 15
+		}`
+
+		cfg, err := MergeConfigAndUnmarshal([]byte(dynCfg), []byte(baseCfg))
+		assert.NoError(t, err)
+		assert.Equal(t, 15, cfg.MaxPoolSize)
+		assert.True(t, cfg.EnableIPPrefix, "Base config value should be preserved when not in dynamic config")
+	})
 }

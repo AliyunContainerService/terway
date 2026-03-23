@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -32,6 +33,12 @@ import (
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
 )
+
+// devImageTagPattern matches container image tags that are git commit IDs (non-semver), common in dev/CI builds.
+var devImageTagPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
+// devSemverTagPattern matches dev/CI image tags like "v1.17.0-d7c63c9e" where a semver base is followed by a git short SHA.
+var devSemverTagPattern = regexp.MustCompile(`^(v\d+\.\d+\.\d+)-[0-9a-f]{7,40}$`)
 
 type Pod struct {
 	*corev1.Pod
@@ -1221,15 +1228,29 @@ func RequireTerwayVersion(requiredVersion string) bool {
 		return false
 	}
 
-	if !semver.IsValid(terwayVersion) {
-		return false
-	}
-
 	if !semver.IsValid(requiredVersion) {
 		return false
 	}
 
-	return semver.Compare(terwayVersion, requiredVersion) >= 0
+	// Release images use semver tags (e.g. v1.17.0). Dev/CI images often use git short SHA tags.
+	// Dev builds may produce tags like "v1.17.0-d7c63c9e" (semver pre-release with a git hash).
+	// In semver, pre-release versions sort below the release (v1.17.0-xxx < v1.17.0), so we
+	// strip the pre-release suffix and compare the base version instead.
+	lowerVersion := strings.ToLower(terwayVersion)
+	if m := devSemverTagPattern.FindStringSubmatch(lowerVersion); m != nil {
+		// m[1] is the base version, e.g. "v1.17.0"
+		return semver.Compare(m[1], requiredVersion) >= 0
+	}
+
+	if semver.IsValid(terwayVersion) {
+		return semver.Compare(terwayVersion, requiredVersion) >= 0
+	}
+
+	if devImageTagPattern.MatchString(lowerVersion) {
+		return true
+	}
+
+	return false
 }
 
 // RequireK8sVersion checks if the cached k8s version meets the minimum requirement.

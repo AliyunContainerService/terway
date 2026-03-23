@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -409,6 +410,7 @@ func printClusterEnvironment(ctx context.Context, config *envconf.Config) (conte
 	fmt.Printf("Total Nodes: %d\n", len(nodeInfoWithCap.AllNodes))
 	fmt.Printf("  - ECS Shared ENI: %d nodes\n", len(nodeInfoWithCap.ECSSharedENINodes))
 	fmt.Printf("  - ECS Exclusive ENI: %d nodes\n", len(nodeInfoWithCap.ECSExclusiveENINodes))
+	fmt.Printf("  - ECS IP Prefix: %d nodes\n", len(nodeInfoWithCap.ECSIPPrefixNodes))
 	fmt.Printf("  - EFLO/Lingjun Shared ENI: %d nodes\n", len(nodeInfoWithCap.LingjunSharedENINodes))
 	fmt.Printf("  - EFLO/Lingjun Exclusive ENI: %d nodes\n", len(nodeInfoWithCap.LingjunExclusiveENINodes))
 
@@ -430,6 +432,24 @@ func printClusterEnvironment(ctx context.Context, config *envconf.Config) (conte
 			for nodeName, reason := range disqualified {
 				fmt.Printf("    ✗ %s: %s\n", nodeName, reason)
 			}
+		}
+	}
+
+	// Print IP Prefix enabled nodes (determined by Node CR ENISpec.EnableIPPrefix)
+	var prefixNodes []string
+	for nodeName, cap := range nodeInfoWithCap.Capacities {
+		if cap.EnableIPPrefix {
+			prefixNodes = append(prefixNodes, nodeName)
+		}
+	}
+	if len(prefixNodes) > 0 {
+		sort.Strings(prefixNodes)
+		fmt.Printf("\n  IP Prefix enabled nodes (enableIPPrefix=true in Node CR): %d\n", len(prefixNodes))
+		for _, nodeName := range prefixNodes {
+			cap := nodeInfoWithCap.Capacities[nodeName]
+			maxPrefixes := (cap.Adapters - 1) * (cap.IPv4PerAdapter - 1)
+			fmt.Printf("    ✓ %s: adapters=%d, ipv4PerAdapter=%d, maxPrefixes=%d\n",
+				nodeName, cap.Adapters, cap.IPv4PerAdapter, maxPrefixes)
 		}
 	}
 

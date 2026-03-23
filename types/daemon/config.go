@@ -70,6 +70,15 @@ type Config struct {
 	RateLimit                   map[string]int                     `json:"rate_limit"`
 	EnablePatchPodIPs           *bool                              `json:"enable_patch_pod_ips,omitempty"  mod:"default=true"`
 	IPPoolSyncPeriod            string                             `json:"ip_pool_sync_period"`
+	EnableIPPrefix              bool                               `json:"enable_ip_prefix,omitempty"`
+	// IPv4PrefixCount specifies the total number of IPv4 prefixes to allocate across all ENIs.
+	// Effective in IPv4 single-stack and dual-stack modes.
+	// In dual-stack mode, each ENI automatically gets exactly one IPv6 prefix alongside IPv4 prefixes.
+	IPv4PrefixCount int `json:"ipv4_prefix_count,omitempty"`
+	// IPv6PrefixCount specifies the total number of IPv6 prefixes to allocate.
+	// Only effective in IPv6 single-stack mode. Valid values: 0 or 1.
+	// Ignored in dual-stack mode (IPv6 prefixes are managed automatically, one per ENI).
+	IPv6PrefixCount int `json:"ipv6_prefix_count,omitempty"`
 }
 
 func (c *Config) GetSecurityGroups() []string {

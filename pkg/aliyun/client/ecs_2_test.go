@@ -298,6 +298,55 @@ func TestECSService_AssignPrivateIPAddress2_FatalError(t *testing.T) {
 	assert.True(t, apiErr.ErrorCodeIs(err, "InvalidParameter"))
 }
 
+func TestECSService_UnAssignPrivateIPAddresses2_OnlyPrefix(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).UnassignPrivateIpAddresses,
+		func(client *ecs.Client, request *ecs.UnassignPrivateIpAddressesRequest) (*ecs.UnassignPrivateIpAddressesResponse, error) {
+			assert.NotNil(t, request.Ipv4Prefix)
+			assert.Equal(t, []string{"10.0.0.0/28"}, *request.Ipv4Prefix)
+			assert.Nil(t, request.PrivateIpAddress)
+			return &ecs.UnassignPrivateIpAddressesResponse{RequestId: "req-1"}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	err := ecsService.UnAssignPrivateIPAddresses2(ctx, "eni-1", []IPSet{{Prefix: "10.0.0.0/28"}})
+	assert.NoError(t, err)
+}
+
+func TestECSService_UnAssignPrivateIPAddresses2_MixedIPAndPrefix(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).UnassignPrivateIpAddresses,
+		func(client *ecs.Client, request *ecs.UnassignPrivateIpAddressesRequest) (*ecs.UnassignPrivateIpAddressesResponse, error) {
+			assert.NotNil(t, request.PrivateIpAddress)
+			assert.Equal(t, []string{"10.0.0.1"}, *request.PrivateIpAddress)
+			assert.NotNil(t, request.Ipv4Prefix)
+			assert.Equal(t, []string{"10.0.0.16/28"}, *request.Ipv4Prefix)
+			return &ecs.UnassignPrivateIpAddressesResponse{RequestId: "req-2"}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	err := ecsService.UnAssignPrivateIPAddresses2(ctx, "eni-1", []IPSet{
+		{IPAddress: "10.0.0.1"},
+		{Prefix: "10.0.0.16/28"},
+	})
+	assert.NoError(t, err)
+}
+
+func TestECSService_UnAssignPrivateIPAddresses2_EmptyInput(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	err := ecsService.UnAssignPrivateIPAddresses2(context.Background(), "eni-1", []IPSet{})
+	assert.NoError(t, err, "empty input should return nil immediately")
+}
+
 func TestECSService_UnAssignPrivateIPAddresses2_Error(t *testing.T) {
 	ecsService := createTestECSServiceForAPI()
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
 	"sync"
 	"time"
 
@@ -18,7 +19,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	toolscache "k8s.io/client-go/tools/cache"
-	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,6 +35,91 @@ import (
 	"github.com/AliyunContainerService/terway/types/daemon"
 )
 
+// SharedCRDManager holds the controller-runtime manager shared by peer controllers
+// (CRDV2 and LocalDelegate). It owns the manager lifecycle and cache sync signal.
+type SharedCRDManager struct {
+	mgr           ctrl.Manager
+	cacheSyncedCh chan struct{}
+}
+
+// NewSharedCRDManager creates the shared controller-runtime manager with filtered
+// caches for this node and registers the nodeReconcile controller.
+func NewSharedCRDManager(restConfig *rest.Config, nodeName, namespace string) (*SharedCRDManager, error) {
+	options := ctrl.Options{
+		Scheme:                 types.Scheme,
+		HealthProbeBindAddress: "0",
+		Metrics: metricsserver.Options{
+			BindAddress: "0",
+		},
+		WebhookServer: nil,
+		Cache: cache.Options{
+			Mapper: types.NewRESTMapper(),
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Node{}: {
+					Field:     fields.SelectorFromSet(map[string]string{"metadata.name": nodeName}),
+					Transform: utils.SlimNode,
+				},
+				&networkv1beta1.PodENI{}: {
+					Label: labels.SelectorFromSet(map[string]string{types.ENIRelatedNodeName: nodeName}),
+				},
+				&networkv1beta1.Node{}: {
+					Field: fields.SelectorFromSet(map[string]string{"metadata.name": nodeName}),
+				},
+				&networkv1beta1.NodeRuntime{}: {
+					Field: fields.SelectorFromSet(map[string]string{"metadata.name": nodeName}),
+				},
+				&corev1.Pod{}: {
+					Field: fields.AndSelectors(
+						fields.OneTermEqualSelector("spec.nodeName", nodeName),
+						fields.OneTermNotEqualSelector("status.phase", string(corev1.PodSucceeded)),
+						fields.OneTermNotEqualSelector("status.phase", string(corev1.PodFailed)),
+					),
+					Transform: utils.SlimPod,
+				},
+				&corev1.ConfigMap{}: {
+					Field: fields.SelectorFromSet(map[string]string{"metadata.namespace": namespace}),
+				},
+			},
+		},
+	}
+
+	mgr, err := ctrl.NewManager(restConfig, options)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create controller manager: %w", err)
+	}
+	if err = (&nodeReconcile{
+		nodeName: nodeName,
+		client:   mgr.GetClient(),
+		record:   mgr.GetEventRecorderFor("terway-daemon"),
+	}).SetupWithManager(mgr); err != nil {
+		return nil, fmt.Errorf("failed to setup node reconcile controller: %w", err)
+	}
+
+	cacheSyncedCh := make(chan struct{})
+	if err = mgr.Add(&started{ch: cacheSyncedCh}); err != nil {
+		return nil, fmt.Errorf("failed to add started runnable: %w", err)
+	}
+
+	return &SharedCRDManager{mgr: mgr, cacheSyncedCh: cacheSyncedCh}, nil
+}
+
+// Start begins the controller-runtime manager in a background goroutine.
+func (s *SharedCRDManager) Start(ctx context.Context, wg *sync.WaitGroup) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := s.mgr.Start(ctx); err != nil && ctx.Err() == nil {
+			logf.Log.Error(err, "shared CRD manager failed")
+			os.Exit(1)
+		}
+	}()
+}
+
+func (s *SharedCRDManager) CacheSynced() <-chan struct{} { return s.cacheSyncedCh }
+func (s *SharedCRDManager) Client() client.Client        { return s.mgr.GetClient() }
+func (s *SharedCRDManager) Scheme() *runtime.Scheme      { return s.mgr.GetScheme() }
+func (s *SharedCRDManager) GetCache() cache.Cache        { return s.mgr.GetCache() }
+
 var _ NetworkInterface = &CRDV2{}
 
 type started struct {
@@ -47,130 +132,37 @@ func (s *started) Start(context.Context) error {
 }
 
 type CRDV2 struct {
-	scheme *runtime.Scheme
-	mgr    ctrl.Manager
+	sharedMgr *SharedCRDManager
+	scheme    *runtime.Scheme
+	client    client.Client
+	nodeName  string
 
-	client client.Client
-
-	nodeName string
-
-	lock sync.Mutex
-	// record pods cni del is called, it is indexed by pod uid
-	deletedPods   map[string]*networkv1beta1.RuntimePodStatus
-	cacheSyncedCh chan struct{}
+	lock        sync.Mutex
+	deletedPods map[string]*networkv1beta1.RuntimePodStatus
 
 	notifier       *Notifier
 	podENINotifier *Notifier
 }
 
-func NewCRDV2(restConfig *rest.Config, nodeName, namespace string) *CRDV2 {
-	options := ctrl.Options{
-		Scheme:                 types.Scheme,
-		HealthProbeBindAddress: "0",
-		Metrics: metricsserver.Options{
-			BindAddress: "0",
-		},
-		WebhookServer: nil,
-		Cache: cache.Options{
-			HTTPClient:           nil,
-			Scheme:               nil,
-			Mapper:               types.NewRESTMapper(),
-			SyncPeriod:           nil,
-			DefaultLabelSelector: nil,
-			DefaultFieldSelector: nil,
-			DefaultTransform:     nil,
-			ByObject: map[client.Object]cache.ByObject{
-				&corev1.Node{}: {
-					Field: fields.SelectorFromSet(map[string]string{
-						"metadata.name": nodeName,
-					}),
-					Transform: utils.SlimNode,
-				},
-				&networkv1beta1.PodENI{}: {
-					Label: labels.SelectorFromSet(map[string]string{
-						types.ENIRelatedNodeName: nodeName,
-					}),
-					Transform: nil,
-				},
-				&networkv1beta1.Node{}: {
-					Field: fields.SelectorFromSet(map[string]string{
-						"metadata.name": nodeName,
-					}),
-					Transform: nil,
-				},
-				&networkv1beta1.NodeRuntime{}: {
-					Field: fields.SelectorFromSet(map[string]string{
-						"metadata.name": nodeName,
-					}),
-					Transform: nil,
-				},
-				&corev1.Pod{}: {
-					Field: fields.AndSelectors(
-						fields.OneTermEqualSelector("spec.nodeName", nodeName),
-						fields.OneTermNotEqualSelector("status.phase", string(corev1.PodSucceeded)),
-						fields.OneTermNotEqualSelector("status.phase", string(corev1.PodFailed)),
-					),
-					Transform: utils.SlimPod,
-				},
-				&corev1.ConfigMap{}: {
-					Field: fields.SelectorFromSet(map[string]string{
-						"metadata.namespace": namespace,
-					}),
-				},
-			},
-		},
-	}
-
-	mgr, err := ctrl.NewManager(restConfig, options)
-	if err != nil {
-		panic(err)
-	}
-	if err = (&nodeReconcile{
-		nodeName: nodeName,
-		client:   mgr.GetClient(),
-		record:   mgr.GetEventRecorderFor("terway-daemon"),
-	}).SetupWithManager(mgr); err != nil {
-		panic(err)
-	}
-
-	cacheSyncedCh := make(chan struct{})
-	err = mgr.Add(&started{ch: cacheSyncedCh})
-	if err != nil {
-		panic(err)
-	}
-
+func NewCRDV2(sharedMgr *SharedCRDManager, nodeName string) *CRDV2 {
 	return &CRDV2{
-		scheme:         mgr.GetScheme(),
-		mgr:            mgr,
-		client:         mgr.GetClient(),
+		sharedMgr:      sharedMgr,
+		scheme:         sharedMgr.Scheme(),
+		client:         sharedMgr.Client(),
 		nodeName:       nodeName,
 		deletedPods:    make(map[string]*networkv1beta1.RuntimePodStatus),
-		cacheSyncedCh:  cacheSyncedCh,
 		notifier:       NewNotifier(),
 		podENINotifier: NewNotifier(),
 	}
 }
 
 func (r *CRDV2) Run(ctx context.Context, podResources []daemon.PodResources, wg *sync.WaitGroup) error {
-	klog.Info("start CRDV2 controller")
+	logf.Log.Info("start CRDV2 controller")
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	<-r.sharedMgr.CacheSynced()
+	logf.Log.Info("crd v2 controller cache synced")
 
-		err := r.mgr.Start(ctx)
-		if err != nil {
-			if ctx.Err() == nil {
-				klog.Fatalf("manager failed: %v", err)
-			}
-		}
-	}()
-
-	// block until cache ready, workaround for now
-	<-r.cacheSyncedCh
-	klog.Info("crd v2 controller cache synced")
-
-	nodeInformer, err := r.mgr.GetCache().GetInformer(ctx, &networkv1beta1.Node{})
+	nodeInformer, err := r.sharedMgr.GetCache().GetInformer(ctx, &networkv1beta1.Node{})
 	if err != nil {
 		return err
 	}
@@ -191,7 +183,7 @@ func (r *CRDV2) Run(ctx context.Context, podResources []daemon.PodResources, wg 
 		return err
 	}
 
-	podENIInformer, err := r.mgr.GetCache().GetInformer(ctx, &networkv1beta1.PodENI{})
+	podENIInformer, err := r.sharedMgr.GetCache().GetInformer(ctx, &networkv1beta1.PodENI{})
 	if err != nil {
 		return err
 	}
@@ -212,15 +204,13 @@ func (r *CRDV2) Run(ctx context.Context, podResources []daemon.PodResources, wg 
 	}
 
 	go wait.UntilWithContext(ctx, func(ctx context.Context) {
-		err := r.syncNodeRuntime(ctx)
-		if err != nil {
+		if err := r.syncNodeRuntime(ctx); err != nil {
 			logf.Log.Error(err, "failed to mark delete")
 		}
 	}, 3*time.Second)
 
 	go wait.UntilWithContext(ctx, func(ctx context.Context) {
-		err := r.syncDeletedPods(ctx)
-		if err != nil {
+		if err := r.syncDeletedPods(ctx); err != nil {
 			logf.Log.Error(err, "sync deleted pods")
 		}
 	}, 5*time.Minute)
@@ -246,12 +236,9 @@ func (r *CRDV2) Allocate(ctx context.Context, cni *daemon.CNI, request ResourceR
 func (r *CRDV2) Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) (bool, error) {
 	switch request.ResourceType() {
 	case ResourceTypeLocalIP, ResourceTypeRDMA:
-		// handle the del req
-		// 1. daemon already verified the request is valid
 		r.lock.Lock()
 		defer r.lock.Unlock()
 
-		// it happens when sync to k8s failed , if local has no pod , need to mark it delete
 		r.deletedPods[cni.PodUID] = &networkv1beta1.RuntimePodStatus{
 			PodID: cni.PodID,
 		}

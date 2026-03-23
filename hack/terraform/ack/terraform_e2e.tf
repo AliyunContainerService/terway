@@ -355,7 +355,7 @@ resource "alicloud_cs_kubernetes_node_pool" "exclusive_eni" {
   }
   labels {
     key   = "k8s.aliyun.com/exclusive-mode-eni-type"
-    value = "secondary"
+    value = "eniOnly"
   }
 }
 

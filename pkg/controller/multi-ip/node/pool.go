@@ -72,6 +72,10 @@ const (
 	// EFLO API limits concurrent attach operations to 2
 	efloMaxConcurrentAttach = 2
 
+	// maxPrefixPerAPICall is the maximum number of prefixes that can be assigned per API call.
+	// Both CreateNetworkInterface and AssignPrivateIpAddresses APIs limit IPv4/IPv6 prefix count to 1-10.
+	maxPrefixPerAPICall = 10
+
 	// Event reasons
 	EventAllocIPFailed      = "AllocIPFailed"
 	EventSyncOpenAPISuccess = "SyncOpenAPISuccess"
@@ -515,6 +519,8 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 			// only ip is updated
 			mergeIPMap(log, remote.IPv4, crENI.IPv4)
 			mergeIPMap(log, remote.IPv6, crENI.IPv6)
+			crENI.IPv4Prefix = mergeIPPrefixes(log, item.IPv4PrefixSets, crENI.IPv4Prefix)
+			crENI.IPv6Prefix = mergeIPPrefixes(log, item.IPv6PrefixSets, crENI.IPv6Prefix)
 
 			// nb(l1b0k): use Deleting status in cr for eni we don't wanted
 			// Note: Don't overwrite Attaching status if we're managing it via queue
@@ -643,6 +649,41 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 
 	var errList []error
 	l := logf.FromContext(ctx)
+
+	// Prefix mode: the controller only ensures the desired number of IP prefixes exist on each ENI.
+	// Pod↔IP allocation records are NOT stored in the Node CR (owned by daemon).
+	// Regular pool management (addIP, adjustPool) is skipped entirely.
+	if isPrefixMode(node) {
+		l.V(2).Info("prefix mode active, skipping regular IPAM")
+
+		// Still release stale pod references in CR (guard against unexpected leftover)
+		ipv4Map, ipv6Map := buildIPMap(podsMapper, node.Status.NetworkInterfaces)
+		releasePodNotFound(ctx, n.client, node.Name, podsMapper, ipv4Map, ipv6Map)
+
+		// Ensure the right number of ENIs exist and each new ENI is created with prefix counts.
+		options := getEniOptions(node)
+		assignEniPrefixWithOptions(ctx, node, options, n.eniTaskQueue)
+		if err := n.allocateFromOptions(ctx, node, options); err != nil {
+			errList = append(errList, err)
+		}
+
+		// Sync task queue status (attach completions update the CR)
+		n.syncTaskQueueStatus(ctx, node)
+
+		// Revert expired Frozen prefixes back to Valid.
+		if processFrozenExpireAt(l, node) {
+			MetaCtx(ctx).StatusChanged.Store(true)
+		}
+
+		// Ensure prefix counts on already-InUse ENIs meet the desired target.
+		if err := n.syncPrefixAllocation(ctx, node); err != nil {
+			errList = append(errList, err)
+		}
+		if err := n.handleStatus(ctx, node); err != nil {
+			errList = append(errList, err)
+		}
+		return utilerrors.NewAggregate(errList)
+	}
 
 	ipv4Map, ipv6Map := buildIPMap(podsMapper, node.Status.NetworkInterfaces)
 
@@ -931,16 +972,28 @@ func (n *ReconcileNode) syncTaskQueueStatus(ctx context.Context, node *networkv1
 				nic.IPv4 = convertIPSet(task.ENIInfo.PrivateIPSets)
 				nic.IPv6 = convertIPSet(task.ENIInfo.IPv6Set)
 
+				// IMPORTANT: Update prefixes from DescribeNetworkInterface response.
+				// This ensures prefixes are correctly recorded even if the CreateNetworkInterface
+				// response didn't include them (API behavior can vary).
+				// Only update if task.ENIInfo has prefixes; otherwise preserve existing CR data.
+				if len(task.ENIInfo.IPv4PrefixSets) > 0 {
+					nic.IPv4Prefix = convertPrefixesToCR(task.ENIInfo.IPv4PrefixSets)
+				}
+				if len(task.ENIInfo.IPv6PrefixSets) > 0 {
+					nic.IPv6Prefix = convertPrefixesToCR(task.ENIInfo.IPv6PrefixSets)
+				}
+
 				// Track OpenAPI allocations for warm-up
 				if !node.Status.WarmUpCompleted && node.Status.WarmUpTarget > 0 {
 					node.Status.WarmUpAllocatedCount += max(len(nic.IPv4), len(nic.IPv6))
 				}
 
 				l.Info("ENI attach completed", "eni", task.ENIID,
-					"ipv4Count", len(nic.IPv4), "ipv6Count", len(nic.IPv6))
+					"ipv4Count", len(nic.IPv4), "ipv6Count", len(nic.IPv6),
+					"ipv4PrefixCount", len(nic.IPv4Prefix), "ipv6PrefixCount", len(nic.IPv6Prefix))
 				n.record.Event(node, corev1.EventTypeNormal, "ENIAttachSuccess",
-					fmt.Sprintf("ENI %s is now ready with %d IPv4 and %d IPv6",
-						task.ENIID, len(nic.IPv4), len(nic.IPv6)))
+					fmt.Sprintf("ENI %s is now ready with %d IPv4, %d IPv6, %d IPv4Prefixes, %d IPv6Prefixes",
+						task.ENIID, len(nic.IPv4), len(nic.IPv6), len(nic.IPv4Prefix), len(nic.IPv6Prefix)))
 			} else {
 				// should not happen
 				nic.Status = aliyunClient.ENIStatusDeleting
@@ -996,9 +1049,9 @@ func (n *ReconcileNode) ensureAsyncTasks(ctx context.Context, node *networkv1bet
 			// Check if task exists
 			if _, ok := n.eniTaskQueue.GetTaskStatus(eniID); !ok {
 				// Task missing, submit recovery task
-				// We don't know the original requested IP count, so we start with 1
-				// The task will update the count after checking the API
-				n.eniTaskQueue.SubmitAttach(ctx, eniID, node.Spec.NodeMetadata.InstanceID, "", node.Name, 1, 1)
+				// We don't know the original requested counts, so we start with 1 IP and 0 prefixes.
+				// The task will update the ENI info from DescribeNetworkInterface after attach.
+				n.eniTaskQueue.SubmitAttach(ctx, eniID, node.Spec.NodeMetadata.InstanceID, "", node.Name, 1, 1, 0, 0)
 				l.Info("submitted recovery attach task", "eni", eniID)
 			}
 		}
@@ -1325,8 +1378,10 @@ func assignEniWithOptions(ctx context.Context, node *networkv1beta1.Node, toAdd 
 			// For InUse status ENI, allocate IPs without subtracting existing idle IPs
 			// Note: The demand calculation in addIP already accounts for ALL idle IPs,
 			// so we should NOT subtract allocatable IPs here to avoid double-counting
+			// IMPORTANT: ECS limits the combined count of (IPs + prefixes) to IPv4PerAdapter,
+			// so we must account for existing prefixes in the quota calculation.
 			if toAddIPv4 > 0 {
-				leftQuota := node.Spec.NodeCap.IPv4PerAdapter - len(option.eniRef.IPv4)
+				leftQuota := node.Spec.NodeCap.IPv4PerAdapter - len(option.eniRef.IPv4) - len(option.eniRef.IPv4Prefix)
 				if leftQuota > 0 {
 					option.addIPv4N = min(leftQuota, toAddIPv4, batchSize(ctx))
 					toAddIPv4 -= option.addIPv4N
@@ -1336,7 +1391,7 @@ func assignEniWithOptions(ctx context.Context, node *networkv1beta1.Node, toAdd 
 			}
 
 			if toAddIPv6 > 0 {
-				leftQuota := node.Spec.NodeCap.IPv6PerAdapter - len(option.eniRef.IPv6)
+				leftQuota := node.Spec.NodeCap.IPv6PerAdapter - len(option.eniRef.IPv6) - len(option.eniRef.IPv6Prefix)
 				if leftQuota > 0 {
 					option.addIPv6N = min(leftQuota, toAddIPv6, batchSize(ctx))
 					toAddIPv6 -= option.addIPv6N
@@ -1366,6 +1421,189 @@ func assignEniWithOptions(ctx context.Context, node *networkv1beta1.Node, toAdd 
 				toAddIPv6 -= option.addIPv6N
 			}
 		}
+	}
+}
+
+// assignEniPrefixWithOptions sets the prefix counts on new (not-yet-created) ENI options for prefix mode.
+// For existing InUse ENIs, syncPrefixAllocation handles prefix allocation separately.
+// ECS allows mixing prefix and secondary IP on the same ENI; the only constraint is that
+// the combined count (primary IP + secondary IPs + prefixes) must not exceed IPv4PerAdapter.
+//
+// IMPORTANT: This function checks if existing InUse ENIs have capacity to accommodate the
+// remaining prefix demand. If they do, we skip creating new ENIs and let syncPrefixAllocation
+// add prefixes to existing ENIs. This prevents unnecessary ENI creation when prefixes can be
+// added to existing ENIs (e.g., when prefix mode is enabled on a node that already has ENIs).
+//
+// IPv6 prefix allocation:
+//   - Dual-stack: each ENI automatically gets exactly 1 IPv6 prefix. The user does NOT
+//     configure ipv6_prefix_count; the controller manages this implicitly.
+//   - IPv6-only: uses IPv6PrefixCount (valid values: 0 or 1).
+func assignEniPrefixWithOptions(ctx context.Context, node *networkv1beta1.Node, options []*eniOptions, taskQueue *ENITaskQueue) {
+	l := logf.FromContext(ctx)
+	eniSpec := node.Spec.ENISpec
+
+	isDualStack := eniSpec.EnableIPv4 && eniSpec.EnableIPv6
+
+	// Get IPv4 desired prefix count
+	totalDesiredV4Prefixes := eniSpec.IPv4PrefixCount
+
+	// Calculate prefix capacity for new ENI:
+	// - IPv4 ENI always has a primary IP which occupies 1 slot
+	// - So the effective prefix capacity is IPv4PerAdapter - 1
+	prefixCapForNewENI := node.Spec.NodeCap.IPv4PerAdapter - 1
+	if prefixCapForNewENI <= 0 {
+		prefixCapForNewENI = 1 // Safety: ensure at least 1 prefix can be allocated
+	}
+
+	// Count existing ENIs and their state
+	existingENICount := 0
+	for _, option := range options {
+		if option.eniRef != nil && option.eniRef.Status == aliyunClient.ENIStatusInUse {
+			existingENICount++
+		}
+	}
+
+	// Calculate how many prefixes already exist on InUse ENIs and their available capacity
+	existingV4Prefixes := 0
+	existingV6Prefixes := 0
+	existingV4Capacity := 0 // Available slots on existing InUse ENIs for adding more prefixes
+	// Count how many InUse ENIs already have at least one IPv6 prefix
+	inUseENIsWithV6Prefix := 0
+	for _, option := range options {
+		if option.eniRef == nil {
+			continue
+		}
+		if option.eniRef.Status == aliyunClient.ENIStatusInUse {
+			existingV4Prefixes += countValidPrefixes(option.eniRef.IPv4Prefix)
+			v6PrefixCount := countValidPrefixes(option.eniRef.IPv6Prefix)
+			existingV6Prefixes += v6PrefixCount
+			if v6PrefixCount > 0 {
+				inUseENIsWithV6Prefix++
+			}
+			// Calculate available capacity: IPv4PerAdapter - (IPs + prefixes)
+			// Each ENI has limited slots shared between IPs and prefixes
+			v4UsedSlots := len(option.eniRef.IPv4) + len(option.eniRef.IPv4Prefix)
+			existingV4Capacity += max(0, node.Spec.NodeCap.IPv4PerAdapter-v4UsedSlots)
+		}
+	}
+
+	// Calculate how many prefixes are pending in Attaching ENIs.
+	// Priority: Use task queue's requested prefix count, as the CreateNetworkInterface API
+	// might not return the actual prefixes in its response (they're only available after attach).
+	// Fall back to ENI's IPv4Prefix field if task doesn't exist.
+	pendingV4Prefixes := 0
+	pendingV6Prefixes := 0
+	attachingENIsWithV6Prefix := 0
+	for _, option := range options {
+		if option.eniRef == nil {
+			continue
+		}
+		if option.eniRef.Status == aliyunClient.ENIStatusAttaching {
+			// First, try to get the requested prefix count from the task queue
+			if taskQueue != nil {
+				if task, ok := taskQueue.GetTaskStatus(option.eniRef.ID); ok {
+					pendingV4Prefixes += task.RequestedIPv4PrefixCount
+					pendingV6Prefixes += task.RequestedIPv6PrefixCount
+					if task.RequestedIPv6PrefixCount > 0 {
+						attachingENIsWithV6Prefix++
+					}
+					continue
+				}
+			}
+			// Fall back to counting prefixes from the ENI's CR data
+			pendingV4Prefixes += countValidPrefixes(option.eniRef.IPv4Prefix)
+			v6PrefixCount := countValidPrefixes(option.eniRef.IPv6Prefix)
+			pendingV6Prefixes += v6PrefixCount
+			if v6PrefixCount > 0 {
+				attachingENIsWithV6Prefix++
+			}
+		}
+	}
+
+	// Calculate remaining IPv4 demand
+	remainingV4Demand := max(0, totalDesiredV4Prefixes-existingV4Prefixes-pendingV4Prefixes)
+
+	// IPv6 demand depends on the stack mode:
+	//   - Dual-stack: not driven by IPv6PrefixCount; handled as "1 per ENI" below.
+	//   - IPv6-only:  uses IPv6PrefixCount (0 or 1).
+	totalDesiredV6Prefixes := 0
+	if !isDualStack {
+		totalDesiredV6Prefixes = eniSpec.IPv6PrefixCount
+	}
+	remainingV6Demand := max(0, totalDesiredV6Prefixes-existingV6Prefixes-pendingV6Prefixes)
+
+	l.V(4).Info("prefix mode: calculating prefix demand",
+		"dualStack", isDualStack,
+		"totalDesiredV4", totalDesiredV4Prefixes, "totalDesiredV6", totalDesiredV6Prefixes,
+		"existingV4", existingV4Prefixes, "pendingV4", pendingV4Prefixes, "remainingV4", remainingV4Demand,
+		"existingV6", existingV6Prefixes, "pendingV6", pendingV6Prefixes, "remainingV6", remainingV6Demand,
+		"existingV4Capacity", existingV4Capacity)
+
+	// Check if existing InUse ENIs have enough capacity for remaining demand.
+	// If so, skip creating new ENIs - syncPrefixAllocation will add prefixes to existing ENIs.
+	// This prevents creating unnecessary ENIs when prefix mode is enabled on nodes that
+	// already have ENIs (e.g., migrating from non-prefix to prefix mode).
+	v4CanUseExisting := remainingV4Demand <= existingV4Capacity || !eniSpec.EnableIPv4
+	// For IPv6 in dual-stack, there is no count-based demand; syncPrefixAllocation will
+	// ensure each InUse ENI has exactly 1 IPv6 prefix, so we don't block new ENI creation.
+	v6CanUseExisting := true
+	if !isDualStack && eniSpec.EnableIPv6 {
+		// IPv6-only: check if enough ENI slots exist for the remaining prefix demand.
+		enisSlotsForV6 := existingENICount - inUseENIsWithV6Prefix - attachingENIsWithV6Prefix
+		v6CanUseExisting = remainingV6Demand <= enisSlotsForV6
+	}
+	if v4CanUseExisting && v6CanUseExisting {
+		l.V(4).Info("prefix mode: existing ENIs have enough capacity, skipping new ENI creation",
+			"remainingV4Demand", remainingV4Demand, "existingV4Capacity", existingV4Capacity,
+			"remainingV6Demand", remainingV6Demand)
+		return
+	}
+
+	// Existing ENIs don't have enough capacity. Calculate how much additional capacity we need
+	// from new ENIs, accounting for what existing ENIs can provide.
+	v4DemandForNewENIs := max(0, remainingV4Demand-existingV4Capacity)
+	v6DemandForNewENIs := 0
+	if !isDualStack && eniSpec.EnableIPv6 {
+		enisSlotsForV6 := existingENICount - inUseENIsWithV6Prefix - attachingENIsWithV6Prefix
+		v6DemandForNewENIs = max(0, remainingV6Demand-enisSlotsForV6)
+	}
+
+	l.V(4).Info("prefix mode: need new ENIs for additional capacity",
+		"v4DemandForNewENIs", v4DemandForNewENIs, "v6DemandForNewENIs", v6DemandForNewENIs)
+
+	// Assign prefixes to new ENI slots only for the demand that exceeds existing capacity
+	for _, option := range options {
+		if option.eniRef != nil {
+			// Existing ENI: syncPrefixAllocation handles it; skip here.
+			continue
+		}
+
+		if v4DemandForNewENIs <= 0 && v6DemandForNewENIs <= 0 {
+			break
+		}
+
+		// Calculate how many prefixes this new ENI should request
+		// Note: For new ENI, 1 slot is reserved for primary IP (IPv4)
+		// Also respect the API limit of maxPrefixPerAPICall (10) per CreateNetworkInterface call
+		if eniSpec.EnableIPv4 && v4DemandForNewENIs > 0 {
+			option.addIPv4PrefixN = min(v4DemandForNewENIs, prefixCapForNewENI, maxPrefixPerAPICall)
+			v4DemandForNewENIs -= option.addIPv4PrefixN
+		}
+
+		if isDualStack {
+			// Dual-stack: every new ENI that carries IPv4 prefixes gets exactly 1 IPv6 prefix.
+			if option.addIPv4PrefixN > 0 {
+				option.addIPv6PrefixN = 1
+			}
+		} else if eniSpec.EnableIPv6 && v6DemandForNewENIs > 0 {
+			// IPv6-only: each ENI gets at most 1 prefix
+			option.addIPv6PrefixN = 1
+			v6DemandForNewENIs--
+		}
+
+		l.V(4).Info("prefix mode: new ENI will be created with prefix counts",
+			"ipv4PrefixCount", option.addIPv4PrefixN, "ipv6PrefixCount", option.addIPv6PrefixN,
+			"v4DemandForNewENIs", v4DemandForNewENIs, "v6DemandForNewENIs", v6DemandForNewENIs)
 	}
 }
 
@@ -1405,7 +1643,7 @@ func (n *ReconcileNode) allocateFromOptions(ctx context.Context, node *networkv1
 	newENICreateCount := 0
 
 	for _, option := range options {
-		if option.addIPv6N <= 0 && option.addIPv4N <= 0 {
+		if option.addIPv6N <= 0 && option.addIPv4N <= 0 && option.addIPv4PrefixN <= 0 && option.addIPv6PrefixN <= 0 {
 			continue
 		}
 		if inFlight >= createBatchSize {
@@ -1568,6 +1806,58 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 				MetaCtx(ctx).StatusChanged.Store(true)
 			}
 
+			// Unassign IPv4 prefixes marked for deletion.
+			ipv4Prefixes := make([]aliyunClient.IPSet, 0)
+			for i := range eni.IPv4Prefix {
+				if eni.IPv4Prefix[i].Status == networkv1beta1.IPPrefixStatusDeleting {
+					ipv4Prefixes = append(ipv4Prefixes, aliyunClient.IPSet{
+						Prefix: aliyunClient.Prefix(eni.IPv4Prefix[i].Prefix),
+					})
+				}
+			}
+			ipv4Prefixes = lo.Subset(ipv4Prefixes, 0, uint(batchSize(ctx)))
+			if len(ipv4Prefixes) > 0 {
+				if waitTime > 0 {
+					time.Sleep(waitTime)
+				}
+				err := n.aliyun.UnAssignPrivateIPAddressesV2(ctx, eni.ID, ipv4Prefixes)
+				if err != nil {
+					log.Error(err, "failed to unassign IPv4 prefixes", "eni", eni.ID)
+					continue
+				}
+				MetaCtx(ctx).StatusChanged.Store(true)
+				// Force a full API sync on next reconcile so the Node CR reflects
+				// the released prefixes and avoids IpPrefixNotEnough errors.
+				MetaCtx(ctx).NeedSyncOpenAPI.Store(true)
+				waitTime = 1 * time.Second
+			}
+
+			// Unassign IPv6 prefixes marked for deletion.
+			ipv6Prefixes := make([]aliyunClient.IPSet, 0)
+			for i := range eni.IPv6Prefix {
+				if eni.IPv6Prefix[i].Status == networkv1beta1.IPPrefixStatusDeleting {
+					ipv6Prefixes = append(ipv6Prefixes, aliyunClient.IPSet{
+						Prefix: aliyunClient.Prefix(eni.IPv6Prefix[i].Prefix),
+					})
+				}
+			}
+			ipv6Prefixes = lo.Subset(ipv6Prefixes, 0, uint(batchSize(ctx)))
+			if len(ipv6Prefixes) > 0 {
+				if waitTime > 0 {
+					time.Sleep(waitTime)
+				}
+				err := n.aliyun.UnAssignIpv6AddressesV2(ctx, eni.ID, ipv6Prefixes)
+				if err != nil {
+					log.Error(err, "failed to unassign IPv6 prefixes", "eni", eni.ID)
+					continue
+				}
+				MetaCtx(ctx).StatusChanged.Store(true)
+				// Force a full API sync on next reconcile so the Node CR reflects
+				// the released prefixes and avoids IpPrefixNotEnough errors.
+				MetaCtx(ctx).NeedSyncOpenAPI.Store(true)
+				waitTime = 1 * time.Second
+			}
+
 			err := n.waitIPGone(ctx, eni, ipv4s, ipv6s)
 			if err != nil {
 				log.Error(err, "run gc failed")
@@ -1665,14 +1955,30 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 
 	// keep the ds behave
 	tags[types.NetworkInterfaceTagCreatorKey] = types.NetworkInterfaceTagCreatorValue
+
+	// Prefix count and private IP count are mutually exclusive per the ECS API.
+	// Use prefix counts when in prefix mode; otherwise use regular IP counts.
+	ipv4Count := opt.addIPv4N
+	ipv6Count := opt.addIPv6N
+	ipv4PrefixCount := opt.addIPv4PrefixN
+	ipv6PrefixCount := opt.addIPv6PrefixN
+	if ipv4PrefixCount > 0 {
+		ipv4Count = 0
+	}
+	if ipv6PrefixCount > 0 {
+		ipv6Count = 0
+	}
+
 	createOpts := &aliyunClient.CreateNetworkInterfaceOptions{
 		NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
 			VSwitchID:        vsw.ID,
 			SecurityGroupIDs: node.Spec.ENISpec.SecurityGroupIDs,
 			ResourceGroupID:  node.Spec.ENISpec.ResourceGroupID,
 			Tags:             tags,
-			IPCount:          opt.addIPv4N,
-			IPv6Count:        opt.addIPv6N,
+			IPCount:          ipv4Count,
+			IPv6Count:        ipv6Count,
+			IPv4PrefixCount:  ipv4PrefixCount,
+			IPv6PrefixCount:  ipv6PrefixCount,
 			SourceDestCheck:  ptr.To(false),
 			ZoneID:           node.Spec.NodeMetadata.ZoneID, // eflo
 			InstanceID:       node.Spec.NodeMetadata.InstanceID,
@@ -1694,7 +2000,8 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 	}
 
 	l.Info("ENI created, submitting async attach task", "eni", result.NetworkInterfaceID,
-		"requestedIPv4", opt.addIPv4N, "requestedIPv6", opt.addIPv6N)
+		"requestedIPv4", ipv4Count, "requestedIPv6", ipv6Count,
+		"requestedIPv4Prefix", ipv4PrefixCount, "requestedIPv6Prefix", ipv6PrefixCount)
 
 	// 2. Submit attach task to queue (async, non-blocking)
 	// This never fails - it only adds a task to in-memory queue
@@ -1703,10 +2010,14 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 		node.Spec.NodeMetadata.InstanceID,
 		"", // trunkENIID - not used for secondary ENI
 		node.Name,
-		opt.addIPv4N,
-		opt.addIPv6N)
+		ipv4Count,
+		ipv6Count,
+		ipv4PrefixCount,
+		ipv6PrefixCount)
 
 	// 3. Mark ENI as Attaching in Node CR
+	// IMPORTANT: Record prefixes from the API response so that subsequent reconciles
+	// can count them as "pending" and avoid creating duplicate ENIs.
 	networkInterface := &networkv1beta1.Nic{
 		ID:                          result.NetworkInterfaceID,
 		Status:                      aliyunClient.ENIStatusAttaching,
@@ -1715,6 +2026,8 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 		IPv6CIDR:                    vsw.IPv6CIDR,
 		NetworkInterfaceType:        networkv1beta1.ENIType(result.Type),
 		NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficMode(result.NetworkInterfaceTrafficMode),
+		IPv4Prefix:                  convertPrefixesToCR(result.IPv4PrefixSets),
+		IPv6Prefix:                  convertPrefixesToCR(result.IPv6PrefixSets),
 	}
 
 	MetaCtx(ctx).Mutex.Lock()
@@ -1727,8 +2040,8 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 	MetaCtx(ctx).StatusChanged.Store(true)
 
 	n.record.Event(node, corev1.EventTypeNormal, types.EventCreateENISucceed,
-		fmt.Sprintf("ENI %s created with %d IPv4, attach in progress",
-			result.NetworkInterfaceID, opt.addIPv4N))
+		fmt.Sprintf("ENI %s created (IPv4=%d IPv4Prefix=%d), attach in progress",
+			result.NetworkInterfaceID, ipv4Count, ipv4PrefixCount))
 
 	// Return immediately, don't block waiting for attach
 	return nil
@@ -2307,4 +2620,232 @@ func (n *ReconcileNode) requeueAfter(node *networkv1beta1.Node) time.Duration {
 	}
 
 	return result
+}
+
+// isPrefixMode returns true when the node should use prefix-based IPAM.
+// Reads the EnableIPPrefix field from the Node CR's ENISpec.
+// LingJun (EFLO) nodes are explicitly unsupported and always return false.
+func isPrefixMode(node *networkv1beta1.Node) bool {
+	if utils.ISLingJunNode(node.Labels) {
+		return false
+	}
+	if node.Spec.ENISpec == nil {
+		return false
+	}
+	return node.Spec.ENISpec.EnableIPPrefix
+}
+
+// processFrozenExpireAt checks all Frozen prefixes for FrozenExpireAt timeout.
+// If a Frozen prefix has expired, it is reverted to Valid so it can be used again.
+func processFrozenExpireAt(log logr.Logger, node *networkv1beta1.Node) bool {
+	now := time.Now()
+	changed := false
+
+	for eniID, eni := range node.Status.NetworkInterfaces {
+		for i := range eni.IPv4Prefix {
+			if revertExpiredFrozenPrefix(log, &eni.IPv4Prefix[i], now) {
+				changed = true
+			}
+		}
+		for i := range eni.IPv6Prefix {
+			if revertExpiredFrozenPrefix(log, &eni.IPv6Prefix[i], now) {
+				changed = true
+			}
+		}
+		node.Status.NetworkInterfaces[eniID] = eni
+	}
+	return changed
+}
+
+// revertExpiredFrozenPrefix reverts a single Frozen prefix to Valid if its FrozenExpireAt has passed.
+func revertExpiredFrozenPrefix(log logr.Logger, prefix *networkv1beta1.IPPrefix, now time.Time) bool {
+	if prefix.Status != networkv1beta1.IPPrefixStatusFrozen {
+		return false
+	}
+	if prefix.FrozenExpireAt.IsZero() {
+		return false
+	}
+	if now.Before(prefix.FrozenExpireAt.Time) {
+		return false
+	}
+	log.Info("frozen prefix expired, reverting to Valid",
+		"prefix", prefix.Prefix, "frozenExpireAt", prefix.FrozenExpireAt.Time)
+	prefix.Status = networkv1beta1.IPPrefixStatusValid
+	prefix.FrozenExpireAt = metav1.Time{}
+	return true
+}
+
+// countValidPrefixes returns the number of prefixes with Valid status.
+func countValidPrefixes(prefixes []networkv1beta1.IPPrefix) int {
+	count := 0
+	for _, p := range prefixes {
+		if p.Status == networkv1beta1.IPPrefixStatusValid {
+			count++
+		}
+	}
+	return count
+}
+
+// convertPrefixesToCR converts API prefix results to CR format with Valid status.
+// This is used when recording newly created ENI prefixes to the Node CR,
+// so that subsequent reconciles can count them as "pending" prefixes on Attaching ENIs.
+func convertPrefixesToCR(prefixes []aliyunClient.Prefix) []networkv1beta1.IPPrefix {
+	if len(prefixes) == 0 {
+		return nil
+	}
+	result := make([]networkv1beta1.IPPrefix, 0, len(prefixes))
+	for _, p := range prefixes {
+		result = append(result, networkv1beta1.IPPrefix{
+			Prefix: string(p),
+			Status: networkv1beta1.IPPrefixStatusValid,
+		})
+	}
+	return result
+}
+
+// syncPrefixAllocation ensures the node has the desired total number of IPv4 (and optionally IPv6) prefixes.
+// It distributes prefixes across InUse ENIs to meet the total target.
+//
+// IPv4: uses IPv4PrefixCount (effective in IPv4 single-stack and dual-stack).
+// IPv6 dual-stack: each InUse ENI with IPv4 prefixes automatically gets exactly 1 IPv6 prefix
+//
+//	(the user does NOT configure ipv6_prefix_count in dual-stack mode).
+//
+// IPv6-only: uses IPv6PrefixCount (valid values: 0 or 1).
+// Pod↔IP binding is NOT stored in the Node CR; that is owned by the daemon.
+func (n *ReconcileNode) syncPrefixAllocation(ctx context.Context, node *networkv1beta1.Node) error {
+	isDualStack := node.Spec.ENISpec.EnableIPv4 && node.Spec.ENISpec.EnableIPv6
+
+	// Get desired prefix counts
+	totalDesiredV4Prefixes := node.Spec.ENISpec.IPv4PrefixCount
+	totalDesiredV6Prefixes := 0
+	if !isDualStack {
+		totalDesiredV6Prefixes = node.Spec.ENISpec.IPv6PrefixCount
+	}
+
+	// Calculate total existing prefixes across all InUse ENIs,
+	// and also count prefixes on Attaching (in-flight) ENIs to avoid over-allocation.
+	// Attaching ENIs were created with prefixes via CreateNetworkInterface; they will
+	// become InUse once attached, so their prefixes must be counted as already-pending.
+	totalV4Prefixes := 0
+	totalV6Prefixes := 0
+	for _, eni := range node.Status.NetworkInterfaces {
+		switch eni.Status {
+		case aliyunClient.ENIStatusInUse:
+			totalV4Prefixes += countValidPrefixes(eni.IPv4Prefix)
+			totalV6Prefixes += countValidPrefixes(eni.IPv6Prefix)
+		case aliyunClient.ENIStatusAttaching:
+			totalV4Prefixes += countValidPrefixes(eni.IPv4Prefix)
+			totalV6Prefixes += countValidPrefixes(eni.IPv6Prefix)
+		}
+	}
+
+	// Calculate remaining demand
+	remainingV4Demand := max(0, totalDesiredV4Prefixes-totalV4Prefixes)
+	remainingV6Demand := max(0, totalDesiredV6Prefixes-totalV6Prefixes)
+
+	var errList []error
+	for _, eni := range node.Status.NetworkInterfaces {
+		if eni.Status != aliyunClient.ENIStatusInUse {
+			continue
+		}
+
+		// Slot accounting: eni.IPv4 includes primary IP (1 slot) + secondary IPs.
+		// Each prefix also occupies 1 slot. Total = len(eni.IPv4) + len(eni.IPv4Prefix).
+		// ECS allows mixing secondary IPs and prefixes on the same ENI; the only constraint
+		// is that the combined count must not exceed IPv4PerAdapter.
+		usedSlots := len(eni.IPv4) + len(eni.IPv4Prefix)
+		freeSlots := node.Spec.NodeCap.IPv4PerAdapter - usedSlots
+
+		if remainingV4Demand > 0 && freeSlots > 0 {
+			toAddV4 := min(remainingV4Demand, freeSlots)
+			if err := n.assignIPv4Prefix(ctx, node, eni, toAddV4); err != nil {
+				errList = append(errList, err)
+			} else {
+				remainingV4Demand -= toAddV4
+			}
+		}
+
+		if isDualStack {
+			// Dual-stack: ensure this ENI has exactly 1 IPv6 prefix.
+			// Only assign if the ENI has IPv4 prefixes and is missing an IPv6 prefix.
+			if countValidPrefixes(eni.IPv6Prefix) == 0 && countValidPrefixes(eni.IPv4Prefix) > 0 {
+				if err := n.assignIPv6Prefix(ctx, node, eni, 1); err != nil {
+					errList = append(errList, err)
+				}
+			}
+		} else if node.Spec.ENISpec.EnableIPv6 && remainingV6Demand > 0 {
+			// IPv6-only: assign prefix based on IPv6PrefixCount demand.
+			if countValidPrefixes(eni.IPv6Prefix) == 0 {
+				if err := n.assignIPv6Prefix(ctx, node, eni, 1); err != nil {
+					errList = append(errList, err)
+				} else {
+					remainingV6Demand--
+				}
+			}
+		}
+	}
+	return utilerrors.NewAggregate(errList)
+}
+
+// assignIPv4Prefix allocates IPv4 prefixes on an ENI via the OpenAPI and appends them to the CR.
+// If count exceeds maxPrefixPerAPICall (10), multiple API calls will be made.
+func (n *ReconcileNode) assignIPv4Prefix(ctx context.Context, _ *networkv1beta1.Node, eni *networkv1beta1.Nic, count int) error {
+	remaining := count
+	for remaining > 0 {
+		batch := min(remaining, maxPrefixPerAPICall)
+		bo := backoff.Backoff(backoff.ENIIPOps)
+		result, err := n.aliyun.AssignPrivateIPAddressV2(ctx, &aliyunClient.AssignPrivateIPAddressOptions{
+			NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
+				NetworkInterfaceID: eni.ID,
+				IPv4PrefixCount:    batch,
+			},
+			Backoff: &bo.Backoff,
+		})
+		if err != nil {
+			return err
+		}
+		MetaCtx(ctx).StatusChanged.Store(true)
+		for _, ip := range result {
+			if ip.Prefix != "" {
+				eni.IPv4Prefix = append(eni.IPv4Prefix, networkv1beta1.IPPrefix{
+					Prefix: string(ip.Prefix),
+					Status: networkv1beta1.IPPrefixStatusValid,
+				})
+			}
+		}
+		remaining -= batch
+	}
+	return nil
+}
+
+// assignIPv6Prefix allocates IPv6 prefixes on an ENI via the OpenAPI and appends them to the CR.
+// If count exceeds maxPrefixPerAPICall (10), multiple API calls will be made.
+func (n *ReconcileNode) assignIPv6Prefix(ctx context.Context, _ *networkv1beta1.Node, eni *networkv1beta1.Nic, count int) error {
+	remaining := count
+	for remaining > 0 {
+		batch := min(remaining, maxPrefixPerAPICall)
+		bo := backoff.Backoff(backoff.ENIIPOps)
+		result, err := n.aliyun.AssignIpv6AddressesV2(ctx, &aliyunClient.AssignIPv6AddressesOptions{
+			NetworkInterfaceOptions: &aliyunClient.NetworkInterfaceOptions{
+				NetworkInterfaceID: eni.ID,
+				IPv6PrefixCount:    batch,
+			},
+			Backoff: &bo.Backoff,
+		})
+		if err != nil {
+			return err
+		}
+		MetaCtx(ctx).StatusChanged.Store(true)
+		for _, ip := range result {
+			if ip.Prefix != "" {
+				eni.IPv6Prefix = append(eni.IPv6Prefix, networkv1beta1.IPPrefix{
+					Prefix: string(ip.Prefix),
+					Status: networkv1beta1.IPPrefixStatusValid,
+				})
+			}
+		}
+		remaining -= batch
+	}
+	return nil
 }

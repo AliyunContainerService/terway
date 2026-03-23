@@ -18,14 +18,20 @@ var _ = Describe("start controller", func() {
 		)
 
 		It("New Controller", func() {
-			ctrl := NewCRDV2(testEnv.Config, nodeName, "default")
-			Expect(ctrl).NotTo(BeNil())
+			sharedMgr, err := NewSharedCRDManager(testEnv.Config, nodeName, "default")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sharedMgr).NotTo(BeNil())
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			wg := &sync.WaitGroup{}
 
-			err := ctrl.Run(ctx, nil, wg)
+			sharedMgr.Start(ctx, wg)
+
+			ctrl := NewCRDV2(sharedMgr, nodeName)
+			Expect(ctrl).NotTo(BeNil())
+
+			err = ctrl.Run(ctx, nil, wg)
 			Expect(err).NotTo(HaveOccurred())
 
 			//  create node cr

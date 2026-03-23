@@ -3,11 +3,13 @@ package node
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 )
 
@@ -306,6 +308,132 @@ func Test_mergeIPMap(t *testing.T) {
 	}
 }
 
+func Test_mergeIPPrefixes(t *testing.T) {
+	frozenExpireAt := metav1.Now()
+
+	type args struct {
+		remote  []aliyunClient.Prefix
+		current []networkv1beta1.IPPrefix
+	}
+	tests := []struct {
+		name   string
+		args   args
+		expect []networkv1beta1.IPPrefix
+	}{
+		{
+			name: "remote exists local missing: add as Valid",
+			args: args{
+				remote:  []aliyunClient.Prefix{"10.0.0.0/28"},
+				current: nil,
+			},
+			expect: []networkv1beta1.IPPrefix{
+				{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusValid},
+			},
+		},
+		{
+			name: "remote exists local exists: preserve full local record including FrozenExpireAt",
+			args: args{
+				remote: []aliyunClient.Prefix{"10.0.0.0/28"},
+				current: []networkv1beta1.IPPrefix{
+					{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusFrozen, FrozenExpireAt: frozenExpireAt},
+				},
+			},
+			expect: []networkv1beta1.IPPrefix{
+				{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusFrozen, FrozenExpireAt: frozenExpireAt},
+			},
+		},
+		{
+			name: "remote missing local Valid: mark as Invalid",
+			args: args{
+				remote: []aliyunClient.Prefix{},
+				current: []networkv1beta1.IPPrefix{
+					{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusValid},
+				},
+			},
+			expect: []networkv1beta1.IPPrefix{
+				{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusInvalid},
+			},
+		},
+		{
+			name: "remote missing local Frozen: mark as Invalid",
+			args: args{
+				remote: []aliyunClient.Prefix{},
+				current: []networkv1beta1.IPPrefix{
+					{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusFrozen, FrozenExpireAt: frozenExpireAt},
+				},
+			},
+			expect: []networkv1beta1.IPPrefix{
+				{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusInvalid, FrozenExpireAt: frozenExpireAt},
+			},
+		},
+		{
+			name: "remote missing local Deleting: remove from CR (unassign completed, cloud confirmed removal)",
+			args: args{
+				remote: []aliyunClient.Prefix{},
+				current: []networkv1beta1.IPPrefix{
+					{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusDeleting},
+				},
+			},
+			expect: []networkv1beta1.IPPrefix{},
+		},
+		{
+			name: "remote missing local already Invalid: keep Invalid unchanged",
+			args: args{
+				remote: []aliyunClient.Prefix{},
+				current: []networkv1beta1.IPPrefix{
+					{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusInvalid},
+				},
+			},
+			expect: []networkv1beta1.IPPrefix{
+				{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusInvalid},
+			},
+		},
+		{
+			name: "Invalid must not transition back to Valid when remote reappears",
+			args: args{
+				// Prefix reappears in remote after being marked Invalid locally.
+				// The local record was Invalid, but remote now has it — treat as new Valid.
+				// (This tests Pass 1: remote-exists path always wins over local Invalid.)
+				remote: []aliyunClient.Prefix{"10.0.0.0/28"},
+				current: []networkv1beta1.IPPrefix{
+					{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusInvalid},
+				},
+			},
+			// When remote has it, Pass 1 preserves the local record as-is (Invalid).
+			// Invalid is a terminal state — the controller must explicitly clean it up,
+			// not silently flip it back to Valid on re-appearance.
+			expect: []networkv1beta1.IPPrefix{
+				{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusInvalid},
+			},
+		},
+		{
+			name: "mixed: some in remote some not",
+			args: args{
+				remote: []aliyunClient.Prefix{"10.0.0.0/28", "10.0.0.32/28"},
+				current: []networkv1beta1.IPPrefix{
+					{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusValid},
+					{Prefix: "10.0.0.16/28", Status: networkv1beta1.IPPrefixStatusFrozen, FrozenExpireAt: frozenExpireAt},
+					{Prefix: "10.0.0.32/28", Status: networkv1beta1.IPPrefixStatusDeleting},
+				},
+			},
+			expect: []networkv1beta1.IPPrefix{
+				// in remote: preserve local
+				{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusValid},
+				// in remote: new
+				{Prefix: "10.0.0.32/28", Status: networkv1beta1.IPPrefixStatusDeleting},
+				// not in remote: mark Invalid
+				{Prefix: "10.0.0.16/28", Status: networkv1beta1.IPPrefixStatusInvalid, FrozenExpireAt: frozenExpireAt},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeIPPrefixes(logr.Discard(), tt.args.remote, tt.args.current)
+			assert.ElementsMatch(t, tt.expect, got, "mergeIPPrefixes result mismatch")
+		})
+	}
+}
+
 func TestIPUsage(t *testing.T) {
 	type args struct {
 		eniIP map[string]*networkv1beta1.IP
@@ -343,6 +471,184 @@ func TestIPUsage(t *testing.T) {
 			got, got1 := IPUsage(tt.args.eniIP)
 			assert.Equalf(t, tt.want, got, "IPUsage(%v)", tt.args.eniIP)
 			assert.Equalf(t, tt.want1, got1, "IPUsage(%v)", tt.args.eniIP)
+		})
+	}
+}
+
+func Test_processFrozenExpireAt_MultipleExpired(t *testing.T) {
+	log := logr.Discard()
+	now := time.Now()
+	node := &networkv1beta1.Node{
+		Status: networkv1beta1.NodeStatus{
+			NetworkInterfaces: map[string]*networkv1beta1.Nic{
+				"eni-1": {
+					ID: "eni-1",
+					IPv4Prefix: []networkv1beta1.IPPrefix{
+						{Prefix: "10.0.0.0/28", Status: networkv1beta1.IPPrefixStatusFrozen, FrozenExpireAt: metav1.NewTime(now.Add(-1 * time.Hour))},
+						{Prefix: "10.0.1.0/28", Status: networkv1beta1.IPPrefixStatusFrozen, FrozenExpireAt: metav1.NewTime(now.Add(1 * time.Hour))},
+						{Prefix: "10.0.2.0/28", Status: networkv1beta1.IPPrefixStatusFrozen, FrozenExpireAt: metav1.NewTime(now.Add(-1 * time.Hour))},
+					},
+				},
+			},
+		},
+	}
+
+	got := processFrozenExpireAt(log, node)
+	assert.True(t, got)
+	assert.Equal(t, networkv1beta1.IPPrefixStatusValid, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[0].Status)
+	assert.True(t, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[0].FrozenExpireAt.IsZero())
+	assert.Equal(t, networkv1beta1.IPPrefixStatusFrozen, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[1].Status)
+	assert.False(t, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[1].FrozenExpireAt.IsZero())
+	assert.Equal(t, networkv1beta1.IPPrefixStatusValid, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[2].Status)
+	assert.True(t, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[2].FrozenExpireAt.IsZero())
+}
+
+func Test_processFrozenExpireAt_IPv6Expired(t *testing.T) {
+	log := logr.Discard()
+	now := time.Now()
+	node := &networkv1beta1.Node{
+		Status: networkv1beta1.NodeStatus{
+			NetworkInterfaces: map[string]*networkv1beta1.Nic{
+				"eni-1": {
+					ID: "eni-1",
+					IPv6Prefix: []networkv1beta1.IPPrefix{
+						{Prefix: "2001:db8::/64", Status: networkv1beta1.IPPrefixStatusFrozen, FrozenExpireAt: metav1.NewTime(now.Add(-1 * time.Hour))},
+					},
+				},
+			},
+		},
+	}
+
+	got := processFrozenExpireAt(log, node)
+	assert.True(t, got)
+	assert.Equal(t, networkv1beta1.IPPrefixStatusValid, node.Status.NetworkInterfaces["eni-1"].IPv6Prefix[0].Status)
+	assert.True(t, node.Status.NetworkInterfaces["eni-1"].IPv6Prefix[0].FrozenExpireAt.IsZero())
+}
+
+func Test_processFrozenExpireAt(t *testing.T) {
+	now := time.Now()
+	type args struct {
+		log  logr.Logger
+		node *networkv1beta1.Node
+	}
+	tests := []struct {
+		name     string
+		args     args
+		want     bool
+		validate func(t *testing.T, node *networkv1beta1.Node)
+	}{
+		{
+			name: "Frozen prefix 未过期 → 不变",
+			args: args{
+				log: logr.Discard(),
+				node: &networkv1beta1.Node{
+					Status: networkv1beta1.NodeStatus{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								IPv4Prefix: []networkv1beta1.IPPrefix{
+									{
+										Prefix:         "10.0.0.0/28",
+										Status:         networkv1beta1.IPPrefixStatusFrozen,
+										FrozenExpireAt: metav1.NewTime(now.Add(1 * time.Hour)),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: false,
+			validate: func(t *testing.T, node *networkv1beta1.Node) {
+				assert.Equal(t, networkv1beta1.IPPrefixStatusFrozen, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[0].Status)
+				assert.False(t, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[0].FrozenExpireAt.IsZero())
+			},
+		},
+		{
+			name: "Frozen prefix 已过期 → 回退为 Valid，FrozenExpireAt 清零",
+			args: args{
+				log: logr.Discard(),
+				node: &networkv1beta1.Node{
+					Status: networkv1beta1.NodeStatus{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								IPv4Prefix: []networkv1beta1.IPPrefix{
+									{
+										Prefix:         "10.0.0.0/28",
+										Status:         networkv1beta1.IPPrefixStatusFrozen,
+										FrozenExpireAt: metav1.NewTime(now.Add(-1 * time.Hour)),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: true,
+			validate: func(t *testing.T, node *networkv1beta1.Node) {
+				assert.Equal(t, networkv1beta1.IPPrefixStatusValid, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[0].Status)
+				assert.True(t, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[0].FrozenExpireAt.IsZero())
+			},
+		},
+		{
+			name: "FrozenExpireAt 为零值 → 不变（不回退）",
+			args: args{
+				log: logr.Discard(),
+				node: &networkv1beta1.Node{
+					Status: networkv1beta1.NodeStatus{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								IPv4Prefix: []networkv1beta1.IPPrefix{
+									{
+										Prefix:         "10.0.0.0/28",
+										Status:         networkv1beta1.IPPrefixStatusFrozen,
+										FrozenExpireAt: metav1.Time{},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: false,
+			validate: func(t *testing.T, node *networkv1beta1.Node) {
+				assert.Equal(t, networkv1beta1.IPPrefixStatusFrozen, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[0].Status)
+				assert.True(t, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[0].FrozenExpireAt.IsZero())
+			},
+		},
+		{
+			name: "Valid prefix 有 FrozenExpireAt → 不变（只处理 Frozen 状态）",
+			args: args{
+				log: logr.Discard(),
+				node: &networkv1beta1.Node{
+					Status: networkv1beta1.NodeStatus{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-1": {
+								IPv4Prefix: []networkv1beta1.IPPrefix{
+									{
+										Prefix:         "10.0.0.0/28",
+										Status:         networkv1beta1.IPPrefixStatusValid,
+										FrozenExpireAt: metav1.NewTime(now.Add(-1 * time.Hour)),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: false,
+			validate: func(t *testing.T, node *networkv1beta1.Node) {
+				assert.Equal(t, networkv1beta1.IPPrefixStatusValid, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[0].Status)
+				assert.False(t, node.Status.NetworkInterfaces["eni-1"].IPv4Prefix[0].FrozenExpireAt.IsZero())
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := processFrozenExpireAt(tt.args.log, tt.args.node)
+			assert.Equal(t, tt.want, got)
+			if tt.validate != nil {
+				tt.validate(t, tt.args.node)
+			}
 		})
 	}
 }
