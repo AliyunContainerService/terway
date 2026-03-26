@@ -774,12 +774,39 @@ func (n *networkService) Execute(cmd string, _ []string, message chan<- string) 
 	close(message)
 }
 
-func (n *networkService) GetResourceMapping() ([]*rpc.ResourceMapping, error) {
-	var mapping []*rpc.ResourceMapping
+func (n *networkService) GetResourceMapping() (*rpc.ResourceMappingReply, error) {
+	reply := &rpc.ResourceMappingReply{}
+
 	for _, status := range n.eniMgr.Status() {
-		mapping = append(mapping, toRPCMapping(status))
+		reply.Info = append(reply.Info, toRPCMapping(status))
 	}
-	return mapping, nil
+
+	if n.resourceDB == nil {
+		return reply, nil
+	}
+	objList, err := n.resourceDB.List()
+	if err != nil {
+		return reply, nil
+	}
+	for _, obj := range objList {
+		podRes := obj.(daemon.PodResources)
+		if podRes.PodInfo == nil {
+			continue
+		}
+		for _, res := range podRes.Resources {
+			reply.ResourceDb = append(reply.ResourceDb, &rpc.ResourceDBEntry{
+				PodName:      podRes.PodInfo.Name,
+				PodNamespace: podRes.PodInfo.Namespace,
+				EniId:        res.ENIID,
+				EniMac:       res.ENIMAC,
+				Ipv4:         res.IPv4,
+				Ipv6:         res.IPv6,
+				Type:         res.Type,
+			})
+		}
+	}
+
+	return reply, nil
 }
 
 func newNetworkService(ctx context.Context, configFilePath, daemonMode string) (*networkService, error) {
@@ -981,7 +1008,35 @@ func toRPCMapping(res eni.Status) *rpc.ResourceMapping {
 		rMapping.Info = append(rMapping.Info, strings.Join(v, "  "))
 	}
 
+	rMapping.Ipv4Prefixes = toPrefixInfoSlice(res.IPv4Prefixes)
+	rMapping.Ipv6Prefixes = toPrefixInfoSlice(res.IPv6Prefixes)
+
 	return &rMapping
+}
+
+func toPrefixInfoSlice(prefixes []eni.PrefixStatus) []*rpc.PrefixInfo {
+	if len(prefixes) == 0 {
+		return nil
+	}
+	result := make([]*rpc.PrefixInfo, 0, len(prefixes))
+	for _, p := range prefixes {
+		allocs := make([]*rpc.PrefixIPAllocation, 0, len(p.Allocations))
+		for _, a := range p.Allocations {
+			allocs = append(allocs, &rpc.PrefixIPAllocation{
+				Ip:    a.IP,
+				PodId: a.PodID,
+			})
+		}
+		result = append(result, &rpc.PrefixInfo{
+			Prefix:      p.Prefix,
+			Status:      p.Status,
+			Total:       uint32(p.Total),
+			Used:        uint32(p.Used),
+			Available:   uint32(p.Available),
+			Allocations: allocs,
+		})
+	}
+	return result
 }
 
 // set default val for netConf

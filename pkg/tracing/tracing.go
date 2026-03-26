@@ -73,7 +73,7 @@ type ResourceMappingHandler interface {
 
 // ResMapping ResMapping
 type ResMapping interface {
-	GetResourceMapping() ([]*rpc.ResourceMapping, error)
+	GetResourceMapping() (*rpc.ResourceMappingReply, error)
 }
 
 // PodEventRecorder records event on pod
@@ -246,7 +246,7 @@ func (t *Tracer) RecordNodeEvent(eventType, reason, message string) error {
 
 // GetResourceMapping gives the resource mapping from the handler
 // if the handler has not been registered, there will be error
-func (t *Tracer) GetResourceMapping() ([]*rpc.ResourceMapping, error) {
+func (t *Tracer) GetResourceMapping() (*rpc.ResourceMappingReply, error) {
 	if t.resourceMapping == nil {
 		return nil, errors.New("no resource mapping handler registered")
 	}

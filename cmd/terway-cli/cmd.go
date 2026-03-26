@@ -100,60 +100,105 @@ func runShow(cmd *cobra.Command, args []string) error {
 }
 
 func runMapping(cmd *cobra.Command, args []string) error {
-	placeholder := &rpc.Placeholder{}
-	result, err := client.GetResourceMapping(ctx, placeholder)
+	result, err := client.GetResourceMapping(ctx, &rpc.Placeholder{})
 	if err != nil {
 		return err
 	}
 
-	//
-	for i, r := range result.Info {
-		items := []pterm.BulletListItem{
-			{
-				Level:       0,
-				Text:        fmt.Sprintf("slot %d", i),
-				BulletStyle: pterm.NewStyle(pterm.FgRed),
-			},
-			{
-				Level:  1,
-				Text:   r.NetworkInterfaceID,
-				Bullet: "-",
-			},
-			{
-				Level:  1,
-				Text:   r.MAC,
-				Bullet: "-",
-			},
-			{
-				Level:  1,
-				Text:   r.Status,
-				Bullet: "-",
-			},
-			{
-				Level:  1,
-				Text:   fmt.Sprintf("Type %s", r.Type),
-				Bullet: "-",
-			},
-			{
-				Level:  1,
-				Text:   fmt.Sprintf("InhibitExpireAt %s", r.AllocInhibitExpireAt),
-				Bullet: "-",
-			},
+	for _, r := range result.Info {
+		leveledList := pterm.LeveledList{
+			{Level: 0, Text: printKV("ENI", r.NetworkInterfaceID)},
+			{Level: 1, Text: printKV("MAC", r.MAC)},
+			{Level: 1, Text: printKV("Status", r.Status)},
+			{Level: 1, Text: printKV("Type", r.Type)},
 		}
 
-		for _, v := range r.Info {
-			items = append(items, pterm.BulletListItem{
-				Level: 2,
-				Text:  v,
+		if r.AllocInhibitExpireAt != "" {
+			leveledList = append(leveledList, pterm.LeveledListItem{
+				Level: 1, Text: printKV("InhibitExpireAt", r.AllocInhibitExpireAt),
 			})
 		}
 
-		if err := pterm.DefaultBulletList.WithItems(items).Render(); err != nil {
+		leveledList = renderPrefixSection(leveledList, "IPv4 Prefixes", r.Ipv4Prefixes)
+		leveledList = renderPrefixSection(leveledList, "IPv6 Prefixes", r.Ipv6Prefixes)
+
+		if len(r.Info) > 0 {
+			leveledList = append(leveledList, pterm.LeveledListItem{Level: 1, Text: "IPs"})
+			for _, v := range r.Info {
+				leveledList = append(leveledList, pterm.LeveledListItem{Level: 2, Text: v})
+			}
+		}
+
+		tree := putils.TreeFromLeveledList(leveledList)
+		if err := pterm.DefaultTree.WithRoot(tree).Render(); err != nil {
 			return err
 		}
 	}
 
-	return err
+	if len(result.ResourceDb) > 0 {
+		leveledList := pterm.LeveledList{
+			{Level: 0, Text: fmt.Sprintf("Resource DB (%d entries)", len(result.ResourceDb))},
+		}
+
+		sort.Slice(result.ResourceDb, func(i, j int) bool {
+			ki := result.ResourceDb[i].PodNamespace + "/" + result.ResourceDb[i].PodName
+			kj := result.ResourceDb[j].PodNamespace + "/" + result.ResourceDb[j].PodName
+			return ki < kj
+		})
+
+		for _, entry := range result.ResourceDb {
+			ip := entry.Ipv4
+			if ip == "" {
+				ip = entry.Ipv6
+			}
+			if entry.Ipv4 != "" && entry.Ipv6 != "" {
+				ip = entry.Ipv4 + "," + entry.Ipv6
+			}
+			leveledList = append(leveledList, pterm.LeveledListItem{
+				Level: 1,
+				Text: fmt.Sprintf("%s/%s -> %s %s",
+					entry.PodNamespace, entry.PodName, entry.EniId, ip),
+			})
+		}
+
+		tree := putils.TreeFromLeveledList(leveledList)
+		if err := pterm.DefaultTree.WithRoot(tree).Render(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func renderPrefixSection(list pterm.LeveledList, title string, prefixes []*rpc.PrefixInfo) pterm.LeveledList {
+	if len(prefixes) == 0 {
+		return list
+	}
+
+	sort.Slice(prefixes, func(i, j int) bool {
+		return prefixes[i].Prefix < prefixes[j].Prefix
+	})
+
+	list = append(list, pterm.LeveledListItem{Level: 1, Text: title})
+	for _, p := range prefixes {
+		list = append(list, pterm.LeveledListItem{
+			Level: 2,
+			Text: fmt.Sprintf("%s [%s] %d total, %d used, %d free",
+				p.Prefix, p.Status, p.Total, p.Used, p.Available),
+		})
+
+		sort.Slice(p.Allocations, func(i, j int) bool {
+			return p.Allocations[i].Ip < p.Allocations[j].Ip
+		})
+
+		for _, a := range p.Allocations {
+			list = append(list, pterm.LeveledListItem{
+				Level: 3,
+				Text:  fmt.Sprintf("%s -> %s", a.Ip, a.PodId),
+			})
+		}
+	}
+	return list
 }
 
 func runExecute(cmd *cobra.Command, args []string) error {

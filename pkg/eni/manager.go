@@ -72,6 +72,10 @@ type Usage interface {
 type ReportStatus interface {
 	Status() Status
 }
+
+type MultiReportStatus interface {
+	Statuses() []Status
+}
 type NetworkInterface interface {
 	Allocate(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace)
 	Release(ctx context.Context, cni *daemon.CNI, request NetworkResource) (bool, error)
@@ -277,11 +281,13 @@ func (m *Manager) Status() []Status {
 	var result []Status
 
 	for _, v := range m.networkInterfaces {
-		s, ok := v.(ReportStatus)
-		if !ok {
+		if ms, ok := v.(MultiReportStatus); ok {
+			result = append(result, ms.Statuses()...)
 			continue
 		}
-		result = append(result, s.Status())
+		if s, ok := v.(ReportStatus); ok {
+			result = append(result, s.Status())
+		}
 	}
 
 	return result
