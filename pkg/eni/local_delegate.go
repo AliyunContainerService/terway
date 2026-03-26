@@ -21,6 +21,7 @@ import (
 )
 
 var _ NetworkInterface = &LocalDelegate{}
+var _ MultiReportStatus = &LocalDelegate{}
 
 var delegateLog = logf.Log.WithName("local-delegate")
 
@@ -407,4 +408,23 @@ func (l *LocalDelegate) recordAllocMetrics(resource *LocalIPResource) {
 	if resource.IP.IPv6.IsValid() {
 		metric.ResourcePoolIdle.WithLabelValues(metric.ResourcePoolTypeLocal, string(types.IPStackIPv6)).Dec()
 	}
+}
+
+func (l *LocalDelegate) Statuses() []Status {
+	l.lock.RLock()
+	defer l.lock.RUnlock()
+
+	result := make([]Status, 0, len(l.eniIPAMs))
+	for _, ipam := range l.eniIPAMs {
+		eniID, mac, ipv4Prefixes, ipv6Prefixes := ipam.StatusSnapshot()
+		result = append(result, Status{
+			NetworkInterfaceID: eniID,
+			MAC:                mac,
+			Type:               "Prefix",
+			Status:             "InUse",
+			IPv4Prefixes:       ipv4Prefixes,
+			IPv6Prefixes:       ipv6Prefixes,
+		})
+	}
+	return result
 }

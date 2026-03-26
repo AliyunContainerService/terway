@@ -1278,20 +1278,14 @@ func TestNetworkService_GetResourceMapping(t *testing.T) {
 				tt.setupMocks(patches, ns)
 			}
 
-			mapping, err := ns.GetResourceMapping()
+			reply, err := ns.GetResourceMapping()
 
 			assert.NoError(t, err)
-			// mapping can be nil when there are no resources
-			if tt.expectedCount == 0 {
-				assert.Empty(t, mapping)
-			} else {
-				assert.NotNil(t, mapping)
-				assert.Equal(t, tt.expectedCount, len(mapping))
-			}
+			assert.NotNil(t, reply)
+			assert.Equal(t, tt.expectedCount, len(reply.Info))
 
-			for _, m := range mapping {
+			for _, m := range reply.Info {
 				assert.NotNil(t, m)
-				// Info field can be nil or empty slice
 			}
 		})
 	}

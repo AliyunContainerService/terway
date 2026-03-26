@@ -137,6 +137,45 @@ func (e *ENILocalIPAM) PoolStats() (int, int, int, int) {
 	return totalV4, totalV4 - allocV4, totalV6, totalV6 - allocV6
 }
 
+// StatusSnapshot exports a point-in-time snapshot of ENI identity and per-prefix allocations.
+func (e *ENILocalIPAM) StatusSnapshot() (eniID, mac string, ipv4 []PrefixStatus, ipv6 []PrefixStatus) {
+	e.lock.RLock()
+	defer e.lock.RUnlock()
+
+	eniID = e.eniID
+	mac = e.eniMAC
+	ipv4 = snapshotPrefixMap(e.ipv4PrefixMap)
+	ipv6 = snapshotPrefixMap(e.ipv6PrefixMap)
+	return
+}
+
+func snapshotPrefixMap(prefixMap map[string]*PrefixInfo) []PrefixStatus {
+	result := make([]PrefixStatus, 0, len(prefixMap))
+	for _, info := range prefixMap {
+		total := int(info.bitmap.Len())
+		used := len(info.allocated)
+
+		allocs := make([]PrefixAllocation, 0, used)
+		for podID, offset := range info.allocated {
+			ip, err := calculateIP(info.Prefix, offset)
+			if err != nil {
+				continue
+			}
+			allocs = append(allocs, PrefixAllocation{IP: ip.String(), PodID: podID})
+		}
+
+		result = append(result, PrefixStatus{
+			Prefix:      info.Prefix,
+			Status:      string(info.status),
+			Total:       total,
+			Used:        used,
+			Available:   total - used,
+			Allocations: allocs,
+		})
+	}
+	return result
+}
+
 type prefixCandidate struct {
 	cidr string
 	info *PrefixInfo

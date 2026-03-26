@@ -53,6 +53,30 @@ message ResourceTraceReply {
   repeated MapKeyValueEntry Trace = 1;
 }
 
+message PrefixIPAllocation {
+  string ip = 1;
+  string pod_id = 2;
+}
+
+message PrefixInfo {
+  string prefix = 1;
+  string status = 2;
+  uint32 total = 3;
+  uint32 used = 4;
+  uint32 available = 5;
+  repeated PrefixIPAllocation allocations = 6;
+}
+
+message ResourceDBEntry {
+  string pod_name = 1;
+  string pod_namespace = 2;
+  string eni_id = 3;
+  string eni_mac = 4;
+  string ipv4 = 5;
+  string ipv6 = 6;
+  string type = 7;
+}
+
 message ResourceMapping {
   string NetworkInterfaceID = 1;
   string MAC = 2;
@@ -60,8 +84,11 @@ message ResourceMapping {
   string AllocInhibitExpireAt = 4 ;
   string Status = 5;
   repeated string Info = 6;
+  repeated PrefixInfo ipv4_prefixes = 7;
+  repeated PrefixInfo ipv6_prefixes = 8;
 }
 
 message ResourceMappingReply {
   repeated ResourceMapping info = 1;
+  repeated ResourceDBEntry resource_db = 2;
 }

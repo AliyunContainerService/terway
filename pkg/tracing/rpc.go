@@ -84,14 +84,7 @@ func (t *tracingRPC) ResourceExecute(request *rpc.ResourceExecuteRequest, server
 }
 
 func (t *tracingRPC) GetResourceMapping(_ context.Context, _ *rpc.Placeholder) (*rpc.ResourceMappingReply, error) {
-	mapping, err := t.tracer.GetResourceMapping()
-	if err != nil {
-		return nil, err
-	}
-
-	return &rpc.ResourceMappingReply{
-		Info: mapping,
-	}, nil
+	return t.tracer.GetResourceMapping()
 }
 
 func toRPCEntry(entry MapKeyValueEntry) *rpc.MapKeyValueEntry {
