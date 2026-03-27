@@ -53,12 +53,28 @@ spec:
                 properties:
                   enableERDMA:
                     type: boolean
+                  enableIPPrefix:
+                    description: |-
+                      EnableIPPrefix indicates whether prefix-based IPAM is enabled for this node.
+                      This field is immutable after the Node CR is created.
+                    type: boolean
                   enableIPv4:
                     type: boolean
                   enableIPv6:
                     type: boolean
                   enableTrunk:
                     type: boolean
+                  ipv4PrefixCount:
+                    description: |-
+                      IPv4PrefixCount specifies the total number of IPv4 prefixes to allocate across all ENIs.
+                      Effective in IPv4 single-stack and dual-stack modes.
+                    type: integer
+                  ipv6PrefixCount:
+                    description: |-
+                      IPv6PrefixCount specifies the total number of IPv6 prefixes to allocate.
+                      Only effective in IPv6 single-stack mode. Valid values: 0 or 1.
+                      In dual-stack mode this field is ignored; each ENI automatically gets one IPv6 prefix.
+                    type: integer
                   resourceGroupID:
                     type: string
                   securityGroupIDs:
@@ -251,6 +267,28 @@ spec:
                       type: object
                     ipv4CIDR:
                       type: string
+                    ipv4Prefix:
+                      items:
+                        properties:
+                          frozenExpireAt:
+                            format: date-time
+                            type: string
+                          prefix:
+                            type: string
+                          status:
+                            description: IPPrefixStatus representing the status of
+                              an IP address.
+                            enum:
+                            - Valid
+                            - Frozen
+                            - Invalid
+                            - Deleting
+                            type: string
+                        required:
+                        - prefix
+                        - status
+                        type: object
+                      type: array
                     ipv6:
                       additionalProperties:
                         properties:
@@ -282,6 +320,28 @@ spec:
                       type: object
                     ipv6CIDR:
                       type: string
+                    ipv6Prefix:
+                      items:
+                        properties:
+                          frozenExpireAt:
+                            format: date-time
+                            type: string
+                          prefix:
+                            type: string
+                          status:
+                            description: IPPrefixStatus representing the status of
+                              an IP address.
+                            enum:
+                            - Valid
+                            - Frozen
+                            - Invalid
+                            - Deleting
+                            type: string
+                        required:
+                        - prefix
+                        - status
+                        type: object
+                      type: array
                     macAddress:
                       type: string
                     networkInterfaceTrafficMode:

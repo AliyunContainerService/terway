@@ -38,8 +38,11 @@ type MockResMapping struct {
 	err      error
 }
 
-func (m *MockResMapping) GetResourceMapping() ([]*rpc.ResourceMapping, error) {
-	return m.mappings, m.err
+func (m *MockResMapping) GetResourceMapping() (*rpc.ResourceMappingReply, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &rpc.ResourceMappingReply{Info: m.mappings}, nil
 }
 
 // MockRes implements daemon.Res interface for testing
@@ -346,8 +349,8 @@ func TestTracer_GetResourceMapping(t *testing.T) {
 		t.Errorf("Expected no error, got %v", err)
 	}
 
-	if len(result) != 1 {
-		t.Errorf("Expected 1 mapping, got %d", len(result))
+	if result == nil || len(result.Info) != 1 {
+		t.Errorf("Expected 1 mapping in reply")
 	}
 
 	// Test without mapping handler

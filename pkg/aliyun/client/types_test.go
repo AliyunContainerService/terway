@@ -102,6 +102,91 @@ func TestFromDescribeResp(t *testing.T) {
 	}
 }
 
+func TestFromCreateResp_WithPrefixes(t *testing.T) {
+	resp := &ecs.CreateNetworkInterfaceResponse{
+		Status:             "Available",
+		MacAddress:         "02:aa:bb:cc:dd:ee",
+		NetworkInterfaceId: "eni-prefix-create",
+		VSwitchId:          "vsw-1",
+		PrivateIpAddress:   "10.0.0.1",
+		PrivateIpSets: ecs.PrivateIpSetsInCreateNetworkInterface{
+			PrivateIpSet: []ecs.PrivateIpSet{{PrivateIpAddress: "10.0.0.1", Primary: true}},
+		},
+		Ipv4PrefixSets: ecs.Ipv4PrefixSetsInCreateNetworkInterface{
+			Ipv4PrefixSet: []ecs.Ipv4PrefixSet{
+				{Ipv4Prefix: "10.0.0.16/28"},
+				{Ipv4Prefix: "10.0.0.32/28"},
+			},
+		},
+		Ipv6PrefixSets: ecs.Ipv6PrefixSetsInCreateNetworkInterface{
+			Ipv6PrefixSet: []ecs.Ipv6PrefixSet{
+				{Ipv6Prefix: "2408:4002:10c0::/80"},
+			},
+		},
+	}
+	ni := FromCreateResp(resp)
+	if len(ni.IPv4PrefixSets) != 2 {
+		t.Fatalf("expected 2 IPv4PrefixSets, got %d", len(ni.IPv4PrefixSets))
+	}
+	if ni.IPv4PrefixSets[0] != Prefix("10.0.0.16/28") || ni.IPv4PrefixSets[1] != Prefix("10.0.0.32/28") {
+		t.Errorf("unexpected IPv4PrefixSets: %+v", ni.IPv4PrefixSets)
+	}
+	if len(ni.IPv6PrefixSets) != 1 {
+		t.Fatalf("expected 1 IPv6PrefixSets, got %d", len(ni.IPv6PrefixSets))
+	}
+	if ni.IPv6PrefixSets[0] != Prefix("2408:4002:10c0::/80") {
+		t.Errorf("unexpected IPv6PrefixSets: %+v", ni.IPv6PrefixSets)
+	}
+	if ni.Type != ENITypeSecondary {
+		t.Errorf("expected Type=%s when response Type is empty, got %s", ENITypeSecondary, ni.Type)
+	}
+}
+
+func TestFromDescribeResp_WithPrefixes(t *testing.T) {
+	resp := &ecs.NetworkInterfaceSet{
+		Status:             "InUse",
+		MacAddress:         "02:aa:bb:cc:dd:ff",
+		NetworkInterfaceId: "eni-prefix-desc",
+		VSwitchId:          "vsw-2",
+		PrivateIpAddress:   "10.0.1.1",
+		Type:               "Secondary",
+		Ipv4PrefixSets: ecs.Ipv4PrefixSetsInDescribeNetworkInterfaces{
+			Ipv4PrefixSet: []ecs.Ipv4PrefixSet{
+				{Ipv4Prefix: "10.0.1.0/28"},
+			},
+		},
+		Ipv6PrefixSets: ecs.Ipv6PrefixSetsInDescribeNetworkInterfaces{
+			Ipv6PrefixSet: []ecs.Ipv6PrefixSet{
+				{Ipv6Prefix: "fd00::/80"},
+				{Ipv6Prefix: "fd01::/80"},
+			},
+		},
+	}
+	ni := FromDescribeResp(resp)
+	if len(ni.IPv4PrefixSets) != 1 || ni.IPv4PrefixSets[0] != Prefix("10.0.1.0/28") {
+		t.Errorf("unexpected IPv4PrefixSets: %+v", ni.IPv4PrefixSets)
+	}
+	if len(ni.IPv6PrefixSets) != 2 {
+		t.Fatalf("expected 2 IPv6PrefixSets, got %d", len(ni.IPv6PrefixSets))
+	}
+	if ni.IPv6PrefixSets[0] != Prefix("fd00::/80") || ni.IPv6PrefixSets[1] != Prefix("fd01::/80") {
+		t.Errorf("unexpected IPv6PrefixSets: %+v", ni.IPv6PrefixSets)
+	}
+}
+
+func TestFromDescribeResp_InstanceIDFromAttachment(t *testing.T) {
+	resp := &ecs.NetworkInterfaceSet{
+		NetworkInterfaceId: "eni-attach",
+		Attachment: ecs.Attachment{
+			InstanceId: "i-from-attachment",
+		},
+	}
+	ni := FromDescribeResp(resp)
+	if ni.InstanceID != "i-from-attachment" {
+		t.Errorf("expected InstanceID from Attachment, got %s", ni.InstanceID)
+	}
+}
+
 func TestFromPtr(t *testing.T) {
 	// nil pointer returns zero value
 	var nilStr *string

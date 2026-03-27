@@ -91,40 +91,43 @@ func TestIPPool(t *testing.T) {
 					t.Fatalf("failed to get node cr: %v", err)
 					return false, err
 				}
-				for _, node := range nodes.Items {
-					if isExclusiveENINode(&node) {
+			for _, node := range nodes.Items {
+				if isExclusiveENINode(&node) {
+					continue
+				}
+				if isPrefixNode(&node) {
+					continue
+				}
+				idle := 0
+				for _, eni := range node.Status.NetworkInterfaces {
+					if eni.Status != aliyunClient.ENIStatusInUse {
 						continue
 					}
-					idle := 0
-					for _, eni := range node.Status.NetworkInterfaces {
-						if eni.Status != aliyunClient.ENIStatusInUse {
+					for _, ip := range eni.IPv4 {
+						if ip.Status != networkv1beta1.IPStatusValid {
 							continue
 						}
-						for _, ip := range eni.IPv4 {
-							if ip.Status != networkv1beta1.IPStatusValid {
-								continue
-							}
-							if ip.Primary {
-								continue
-							}
-							if ip.PodID == "" {
-								idle++
-							}
+						if ip.Primary {
+							continue
+						}
+						if ip.PodID == "" {
+							idle++
 						}
 					}
-					if idle > 0 {
-						t.Logf("node %v has %v idle ip", node.Name, idle)
-						return false, nil
-					}
 				}
-				return true, nil
-			}, wait.WithTimeout(5*time.Minute), wait.WithInterval(5*time.Second))
-			if err != nil {
-				t.Fatalf("failed to wait for node cr config update: %v", err)
+				if idle > 0 {
+					t.Logf("node %v has %v idle ip", node.Name, idle)
+					return false, nil
+				}
 			}
-			return ctx
-		}).
-		Assess("step 2: test preheating", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			return true, nil
+		}, wait.WithTimeout(5*time.Minute), wait.WithInterval(5*time.Second))
+		if err != nil {
+			t.Fatalf("failed to wait for node cr config update: %v", err)
+		}
+		return ctx
+	}).
+	Assess("step 2: test preheating", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			t.Log("Step 1: Modified eni_config with ip_pool_sync_period=30s, max_pool_size=5, min_pool_size=5 and restarted Terwayd")
 			cm := &corev1.ConfigMap{}
 			err := config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
@@ -167,29 +170,32 @@ func TestIPPool(t *testing.T) {
 					t.Fatalf("failed to get node cr: %v", err)
 					return false, err
 				}
-				for _, node := range nodes.Items {
-					if isExclusiveENINode(&node) {
+			for _, node := range nodes.Items {
+				if isExclusiveENINode(&node) {
+					continue
+				}
+				if isPrefixNode(&node) {
+					continue
+				}
+				idle := 0
+				for _, eni := range node.Status.NetworkInterfaces {
+					if eni.Status != aliyunClient.ENIStatusInUse {
 						continue
 					}
-					idle := 0
-					for _, eni := range node.Status.NetworkInterfaces {
-						if eni.Status != aliyunClient.ENIStatusInUse {
+					for _, ip := range eni.IPv4 {
+						if ip.Status != networkv1beta1.IPStatusValid {
 							continue
 						}
-						for _, ip := range eni.IPv4 {
-							if ip.Status != networkv1beta1.IPStatusValid {
-								continue
-							}
-							if ip.PodID == "" {
-								idle++
-							}
+						if ip.PodID == "" {
+							idle++
 						}
 					}
-					if idle <= 3 {
-						t.Logf("node %v has %v idle ip", node.Name, idle)
-						return false, nil
-					}
 				}
+				if idle <= 3 {
+					t.Logf("node %v has %v idle ip", node.Name, idle)
+					return false, nil
+				}
+			}
 				return true, nil
 			}, wait.WithTimeout(5*time.Minute), wait.WithInterval(5*time.Second))
 			if err != nil {
@@ -240,35 +246,38 @@ func TestIPPool(t *testing.T) {
 				if err != nil {
 					t.Fatalf("failed to get node cr: %v", err)
 				}
-				for _, node := range nodes.Items {
-					if isExclusiveENINode(&node) {
+			for _, node := range nodes.Items {
+				if isExclusiveENINode(&node) {
+					continue
+				}
+				if isPrefixNode(&node) {
+					continue
+				}
+				idle := 0
+				for _, eni := range node.Status.NetworkInterfaces {
+					if eni.Status != aliyunClient.ENIStatusInUse {
 						continue
 					}
-					idle := 0
-					for _, eni := range node.Status.NetworkInterfaces {
-						if eni.Status != aliyunClient.ENIStatusInUse {
+					for _, ip := range eni.IPv4 {
+						if ip.Status != networkv1beta1.IPStatusValid {
 							continue
 						}
-						for _, ip := range eni.IPv4 {
-							if ip.Status != networkv1beta1.IPStatusValid {
-								continue
-							}
-							if ip.Primary {
-								continue
-							}
-							if ip.PodID == "" {
-								idle++
-							}
+						if ip.Primary {
+							continue
+						}
+						if ip.PodID == "" {
+							idle++
 						}
 					}
-					if idle > 0 {
-						t.Logf("node %v has %v idle ip", node.Name, idle)
-						_ = triggerNode(ctx, config, t, &node)
-
-						return false, nil
-					}
 				}
-				if time.Since(start) < 4*time.Minute {
+				if idle > 0 {
+					t.Logf("node %v has %v idle ip", node.Name, idle)
+					_ = triggerNode(ctx, config, t, &node)
+
+					return false, nil
+				}
+			}
+			if time.Since(start) < 4*time.Minute {
 					return false, fmt.Errorf("ip should not be release in 4min")
 				}
 				t.Logf("ip released after %v", time.Since(start))

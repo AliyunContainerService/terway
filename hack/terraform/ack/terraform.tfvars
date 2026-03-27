@@ -9,19 +9,19 @@ region_id = "cn-hangzhou"
 cluster_spec = "ack.pro.small"
 
 # 可用区配置
-availability_zone = ["cn-hangzhou-i", "cn-hangzhou-j", "cn-hangzhou-k"]
+availability_zone = ["cn-hangzhou-j", "cn-hangzhou-k"]
 
 # 节点交换机配置 (留空将自动创建)
 node_vswitch_ids = []
 
 # 节点交换机 CIDR (当 node_vswitch_ids 为空时使用)
-node_vswitch_cidrs = ["172.16.0.0/23", "172.16.2.0/23", "172.16.4.0/23"]
+node_vswitch_cidrs = ["172.16.2.0/23", "172.16.4.0/23"]
 
 # Terway Pod 交换机配置 (留空将自动创建)
 terway_vswitch_ids = []
 
 # Terway Pod 交换机 CIDR (当 terway_vswitch_ids 为空时使用)
-terway_vswitch_cidrs = ["172.16.208.0/20", "172.16.224.0/20", "172.16.240.0/20"]
+terway_vswitch_cidrs = ["172.17.0.0/16", "172.18.0.0/16"]
 
 # 工作节点实例类型
 worker_instance_types = ["ecs.g7ne.2xlarge", "ecs.g7ne.4xlarge"]

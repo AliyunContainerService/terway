@@ -1396,5 +1396,380 @@ var _ = Describe("Node controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(node.Spec.ENISpec.EnableTrunk).To(BeFalse())
 		})
+
+		It("EnableIPPrefix set from config on first creation", func() {
+			ctx := context.Background()
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "i-prefix-test",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).Should(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "eni-config",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": `{
+						"vswitches": {"cn-hangzhou-i":["vsw-1"]},
+						"security_group": "sg-1",
+						"enable_ip_prefix": true
+					}`,
+				}}
+			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+			controllerReconciler := &nodeReconcile{
+				client:   k8sClient,
+				nodeName: nodeName,
+				record:   record.NewFakeRecorder(100),
+			}
+			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
+			defer devicePluginPatches.Reset()
+
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "cn-hangzhou",
+						InstanceID:   "i-prefix-test",
+						InstanceType: "ecs.c6.large",
+						ZoneID:       "cn-hangzhou-i",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:           3,
+						IPv4PerAdapter:     10,
+						IPv6PerAdapter:     10,
+						EriQuantity:        2,
+						MemberAdapterLimit: 2,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.Spec.ENISpec).NotTo(BeNil())
+			Expect(node.Spec.ENISpec.EnableIPPrefix).To(BeTrue())
+		})
+
+		It("IPv4PrefixCount propagation and pool size zeroing", func() {
+			ctx := context.Background()
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "i-prefixcount-test",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).Should(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "eni-config",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": `{
+						"vswitches": {"cn-hangzhou-i":["vsw-1"]},
+						"security_group": "sg-1",
+						"enable_ip_prefix": true,
+						"ipv4_prefix_count": 5,
+						"max_pool_size": 20,
+						"min_pool_size": 10
+					}`,
+				}}
+			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+			controllerReconciler := &nodeReconcile{
+				client:   k8sClient,
+				nodeName: nodeName,
+				record:   record.NewFakeRecorder(100),
+			}
+			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
+			defer devicePluginPatches.Reset()
+
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "cn-hangzhou",
+						InstanceID:   "i-prefixcount-test",
+						InstanceType: "ecs.c6.large",
+						ZoneID:       "cn-hangzhou-i",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 15,
+						IPv6PerAdapter: 15,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.Spec.ENISpec).NotTo(BeNil())
+			Expect(node.Spec.ENISpec.EnableIPPrefix).To(BeTrue())
+			Expect(node.Spec.ENISpec.IPv4PrefixCount).To(Equal(5))
+			Expect(node.Spec.Pool.MaxPoolSize).To(Equal(0), "pool sizes must be zero in prefix mode")
+			Expect(node.Spec.Pool.MinPoolSize).To(Equal(0), "pool sizes must be zero in prefix mode")
+		})
+
+		It("IPv6PrefixCount propagation for IPv6-only mode", func() {
+			ctx := context.Background()
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "i-v6prefixcount-test",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).Should(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "eni-config",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": `{
+						"vswitches": {"cn-hangzhou-i":["vsw-1"]},
+						"security_group": "sg-1",
+						"ip_stack": "ipv6",
+						"enable_ip_prefix": true,
+						"ipv6_prefix_count": 1,
+						"max_pool_size": 20,
+						"min_pool_size": 10
+					}`,
+				}}
+			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+			controllerReconciler := &nodeReconcile{
+				client:   k8sClient,
+				nodeName: nodeName,
+				record:   record.NewFakeRecorder(100),
+			}
+			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
+			defer devicePluginPatches.Reset()
+
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "cn-hangzhou",
+						InstanceID:   "i-v6prefixcount-test",
+						InstanceType: "ecs.c6.large",
+						ZoneID:       "cn-hangzhou-i",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 15,
+						IPv6PerAdapter: 15,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.Spec.ENISpec).NotTo(BeNil())
+			Expect(node.Spec.ENISpec.EnableIPv4).To(BeFalse())
+			Expect(node.Spec.ENISpec.EnableIPv6).To(BeTrue())
+			Expect(node.Spec.ENISpec.EnableIPPrefix).To(BeTrue())
+			Expect(node.Spec.ENISpec.IPv6PrefixCount).To(Equal(1))
+			Expect(node.Spec.Pool.MaxPoolSize).To(Equal(0), "pool sizes must be zero in prefix mode")
+			Expect(node.Spec.Pool.MinPoolSize).To(Equal(0), "pool sizes must be zero in prefix mode")
+		})
+
+		It("Dual-stack does NOT set IPv6PrefixCount", func() {
+			ctx := context.Background()
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "i-ds-noipv6prefix",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).Should(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "eni-config",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": `{
+						"vswitches": {"cn-hangzhou-i":["vsw-1"]},
+						"security_group": "sg-1",
+						"ip_stack": "dual",
+						"enable_ip_prefix": true,
+						"ipv4_prefix_count": 3,
+						"ipv6_prefix_count": 1
+					}`,
+				}}
+			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+			controllerReconciler := &nodeReconcile{
+				client:   k8sClient,
+				nodeName: nodeName,
+				record:   record.NewFakeRecorder(100),
+			}
+			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
+			defer devicePluginPatches.Reset()
+
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "cn-hangzhou",
+						InstanceID:   "i-ds-noipv6prefix",
+						InstanceType: "ecs.c6.large",
+						ZoneID:       "cn-hangzhou-i",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:       3,
+						IPv4PerAdapter: 15,
+						IPv6PerAdapter: 15,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.Spec.ENISpec).NotTo(BeNil())
+			Expect(node.Spec.ENISpec.EnableIPv4).To(BeTrue())
+			Expect(node.Spec.ENISpec.EnableIPv6).To(BeTrue())
+			Expect(node.Spec.ENISpec.IPv4PrefixCount).To(Equal(3))
+			Expect(node.Spec.ENISpec.IPv6PrefixCount).To(Equal(0), "dual-stack should NOT set IPv6PrefixCount")
+		})
+
+		It("EnableIPPrefix immutability - config change ignored", func() {
+			ctx := context.Background()
+
+			k8sNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "i-prefix-immutable",
+				},
+			}
+			Expect(k8sClient.Create(ctx, k8sNode)).Should(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "eni-config",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": `{
+						"vswitches": {"cn-hangzhou-i":["vsw-1"]},
+						"security_group": "sg-1",
+						"enable_ip_prefix": true
+					}`,
+				}}
+			Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+			controllerReconciler := &nodeReconcile{
+				client:   k8sClient,
+				nodeName: nodeName,
+				record:   record.NewFakeRecorder(100),
+			}
+			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
+			defer devicePluginPatches.Reset()
+
+			node := &networkv1beta1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						RegionID:     "cn-hangzhou",
+						InstanceID:   "i-prefix-immutable",
+						InstanceType: "ecs.c6.large",
+						ZoneID:       "cn-hangzhou-i",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						Adapters:           3,
+						IPv4PerAdapter:     10,
+						IPv6PerAdapter:     10,
+						EriQuantity:        2,
+						MemberAdapterLimit: 2,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).Should(Succeed())
+
+			By("First reconcile with enable_ip_prefix=true")
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.Spec.ENISpec).NotTo(BeNil())
+			Expect(node.Spec.ENISpec.EnableIPPrefix).To(BeTrue())
+
+			By("Update config to enable_ip_prefix=false")
+			cm.Data["eni_conf"] = `{
+				"vswitches": {"cn-hangzhou-i":["vsw-1"]},
+				"security_group": "sg-1",
+				"enable_ip_prefix": false
+			}`
+			Expect(k8sClient.Update(ctx, cm)).Should(Succeed())
+
+			By("Second reconcile - EnableIPPrefix should remain true (immutable)")
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(node.Spec.ENISpec).NotTo(BeNil())
+			Expect(node.Spec.ENISpec.EnableIPPrefix).To(BeTrue(), "EnableIPPrefix should remain true despite config change")
+		})
 	})
 })

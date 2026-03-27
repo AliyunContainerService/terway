@@ -46,6 +46,11 @@ type eniOptions struct {
 	addIPv4N int
 	addIPv6N int
 
+	// addIPv4PrefixN / addIPv6PrefixN are used in prefix mode.
+	// They are mutually exclusive with addIPv4N / addIPv6N per the ECS API constraint.
+	addIPv4PrefixN int
+	addIPv6PrefixN int
+
 	isFull bool
 	errors []error
 }
@@ -119,8 +124,7 @@ func releaseUnUsedIP(log logr.Logger, eni *networkv1beta1.Nic, toDel int) int {
 }
 
 func newENIFromAPI(eni *aliyunClient.NetworkInterface) *networkv1beta1.Nic {
-
-	return &networkv1beta1.Nic{
+	nic := &networkv1beta1.Nic{
 		ID:                          eni.NetworkInterfaceID,
 		Status:                      eni.Status,
 		MacAddress:                  eni.MacAddress,
@@ -132,6 +136,78 @@ func newENIFromAPI(eni *aliyunClient.NetworkInterface) *networkv1beta1.Nic {
 		IPv4:                        convertIPSet(eni.PrivateIPSets),
 		IPv6:                        convertIPSet(eni.IPv6Set),
 	}
+	for _, p := range eni.IPv4PrefixSets {
+		nic.IPv4Prefix = append(nic.IPv4Prefix, networkv1beta1.IPPrefix{
+			Prefix: string(p),
+			Status: networkv1beta1.IPPrefixStatusValid,
+		})
+	}
+	for _, p := range eni.IPv6PrefixSets {
+		nic.IPv6Prefix = append(nic.IPv6Prefix, networkv1beta1.IPPrefix{
+			Prefix: string(p),
+			Status: networkv1beta1.IPPrefixStatusValid,
+		})
+	}
+	return nic
+}
+
+// mergeIPPrefixes merges remote prefix sets into the current CR slice.
+//
+// Merge rules:
+//   - Remote exists, local exists: preserve the full local IPPrefix (Status + FrozenExpireAt).
+//   - Remote exists, local missing: add as Valid (new prefix from cloud).
+//   - Remote missing, local Deleting: remove from local.
+//   - Remote missing, local exists (other statuses): mark as Invalid so the Daemon can ACK
+//     the removal before the record is cleaned up. Invalid is a terminal state and must not
+//     transition back to Valid.
+func mergeIPPrefixes(log logr.Logger, remote []aliyunClient.Prefix, current []networkv1beta1.IPPrefix) []networkv1beta1.IPPrefix {
+	remoteSet := make(map[string]struct{}, len(remote))
+	for _, r := range remote {
+		remoteSet[string(r)] = struct{}{}
+	}
+
+	existingByPrefix := make(map[string]networkv1beta1.IPPrefix, len(current))
+	for _, p := range current {
+		existingByPrefix[p.Prefix] = p
+	}
+
+	result := make([]networkv1beta1.IPPrefix, 0, len(remote)+len(current))
+
+	// Pass 1: iterate remote — add or carry-over existing entries.
+	for _, r := range remote {
+		s := string(r)
+		if existing, ok := existingByPrefix[s]; ok {
+			// Preserve the full local record (Status + FrozenExpireAt).
+			result = append(result, existing)
+		} else {
+			result = append(result, networkv1beta1.IPPrefix{Prefix: s, Status: networkv1beta1.IPPrefixStatusValid})
+			log.Info("sync prefix with remote, add prefix to local", "prefix", s)
+		}
+	}
+
+	// Pass 2: handle local-only prefixes (disappeared from remote).
+	for _, p := range current {
+		if _, inRemote := remoteSet[p.Prefix]; inRemote {
+			continue // already handled in Pass 1
+		}
+		switch p.Status {
+		case networkv1beta1.IPPrefixStatusDeleting:
+			// Deleting prefix has been successfully removed from cloud (unassign completed).
+			// Drop the CR entry — no need to keep it once it's gone from remote.
+		case networkv1beta1.IPPrefixStatusInvalid:
+			// Already Invalid, keep as-is and wait for Daemon ACK.
+			result = append(result, p)
+		default:
+			// Valid or Frozen: prefix vanished unexpectedly. Mark Invalid so the Daemon
+			// can ACK before the record is removed. Invalid must never revert to Valid.
+			p.Status = networkv1beta1.IPPrefixStatusInvalid
+			result = append(result, p)
+			log.Info("prefix not in remote, marked as Invalid, waiting for Daemon ACK",
+				"prefix", p.Prefix)
+		}
+	}
+
+	return result
 }
 
 // convertIPSet convert aliyunClient.IPSet to networkv1beta1.IP

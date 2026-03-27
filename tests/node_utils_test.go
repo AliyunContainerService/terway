@@ -34,12 +34,13 @@ const (
 
 // NodeCapacityInfo contains capacity information for a single node
 type NodeCapacityInfo struct {
-	NodeName       string
-	Adapters       int // Number of available adapters (NICs)
-	TotalAdapters  int // Total adapters including primary
-	IPv4PerAdapter int
-	IPv6PerAdapter int
-	NodeType       NodeType
+	NodeName                      string
+	Adapters                      int // Number of available adapters (NICs)
+	TotalAdapters                 int // Total adapters including primary
+	IPv4PerAdapter                int
+	IPv6PerAdapter                int
+	NodeType                      NodeType
+	EnableIPPrefix                bool // from Node CR Spec.ENISpec.EnableIPPrefix
 	MeetsSharedENIRequirements    bool
 	MeetsExclusiveENIRequirements bool
 }
@@ -57,6 +58,7 @@ type NodeType string
 const (
 	NodeTypeECSSharedENI        NodeType = "ecs-shared-eni"
 	NodeTypeECSExclusiveENI     NodeType = "ecs-exclusive-eni"
+	NodeTypeECSIPPrefix         NodeType = "ecs-ip-prefix"
 	NodeTypeLingjunSharedENI    NodeType = "lingjun-shared-eni"
 	NodeTypeLingjunExclusiveENI NodeType = "lingjun-exclusive-eni"
 )
@@ -85,6 +87,7 @@ const (
 type NodeTypeInfo struct {
 	ECSSharedENINodes        []corev1.Node
 	ECSExclusiveENINodes     []corev1.Node
+	ECSIPPrefixNodes         []corev1.Node
 	LingjunSharedENINodes    []corev1.Node
 	LingjunExclusiveENINodes []corev1.Node
 	AllNodes                 []corev1.Node
@@ -113,6 +116,8 @@ func (n *NodeTypeInfo) GetNodesByType(nodeType NodeType) []corev1.Node {
 		return n.ECSSharedENINodes
 	case NodeTypeECSExclusiveENI:
 		return n.ECSExclusiveENINodes
+	case NodeTypeECSIPPrefix:
+		return n.ECSIPPrefixNodes
 	case NodeTypeLingjunSharedENI:
 		return n.LingjunSharedENINodes
 	case NodeTypeLingjunExclusiveENI:
@@ -215,6 +220,8 @@ func DiscoverNodeTypes(ctx context.Context, client klient.Client) (*NodeTypeInfo
 			info.ECSSharedENINodes = append(info.ECSSharedENINodes, node)
 		case NodeTypeECSExclusiveENI:
 			info.ECSExclusiveENINodes = append(info.ECSExclusiveENINodes, node)
+		case NodeTypeECSIPPrefix:
+			info.ECSIPPrefixNodes = append(info.ECSIPPrefixNodes, node)
 		case NodeTypeLingjunSharedENI:
 			info.LingjunSharedENINodes = append(info.LingjunSharedENINodes, node)
 		case NodeTypeLingjunExclusiveENI:
@@ -237,6 +244,11 @@ func classifyNode(node corev1.Node) NodeType {
 		return NodeTypeLingjunSharedENI
 	}
 
+	// Check if it's an IP Prefix node (has k8s.aliyun.com/ip-prefix=true label)
+	if isIPPrefixNode(&node) {
+		return NodeTypeECSIPPrefix
+	}
+
 	// Check if it's an ECS exclusive ENI node
 	if isExclusiveENINode(&node) {
 		return NodeTypeECSExclusiveENI
@@ -244,6 +256,11 @@ func classifyNode(node corev1.Node) NodeType {
 
 	// Default to ECS shared ENI node
 	return NodeTypeECSSharedENI
+}
+
+// isIPPrefixNode checks if a node is configured for IP Prefix mode
+func isIPPrefixNode(node metav1.Object) bool {
+	return node.GetLabels()["k8s.aliyun.com/ip-prefix"] == "true"
 }
 
 // isLingjunNode checks if a node is a Lingjun node
@@ -254,6 +271,12 @@ func isLingjunNode(node metav1.Object) bool {
 // isExclusiveENINode checks if a node is configured for exclusive ENI mode
 func isExclusiveENINode(node metav1.Object) bool {
 	return node.GetLabels()["k8s.aliyun.com/exclusive-mode-eni-type"] == "eniOnly"
+}
+
+// isPrefixNode checks if a Node CR has IP Prefix mode enabled via spec.eni.enableIPPrefix.
+// Pool-based IP preheating/water-level features are incompatible with prefix mode.
+func isPrefixNode(node *networkv1beta1.Node) bool {
+	return node.Spec.ENISpec != nil && node.Spec.ENISpec.EnableIPPrefix
 }
 
 // =============================================================================
@@ -268,6 +291,10 @@ func GetNodeAffinityForType(nodeType NodeType) map[string]string {
 	case NodeTypeECSExclusiveENI:
 		return map[string]string{
 			"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
+		}
+	case NodeTypeECSIPPrefix:
+		return map[string]string{
+			"k8s.aliyun.com/ip-prefix": "true",
 		}
 	case NodeTypeLingjunSharedENI:
 		return map[string]string{
@@ -343,6 +370,7 @@ func GetAllNodeTypes() []NodeType {
 	return []NodeType{
 		NodeTypeECSSharedENI,
 		NodeTypeECSExclusiveENI,
+		NodeTypeECSIPPrefix,
 		NodeTypeLingjunSharedENI,
 		NodeTypeLingjunExclusiveENI,
 	}
@@ -356,6 +384,9 @@ func (n *NodeTypeInfo) GetAvailableNodeTypes() []NodeType {
 	}
 	if len(n.ECSExclusiveENINodes) > 0 {
 		available = append(available, NodeTypeECSExclusiveENI)
+	}
+	if len(n.ECSIPPrefixNodes) > 0 {
+		available = append(available, NodeTypeECSIPPrefix)
 	}
 	if len(n.LingjunSharedENINodes) > 0 {
 		available = append(available, NodeTypeLingjunSharedENI)
@@ -614,6 +645,7 @@ func DiscoverNodeCapacities(ctx context.Context, client klient.Client) (NodeCapa
 
 	for _, node := range nodes.Items {
 		nodeType := classifyNodeCR(&node)
+		enableIPPrefix := node.Spec.ENISpec != nil && node.Spec.ENISpec.EnableIPPrefix
 		cap := &NodeCapacityInfo{
 			NodeName:       node.Name,
 			Adapters:       node.Spec.NodeCap.Adapters,
@@ -621,6 +653,7 @@ func DiscoverNodeCapacities(ctx context.Context, client klient.Client) (NodeCapa
 			IPv4PerAdapter: node.Spec.NodeCap.IPv4PerAdapter,
 			IPv6PerAdapter: node.Spec.NodeCap.IPv6PerAdapter,
 			NodeType:       nodeType,
+			EnableIPPrefix: enableIPPrefix,
 		}
 
 		// Check if node meets test requirements
@@ -637,12 +670,16 @@ func DiscoverNodeCapacities(ctx context.Context, client klient.Client) (NodeCapa
 func classifyNodeCR(node *networkv1beta1.Node) NodeType {
 	isLingjun := node.Labels["alibabacloud.com/lingjun-worker"] == "true"
 	isExclusive := node.Labels["k8s.aliyun.com/exclusive-mode-eni-type"] == "eniOnly"
+	isIPPrefix := node.Spec.ENISpec != nil && node.Spec.ENISpec.EnableIPPrefix
 
 	if isLingjun && isExclusive {
 		return NodeTypeLingjunExclusiveENI
 	}
 	if isLingjun {
 		return NodeTypeLingjunSharedENI
+	}
+	if isIPPrefix {
+		return NodeTypeECSIPPrefix
 	}
 	if isExclusive {
 		return NodeTypeECSExclusiveENI
