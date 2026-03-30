@@ -12,7 +12,7 @@ variable "cluster_spec" {
 # 指定虚拟交换机（vSwitches）的可用区。
 variable "availability_zone" {
   description = "The availability zones of vswitches."
-  default     = ["cn-hangzhou-i", "cn-hangzhou-j", "cn-hangzhou-k"]
+  default     = ["cn-hangzhou-j", "cn-hangzhou-k"]
 }
 
 # 指定交换机ID（vSwitch IDs）的列表。
@@ -26,7 +26,7 @@ variable "node_vswitch_ids" {
 variable "node_vswitch_cidrs" {
   description = "List of cidr blocks used to create several new vswitches when 'node_vswitch_ids' is not specified."
   type        = list(string)
-  default     = ["172.16.0.0/23", "172.16.2.0/23", "172.16.4.0/23"]
+  default     = ["172.16.2.0/23", "172.16.4.0/23"]
 }
 
 # 指定网络组件Terway配置。如果为空，默认会根据terway_vswitch_cidrs的创建新的terway vSwitch。
@@ -40,7 +40,7 @@ variable "terway_vswitch_ids" {
 variable "terway_vswitch_cidrs" {
   description = "List of cidr blocks used to create several new vswitches when 'terway_vswitch_ids' is not specified."
   type        = list(string)
-  default     = ["172.16.208.0/20", "172.16.224.0/20", "172.16.240.0/20"]
+  default     = ["172.16.224.0/20", "172.16.240.0/20"]
 }
 
 # 定义了用于启动工作节点的ECS实例类型。
@@ -204,9 +204,8 @@ resource "random_string" "cluster_suffix" {
 locals {
   k8s_name_terway         = substr(join("-", [var.k8s_name_prefix, "terway", random_string.cluster_suffix.result]), 0, 63)
   new_vpc_name            = "tf-vpc-172-16"
-  new_vsw_name_azD        = "tf-vswitch-azD-172-16-0"
-  new_vsw_name_azE        = "tf-vswitch-azE-172-16-2"
-  new_vsw_name_azF        = "tf-vswitch-azF-172-16-4"
+  new_vsw_name_azJ        = "tf-vswitch-azJ-172-16-2"
+  new_vsw_name_azK        = "tf-vswitch-azK-172-16-4"
   nodepool_name           = "default-nodepool"
   managed_nodepool_name   = "managed-node-pool"
   autoscale_nodepool_name = "autoscale-node-pool"
@@ -221,26 +220,43 @@ data "alicloud_instance_types" "default" {
   kubernetes_node_role = "Worker"
 }
 
-# 专有网络。
+# 专有网络 - Dual Stack (IPv4 + IPv6)
 resource "alicloud_vpc" "default" {
   vpc_name   = local.new_vpc_name
   cidr_block = "172.16.0.0/12"
+  # 启用 IPv6，创建双栈 VPC
+  enable_ipv6 = true
 }
 
-# Node交换机。
+# IPv6 Gateway
+resource "alicloud_vpc_ipv6_gateway" "default" {
+  vpc_id            = alicloud_vpc.default.id
+  ipv6_gateway_name = "${local.new_vpc_name}-ipv6-gw"
+  # spec 字段已从 provider 1.205.0 版本开始弃用
+}
+
+# Node交换机 - Dual Stack (IPv4 + IPv6)
 resource "alicloud_vswitch" "vswitches" {
   count      = length(var.node_vswitch_ids) > 0 ? 0 : length(var.node_vswitch_cidrs)
   vpc_id     = alicloud_vpc.default.id
   cidr_block = element(var.node_vswitch_cidrs, count.index)
   zone_id    = element(var.availability_zone, count.index)
+  # 启用 IPv6，创建双栈交换机
+  enable_ipv6 = true
+  # 从 VPC /56 中分配 /64 子网，索引从 1 开始（避免与默认交换机冲突）
+  ipv6_cidr_block_mask = count.index + 1
 }
 
-# Pod交换机。
+# Pod交换机 - Dual Stack (IPv4 + IPv6)
 resource "alicloud_vswitch" "terway_vswitches" {
   count      = length(var.terway_vswitch_ids) > 0 ? 0 : length(var.terway_vswitch_cidrs)
   vpc_id     = alicloud_vpc.default.id
   cidr_block = element(var.terway_vswitch_cidrs, count.index)
   zone_id    = element(var.availability_zone, count.index)
+  # 启用 IPv6，创建双栈交换机
+  enable_ipv6 = true
+  # 从 VPC /56 中分配 /64 子网，Pod 交换机使用 11+ 索引段
+  ipv6_cidr_block_mask = count.index + 11
 }
 
 # Kubernetes托管版。
@@ -339,7 +355,7 @@ resource "alicloud_cs_kubernetes_node_pool" "exclusive_eni" {
   }
   labels {
     key   = "k8s.aliyun.com/exclusive-mode-eni-type"
-    value = "secondary"
+    value = "eniOnly"
   }
 }
 
@@ -347,6 +363,61 @@ resource "alicloud_cs_kubernetes_node_pool" "exclusive_eni" {
 data "alicloud_cs_cluster_credential" "auth" {
   cluster_id  = alicloud_cs_managed_kubernetes.default.id
   output_file = var.kubeconfig_output_file != "" ? var.kubeconfig_output_file : "kubeconfig-${local.k8s_name_terway}"
+}
+
+# =============================================================================
+# Phase 2: Create Terway Dynamic ConfigMap (e2e-ip-prefix)
+# =============================================================================
+# 使用 Kubernetes Provider 创建 ConfigMap
+resource "kubernetes_config_map_v1" "e2e_ip_prefix" {
+  metadata {
+    name      = "e2e-ip-prefix"
+    namespace = "kube-system"
+  }
+
+  data = {
+    eni_conf = jsonencode({
+      enable_ip_prefix = true
+      ipv4_prefix_count  = 3
+    })
+  }
+
+  # 确保集群凭证可用后再创建 ConfigMap
+  depends_on = [data.alicloud_cs_cluster_credential.auth]
+}
+
+# =============================================================================
+# Phase 3: Create IP Prefix Node Pool (依赖 ConfigMap)
+# =============================================================================
+# IP Prefix 测试节点池
+resource "alicloud_cs_kubernetes_node_pool" "ip_prefix" {
+  cluster_id            = alicloud_cs_managed_kubernetes.default.id
+  node_pool_name        = "ip-prefix"
+  vswitch_ids           = split(",", join(",", alicloud_vswitch.vswitches.*.id))
+  instance_types        = var.worker_instance_types
+  instance_charge_type  = "PostPaid"
+  desired_size          = 2
+  install_cloud_monitor = true
+  system_disk_category  = "cloud_essd"
+  system_disk_size      = 100
+  image_type            = "AliyunLinux3"
+  data_disks {
+    category = "cloud_essd"
+    size     = 120
+  }
+  # IP Prefix E2E 标识 label：用于 Pod nodeAffinity 调度
+  labels {
+    key   = "k8s.aliyun.com/ip-prefix"
+    value = "true"
+  }
+  # terway dynamic config: 指向预创建的 ConfigMap
+  labels {
+    key   = "terway-config"
+    value = "e2e-ip-prefix"
+  }
+
+  # ConfigMap 应该在节点池之前创建
+  depends_on = [kubernetes_config_map_v1.e2e_ip_prefix]
 }
 
 # 输出集群信息和 kubeconfig

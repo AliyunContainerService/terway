@@ -32,6 +32,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/controller/common"
 	"github.com/AliyunContainerService/terway/pkg/controller/multi-ip/node"
 	"github.com/AliyunContainerService/terway/pkg/controller/status"
+	"github.com/AliyunContainerService/terway/pkg/eni"
 	"github.com/AliyunContainerService/terway/pkg/feature"
 	"github.com/AliyunContainerService/terway/pkg/utils"
 	"github.com/AliyunContainerService/terway/types"
@@ -261,15 +262,26 @@ func (r *ReconcileNode) k8sAnno(ctx context.Context, k8sNode *corev1.Node, node 
 			}
 		})
 	default:
-		lo.ForEach(node.Spec.Flavor, func(item networkv1beta1.Flavor, index int) {
-			if item.NetworkInterfaceType == networkv1beta1.ENITypeSecondary &&
-				item.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeStandard {
-				secondaryIP += item.Count * node.Spec.NodeCap.IPv4PerAdapter
+		if node.Spec.ENISpec.EnableIPPrefix {
+			// In IP Prefix mode, each ENI uses prefix delegation.
+			// IPv6-only: capacity is capped by IPv6PrefixMaxAddresses (2^16).
+			// IPv4 or dual-stack: (IPv4PerAdapter-1) * 16 * (TotalAdapters-1).
+			if !node.Spec.ENISpec.EnableIPv4 && node.Spec.ENISpec.EnableIPv6 {
+				secondaryIP = int(eni.IPv6PrefixMaxAddresses)
+			} else {
+				secondaryIP = (node.Spec.NodeCap.IPv4PerAdapter - 1) * 16 * (node.Spec.NodeCap.TotalAdapters - 1)
 			}
-			if item.NetworkInterfaceType == networkv1beta1.ENITypeTrunk {
-				secondaryIP += item.Count * node.Spec.NodeCap.IPv4PerAdapter
-			}
-		})
+		} else {
+			lo.ForEach(node.Spec.Flavor, func(item networkv1beta1.Flavor, index int) {
+				if item.NetworkInterfaceType == networkv1beta1.ENITypeSecondary &&
+					item.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeStandard {
+					secondaryIP += item.Count * node.Spec.NodeCap.IPv4PerAdapter
+				}
+				if item.NetworkInterfaceType == networkv1beta1.ENITypeTrunk {
+					secondaryIP += item.Count * node.Spec.NodeCap.IPv4PerAdapter
+				}
+			})
+		}
 
 		// handle trunk
 		if node.Spec.ENISpec.EnableTrunk {

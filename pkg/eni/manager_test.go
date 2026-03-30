@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	corev1 "k8s.io/api/core/v1"
 
@@ -495,6 +496,101 @@ func TestManager(t *testing.T) {
 	assert.NoError(t, err)
 
 	mgr.Status()
+}
+
+// multiReportStatusNI implements both NetworkInterface and MultiReportStatus
+type multiReportStatusNI struct {
+	NoOpNetworkInterface
+	statuses []Status
+}
+
+func (m *multiReportStatusNI) Statuses() []Status {
+	return m.statuses
+}
+
+// singleReportStatusNI implements both NetworkInterface and ReportStatus
+type singleReportStatusNI struct {
+	NoOpNetworkInterface
+	status Status
+}
+
+func (s *singleReportStatusNI) Status() Status {
+	return s.status
+}
+
+func TestManagerStatus_MultiReportStatus(t *testing.T) {
+	multiNI := &multiReportStatusNI{
+		statuses: []Status{
+			{
+				NetworkInterfaceID: "eni-multi-1",
+				Type:               "Prefix",
+				Status:             "InUse",
+				IPv4Prefixes: []PrefixStatus{
+					{Prefix: "10.0.0.0/28", Status: "Valid", Total: 16, Used: 2, Available: 14},
+				},
+			},
+			{
+				NetworkInterfaceID: "eni-multi-2",
+				Type:               "Prefix",
+				Status:             "InUse",
+			},
+		},
+	}
+
+	k8s := k8smocks.NewKubernetes(t)
+	k8s.On("PatchNodeIPResCondition", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	mgr := NewManager(nil, 0, []NetworkInterface{multiNI}, daemon.EniSelectionPolicyMostIPs, k8s)
+
+	result := mgr.Status()
+	assert.Len(t, result, 2)
+	assert.Equal(t, "eni-multi-1", result[0].NetworkInterfaceID)
+	assert.Equal(t, "eni-multi-2", result[1].NetworkInterfaceID)
+	require.Len(t, result[0].IPv4Prefixes, 1)
+	assert.Equal(t, 16, result[0].IPv4Prefixes[0].Total)
+}
+
+func TestManagerStatus_SingleReportStatus(t *testing.T) {
+	singleNI := &singleReportStatusNI{
+		status: Status{
+			NetworkInterfaceID: "eni-single-1",
+			Type:               "secondary",
+			Status:             "InUse",
+		},
+	}
+
+	k8s := k8smocks.NewKubernetes(t)
+	k8s.On("PatchNodeIPResCondition", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	mgr := NewManager(nil, 0, []NetworkInterface{singleNI}, daemon.EniSelectionPolicyMostIPs, k8s)
+
+	result := mgr.Status()
+	assert.Len(t, result, 1)
+	assert.Equal(t, "eni-single-1", result[0].NetworkInterfaceID)
+}
+
+func TestManagerStatus_MixedNIs(t *testing.T) {
+	multiNI := &multiReportStatusNI{
+		statuses: []Status{
+			{NetworkInterfaceID: "eni-prefix-1", Type: "Prefix"},
+		},
+	}
+	singleNI := &singleReportStatusNI{
+		status: Status{NetworkInterfaceID: "eni-local-1", Type: "secondary"},
+	}
+	noopNI := &NoOpNetworkInterface{}
+
+	k8s := k8smocks.NewKubernetes(t)
+	k8s.On("PatchNodeIPResCondition", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	mgr := NewManager(nil, 0, []NetworkInterface{multiNI, singleNI, noopNI}, daemon.EniSelectionPolicyMostIPs, k8s)
+
+	result := mgr.Status()
+	assert.Len(t, result, 2)
+
+	ids := map[string]bool{}
+	for _, s := range result {
+		ids[s.NetworkInterfaceID] = true
+	}
+	assert.True(t, ids["eni-prefix-1"])
+	assert.True(t, ids["eni-local-1"])
 }
 
 type NoOpNetworkInterface struct {

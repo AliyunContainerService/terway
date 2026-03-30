@@ -230,6 +230,20 @@ type NetworkResource interface {
 	ToStore() []daemon.ResourceItem
 }
 
+type PrefixAllocation struct {
+	IP    string
+	PodID string
+}
+
+type PrefixStatus struct {
+	Prefix      string
+	Status      string
+	Total       int
+	Used        int
+	Available   int
+	Allocations []PrefixAllocation
+}
+
 type Status struct {
 	NetworkInterfaceID   string
 	MAC                  string
@@ -238,6 +252,9 @@ type Status struct {
 
 	Usage  [][]string
 	Status string
+
+	IPv4Prefixes []PrefixStatus
+	IPv6Prefixes []PrefixStatus
 }
 
 type Trace struct {

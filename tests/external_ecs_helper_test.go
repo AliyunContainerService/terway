@@ -277,20 +277,20 @@ func (r *EchoResponse) GetSourceIP() string {
 
 // ConnectivityTestResult represents the result of a connectivity test
 type ConnectivityTestResult struct {
-	ScenarioName       string
-	Source             string
-	Target             string
-	ServiceType        string
-	TrafficPolicy      string
-	BackendLocation    string
-	LoadBalancerType   string
-	Connected          bool
-	SourceIPPreserved  bool
-	ObservedSourceIP   string
-	ExpectedSourceIP   string
-	ErrorMessage       string
-	Duration           time.Duration
-	RawResponse        string
+	ScenarioName      string
+	Source            string
+	Target            string
+	ServiceType       string
+	TrafficPolicy     string
+	BackendLocation   string
+	LoadBalancerType  string
+	Connected         bool
+	SourceIPPreserved bool
+	ObservedSourceIP  string
+	ExpectedSourceIP  string
+	ErrorMessage      string
+	Duration          time.Duration
+	RawResponse       string
 }
 
 // String returns a formatted string representation of the test result

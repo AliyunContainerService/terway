@@ -49,6 +49,17 @@ const (
 	VSwitchSelectionPolicyMost    SelectionPolicy = "most"
 )
 
+// IPPrefixStatus representing the status of an IP address.
+// +kubebuilder:validation:Enum=Valid;Frozen;Invalid;Deleting
+type IPPrefixStatus string
+
+const (
+	IPPrefixStatusValid    IPPrefixStatus = "Valid"
+	IPPrefixStatusFrozen   IPPrefixStatus = "Frozen"
+	IPPrefixStatusInvalid  IPPrefixStatus = "Invalid"
+	IPPrefixStatusDeleting IPPrefixStatus = "Deleting"
+)
+
 type NodeMetadata struct {
 	// +kubebuilder:validation:Required
 	RegionID string `json:"regionID,omitempty"`
@@ -93,6 +104,19 @@ type ENISpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:default:most
 	VSwitchSelectPolicy SelectionPolicy `json:"vSwitchSelectPolicy,omitempty"`
+
+	// EnableIPPrefix indicates whether prefix-based IPAM is enabled for this node.
+	// This field is immutable after the Node CR is created.
+	EnableIPPrefix bool `json:"enableIPPrefix,omitempty"`
+
+	// IPv4PrefixCount specifies the total number of IPv4 prefixes to allocate across all ENIs.
+	// Effective in IPv4 single-stack and dual-stack modes.
+	IPv4PrefixCount int `json:"ipv4PrefixCount,omitempty"`
+
+	// IPv6PrefixCount specifies the total number of IPv6 prefixes to allocate.
+	// Only effective in IPv6 single-stack mode. Valid values: 0 or 1.
+	// In dual-stack mode this field is ignored; each ENI automatically gets one IPv6 prefix.
+	IPv6PrefixCount int `json:"ipv6PrefixCount,omitempty"`
 }
 
 type PoolSpec struct {
@@ -163,6 +187,12 @@ type IP struct {
 
 type IPMap map[string]*IP
 
+type IPPrefix struct {
+	Prefix         string         `json:"prefix"`
+	Status         IPPrefixStatus `json:"status"`
+	FrozenExpireAt metav1.Time    `json:"frozenExpireAt,omitempty"`
+}
+
 type Nic struct {
 	// +kubebuilder:validation:Required
 	ID string `json:"id"`
@@ -183,6 +213,9 @@ type Nic struct {
 
 	IPv4 map[string]*IP `json:"ipv4,omitempty"`
 	IPv6 map[string]*IP `json:"ipv6,omitempty"`
+
+	IPv4Prefix []IPPrefix `json:"ipv4Prefix,omitempty"`
+	IPv6Prefix []IPPrefix `json:"ipv6Prefix,omitempty"`
 
 	IPv4CIDR string `json:"ipv4CIDR,omitempty"`
 

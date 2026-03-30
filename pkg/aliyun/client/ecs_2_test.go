@@ -72,6 +72,208 @@ func TestECSService_AssignPrivateIPAddress2_Error_Retry(t *testing.T) {
 	assert.Equal(t, "10.0.0.1", result[0].IPAddress)
 }
 
+// Test AssignPrivateIPAddress2 when only IPv4 prefix is returned (no regular IPs)
+// This tests the dd77ec94 commit logic for prefix-only allocation
+func TestECSService_AssignPrivateIPAddress2_OnlyPrefix(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).AssignPrivateIpAddresses,
+		func(client *ecs.Client, request *ecs.AssignPrivateIpAddressesRequest) (*ecs.AssignPrivateIpAddressesResponse, error) {
+			// Verify request uses Ipv4PrefixCount
+			val, _ := request.Ipv4PrefixCount.GetValue()
+			assert.Equal(t, 1, val)
+
+			return &ecs.AssignPrivateIpAddressesResponse{
+				RequestId: "request-id",
+				AssignedPrivateIpAddressesSet: ecs.AssignedPrivateIpAddressesSet{
+					PrivateIpSet: ecs.PrivateIpSetInAssignPrivateIpAddresses{
+						PrivateIpAddress: []string{}, // Empty when only prefix is allocated
+					},
+					Ipv4PrefixSet: ecs.Ipv4PrefixSetInAssignPrivateIpAddresses{
+						Ipv4Prefixes: []string{"10.244.126.96/28"},
+					},
+				},
+			}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	result, err := ecsService.AssignPrivateIPAddress2(ctx, &AssignPrivateIPAddressOptions{
+		NetworkInterfaceOptions: &NetworkInterfaceOptions{
+			NetworkInterfaceID: "eni-test-001",
+			IPv4PrefixCount:    1,
+		},
+		Backoff: &wait.Backoff{Steps: 1, Duration: time.Millisecond},
+	})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result, 1)
+	assert.Equal(t, Prefix("10.244.126.96/28"), result[0].Prefix)
+	assert.Empty(t, result[0].IPAddress)
+}
+
+// Test AssignPrivateIPAddress2 with both IPs and prefixes in response
+// Note: ECS API doesn't allow simultaneous allocation, but code should handle combined response
+func TestECSService_AssignPrivateIPAddress2_BothIPAndPrefix(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).AssignPrivateIpAddresses,
+		func(client *ecs.Client, request *ecs.AssignPrivateIpAddressesRequest) (*ecs.AssignPrivateIpAddressesResponse, error) {
+			return &ecs.AssignPrivateIpAddressesResponse{
+				RequestId: "request-id",
+				AssignedPrivateIpAddressesSet: ecs.AssignedPrivateIpAddressesSet{
+					PrivateIpSet: ecs.PrivateIpSetInAssignPrivateIpAddresses{
+						PrivateIpAddress: []string{"10.0.0.1"},
+					},
+					Ipv4PrefixSet: ecs.Ipv4PrefixSetInAssignPrivateIpAddresses{
+						Ipv4Prefixes: []string{"10.244.126.96/28"},
+					},
+				},
+			}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	result, err := ecsService.AssignPrivateIPAddress2(ctx, &AssignPrivateIPAddressOptions{
+		NetworkInterfaceOptions: &NetworkInterfaceOptions{
+			NetworkInterfaceID: "eni-test-001",
+			IPCount:            1,
+		},
+		Backoff: &wait.Backoff{Steps: 1, Duration: time.Millisecond},
+	})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result, 2)
+	// First result should be IP
+	assert.Equal(t, "10.0.0.1", result[0].IPAddress)
+	assert.Empty(t, result[0].Prefix)
+	// Second result should be prefix
+	assert.Equal(t, Prefix("10.244.126.96/28"), result[1].Prefix)
+	assert.Empty(t, result[1].IPAddress)
+}
+
+// Test AssignPrivateIPAddress2 with empty response (edge case)
+func TestECSService_AssignPrivateIPAddress2_EmptyResponse(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).AssignPrivateIpAddresses,
+		func(client *ecs.Client, request *ecs.AssignPrivateIpAddressesRequest) (*ecs.AssignPrivateIpAddressesResponse, error) {
+			return &ecs.AssignPrivateIpAddressesResponse{
+				RequestId: "request-id",
+				AssignedPrivateIpAddressesSet: ecs.AssignedPrivateIpAddressesSet{
+					PrivateIpSet: ecs.PrivateIpSetInAssignPrivateIpAddresses{
+						PrivateIpAddress: []string{},
+					},
+					Ipv4PrefixSet: ecs.Ipv4PrefixSetInAssignPrivateIpAddresses{
+						Ipv4Prefixes: []string{},
+					},
+				},
+			}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	result, err := ecsService.AssignPrivateIPAddress2(ctx, &AssignPrivateIPAddressOptions{
+		NetworkInterfaceOptions: &NetworkInterfaceOptions{
+			NetworkInterfaceID: "eni-test-001",
+			IPCount:            1,
+		},
+		Backoff: &wait.Backoff{Steps: 1, Duration: time.Millisecond},
+	})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Empty(t, result)
+}
+
+// Test AssignIpv6Addresses2 with only IPv6 prefix (no regular IPv6 addresses)
+func TestECSService_AssignIpv6Addresses2_OnlyPrefix(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).AssignIpv6Addresses,
+		func(client *ecs.Client, request *ecs.AssignIpv6AddressesRequest) (*ecs.AssignIpv6AddressesResponse, error) {
+			// Verify request uses Ipv6PrefixCount
+			val, _ := request.Ipv6PrefixCount.GetValue()
+			assert.Equal(t, 1, val)
+
+			return &ecs.AssignIpv6AddressesResponse{
+				RequestId: "request-id",
+				Ipv6Sets: ecs.Ipv6SetsInAssignIpv6Addresses{
+					Ipv6Address: []string{}, // Empty when only prefix is allocated
+				},
+				Ipv6PrefixSets: ecs.Ipv6PrefixSetsInAssignIpv6Addresses{
+					Ipv6Prefix: []string{"2408:4002:10c0:8200::/80"},
+				},
+			}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	result, err := ecsService.AssignIpv6Addresses2(ctx, &AssignIPv6AddressesOptions{
+		NetworkInterfaceOptions: &NetworkInterfaceOptions{
+			NetworkInterfaceID: "eni-test-001",
+			IPv6PrefixCount:    1,
+		},
+		Backoff: &wait.Backoff{Steps: 1, Duration: time.Millisecond},
+	})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result, 1)
+	assert.Equal(t, Prefix("2408:4002:10c0:8200::/80"), result[0].Prefix)
+	assert.Empty(t, result[0].IPAddress)
+}
+
+// Test AssignIpv6Addresses2 with both IPv6 addresses and prefixes
+func TestECSService_AssignIpv6Addresses2_BothIPAndPrefix(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).AssignIpv6Addresses,
+		func(client *ecs.Client, request *ecs.AssignIpv6AddressesRequest) (*ecs.AssignIpv6AddressesResponse, error) {
+			return &ecs.AssignIpv6AddressesResponse{
+				RequestId: "request-id",
+				Ipv6Sets: ecs.Ipv6SetsInAssignIpv6Addresses{
+					Ipv6Address: []string{"2408:4002:10c0:8200::1"},
+				},
+				Ipv6PrefixSets: ecs.Ipv6PrefixSetsInAssignIpv6Addresses{
+					Ipv6Prefix: []string{"2408:4002:10c0:8200::/80"},
+				},
+			}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	result, err := ecsService.AssignIpv6Addresses2(ctx, &AssignIPv6AddressesOptions{
+		NetworkInterfaceOptions: &NetworkInterfaceOptions{
+			NetworkInterfaceID: "eni-test-001",
+			IPv6Count:          1,
+		},
+		Backoff: &wait.Backoff{Steps: 1, Duration: time.Millisecond},
+	})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result, 2)
+	// First result should be IP
+	assert.Equal(t, "2408:4002:10c0:8200::1", result[0].IPAddress)
+	assert.Empty(t, result[0].Prefix)
+	// Second result should be prefix
+	assert.Equal(t, Prefix("2408:4002:10c0:8200::/80"), result[1].Prefix)
+	assert.Empty(t, result[1].IPAddress)
+}
+
 func TestECSService_AssignPrivateIPAddress2_FatalError(t *testing.T) {
 	ecsService := createTestECSServiceForAPI()
 
@@ -94,6 +296,55 @@ func TestECSService_AssignPrivateIPAddress2_FatalError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.True(t, apiErr.ErrorCodeIs(err, "InvalidParameter"))
+}
+
+func TestECSService_UnAssignPrivateIPAddresses2_OnlyPrefix(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).UnassignPrivateIpAddresses,
+		func(client *ecs.Client, request *ecs.UnassignPrivateIpAddressesRequest) (*ecs.UnassignPrivateIpAddressesResponse, error) {
+			assert.NotNil(t, request.Ipv4Prefix)
+			assert.Equal(t, []string{"10.0.0.0/28"}, *request.Ipv4Prefix)
+			assert.Nil(t, request.PrivateIpAddress)
+			return &ecs.UnassignPrivateIpAddressesResponse{RequestId: "req-1"}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	err := ecsService.UnAssignPrivateIPAddresses2(ctx, "eni-1", []IPSet{{Prefix: "10.0.0.0/28"}})
+	assert.NoError(t, err)
+}
+
+func TestECSService_UnAssignPrivateIPAddresses2_MixedIPAndPrefix(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).UnassignPrivateIpAddresses,
+		func(client *ecs.Client, request *ecs.UnassignPrivateIpAddressesRequest) (*ecs.UnassignPrivateIpAddressesResponse, error) {
+			assert.NotNil(t, request.PrivateIpAddress)
+			assert.Equal(t, []string{"10.0.0.1"}, *request.PrivateIpAddress)
+			assert.NotNil(t, request.Ipv4Prefix)
+			assert.Equal(t, []string{"10.0.0.16/28"}, *request.Ipv4Prefix)
+			return &ecs.UnassignPrivateIpAddressesResponse{RequestId: "req-2"}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	err := ecsService.UnAssignPrivateIPAddresses2(ctx, "eni-1", []IPSet{
+		{IPAddress: "10.0.0.1"},
+		{Prefix: "10.0.0.16/28"},
+	})
+	assert.NoError(t, err)
+}
+
+func TestECSService_UnAssignPrivateIPAddresses2_EmptyInput(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	err := ecsService.UnAssignPrivateIPAddresses2(context.Background(), "eni-1", []IPSet{})
+	assert.NoError(t, err, "empty input should return nil immediately")
 }
 
 func TestECSService_UnAssignPrivateIPAddresses2_Error(t *testing.T) {

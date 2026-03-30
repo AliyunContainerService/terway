@@ -95,6 +95,9 @@ func TestIPPool(t *testing.T) {
 					if isExclusiveENINode(&node) {
 						continue
 					}
+					if isPrefixNode(&node) {
+						continue
+					}
 					idle := 0
 					for _, eni := range node.Status.NetworkInterfaces {
 						if eni.Status != aliyunClient.ENIStatusInUse {
@@ -171,6 +174,9 @@ func TestIPPool(t *testing.T) {
 					if isExclusiveENINode(&node) {
 						continue
 					}
+					if isPrefixNode(&node) {
+						continue
+					}
 					idle := 0
 					for _, eni := range node.Status.NetworkInterfaces {
 						if eni.Status != aliyunClient.ENIStatusInUse {
@@ -242,6 +248,9 @@ func TestIPPool(t *testing.T) {
 				}
 				for _, node := range nodes.Items {
 					if isExclusiveENINode(&node) {
+						continue
+					}
+					if isPrefixNode(&node) {
 						continue
 					}
 					idle := 0

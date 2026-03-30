@@ -117,13 +117,17 @@ func (a *ECSService) AssignPrivateIPAddress2(ctx context.Context, opts ...Assign
 	ips, err := ip.ToIPAddrs(resp.AssignedPrivateIpAddressesSet.PrivateIpSet.PrivateIpAddress)
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("assign private ip", "ips", ips)
 
-	return lo.Map(ips, func(item netip.Addr, _ int) IPSet {
+	result := lo.Map(ips, func(item netip.Addr, _ int) IPSet {
 		return IPSet{
 			IPAddress: item.String(),
 			IPStatus:  "",
 			Primary:   false,
 		}
-	}), err
+	})
+	for _, prefix := range resp.AssignedPrivateIpAddressesSet.Ipv4PrefixSet.Ipv4Prefixes {
+		result = append(result, IPSet{Prefix: Prefix(prefix)})
+	}
+	return result, err
 }
 
 func (a *ECSService) UnAssignPrivateIPAddresses2(ctx context.Context, eniID string, ips []IPSet) error {
@@ -142,10 +146,21 @@ func (a *ECSService) UnAssignPrivateIPAddresses2(ctx context.Context, eniID stri
 	req := ecs.CreateUnassignPrivateIpAddressesRequest()
 	req.NetworkInterfaceId = eniID
 
-	str := lo.Map(ips, func(item IPSet, _ int) string {
-		return item.IPAddress
-	})
-	req.PrivateIpAddress = &str
+	// Separate regular IPs and prefixes into their respective request fields.
+	var ipAddrs, prefixes []string
+	for _, item := range ips {
+		if item.Prefix != "" {
+			prefixes = append(prefixes, string(item.Prefix))
+		} else if item.IPAddress != "" {
+			ipAddrs = append(ipAddrs, item.IPAddress)
+		}
+	}
+	if len(ipAddrs) > 0 {
+		req.PrivateIpAddress = &ipAddrs
+	}
+	if len(prefixes) > 0 {
+		req.Ipv4Prefix = &prefixes
+	}
 
 	l := LogFields(logf.FromContext(ctx), req)
 
@@ -224,6 +239,9 @@ func (a *ECSService) AssignIpv6Addresses2(ctx context.Context, opts ...AssignIPv
 			Primary:   false,
 		}
 	})
+	for _, prefix := range resp.Ipv6PrefixSets.Ipv6Prefix {
+		ips = append(ips, IPSet{Prefix: Prefix(prefix)})
+	}
 	l.WithValues(LogFieldRequestID, resp.RequestId).Info("assign ipv6", "ips", ips)
 
 	return ips, nil

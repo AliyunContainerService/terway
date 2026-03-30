@@ -4,11 +4,15 @@ terraform {
   required_providers {
     alicloud = {
       source  = "aliyun/alicloud"
-      version = "~> 1.262.0"
+      version = ">= 1.272.0"
     }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.0"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = ">= 2.0"
     }
   }
 }
@@ -29,4 +33,9 @@ provider "alicloud" {
   # 可选：如果不使用配置文件，可以在这里指定
   # access_key = var.access_key
   # secret_key = var.secret_key
+}
+
+# Kubernetes provider using the cluster kubeconfig file
+provider "kubernetes" {
+  config_path = data.alicloud_cs_cluster_credential.auth.output_file
 }

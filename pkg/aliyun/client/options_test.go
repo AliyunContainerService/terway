@@ -498,6 +498,264 @@ func TestAssignPrivateIPAddressOptions_EFLO(t *testing.T) {
 	}
 }
 
+func TestCreateNetworkInterfaceOptions_Finish_Validation(t *testing.T) {
+	keyGen := &MockIdempotentKeyGen{generatedKeys: map[string]string{}}
+	tests := []struct {
+		name    string
+		options *CreateNetworkInterfaceOptions
+		wantErr error
+	}{
+		{
+			name: "IPv4 prefix only is valid",
+			options: &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					VSwitchID:        "vsw-xxxxxx",
+					SecurityGroupIDs: []string{"sg-xxxxxx"},
+					IPv4PrefixCount:  1,
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "IPv6 prefix only is valid",
+			options: &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					VSwitchID:        "vsw-xxxxxx",
+					SecurityGroupIDs: []string{"sg-xxxxxx"},
+					IPv6PrefixCount:  1,
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "IPv4 individual IPs only (IPCount>1) is valid",
+			options: &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					VSwitchID:        "vsw-xxxxxx",
+					SecurityGroupIDs: []string{"sg-xxxxxx"},
+					IPCount:          2,
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "IPv6 individual IPs only is valid",
+			options: &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					VSwitchID:        "vsw-xxxxxx",
+					SecurityGroupIDs: []string{"sg-xxxxxx"},
+					IPv6Count:        2,
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Cannot mix IPv4 individual IPs and IPv4 prefix",
+			options: &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					VSwitchID:        "vsw-xxxxxx",
+					SecurityGroupIDs: []string{"sg-xxxxxx"},
+					IPCount:          2,
+					IPv4PrefixCount:  1,
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Cannot mix IPv6 individual IPs and IPv6 prefix",
+			options: &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					VSwitchID:        "vsw-xxxxxx",
+					SecurityGroupIDs: []string{"sg-xxxxxx"},
+					IPv6Count:        1,
+					IPv6PrefixCount:  1,
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, cleanup, err := tt.options.Finish(keyGen)
+			if tt.wantErr != nil {
+				assert.Equal(t, tt.wantErr, err)
+				assert.Nil(t, req)
+				assert.Nil(t, cleanup)
+				return
+			}
+			assert.NoError(t, err)
+			assert.NotNil(t, req)
+			assert.NotNil(t, cleanup)
+			cleanup()
+		})
+	}
+}
+
+func TestAssignPrivateIPAddressOptions_Finish(t *testing.T) {
+	keyGen := &MockIdempotentKeyGen{generatedKeys: map[string]string{}}
+	tests := []struct {
+		name    string
+		options *AssignPrivateIPAddressOptions
+		wantErr error
+	}{
+		{
+			name: "Individual IPs only is valid",
+			options: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPCount:            2,
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "IPv4 prefix only is valid",
+			options: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPv4PrefixCount:    1,
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Cannot mix individual IPs and IPv4 prefix",
+			options: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPCount:            2,
+					IPv4PrefixCount:    1,
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Missing NetworkInterfaceID",
+			options: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					IPCount: 1,
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Both counts are zero",
+			options: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Nil NetworkInterfaceOptions",
+			options: &AssignPrivateIPAddressOptions{
+				NetworkInterfaceOptions: nil,
+			},
+			wantErr: ErrInvalidArgs,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, cleanup, err := tt.options.Finish(keyGen)
+			if tt.wantErr != nil {
+				assert.Equal(t, tt.wantErr, err)
+				assert.Nil(t, req)
+				assert.Nil(t, cleanup)
+				return
+			}
+			assert.NoError(t, err)
+			assert.NotNil(t, req)
+			assert.NotNil(t, cleanup)
+			cleanup()
+		})
+	}
+}
+
+func TestAssignIPv6AddressesOptions_Finish(t *testing.T) {
+	keyGen := &MockIdempotentKeyGen{generatedKeys: map[string]string{}}
+	tests := []struct {
+		name    string
+		options *AssignIPv6AddressesOptions
+		wantErr error
+	}{
+		{
+			name: "Individual IPv6 only is valid",
+			options: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPv6Count:          2,
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "IPv6 prefix only is valid",
+			options: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPv6PrefixCount:    1,
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Cannot mix individual IPv6 and IPv6 prefix",
+			options: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+					IPv6Count:          1,
+					IPv6PrefixCount:    1,
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Missing NetworkInterfaceID",
+			options: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					IPv6Count: 1,
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Both counts are zero",
+			options: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{
+					NetworkInterfaceID: "eni-xxxxxx",
+				},
+			},
+			wantErr: ErrInvalidArgs,
+		},
+		{
+			name: "Nil NetworkInterfaceOptions",
+			options: &AssignIPv6AddressesOptions{
+				NetworkInterfaceOptions: nil,
+			},
+			wantErr: ErrInvalidArgs,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, cleanup, err := tt.options.Finish(keyGen)
+			if tt.wantErr != nil {
+				assert.Equal(t, tt.wantErr, err)
+				assert.Nil(t, req)
+				assert.Nil(t, cleanup)
+				return
+			}
+			assert.NoError(t, err)
+			assert.NotNil(t, req)
+			assert.NotNil(t, cleanup)
+			cleanup()
+		})
+	}
+}
+
 func TestAssignIPv6AddressesOptions_ApplyAssignIPv6Addresses(t *testing.T) {
 	tests := []struct {
 		name   string

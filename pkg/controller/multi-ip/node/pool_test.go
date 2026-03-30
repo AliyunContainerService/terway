@@ -3320,7 +3320,7 @@ var _ = Describe("Test ReconcileNode", func() {
 				Build()
 
 			// Pre-add a task to the queue
-			reconciler.eniTaskQueue.SubmitAttach(ctx, "eni-existing", "i-test", "", "test-node", 5, 0)
+			reconciler.eniTaskQueue.SubmitAttach(ctx, "eni-existing", "i-test", "", "test-node", 5, 0, 0, 0)
 
 			// Wait for task to be added
 			task, ok := reconciler.eniTaskQueue.GetTaskStatus("eni-existing")
@@ -3587,6 +3587,127 @@ var _ = Describe("Test ReconcileNode", func() {
 			By("Processing node with no network interfaces")
 			err := reconciler.handleStatus(ctx, node)
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("Should unassign IPv4 prefixes in Deleting status and set NeedSyncOpenAPI", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
+
+			// Build ENI with one IPv4 prefix in Deleting status and one in Valid status.
+			// There are no individual IPv4/IPv6 IPs to delete, so waitIPGone is not called.
+			eni1 := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusInUse, nil, nil)
+			eni1.IPv4Prefix = []networkv1beta1.IPPrefix{
+				{Prefix: "192.168.0.0/28", Status: networkv1beta1.IPPrefixStatusDeleting},
+				{Prefix: "192.168.1.0/28", Status: networkv1beta1.IPPrefixStatusValid},
+			}
+
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithExistingENI(eni1).
+				Build()
+
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+
+			// IPv4 prefix unassignment reuses UnAssignPrivateIPAddressesV2, with the
+			// Prefix field set in IPSet instead of IPAddress.
+			mockHelper.SetupUnassignIP("eni-1", nil)
+
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithDefaults().
+				Build()
+
+			By("Calling handleStatus with an ENI that has a Deleting IPv4 prefix")
+			err := reconciler.handleStatus(ctx, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying NeedSyncOpenAPI is set after IPv4 prefix unassignment")
+			Expect(MetaCtx(ctx).NeedSyncOpenAPI.Load()).To(BeTrue())
+
+			By("Verifying StatusChanged is set")
+			Expect(MetaCtx(ctx).StatusChanged.Load()).To(BeTrue())
+		})
+
+		It("Should unassign IPv6 prefixes in Deleting status and set NeedSyncOpenAPI", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
+
+			// Build ENI with one IPv6 prefix in Deleting status and one in Valid status.
+			// There are no individual IPv4/IPv6 IPs to delete, so waitIPGone is not called.
+			eni1 := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusInUse, nil, nil)
+			eni1.IPv6Prefix = []networkv1beta1.IPPrefix{
+				{Prefix: "fd00::/60", Status: networkv1beta1.IPPrefixStatusDeleting},
+				{Prefix: "fd00:1::/60", Status: networkv1beta1.IPPrefixStatusValid},
+			}
+
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithExistingENI(eni1).
+				Build()
+
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+
+			// IPv6 prefix unassignment reuses UnAssignIpv6AddressesV2, with the
+			// Prefix field set in IPSet instead of IPAddress.
+			mockHelper.SetupUnassignIPv6("eni-1", nil)
+
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithDefaults().
+				Build()
+
+			By("Calling handleStatus with an ENI that has a Deleting IPv6 prefix")
+			err := reconciler.handleStatus(ctx, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying NeedSyncOpenAPI is set after IPv6 prefix unassignment")
+			Expect(MetaCtx(ctx).NeedSyncOpenAPI.Load()).To(BeTrue())
+
+			By("Verifying StatusChanged is set")
+			Expect(MetaCtx(ctx).StatusChanged.Load()).To(BeTrue())
+		})
+
+		It("Should skip IPv6 prefix unassignment on API error and continue", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
+
+			// Build ENI with one IPv6 prefix in Deleting status.
+			// On API error, handleStatus logs the error and uses `continue` to skip
+			// to the next ENI, so NeedSyncOpenAPI must remain false.
+			eni1 := BuildENIWithCustomIPs("eni-1", aliyunClient.ENIStatusInUse, nil, nil)
+			eni1.IPv6Prefix = []networkv1beta1.IPPrefix{
+				{Prefix: "fd00::/60", Status: networkv1beta1.IPPrefixStatusDeleting},
+			}
+
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithExistingENI(eni1).
+				Build()
+
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+
+			// Simulate API error on IPv6 prefix unassignment.
+			prefixErr := fmt.Errorf("failed to unassign IPv6 prefix")
+			mockHelper.SetupUnassignIPv6("eni-1", prefixErr)
+
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithDefaults().
+				Build()
+
+			By("Calling handleStatus with an API error on IPv6 prefix unassignment")
+			err := reconciler.handleStatus(ctx, node)
+			// handleStatus itself returns nil; per-ENI errors are logged and skipped via continue.
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying NeedSyncOpenAPI is NOT set when unassignment failed")
+			Expect(MetaCtx(ctx).NeedSyncOpenAPI.Load()).To(BeFalse())
+
+			By("Verifying the ENI still exists in node status (not removed)")
+			Expect(node.Status.NetworkInterfaces).To(HaveKey("eni-1"))
 		})
 	})
 
@@ -4058,7 +4179,7 @@ var _ = Describe("Test ReconcileNode", func() {
 
 			// 5. Add node to cache and task queue to verify cleanup
 			reconciler.cache.Store(nodeName, &NodeStatus{})
-			reconciler.eniTaskQueue.SubmitAttach(ctx, "eni-1", "instance-1", "", nodeName, 1, 0)
+			reconciler.eniTaskQueue.SubmitAttach(ctx, "eni-1", "instance-1", "", nodeName, 1, 0, 0, 0)
 			Expect(reconciler.eniTaskQueue.GetAttachingCount(nodeName)).To(Equal(1))
 
 			// 6. Reconcile
