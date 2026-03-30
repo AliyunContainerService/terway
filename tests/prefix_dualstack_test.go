@@ -21,19 +21,7 @@ import (
 
 // TestPrefix_DualStack_1to1Ratio tests IPv4/IPv6 prefix 1:1 ratio
 func TestPrefix_DualStack_1to1Ratio(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 	// Check if dual stack is enabled
 	if !testIPv6 {
 		t.Skip("Dual stack not enabled in cluster")
@@ -84,28 +72,12 @@ func TestPrefix_DualStack_1to1Ratio(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // TestPrefix_DualStack_CapacityConstraint tests dual stack capacity constraints
 func TestPrefix_DualStack_CapacityConstraint(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 	if !testIPv6 {
 		t.Skip("Dual stack not enabled in cluster")
 		return
@@ -163,11 +135,7 @@ func TestPrefix_DualStack_CapacityConstraint(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // =============================================================================
@@ -192,7 +160,7 @@ func assessDualStack1to1Ratio(ctx context.Context, t *testing.T, config *envconf
 	// Dual stack mode does not support ipv4_prefix_count; count is determined by system capacity
 	t.Log("Configure enable_ip_prefix=true via Dynamic Config")
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, `{"enable_ip_prefix":true}`)
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true}`)
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
@@ -252,7 +220,7 @@ func assessDualStackCapacityConstraint(ctx context.Context, t *testing.T, config
 	// Setup Dynamic Config with enable_ip_prefix=true and ipv4_prefix_count
 	// Note: ip_stack is a cluster-level parameter and should not be set in node-level Dynamic Config
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, requestedCount))
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, requestedCount))
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
@@ -319,9 +287,6 @@ func assessDualStackCapacityConstraint(ctx context.Context, t *testing.T, config
 // =============================================================================
 // Helper Functions for Dual Stack
 // =============================================================================
-
-// configureIPPrefixCountAndStack updates both ipv4_prefix_count and ip_stack in the node-specific
-// Dynamic Config ConfigMap. The ConfigMap must have been created first via setupNodeDynamicConfig.
 
 // waitForDualStackPrefixAllocation waits for both IPv4 and IPv6 prefix allocation
 func waitForDualStackPrefixAllocation(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string, expectedCount int, timeout time.Duration) error {

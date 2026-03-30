@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +17,41 @@ import (
 	"sigs.k8s.io/e2e-framework/klient/k8s"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
+	"sigs.k8s.io/e2e-framework/pkg/features"
 )
+
+// =============================================================================
+// Shared Test Helpers
+// =============================================================================
+
+// skipIfNotPrefixTestEnvironment skips the test when cluster prerequisites for
+// IP Prefix tests are not met: CRD IPAM mode, terway-eniip daemonset, v1.17.0+.
+func skipIfNotPrefixTestEnvironment(t *testing.T) {
+	t.Helper()
+	if eniConfig == nil || eniConfig.IPAMType != "crd" {
+		t.Skipf("skip: ipam type is not crd, current: %s", func() string {
+			if eniConfig != nil {
+				return eniConfig.IPAMType
+			}
+			return "<nil>"
+		}())
+	}
+	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
+		t.Skipf("Requires terway-eniip daemonset, current: %s", GetCachedTerwayDaemonSetName())
+	}
+	if !RequireTerwayVersion("v1.17.0") {
+		t.Skipf("Requires terway version >= v1.17.0")
+	}
+}
+
+// runPrefixFeatureTest runs a feature test and records global failure state.
+func runPrefixFeatureTest(t *testing.T, feat features.Feature) {
+	t.Helper()
+	testenv.Test(t, feat)
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
 
 // =============================================================================
 // Context Keys for Prefix Tests
@@ -99,7 +134,7 @@ const sharedDynamicConfigName = "e2e-ip-prefix"
 // The "terway-config=e2e-ip-prefix" label on ip-prefix nodes is pre-configured
 // by Terraform at node pool creation time and must NOT be modified by e2e tests.
 // This function only updates the ConfigMap content.
-func setupNodeDynamicConfig(ctx context.Context, config *envconf.Config, t *testing.T, _ string, eniConfJSON string) (context.Context, error) {
+func setupNodeDynamicConfig(ctx context.Context, config *envconf.Config, t *testing.T, eniConfJSON string) (context.Context, error) {
 	cmName := sharedDynamicConfigName
 
 	// Create or update the shared ConfigMap
@@ -272,35 +307,6 @@ func waitForPrefixCleanup(ctx context.Context, config *envconf.Config, t *testin
 	}, wait.WithTimeout(timeout), wait.WithInterval(10*time.Second))
 }
 
-// waitForENICleanup waits until all secondary ENIs with prefixes are deleted from the node.
-// This is used for non-Trunk ENIs where the entire ENI is marked for deletion.
-func waitForENICleanup(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string, timeout time.Duration) error {
-	return wait.For(func(ctx context.Context) (done bool, err error) {
-		node := &networkv1beta1.Node{}
-		err = config.Client().Resources().Get(ctx, nodeName, "", node)
-		if err != nil {
-			return false, err
-		}
-
-		totalPrefixes := 0
-		totalENIs := 0
-		for _, nic := range node.Status.NetworkInterfaces {
-			if len(nic.IPv4Prefix) > 0 || len(nic.IPv6Prefix) > 0 {
-				totalENIs++
-				totalPrefixes += len(nic.IPv4Prefix) + len(nic.IPv6Prefix)
-			}
-		}
-
-		if totalPrefixes == 0 {
-			t.Logf("[cleanup] Node %s: all ENIs and prefixes cleaned up", nodeName)
-			return true, nil
-		}
-
-		t.Logf("[cleanup] Node %s: waiting for ENI cleanup, %d prefixes on %d ENIs remaining",
-			nodeName, totalPrefixes, totalENIs)
-		return false, nil
-	}, wait.WithTimeout(timeout), wait.WithInterval(10*time.Second))
-}
 
 // waitForNodeCRIPv4PrefixCount waits until the Node CR Spec.ENISpec.IPv4PrefixCount equals
 // expectedCount. This confirms Terway has read the Dynamic Config and propagated the new
@@ -426,11 +432,21 @@ func setupIPPrefixNodes(ctx context.Context, t *testing.T, config *envconf.Confi
 		t.Logf("Updated ConfigMap kube-system/e2e-ip-prefix with ipv4_prefix_count=%d", prefixCount)
 	}
 
-	// Step 2: Wait for terway pods to be ready on all prefix nodes
+	// Step 2: Wait for terway pods to be ready on all prefix nodes in parallel.
 	// (Nodes are already labeled by Terraform, terway should be scheduling)
-	for _, node := range nodes {
-		if err := waitForTerwayPodReady(ctx, t, config, node.Name, 5*time.Minute); err != nil {
-			return ctx, fmt.Errorf("terway pod not ready on node %s: %w", node.Name, err)
+	errs := make([]error, len(nodes))
+	var wg sync.WaitGroup
+	for i, node := range nodes {
+		wg.Add(1)
+		go func(i int, nodeName string) {
+			defer wg.Done()
+			errs[i] = waitForTerwayPodReady(ctx, t, config, nodeName, 5*time.Minute)
+		}(i, node.Name)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			return ctx, fmt.Errorf("terway pod not ready on node %s: %w", nodes[i].Name, err)
 		}
 	}
 

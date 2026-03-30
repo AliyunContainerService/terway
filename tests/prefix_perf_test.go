@@ -302,24 +302,7 @@ func (s *PrefixIPAllocationPerfTestSuite) RestoreConfig(ctx context.Context, t *
 // then starts 100 pods (10 deployments × 10 pods) and reports allocation
 // latency statistics (P99 / P90 / Max / Min / Avg).
 func TestIPPrefixAllocationPerf(t *testing.T) {
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		ipamType := ""
-		if eniConfig != nil {
-			ipamType = eniConfig.IPAMType
-		}
-		t.Skipf("skip: ipam type is not crd, current type: %s", ipamType)
-		return
-	}
-
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("TestIPPrefixAllocationPerf requires terway-eniip daemonset, current: %s", GetCachedTerwayDaemonSetName())
-		return
-	}
-
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	suite := NewPrefixIPAllocationPerfTestSuite()
 
