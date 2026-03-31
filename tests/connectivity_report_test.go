@@ -21,6 +21,17 @@ import (
 
 const echoServerImage = "registry.cn-hangzhou.aliyuncs.com/l1b0k/echo"
 
+type reportCtxKey int
+
+const (
+	reportCtxExecutor reportCtxKey = iota
+	reportCtxExternalECSID
+	reportCtxExternalECSIP
+	reportCtxServerNode
+	reportCtxClientNode
+	reportCtxCfg
+)
+
 // TestConnectivityWithReport runs connectivity tests and generates a comprehensive report
 func TestConnectivityWithReport(t *testing.T) {
 	if !HasExternalECSConfig() {
@@ -175,9 +186,9 @@ func createReportableTestScenario(cfg TestScenarioConfig, report *ConnectivityTe
 				if err != nil {
 					t.Skipf("Cannot get external ECS IP: %v", err)
 				}
-				ctx = context.WithValue(ctx, "executor", executor)
-				ctx = context.WithValue(ctx, "externalECSID", externalECSID)
-				ctx = context.WithValue(ctx, "externalECSIP", externalECSIP)
+				ctx = context.WithValue(ctx, reportCtxExecutor, executor)
+				ctx = context.WithValue(ctx, reportCtxExternalECSID, externalECSID)
+				ctx = context.WithValue(ctx, reportCtxExternalECSIP, externalECSIP)
 
 			case "internal-ecs":
 				// Create host network pod
@@ -228,14 +239,14 @@ func createReportableTestScenario(cfg TestScenarioConfig, report *ConnectivityTe
 			}
 
 			ctx = SaveResources(ctx, objs...)
-			ctx = context.WithValue(ctx, "serverNode", serverNode)
-			ctx = context.WithValue(ctx, "clientNode", clientNodeName)
-			ctx = context.WithValue(ctx, "cfg", cfg)
+			ctx = context.WithValue(ctx, reportCtxServerNode, serverNode)
+			ctx = context.WithValue(ctx, reportCtxClientNode, clientNodeName)
+			ctx = context.WithValue(ctx, reportCtxCfg, cfg)
 			return ctx
 		}).
 		Assess("Test connectivity and record result", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			cfg := ctx.Value("cfg").(TestScenarioConfig)
-			clientNodeName := ctx.Value("clientNode").(string)
+			cfg := ctx.Value(reportCtxCfg).(TestScenarioConfig)
+			clientNodeName := ctx.Value(reportCtxClientNode).(string)
 
 			// Wait for server pod
 			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: serverName, Namespace: config.Namespace()}}
@@ -326,9 +337,9 @@ func createReportableTestScenario(cfg TestScenarioConfig, report *ConnectivityTe
 
 				switch cfg.Source {
 				case "external-ecs":
-					executor := ctx.Value("executor").(*ECSCommandExecutor)
-					externalECSID := ctx.Value("externalECSID").(string)
-					expectedSourceIP = ctx.Value("externalECSIP").(string)
+					executor := ctx.Value(reportCtxExecutor).(*ECSCommandExecutor)
+					externalECSID := ctx.Value(reportCtxExternalECSID).(string)
+					expectedSourceIP = ctx.Value(reportCtxExternalECSIP).(string)
 
 					cmdResult, err := executor.RunCurlCommand(ctx, externalECSID, targetURL, 60*time.Second)
 					if err != nil {

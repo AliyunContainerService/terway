@@ -23,9 +23,14 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"k8s.io/client-go/kubernetes/scheme"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/e2e-framework/klient"
 	"sigs.k8s.io/e2e-framework/klient/k8s"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
@@ -98,7 +103,21 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic("error get home path")
 	}
-	envCfg := envconf.NewWithKubeConfig(filepath.Join(home, ".kube", "config")).
+
+	kubeConfigPath := filepath.Join(home, ".kube", "config")
+	restConfig, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
+	if err != nil {
+		panic(fmt.Sprintf("error build rest config: %v", err))
+	}
+	restConfig.QPS = 50
+	restConfig.Burst = 100
+
+	client, err := klient.New(restConfig)
+	if err != nil {
+		panic(fmt.Sprintf("error create klient: %v", err))
+	}
+
+	envCfg := envconf.New().WithClient(client).
 		WithRandomNamespace().WithParallelTestEnabled()
 
 	testenv = env.NewWithConfig(envCfg)
@@ -110,48 +129,52 @@ func TestMain(m *testing.M) {
 		configureKubeClientQPS,
 		printClusterEnvironment,
 		labelExternalIPNodes,
+		labelIPPrefixNodes,
+		resetNodeConfigToDefault,
 	)
 	testenv.AfterEachFeature(func(ctx context.Context, config *envconf.Config, t *testing.T, feature features.Feature) (context.Context, error) {
-		// If test was skipped, don't do anything
 		if t.Skipped() {
-			t.Log("Test was skipped, cleaning up")
 			return ctx, nil
 		}
 
-		if IsTestSuccess(ctx) {
-			t.Log("Test succeeded, cleaning up resources")
-			lo.ForEach(ResourcesFromCtx(ctx), func(item k8s.Object, index int) {
-				_ = config.Client().Resources().Delete(ctx, item)
-				err := wait.For(conditions.New(config.Client().Resources()).ResourceDeleted(item),
-					wait.WithInterval(1*time.Second), wait.WithImmediate(), wait.WithTimeout(1*time.Minute))
-				if err != nil {
-					t.Fatal("failed waiting for pods to be deleted", err)
-				}
-			})
-		} else {
-			t.Log("Test did not succeed, keeping resources for debugging")
-
+		if !IsTestSuccess(ctx) {
+			// Log debug info before cleaning up
 			pod := &corev1.PodList{}
-			err = config.Client().Resources(envCfg.Namespace()).List(ctx, pod)
-			t.Log("---------list pods---------")
-			// Filter pods that are not in Running state
-			isTestFailed := false
-			for _, printPod := range pod.Items {
-				if printPod.Status.Phase != corev1.PodRunning {
-					isTestFailed = true
+			if err := config.Client().Resources(envCfg.Namespace()).List(ctx, pod); err != nil {
+				t.Logf("Warning: failed to list pods: %v", err)
+			} else {
+				t.Log("---------list pods---------")
+				isTestFailed := false
+				for _, printPod := range pod.Items {
+					if printPod.Status.Phase != corev1.PodRunning {
+						isTestFailed = true
+					}
+					t.Logf("Pod: %s/%s, Node: %s, Status: %s", printPod.Namespace, printPod.Name, printPod.Spec.NodeName, printPod.Status.Phase)
 				}
-				t.Logf("Pod: %s/%s, Node: %s, Status: %s\n", printPod.Namespace, printPod.Name, printPod.Spec.NodeName, printPod.Status.Phase)
-			}
-			if isTestFailed {
-				t.Log("---------list events---------")
-				// List events
-				event := &corev1.EventList{}
-				err = config.Client().Resources(envCfg.Namespace()).List(ctx, event)
-				for _, printEvent := range event.Items {
-					t.Logf("%s/%s, Event: %s %s, Time:%s\n", printEvent.InvolvedObject.Kind, printEvent.InvolvedObject.Name, printEvent.Reason, printEvent.Message, printEvent.LastTimestamp)
+				if isTestFailed {
+					t.Log("---------list events---------")
+					event := &corev1.EventList{}
+					if err := config.Client().Resources(envCfg.Namespace()).List(ctx, event); err != nil {
+						t.Logf("Warning: failed to list events: %v", err)
+					} else {
+						for _, printEvent := range event.Items {
+							t.Logf("%s/%s, Event: %s %s, Time:%s", printEvent.InvolvedObject.Kind, printEvent.InvolvedObject.Name, printEvent.Reason, printEvent.Message, printEvent.LastTimestamp)
+						}
+					}
 				}
 			}
 		}
+
+		// Always clean up resources to prevent cascade failures
+		lo.ForEach(ResourcesFromCtx(ctx), func(item k8s.Object, index int) {
+			_ = config.Client().Resources().Delete(ctx, item)
+			err := wait.For(conditions.New(config.Client().Resources()).ResourceDeleted(item),
+				wait.WithInterval(1*time.Second), wait.WithImmediate(), wait.WithTimeout(1*time.Minute))
+			if err != nil {
+				t.Logf("Warning: failed waiting for resource %s to be deleted: %v", item.GetName(), err)
+			}
+		})
+
 		return ctx, nil
 	})
 
@@ -341,8 +364,8 @@ func configureKubeClientQPS(ctx context.Context, config *envconf.Config) (contex
 	}
 
 	// Set kube_client_qps and kube_client_burst
-	eniConfMap["kube_client_qps"] = 50
-	eniConfMap["kube_client_burst"] = 100
+	eniConfMap["kube_client_qps"] = 200
+	eniConfMap["kube_client_burst"] = 300
 
 	updatedConf, err := json.Marshal(eniConfMap)
 	if err != nil {
@@ -473,6 +496,213 @@ type SecurityGroupTestConfig struct {
 	TestName   string
 	ClientSGID string
 	ServerSGID string
+}
+
+// labelIPPrefixNodes labels nodes with k8s.aliyun.com/ip-prefix=true if their Node CR
+// has EnableIPPrefix=true. This ensures IP Prefix nodes can be discovered by classifyNode
+// even when the node pool label was not set in Terraform.
+func labelIPPrefixNodes(ctx context.Context, config *envconf.Config) (context.Context, error) {
+	nodeCRList := &networkv1beta1.NodeList{}
+	err := config.Client().Resources().List(ctx, nodeCRList)
+	if err != nil {
+		fmt.Printf("Warning: failed to list Node CRs for IP prefix labeling: %v\n", err)
+		return ctx, nil
+	}
+
+	for _, nodeCR := range nodeCRList.Items {
+		if nodeCR.Spec.ENISpec == nil || !nodeCR.Spec.ENISpec.EnableIPPrefix {
+			continue
+		}
+
+		node := &corev1.Node{}
+		err := config.Client().Resources().Get(ctx, nodeCR.Name, "", node)
+		if err != nil {
+			fmt.Printf("Warning: failed to get node %s: %v\n", nodeCR.Name, err)
+			continue
+		}
+
+		if node.Labels["k8s.aliyun.com/ip-prefix"] == "true" {
+			continue
+		}
+
+		fmt.Printf("Labeling IP Prefix node %s with k8s.aliyun.com/ip-prefix=true\n", node.Name)
+		patch, _ := json.Marshal(map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"labels": map[string]interface{}{
+					"k8s.aliyun.com/ip-prefix": "true",
+				},
+			},
+		})
+		err = config.Client().Resources().Patch(ctx, node, k8s.Patch{PatchType: types.StrategicMergePatchType, Data: patch})
+		if err != nil {
+			fmt.Printf("Warning: failed to label node %s: %v\n", node.Name, err)
+		}
+	}
+
+	return ctx, nil
+}
+
+// defaultIPv4PrefixCount is the default number of IPv4 prefixes allocated on prefix nodes
+// during initialization. This ensures prefix nodes participate in standard shared ENI tests.
+const defaultIPv4PrefixCount = 5
+
+// resetNodeConfigToDefault resets the eni-config pool settings to default values
+// before any test runs. This ensures a clean starting state where:
+//   - IP pool preheating is disabled (max_pool_size=0, min_pool_size=0)
+//   - Prefix node e2e-ip-prefix ConfigMap has the default ipv4_prefix_count
+//
+// Prefix node state is NOT forcefully cleaned here; prefix tests manage their own
+// node state through prefix_helpers_test.go. Directly writing Node CR status from
+// global setup corrupts the data plane on other node types sharing the cluster.
+func resetNodeConfigToDefault(ctx context.Context, config *envconf.Config) (context.Context, error) {
+	if terway != "terway-eniip" {
+		fmt.Printf("Skipping node config reset: terway=%s (only supported for terway-eniip)\n", terway)
+		return ctx, nil
+	}
+
+	fmt.Println("=== Resetting node configuration to defaults ===")
+
+	// Step 1: Configure eni-config with default pool settings
+	cm := &corev1.ConfigMap{}
+	err := config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			fmt.Println("eni-config not found, skipping configuration reset")
+			return ctx, nil
+		}
+		return ctx, fmt.Errorf("failed to get eni-config: %w", err)
+	}
+
+	eniConf := cm.Data["eni_conf"]
+	if eniConf != "" {
+		var eniConfMap map[string]interface{}
+		if err := json.Unmarshal([]byte(eniConf), &eniConfMap); err != nil {
+			return ctx, fmt.Errorf("failed to parse eni_conf: %w", err)
+		}
+
+		eniConfMap["max_pool_size"] = 0
+		eniConfMap["min_pool_size"] = 0
+		delete(eniConfMap, "ip_pool_sync_period")
+
+		updatedConf, err := json.Marshal(eniConfMap)
+		if err != nil {
+			return ctx, fmt.Errorf("failed to marshal eni_conf: %w", err)
+		}
+
+		cm.Data["eni_conf"] = string(updatedConf)
+		if err := config.Client().Resources().Update(ctx, cm); err != nil {
+			return ctx, fmt.Errorf("failed to update eni-config: %w", err)
+		}
+		fmt.Println("Configured eni-config: max_pool_size=0, min_pool_size=0")
+	}
+
+	// Step 2: Ensure e2e-ip-prefix ConfigMap exists with default prefix count (if prefix nodes exist).
+	// This only updates the ConfigMap; it does NOT forcefully clean up Node CR status.
+	// Terway will reconcile prefix nodes to the desired state after restart.
+	hasPrefixNodes := false
+	nodeCRList := &networkv1beta1.NodeList{}
+	if err := config.Client().Resources().List(ctx, nodeCRList); err != nil {
+		fmt.Printf("Warning: failed to list Node CRs: %v\n", err)
+	} else {
+		for _, nodeCR := range nodeCRList.Items {
+			if nodeCR.Spec.ENISpec != nil && nodeCR.Spec.ENISpec.EnableIPPrefix {
+				hasPrefixNodes = true
+				break
+			}
+		}
+	}
+
+	if hasPrefixNodes {
+		prefixCMData := fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, defaultIPv4PrefixCount)
+		existingCM := &corev1.ConfigMap{}
+		err = config.Client().Resources().Get(ctx, "e2e-ip-prefix", "kube-system", existingCM)
+		if err != nil {
+			newCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "e2e-ip-prefix",
+					Namespace: "kube-system",
+				},
+				Data: map[string]string{
+					"eni_conf": prefixCMData,
+				},
+			}
+			if createErr := config.Client().Resources().Create(ctx, newCM); createErr != nil {
+				return ctx, fmt.Errorf("failed to create e2e-ip-prefix: %w", createErr)
+			}
+			fmt.Printf("Created e2e-ip-prefix ConfigMap: ipv4_prefix_count=%d\n", defaultIPv4PrefixCount)
+		} else {
+			existingCM.Data["eni_conf"] = prefixCMData
+			if updateErr := config.Client().Resources().Update(ctx, existingCM); updateErr != nil {
+				return ctx, fmt.Errorf("failed to update e2e-ip-prefix: %w", updateErr)
+			}
+			fmt.Printf("Updated e2e-ip-prefix ConfigMap: ipv4_prefix_count=%d\n", defaultIPv4PrefixCount)
+		}
+	}
+
+	// Step 3: Restart terway to apply configuration
+	fmt.Println("Restarting terway to apply default configuration...")
+	if err := restartTerway(ctx, config); err != nil {
+		return ctx, fmt.Errorf("failed to restart terway: %w", err)
+	}
+
+	// Step 4: Verify shared ENI nodes have converged to pool=0.
+	// Prefix and exclusive ENI nodes are skipped — prefix tests handle their own state,
+	// and exclusive ENI nodes don't use pool-based IP management.
+	fmt.Println("Verifying shared ENI node state after configuration reset...")
+	if err := verifyNodeCRDefaultState(ctx, config, hasPrefixNodes); err != nil {
+		return ctx, fmt.Errorf("Node CR verification failed after config reset: %w", err)
+	}
+
+	fmt.Println("=== Node configuration reset complete ===")
+	return ctx, nil
+}
+
+// verifyNodeCRDefaultState polls Node CRs until shared ENI nodes have converged
+// to pool=0 (no idle IPs). Prefix and exclusive ENI nodes are skipped:
+//   - Exclusive ENI nodes don't use pool-based IP management
+//   - Prefix nodes manage their own state through prefix-specific tests
+func verifyNodeCRDefaultState(ctx context.Context, config *envconf.Config, _ bool) error {
+	return wait.For(func(ctx context.Context) (done bool, err error) {
+		nodeCRList := &networkv1beta1.NodeList{}
+		if err := config.Client().Resources().List(ctx, nodeCRList); err != nil {
+			return false, err
+		}
+
+		allGood := true
+		for i := range nodeCRList.Items {
+			node := &nodeCRList.Items[i]
+
+			if isExclusiveENINode(node) || isPrefixNode(node) {
+				continue
+			}
+
+			if !verifyPoolNodeState(node) {
+				allGood = false
+			}
+		}
+
+		return allGood, nil
+	}, wait.WithTimeout(5*time.Minute), wait.WithInterval(10*time.Second))
+}
+
+// verifyPoolNodeState checks that a non-prefix shared ENI node has no idle IPs (pool disabled).
+func verifyPoolNodeState(node *networkv1beta1.Node) bool {
+	idle := 0
+	for _, eni := range node.Status.NetworkInterfaces {
+		if eni.Status != aliyunClient.ENIStatusInUse {
+			continue
+		}
+		for _, ip := range eni.IPv4 {
+			if !ip.Primary && ip.Status == networkv1beta1.IPStatusValid && ip.PodID == "" {
+				idle++
+			}
+		}
+	}
+	if idle > 0 {
+		fmt.Printf("  [verify] Node %s (shared): %d idle IPs, expecting 0\n", node.Name, idle)
+		return false
+	}
+	return true
 }
 
 // GetSecurityGroupTestConfig returns the security group configuration for a specific test

@@ -4,7 +4,6 @@ package tests
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -13,8 +12,6 @@ import (
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/Jeffail/gabs/v2"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/e2e-framework/klient/k8s"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
@@ -101,28 +98,8 @@ func TestSharedENI_IdleIPReclaim(t *testing.T) {
 	}
 }
 
-// getQualifiedNodesForIdleIPReclaim returns nodes that meet capacity requirements for idle IP reclaim test
 func getQualifiedNodesForIdleIPReclaim(nodeInfo *NodeTypeInfoWithCapacity, nodeType NodeType) []string {
-	var qualified []string
-
-	for nodeName, cap := range nodeInfo.Capacities {
-		if cap.NodeType != nodeType {
-			continue
-		}
-
-		// Check if node has enough adapters
-		if !cap.MeetsSharedENIRequirements {
-			continue
-		}
-
-		// Check if node has enough total IP capacity (adapters * ipv4PerAdapter)
-		totalIPCapacity := cap.Adapters * cap.IPv4PerAdapter
-		if totalIPCapacity >= MinIPsForIdleIPReclaimTest {
-			qualified = append(qualified, nodeName)
-		}
-	}
-
-	return qualified
+	return nodeInfo.Capacities.GetQualifiedNodesWithMinCapacity(nodeType, MinIPsForIdleIPReclaimTest)
 }
 
 // createIdleIPReclaimTestWithQualifiedNodes creates idle IP reclaim tests with qualified node filtering
@@ -472,11 +449,20 @@ func assessIdleIPReclaimBatch(ctx context.Context, t *testing.T, config *envconf
 	t.Logf("Initial idle: %d, After first cycle: %d, Reclaimed: %d, Expected max: %d",
 		initialIdleCount, afterFirstCycle, actualReclaimed, expectedMaxReclaimed)
 
-	if afterFirstCycle < 2*nodeCount {
-		t.Logf("Warning: IPs might have been over-reclaimed, but respecting min_pool_size=%d per node", 2)
+	if actualReclaimed > expectedMaxReclaimed {
+		t.Errorf("batch_size violation: reclaimed %d IPs but expected at most %d (batch_size=2 x %d nodes)",
+			actualReclaimed, expectedMaxReclaimed, nodeCount)
 	}
 
-	return MarkTestSuccess(ctx)
+	if afterFirstCycle < 2*nodeCount {
+		t.Errorf("min_pool_size violated: only %d idle IPs remain across %d nodes (expected >= %d, min_pool_size=2 per node)",
+			afterFirstCycle, nodeCount, 2*nodeCount)
+	}
+
+	if !t.Failed() {
+		return MarkTestSuccess(ctx)
+	}
+	return ctx
 }
 
 // =============================================================================
@@ -660,12 +646,5 @@ func isNodeOfType(node *networkv1beta1.Node, nodeType NodeType) bool {
 }
 
 func triggerNode(ctx context.Context, config *envconf.Config, t *testing.T, node *networkv1beta1.Node) error {
-	mergePatch, _ := json.Marshal(map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"annotations": map[string]interface{}{
-				"e2e-update": time.Now().String(),
-			},
-		},
-	})
-	return config.Client().Resources().Patch(ctx, node, k8s.Patch{PatchType: types.MergePatchType, Data: mergePatch})
+	return triggerNodeCRReconcile(ctx, config, node)
 }

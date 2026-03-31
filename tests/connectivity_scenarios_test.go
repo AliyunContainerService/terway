@@ -14,160 +14,60 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/features"
 )
 
+func runConnectivityTestForNodeTypes(t *testing.T, nodeTypes []NodeType, createFn func(NodeType) features.Feature) {
+	var feats []features.Feature
+	for _, nodeType := range nodeTypes {
+		feats = append(feats, createFn(nodeType))
+	}
+	testenv.TestInParallel(t, feats...)
+	if t.Failed() {
+		isFailed.Store(true)
+	}
+}
+
+var (
+	sharedENINodeTypes    = []NodeType{NodeTypeECSSharedENI, NodeTypeECSIPPrefix, NodeTypeLingjunSharedENI}
+	exclusiveENINodeTypes = []NodeType{NodeTypeECSExclusiveENI, NodeTypeLingjunExclusiveENI}
+)
+
 // =============================================================================
 // Shared ENI Mode Connectivity Tests
 // =============================================================================
 
-// TestSharedENI_Connectivity_SameNode tests basic pod connectivity on the same node
-// for shared ENI mode on both ECS and Lingjun nodes.
 func TestSharedENI_Connectivity_SameNode(t *testing.T) {
-	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
-
-	var feats []features.Feature
-	for _, nodeType := range nodeTypes {
-		feat := createSameNodeConnectivityTest(nodeType)
-		feats = append(feats, feat)
-	}
-
-	testenv.Test(t, feats...)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runConnectivityTestForNodeTypes(t, sharedENINodeTypes, createSameNodeConnectivityTest)
 }
 
-// TestSharedENI_Connectivity_CrossNode tests pod connectivity across different nodes
-// for shared ENI mode on both ECS and Lingjun nodes.
 func TestSharedENI_Connectivity_CrossNode(t *testing.T) {
-	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
-
-	var feats []features.Feature
-	for _, nodeType := range nodeTypes {
-		feat := createCrossNodeConnectivityTest(nodeType)
-		feats = append(feats, feat)
-	}
-
-	testenv.Test(t, feats...)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runConnectivityTestForNodeTypes(t, sharedENINodeTypes, createCrossNodeConnectivityTest)
 }
 
-// TestSharedENI_Connectivity_Hairpin tests hairpin connectivity (pod accessing itself via service)
-// for shared ENI mode on both ECS and Lingjun nodes.
 func TestSharedENI_Connectivity_Hairpin(t *testing.T) {
-	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+	runConnectivityTestForNodeTypes(t, sharedENINodeTypes, createHairpinConnectivityTest)
+}
 
-	var feats []features.Feature
-	for _, nodeType := range nodeTypes {
-		feat := createHairpinConnectivityTest(nodeType)
-		feats = append(feats, feat)
-	}
-
-	testenv.Test(t, feats...)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+func TestSharedENI_Connectivity_CrossZone(t *testing.T) {
+	runConnectivityTestForNodeTypes(t, sharedENINodeTypes, createCrossZoneConnectivityTest)
 }
 
 // =============================================================================
 // Exclusive ENI Mode Connectivity Tests
 // =============================================================================
 
-// TestExclusiveENI_Connectivity_SameNode tests basic pod connectivity on the same node
-// for exclusive ENI mode on both ECS and Lingjun nodes.
 func TestExclusiveENI_Connectivity_SameNode(t *testing.T) {
-	nodeTypes := []NodeType{NodeTypeECSExclusiveENI, NodeTypeLingjunExclusiveENI}
-
-	var feats []features.Feature
-	for _, nodeType := range nodeTypes {
-		feat := createSameNodeConnectivityTest(nodeType)
-		feats = append(feats, feat)
-	}
-
-	testenv.Test(t, feats...)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runConnectivityTestForNodeTypes(t, exclusiveENINodeTypes, createSameNodeConnectivityTest)
 }
 
-// TestExclusiveENI_Connectivity_CrossNode tests pod connectivity across different nodes
-// for exclusive ENI mode on both ECS and Lingjun nodes.
 func TestExclusiveENI_Connectivity_CrossNode(t *testing.T) {
-	nodeTypes := []NodeType{NodeTypeECSExclusiveENI, NodeTypeLingjunExclusiveENI}
-
-	var feats []features.Feature
-	for _, nodeType := range nodeTypes {
-		feat := createCrossNodeConnectivityTest(nodeType)
-		feats = append(feats, feat)
-	}
-
-	testenv.Test(t, feats...)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runConnectivityTestForNodeTypes(t, exclusiveENINodeTypes, createCrossNodeConnectivityTest)
 }
 
-// TestExclusiveENI_Connectivity_Hairpin tests hairpin connectivity (pod accessing itself via service)
-// for exclusive ENI mode on both ECS and Lingjun nodes.
 func TestExclusiveENI_Connectivity_Hairpin(t *testing.T) {
-	nodeTypes := []NodeType{NodeTypeECSExclusiveENI, NodeTypeLingjunExclusiveENI}
-
-	var feats []features.Feature
-	for _, nodeType := range nodeTypes {
-		feat := createHairpinConnectivityTest(nodeType)
-		feats = append(feats, feat)
-	}
-
-	testenv.Test(t, feats...)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runConnectivityTestForNodeTypes(t, exclusiveENINodeTypes, createHairpinConnectivityTest)
 }
 
-// =============================================================================
-// Cross-Zone Connectivity Tests
-// =============================================================================
-
-// TestSharedENI_Connectivity_CrossZone tests pod connectivity across different availability zones
-// for shared ENI mode on both ECS and Lingjun nodes.
-func TestSharedENI_Connectivity_CrossZone(t *testing.T) {
-	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
-
-	var feats []features.Feature
-	for _, nodeType := range nodeTypes {
-		feat := createCrossZoneConnectivityTest(nodeType)
-		feats = append(feats, feat)
-	}
-
-	testenv.Test(t, feats...)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
-}
-
-// TestExclusiveENI_Connectivity_CrossZone tests pod connectivity across different availability zones
-// for exclusive ENI mode on both ECS and Lingjun nodes.
 func TestExclusiveENI_Connectivity_CrossZone(t *testing.T) {
-	nodeTypes := []NodeType{NodeTypeECSExclusiveENI, NodeTypeLingjunExclusiveENI}
-
-	var feats []features.Feature
-	for _, nodeType := range nodeTypes {
-		feat := createCrossZoneConnectivityTest(nodeType)
-		feats = append(feats, feat)
-	}
-
-	testenv.Test(t, feats...)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runConnectivityTestForNodeTypes(t, exclusiveENINodeTypes, createCrossZoneConnectivityTest)
 }
 
 // =============================================================================
@@ -274,7 +174,10 @@ func createSameNodeConnectivityTest(nodeType NodeType) features.Feature {
 					t.Errorf("same-node connectivity test failed for %s on %s: %v", stack, nodeType, err)
 				}
 			}
-			return MarkTestSuccess(ctx)
+			if !t.Failed() {
+				return MarkTestSuccess(ctx)
+			}
+			return ctx
 		}).
 		Feature()
 }
@@ -379,7 +282,10 @@ func createCrossNodeConnectivityTest(nodeType NodeType) features.Feature {
 					t.Errorf("cross-node connectivity failed for %s on %s: %v", stack, nodeType, err)
 				}
 			}
-			return MarkTestSuccess(ctx)
+			if !t.Failed() {
+				return MarkTestSuccess(ctx)
+			}
+			return ctx
 		}).
 		Feature()
 }
@@ -448,7 +354,6 @@ func createHairpinConnectivityTest(nodeType NodeType) features.Feature {
 		}).
 		Assess("hairpin connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			for _, stack := range getStack() {
-				// Skip IPv6 hairpin test for ipvlan mode (known limitation)
 				if stack == "ipv6" && ipvlan {
 					t.Logf("Skipping IPv6 hairpin test for ipvlan mode (known limitation)")
 					continue
@@ -459,7 +364,10 @@ func createHairpinConnectivityTest(nodeType NodeType) features.Feature {
 					t.Errorf("hairpin connectivity test failed for %s on %s: %v", stack, nodeType, err)
 				}
 			}
-			return MarkTestSuccess(ctx)
+			if !t.Failed() {
+				return MarkTestSuccess(ctx)
+			}
+			return ctx
 		}).
 		Feature()
 }
@@ -582,7 +490,10 @@ func createCrossZoneConnectivityTest(nodeType NodeType) features.Feature {
 					t.Errorf("cross-zone connectivity failed for %s on %s: %v", stack, nodeType, err)
 				}
 			}
-			return MarkTestSuccess(ctx)
+			if !t.Failed() {
+				return MarkTestSuccess(ctx)
+			}
+			return ctx
 		}).
 		Feature()
 }
@@ -616,7 +527,7 @@ func applyNodeAffinityAndTolerations(pod *Pod, nodeType NodeType) *Pod {
 // getENIModeFromNodeType returns "Shared" or "Exclusive" based on node type
 func getENIModeFromNodeType(nodeType NodeType) string {
 	switch nodeType {
-	case NodeTypeECSSharedENI, NodeTypeLingjunSharedENI:
+	case NodeTypeECSSharedENI, NodeTypeECSIPPrefix, NodeTypeLingjunSharedENI:
 		return "Shared"
 	case NodeTypeECSExclusiveENI, NodeTypeLingjunExclusiveENI:
 		return "Exclusive"
@@ -625,11 +536,13 @@ func getENIModeFromNodeType(nodeType NodeType) string {
 	}
 }
 
-// getMachineTypeFromNodeType returns "ECS" or "Lingjun" based on node type
+// getMachineTypeFromNodeType returns "ECS", "IPPrefix", or "Lingjun" based on node type
 func getMachineTypeFromNodeType(nodeType NodeType) string {
 	switch nodeType {
 	case NodeTypeECSSharedENI, NodeTypeECSExclusiveENI:
 		return "ECS"
+	case NodeTypeECSIPPrefix:
+		return "IPPrefix"
 	case NodeTypeLingjunSharedENI, NodeTypeLingjunExclusiveENI:
 		return "Lingjun"
 	default:

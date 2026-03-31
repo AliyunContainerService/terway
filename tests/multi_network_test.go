@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/e2e-framework/klient/wait"
@@ -69,33 +68,32 @@ func (c *MultiNetworkConfig) HasCustomConfig() bool {
 // Trunk mode pods require aliyun/member-eni resource (ECS shared ENI nodes).
 // Exclusive ENI mode pods require aliyun/eni resource (ECS/Lingjun exclusive ENI nodes).
 func TestPodNetworking_MultiNetwork_Default(t *testing.T) {
-	// Pre-check: terway daemonset name must be terway-eniip
 	if terway != "terway-eniip" {
 		t.Skipf("TestPodNetworking_MultiNetwork requires terway-eniip daemonset, current: %s", terway)
 		return
 	}
-
-	// Pre-check: terway version must be >= v1.16.1
-	if terwayVersion != "" {
-		version := terwayVersion
-		if !strings.HasPrefix(version, "v") {
-			version = "v" + version
-		}
-		if semver.IsValid(version) && semver.Compare(version, "v1.16.1") < 0 {
-			t.Skipf("TestPodNetworking_MultiNetwork requires terway version >= v1.16.1, current: %s", terwayVersion)
-			return
-		}
+	if !RequireTerwayVersion("v1.16.1") {
+		t.Skipf("TestPodNetworking_MultiNetwork requires terway version >= v1.16.1, current: %s", terwayVersion)
+		return
 	}
 
 	var feats []features.Feature
 
-	// Test with Trunk mode (shared ENI, member-eni resource)
-	trunkFeat := createMultiNetworkTest("Trunk", networkv1beta1.ENIOptionTypeTrunk)
-	feats = append(feats, trunkFeat)
+	// Test with Trunk mode (shared ENI, member-eni resource) only when trunk is enabled
+	if testTrunk {
+		trunkFeat := createMultiNetworkTest("Trunk", networkv1beta1.ENIOptionTypeTrunk)
+		feats = append(feats, trunkFeat)
+	} else {
+		t.Logf("Skipping Trunk mode multi-network test: EnableTrunk=false")
+	}
 
 	// Test with exclusive ENI mode
 	exclusiveFeat := createMultiNetworkTest("ExclusiveENI", networkv1beta1.ENIOptionTypeENI)
 	feats = append(feats, exclusiveFeat)
+
+	if len(feats) == 0 {
+		t.Skipf("No multi-network features to test")
+	}
 
 	testenv.Test(t, feats...)
 
@@ -113,29 +111,22 @@ func TestPodNetworking_MultiNetwork_Custom(t *testing.T) {
 		return
 	}
 
-	// Pre-check: terway daemonset name must be terway-eniip
 	if terway != "terway-eniip" {
 		t.Skipf("TestPodNetworking_MultiNetwork requires terway-eniip daemonset, current: %s", terway)
 		return
 	}
-
-	// Pre-check: terway version must be >= v1.16.1
-	if terwayVersion != "" {
-		version := terwayVersion
-		if !strings.HasPrefix(version, "v") {
-			version = "v" + version
-		}
-		if semver.IsValid(version) && semver.Compare(version, "v1.16.1") < 0 {
-			t.Skipf("TestPodNetworking_MultiNetwork requires terway version >= v1.16.1, current: %s", terwayVersion)
-			return
-		}
+	if !RequireTerwayVersion("v1.16.1") {
+		t.Skipf("TestPodNetworking_MultiNetwork requires terway version >= v1.16.1, current: %s", terwayVersion)
+		return
 	}
 
 	var feats []features.Feature
 
-	// Test with Trunk mode and custom config
-	trunkFeat := createMultiNetworkTestWithCustomConfig("Trunk", networkv1beta1.ENIOptionTypeTrunk, config)
-	feats = append(feats, trunkFeat)
+	// Test with Trunk mode and custom config only when trunk is enabled
+	if testTrunk {
+		trunkFeat := createMultiNetworkTestWithCustomConfig("Trunk", networkv1beta1.ENIOptionTypeTrunk, config)
+		feats = append(feats, trunkFeat)
+	}
 
 	// Test with exclusive ENI mode and custom config
 	exclusiveFeat := createMultiNetworkTestWithCustomConfig("ExclusiveENI", networkv1beta1.ENIOptionTypeENI, config)

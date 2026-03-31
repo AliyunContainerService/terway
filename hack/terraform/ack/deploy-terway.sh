@@ -242,8 +242,8 @@ generate_values_file() {
     log_info "Generating Helm values file..."
 
     # 构建 vSwitch IDs 按可用区分组 (生成 YAML 格式)
-    VSWITCH_YAML=$(jq -r -n --argjson state "$(cat "${TERRAFORM_STATE_FILE}")" '
-        $state.resources
+    VSWITCH_YAML=$(jq -r -n --slurpfile state "${TERRAFORM_STATE_FILE}" '
+        $state[0].resources
         | map(select(.type == "alicloud_vswitch" and .name == "terway_vswitches"))
         | map(.instances[])
         | group_by(.attributes.zone_id // .attributes.availability_zone)

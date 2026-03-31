@@ -101,28 +101,8 @@ func TestSharedENI_WarmUp(t *testing.T) {
 	}
 }
 
-// getQualifiedNodesForWarmUp returns nodes that meet capacity requirements for warm-up test
 func getQualifiedNodesForWarmUp(nodeInfo *NodeTypeInfoWithCapacity, nodeType NodeType) []string {
-	var qualified []string
-
-	for nodeName, cap := range nodeInfo.Capacities {
-		if cap.NodeType != nodeType {
-			continue
-		}
-
-		// Check if node has enough adapters
-		if !cap.MeetsSharedENIRequirements {
-			continue
-		}
-
-		// Check if node has enough total IP capacity (adapters * ipv4PerAdapter)
-		totalIPCapacity := cap.Adapters * cap.IPv4PerAdapter
-		if totalIPCapacity >= MinIPsForWarmUpTest {
-			qualified = append(qualified, nodeName)
-		}
-	}
-
-	return qualified
+	return nodeInfo.Capacities.GetQualifiedNodesWithMinCapacity(nodeType, MinIPsForWarmUpTest)
 }
 
 // createWarmUpTestWithQualifiedNodes creates IP warm-up tests with qualified node filtering
@@ -619,16 +599,8 @@ func configureWarmUp(ctx context.Context, t *testing.T, config *envconf.Config, 
 	return config.Client().Resources().Update(ctx, cm)
 }
 
-// triggerNodeCR triggers a node CR update to force reconciliation
 func triggerNodeCR(ctx context.Context, config *envconf.Config, t *testing.T, node *networkv1beta1.Node) error {
-	mergePatch, _ := json.Marshal(map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"annotations": map[string]interface{}{
-				"e2e-update": time.Now().String(),
-			},
-		},
-	})
-	return config.Client().Resources().Patch(ctx, node, k8s.Patch{PatchType: types.MergePatchType, Data: mergePatch})
+	return triggerNodeCRReconcile(ctx, config, node)
 }
 
 // waitForNodeSpecSyncByQualifiedNodes waits for node spec to be synchronized with expected warm-up size

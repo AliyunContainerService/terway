@@ -128,15 +128,19 @@ func checkENIResourcesBeforeTest(t *testing.T) *ENIResourceInfo {
 // TestPodNetworking_TrunkMode tests Trunk ENI attach type
 // Pods will be automatically scheduled to nodes with aliyun/member-eni resource.
 func TestPodNetworking_TrunkMode(t *testing.T) {
+	if !testTrunk {
+		t.Skipf("TestPodNetworking_TrunkMode requires EnableTrunk=true in cluster config")
+	}
 	envInfo := collectClusterEnvInfo(t)
 	if terway != "terway-eniip" {
-		t.Skipf("TestPodNetworking_ExclusiveENIMode requires terway-eniip, but terway is %s", terway)
+		t.Skipf("TestPodNetworking_TrunkMode requires terway-eniip, but terway is %s", terway)
 	}
 	if !envInfo.ENIInfo.HasMemberENIResource() {
 		t.Skipf("TestPodNetworking_TrunkMode requires aliyun/member-eni resource, but no nodes have it (total: %d)", envInfo.ENIInfo.TotalMemberENI)
 	}
 
 	config := DefaultPodNetworkingTestConfig().
+		WithPodNetworkingName("test-pn-trunk").
 		WithENIAttachType(networkv1beta1.ENIOptionTypeTrunk).
 		WithExpectedENIType(networkv1beta1.ENITypeMember)
 
@@ -159,6 +163,7 @@ func TestPodNetworking_ExclusiveENIMode(t *testing.T) {
 	}
 
 	config := DefaultPodNetworkingTestConfig().
+		WithPodNetworkingName("test-pn-eni").
 		WithENIAttachType(networkv1beta1.ENIOptionTypeENI).
 		WithExpectedENIType(networkv1beta1.ENITypeSecondary)
 
@@ -174,7 +179,7 @@ func TestPodNetworking_ExclusiveENIMode(t *testing.T) {
 func TestPodNetworking_DefaultMode(t *testing.T) {
 	envInfo := collectClusterEnvInfo(t)
 	if terway != "terway-eniip" {
-		t.Skipf("TestPodNetworking_ExclusiveENIMode requires terway-eniip, but terway is %s", terway)
+		t.Skipf("TestPodNetworking_DefaultMode requires terway-eniip, but terway is %s", terway)
 	}
 	if !envInfo.ENIInfo.HasExclusiveENIResource() && !envInfo.ENIInfo.HasMemberENIResource() {
 		t.Skipf("TestPodNetworking_DefaultMode requires either aliyun/eni or aliyun/member-eni resource, but no nodes have them (exclusive: %d, member: %d)",
@@ -182,6 +187,7 @@ func TestPodNetworking_DefaultMode(t *testing.T) {
 	}
 
 	config := DefaultPodNetworkingTestConfig().
+		WithPodNetworkingName("test-pn-default").
 		WithENIAttachType(networkv1beta1.ENIOptionTypeDefault)
 
 	RunPodNetworkingTestSuite(t, config)
@@ -198,9 +204,12 @@ func TestPodNetworking_DefaultMode(t *testing.T) {
 // TestPodNetworking_PodSelector tests pod selector matching
 // Pods with matching labels will use the PodNetworking configuration.
 func TestPodNetworking_PodSelector(t *testing.T) {
+	if !testTrunk {
+		t.Skipf("TestPodNetworking_PodSelector requires EnableTrunk=true in cluster config")
+	}
 	envInfo := collectClusterEnvInfo(t)
 	if terway != "terway-eniip" {
-		t.Skipf("TestPodNetworking_ExclusiveENIMode requires terway-eniip, but terway is %s", terway)
+		t.Skipf("TestPodNetworking_PodSelector requires terway-eniip, but terway is %s", terway)
 	}
 	if !envInfo.ENIInfo.HasMemberENIResource() {
 		t.Skipf("TestPodNetworking_PodSelector requires aliyun/member-eni resource, but no nodes have it (total: %d)", envInfo.ENIInfo.TotalMemberENI)
@@ -298,9 +307,12 @@ func TestPodNetworking_PodSelector(t *testing.T) {
 // TestPodNetworking_NamespaceSelector tests namespace selector matching
 // Pods in namespaces with matching labels will use the PodNetworking configuration.
 func TestPodNetworking_NamespaceSelector(t *testing.T) {
+	if !testTrunk {
+		t.Skipf("TestPodNetworking_NamespaceSelector requires EnableTrunk=true in cluster config")
+	}
 	envInfo := collectClusterEnvInfo(t)
 	if terway != "terway-eniip" {
-		t.Skipf("TestPodNetworking_ExclusiveENIMode requires terway-eniip, but terway is %s", terway)
+		t.Skipf("TestPodNetworking_NamespaceSelector requires terway-eniip, but terway is %s", terway)
 	}
 	if !envInfo.ENIInfo.HasMemberENIResource() {
 		t.Skipf("TestPodNetworking_NamespaceSelector requires aliyun/member-eni resource, but no nodes have it (total: %d)", envInfo.ENIInfo.TotalMemberENI)
@@ -429,18 +441,18 @@ func TestPodNetworking_NamespaceSelector(t *testing.T) {
 // Pods with fixed IP will retain their IP across restarts within the TTL period.
 func TestPodNetworking_FixedIP(t *testing.T) {
 	if terway != "terway-eniip" {
-		t.Skipf("TestPodNetworking_ExclusiveENIMode requires terway-eniip, but terway is %s", terway)
+		t.Skipf("TestPodNetworking_FixedIP requires terway-eniip, but terway is %s", terway)
 	}
 	envInfo := collectClusterEnvInfo(t)
 
 	var feats []features.Feature
 
-	// Test with Trunk mode if member-eni resource is available
-	if envInfo.ENIInfo.HasMemberENIResource() {
+	// Test with Trunk mode if member-eni resource is available and trunk is enabled
+	if testTrunk && envInfo.ENIInfo.HasMemberENIResource() {
 		trunkFeat := createFixedIPTest("Trunk", networkv1beta1.ENIOptionTypeTrunk)
 		feats = append(feats, trunkFeat)
 	} else {
-		t.Logf("Skipping Trunk mode FixedIP test: no aliyun/member-eni resource available")
+		t.Logf("Skipping Trunk mode FixedIP test: testTrunk=%v, member-eni=%d", testTrunk, envInfo.ENIInfo.TotalMemberENI)
 	}
 
 	// Test with Exclusive ENI mode if eni resource is available
@@ -569,8 +581,11 @@ func createFixedIPTest(eniModeName string, eniType networkv1beta1.ENIAttachType)
 // TestPodNetworking_VSwitchAndSG tests vSwitch and security group configuration
 // with both default and custom configurations.
 func TestPodNetworking_VSwitchAndSG(t *testing.T) {
+	if !testTrunk {
+		t.Skipf("TestPodNetworking_VSwitchAndSG requires EnableTrunk=true in cluster config")
+	}
 	if terway != "terway-eniip" {
-		t.Skipf("TestPodNetworking_ExclusiveENIMode requires terway-eniip, but terway is %s", terway)
+		t.Skipf("TestPodNetworking_VSwitchAndSG requires terway-eniip, but terway is %s", terway)
 	}
 	collectClusterEnvInfo(t)
 
@@ -678,14 +693,14 @@ func TestPodNetworking_Connectivity(t *testing.T) {
 
 	var feats []features.Feature
 
-	// Test with Trunk mode if member-eni resource is available
-	if envInfo.ENIInfo.HasMemberENIResource() {
+	// Test with Trunk mode if member-eni resource is available and trunk is enabled
+	if testTrunk && envInfo.ENIInfo.HasMemberENIResource() {
 		sameNodeTrunk := createPodNetworkingConnectivityTest("Trunk", networkv1beta1.ENIOptionTypeTrunk, "SameNode", "same-node")
 		crossNodeTrunk := createPodNetworkingConnectivityTest("Trunk", networkv1beta1.ENIOptionTypeTrunk, "CrossNode", "cross-node")
 		crossZoneTrunk := createPodNetworkingConnectivityTest("Trunk", networkv1beta1.ENIOptionTypeTrunk, "CrossZone", "cross-zone")
 		feats = append(feats, sameNodeTrunk, crossNodeTrunk, crossZoneTrunk)
 	} else {
-		t.Logf("Skipping Trunk mode connectivity test: no aliyun/member-eni resource available")
+		t.Logf("Skipping Trunk mode connectivity test: testTrunk=%v, member-eni=%d", testTrunk, envInfo.ENIInfo.TotalMemberENI)
 	}
 
 	// Test with Exclusive ENI mode if eni resource is available
@@ -702,7 +717,7 @@ func TestPodNetworking_Connectivity(t *testing.T) {
 		t.Skipf("TestPodNetworking_Connectivity requires aliyun/member-eni or aliyun/eni resource, but no nodes have them")
 	}
 
-	testenv.Test(t, feats...)
+	testenv.TestInParallel(t, feats...)
 
 	if t.Failed() {
 		isFailed.Store(true)
@@ -887,7 +902,6 @@ func createPodNetworkingConnectivityTest(eniModeName string, eniType networkv1be
 		}).
 		Assess("hairpin connectivity should work", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			for _, stack := range getStack() {
-				// Skip IPv6 hairpin test for ipvlan mode (known limitation)
 				if stack == "ipv6" && ipvlan {
 					t.Logf("Skipping IPv6 hairpin test for ipvlan mode")
 					continue
@@ -898,7 +912,10 @@ func createPodNetworkingConnectivityTest(eniModeName string, eniType networkv1be
 					t.Errorf("hairpin connectivity failed for %s (%s/%s): %v", stack, eniModeName, scenario, err)
 				}
 			}
-			return MarkTestSuccess(ctx)
+			if !t.Failed() {
+				return MarkTestSuccess(ctx)
+			}
+			return ctx
 		}).
 		Feature()
 }
