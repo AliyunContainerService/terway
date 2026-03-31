@@ -336,7 +336,8 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	if node.Spec.NodeCap.Adapters > 0 {
 		node.Spec.Flavor = nil
 
-		if node.Annotations[types.ENOApi] == "hdeni" {
+		if node.Annotations[types.ENOApi] == types.APIEnoHDeni ||
+			node.Annotations[types.ENOApi] == types.APIEcsHDeni {
 			node.Spec.Flavor = append(node.Spec.Flavor, networkv1beta1.Flavor{
 				NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
 				NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,

@@ -24,6 +24,8 @@ import (
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
+	terwayTypes "github.com/AliyunContainerService/terway/types"
 )
 
 var _ = Describe("Eni controller", func() {
@@ -503,6 +505,122 @@ var _ = Describe("Eni controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(result.IsZero()).To(BeFalse())
+		})
+	})
+
+	Context("attach hdeni with empty TrunkENIID test", func() {
+		hdeniID := "hdeni-attach-empty-trunk"
+		instanceID := "i-attach-hdeni"
+
+		typeNamespacedName := types.NamespacedName{
+			Name: hdeniID,
+		}
+		var hdeni *networkv1beta1.NetworkInterface
+
+		It("prepare resources", func() {
+			ctx := context.Background()
+
+			hdeni = &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: hdeniID,
+					Finalizers: []string{
+						"network.alibabacloud.com/eni",
+					},
+					Annotations: map[string]string{
+						terwayTypes.ENOApi: terwayTypes.APIEcsHDeni,
+					},
+				},
+				Spec: networkv1beta1.NetworkInterfaceSpec{
+					ENI: networkv1beta1.ENI{
+						ID:               hdeniID,
+						MAC:              "mac",
+						VPCID:            "",
+						Zone:             "",
+						VSwitchID:        "",
+						ResourceGroupID:  "",
+						SecurityGroupIDs: nil,
+					},
+					IPv4:        "",
+					IPv6:        "",
+					IPv4CIDR:    "",
+					IPv6CIDR:    "",
+					ExtraConfig: nil,
+				},
+			}
+
+			err := k8sClient.Create(ctx, hdeni)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Set TrunkENIID to empty to trigger the special logic
+			hdeni.Status = networkv1beta1.NetworkInterfaceStatus{
+				Phase:      networkv1beta1.ENIPhaseBinding,
+				ENIInfo:    networkv1beta1.ENIInfo{},
+				InstanceID: instanceID,
+				TrunkENIID: "", // empty TrunkENIID
+				NodeName:   "node-1",
+			}
+			err = k8sClient.Status().Update(ctx, hdeni)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should attach hdeni with DenseModeTrunkEniId when TrunkENIID is empty", func() {
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+
+			// Expect AttachNetworkInterfaceV2 to be called with TrunkNetworkInstanceID = "DenseModeTrunkEniId"
+			aliyun.On("AttachNetworkInterfaceV2", mock.Anything, &aliyunClient.AttachNetworkInterfaceOptions{
+				NetworkInterfaceID:     ptr.To(hdeniID),
+				InstanceID:             ptr.To(instanceID),
+				TrunkNetworkInstanceID: ptr.To("DenseModeTrunkEniId"),
+			}).Return(nil).Once()
+			aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
+				NetworkInterfaceIDs: &[]string{hdeniID},
+				RawStatus:           ptr.To(true),
+			}).Return(
+				[]*aliyunClient.NetworkInterface{
+					{
+						Status:                      "InUse",
+						MacAddress:                  "mac",
+						NetworkInterfaceID:          hdeniID,
+						VPCID:                       "vpcID",
+						VSwitchID:                   "vswID",
+						PrivateIPAddress:            "privateIPAddress",
+						PrivateIPSets:               nil,
+						ZoneID:                      "zoneID",
+						SecurityGroupIDs:            []string{"sg-0"},
+						ResourceGroupID:             "rg-0",
+						IPv6Set:                     nil,
+						Tags:                        nil,
+						Type:                        "Secondary",
+						InstanceID:                  "i-xx",
+						TrunkNetworkInterfaceID:     "DenseModeTrunkEniId",
+						NetworkInterfaceTrafficMode: "Standard",
+						DeviceIndex:                 1,
+						CreationTime:                "",
+						NetworkCardIndex:            0,
+					}}, nil).Once()
+
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			ctx := context.Background()
+
+			_, err := r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, hdeni)
+				Expect(err).NotTo(HaveOccurred())
+
+				return hdeni.Status.Phase == networkv1beta1.ENIPhaseBind &&
+					hdeni.Status.ENIInfo.Status == networkv1beta1.ENIStatusBind
+			}, 5*time.Second, 500*time.Millisecond).Should(BeTrue())
 		})
 	})
 
@@ -1421,6 +1539,157 @@ var _ = Describe("Eni controller", func() {
 		})
 	})
 
+	// ==============================================================================
+	// resolveBackendAPI tests
+	// ==============================================================================
+
+	Context("resolveBackendAPI", func() {
+		It("should return BackendAPIECS when NI has APIEcs annotation", func() {
+			ctx := context.Background()
+			ni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "hdeni-resolve-1",
+					Annotations: map[string]string{terwayTypes.ENOApi: terwayTypes.APIEcs},
+				},
+			}
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			result := r.resolveBackendAPI(ctx, ni)
+			Expect(result).To(Equal(aliyunClient.BackendAPIECS))
+		})
+
+		It("should return BackendAPIECS when NI has APIEcsHDeni annotation", func() {
+			ctx := context.Background()
+			ni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "hdeni-resolve-2",
+					Annotations: map[string]string{terwayTypes.ENOApi: terwayTypes.APIEcsHDeni},
+				},
+			}
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			result := r.resolveBackendAPI(ctx, ni)
+			Expect(result).To(Equal(aliyunClient.BackendAPIECS))
+		})
+
+		It("should return BackendAPIEFLOHDENI when NI has APIEnoHDeni annotation", func() {
+			ctx := context.Background()
+			ni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "hdeni-resolve-3",
+					Annotations: map[string]string{terwayTypes.ENOApi: terwayTypes.APIEnoHDeni},
+				},
+			}
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			result := r.resolveBackendAPI(ctx, ni)
+			Expect(result).To(Equal(aliyunClient.BackendAPIEFLOHDENI))
+		})
+
+		It("should fallback to leni- prefix when no annotations", func() {
+			ctx := context.Background()
+			ni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "leni-resolve-8"},
+			}
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			result := r.resolveBackendAPI(ctx, ni)
+			Expect(result).To(Equal(aliyunClient.BackendAPIEFLO))
+		})
+
+		It("should fallback to hdeni- prefix when no annotations", func() {
+			ctx := context.Background()
+			ni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "hdeni-resolve-9"},
+			}
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			result := r.resolveBackendAPI(ctx, ni)
+			Expect(result).To(Equal(aliyunClient.BackendAPIEFLOHDENI))
+		})
+
+		It("should fallback to BackendAPIECS for regular eni- prefix", func() {
+			ctx := context.Background()
+			ni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{Name: "eni-resolve-10"},
+			}
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			result := r.resolveBackendAPI(ctx, ni)
+			Expect(result).To(Equal(aliyunClient.BackendAPIECS))
+		})
+
+		It("should fallback to name prefix when NI has unknown annotation", func() {
+			ctx := context.Background()
+			ni := &networkv1beta1.NetworkInterface{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "leni-resolve-11",
+					Annotations: map[string]string{terwayTypes.ENOApi: "unknown-api"},
+				},
+			}
+
+			aliyun := mocks.NewOpenAPI(GinkgoT())
+			r := &ReconcileNetworkInterface{
+				client:          k8sClient,
+				scheme:          scheme.Scheme,
+				aliyun:          aliyun,
+				record:          record.NewFakeRecorder(1000),
+				resourceBackoff: NewBackoffManager(),
+			}
+
+			result := r.resolveBackendAPI(ctx, ni)
+			Expect(result).To(Equal(aliyunClient.BackendAPIEFLO))
+		})
+	})
+
 })
 
 func TestToPtr(t *testing.T) {
@@ -1430,5 +1699,47 @@ func TestToPtr(t *testing.T) {
 	s := "x"
 	if p := toPtr("x"); p == nil || *p != s {
 		t.Errorf("toPtr(\"x\") should return &\"x\", got %v", p)
+	}
+}
+
+func TestGetECSBackoff(t *testing.T) {
+	r := &ReconcileNetworkInterface{}
+
+	tests := []struct {
+		name            string
+		niName          string
+		expectedBackoff string
+	}{
+		{
+			name:            "leni- prefix returns WaitECSLENIStatus backoff",
+			niName:          "leni-abc123",
+			expectedBackoff: backoff.WaitECSLENIStatus,
+		},
+		{
+			name:            "hdeni- prefix returns WaitECSHDENIStatus backoff",
+			niName:          "hdeni-def456",
+			expectedBackoff: backoff.WaitECSHDENIStatus,
+		},
+		{
+			name:            "eni- prefix returns WaitENIStatus backoff",
+			niName:          "eni-xyz789",
+			expectedBackoff: backoff.WaitENIStatus,
+		},
+		{
+			name:            "regular name returns WaitENIStatus backoff",
+			niName:          "some-other-name",
+			expectedBackoff: backoff.WaitENIStatus,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := r.getECSBackoff(tt.niName)
+			expected := backoff.Backoff(tt.expectedBackoff)
+			if result.InitialDelay != expected.InitialDelay {
+				t.Errorf("getECSBackoff(%q).InitialDelay = %v, want %v",
+					tt.niName, result.InitialDelay, expected.InitialDelay)
+			}
+		})
 	}
 }
