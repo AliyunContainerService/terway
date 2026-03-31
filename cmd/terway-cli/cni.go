@@ -8,11 +8,9 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/Jeffail/gabs/v2"
 	"github.com/spf13/cobra"
-	"golang.org/x/sys/unix"
-
-	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 )
 
 type checkKernelVersionFunc func(int, int, int) bool
@@ -296,33 +294,6 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 	}
 
 	return g.StringIndent("", "  "), nil
-}
-
-func mountHostBpf() error {
-	target := "/sys/fs/bpf"
-
-	// 确保目标目录存在
-	err := os.MkdirAll(target, 0755)
-	if err != nil {
-		return fmt.Errorf("failed to create mount point: %v", err)
-	}
-
-	// 检查是否已挂载
-	mounted, err := isMounted(target)
-	if err != nil {
-		return fmt.Errorf("failed to check mount status: %v", err)
-	}
-	if mounted {
-		return nil
-	}
-
-	// 执行 mount bpffs /sys/fs/bpf -t bpf
-	err = unix.Mount("bpffs", target, "bpf", 0, "")
-	if err != nil {
-		return fmt.Errorf("mount failed: %v", err)
-	}
-
-	return nil
 }
 
 func isMounted(path string) (bool, error) {

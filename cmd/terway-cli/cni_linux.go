@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 
 	terwayfeature "github.com/AliyunContainerService/terway/pkg/feature"
@@ -149,4 +150,31 @@ func parseRelease(rel string) (major, minor, patch int, ok bool) {
 	}
 	patch, ok = next()
 	return
+}
+
+func mountHostBpf() error {
+	target := "/sys/fs/bpf"
+
+	// 确保目标目录存在
+	err := os.MkdirAll(target, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create mount point: %v", err)
+	}
+
+	// 检查是否已挂载
+	mounted, err := isMounted(target)
+	if err != nil {
+		return fmt.Errorf("failed to check mount status: %v", err)
+	}
+	if mounted {
+		return nil
+	}
+
+	// 执行 mount bpffs /sys/fs/bpf -t bpf
+	err = unix.Mount("bpffs", target, "bpf", 0, "")
+	if err != nil {
+		return fmt.Errorf("mount failed: %v", err)
+	}
+
+	return nil
 }

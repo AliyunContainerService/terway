@@ -21,7 +21,6 @@ import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	credential "github.com/aliyun/credentials-go/credentials"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 )
 
@@ -93,7 +92,6 @@ func provideSDKConfig(config ClientConfig) *sdk.Config {
 }
 
 func provideSDKV2Config(config ClientConfig, credential credential.Credential) *openapi.Config {
-	klog.Infof("provideSDKV2Config %#v", config)
 	return &openapi.Config{
 		UserAgent:    ptr.To(kubernetesAlicloudIdentity),
 		Protocol:     ptr.To(config.Scheme),
