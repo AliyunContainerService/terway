@@ -36,63 +36,47 @@ var (
 		Use:   "terway-cli",
 		Short: "terway-cil is a command tool for diagnosing terway & network internal status.",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			// create connection and grpc client
-			ctx, contextCancel = context.WithTimeout(context.Background(), connTimeout)
-			conn, err := grpc.NewClient("passthrough:"+defaultSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
-				func(ctx context.Context, s string) (net.Conn, error) {
-					unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
-					if err != nil {
-						return nil, fmt.Errorf("error while resolve unix addr:%w", err)
-					}
-					d := net.Dialer{}
-					return d.DialContext(ctx, "unix", unixAddr.String())
-				}))
-
-			if err != nil {
-				contextCancel()
-				return err
-			}
-
-			grpcConn = conn
-			client = rpc.NewTerwayTracingClient(conn)
-
-			err = utilfeature.DefaultMutableFeatureGate.SetFromMap(featureGates)
-			if err != nil {
-				return err
-			}
-			return nil
+			return utilfeature.DefaultMutableFeatureGate.SetFromMap(featureGates)
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
-			contextCancel()
-			_ = grpcConn.Close()
+			if contextCancel != nil {
+				contextCancel()
+			}
+			if grpcConn != nil {
+				_ = grpcConn.Close()
+			}
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 
 	listCmd = &cobra.Command{
-		Use:   "list [type]",
-		Short: "show types/resources list.",
-		RunE:  runList,
+		Use:     "list [type]",
+		Short:   "show types/resources list.",
+		PreRunE: grpcPreRunE,
+		RunE:    runList,
 	}
 
 	showCmd = &cobra.Command{
-		Use:   "show <type> [resource_name]",
-		Short: "show config",
-		Long:  "show config and trace info of the resource, get the first if name not specified.",
-		RunE:  runShow,
+		Use:     "show <type> [resource_name]",
+		Short:   "show config",
+		Long:    "show config and trace info of the resource, get the first if name not specified.",
+		PreRunE: grpcPreRunE,
+		RunE:    runShow,
 	}
 
 	mappingCmd = &cobra.Command{
-		Use:   "mapping",
-		Short: "get terway resource mappings.",
-		RunE:  runMapping,
+		Use:     "mapping",
+		Short:   "get terway resource mappings.",
+		PreRunE: grpcPreRunE,
+		RunE:    runMapping,
 	}
 
 	executeCmd = &cobra.Command{
-		Use:   "execute <type> <resource> <command> [args...]",
-		Short: "send command to the given resource.",
-		RunE:  runExecute,
+		Use:     "execute <type> <resource> <command> [args...]",
+		Short:   "send command to the given resource.",
+		PreRunE: grpcPreRunE,
+		RunE:    runExecute,
 	}
 
 	metadataCmd = &cobra.Command{
@@ -102,11 +86,32 @@ var (
 	}
 )
 
+func grpcPreRunE(_ *cobra.Command, _ []string) error {
+	ctx, contextCancel = context.WithTimeout(context.Background(), connTimeout)
+	conn, err := grpc.NewClient("passthrough:"+defaultSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
+		func(ctx context.Context, s string) (net.Conn, error) {
+			unixAddr, err := net.ResolveUnixAddr("unix", defaultSocketPath)
+			if err != nil {
+				return nil, fmt.Errorf("error while resolve unix addr:%w", err)
+			}
+			d := net.Dialer{}
+			return d.DialContext(ctx, "unix", unixAddr.String())
+		}))
+	if err != nil {
+		contextCancel()
+		return err
+	}
+
+	grpcConn = conn
+	client = rpc.NewTerwayTracingClient(conn)
+	return nil
+}
+
 func init() {
 	rootCmd.PersistentFlags().Var(cliflag.NewMapStringBool(&featureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features. "+
 		"Options are:\n"+strings.Join(utilfeature.DefaultFeatureGate.KnownFeatures(), "\n"))
 
-	rootCmd.AddCommand(listCmd, showCmd, mappingCmd, executeCmd, metadataCmd, cniCmd, nodeconfigCmd, policyCmd, eniCmd)
+	rootCmd.AddCommand(listCmd, showCmd, mappingCmd, executeCmd, metadataCmd, cniCmd, nodeconfigCmd, policyCmd, eniCmd, migrateCmd)
 }
 
 func main() {

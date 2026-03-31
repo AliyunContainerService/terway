@@ -86,10 +86,10 @@ var backoffMap = map[string]ExtendedBackoff{
 		InitialDelay: 1 * time.Second,
 		Backoff: wait.Backoff{
 			Duration: 2 * time.Second,
-			Factor:   2,
-			Jitter:   0.3,
-			Cap:      10 * time.Second,
-			Steps:    8,
+			Factor:   1.5,
+			Jitter:   0,
+			Cap:      4 * time.Second,
+			Steps:    4,
 		},
 	},
 	ENIIPOps: {

@@ -225,6 +225,33 @@ func LogFields(l logr.Logger, obj any) logr.Logger {
 	return r
 }
 
+// ClassifyENILinkCapability checks whether a list of ENIs indicates ECS link support.
+// hasPrimary is true when a Primary ENI exists (new ENI link instances).
+// hasMigrationTags is true when any non-Primary ENI has both leni_primary=true
+// and acs:ecs:support_eni=true tags (migrated instances).
+func ClassifyENILinkCapability(enis []*NetworkInterface) (hasPrimary, hasMigrationTags bool) {
+	for _, eni := range enis {
+		if eni.Type == ENITypePrimary {
+			hasPrimary = true
+			continue
+		}
+
+		var leniPrimary, supportENI bool
+		for _, tag := range eni.Tags {
+			if tag.TagKey == "leni_primary" && tag.TagValue == "true" {
+				leniPrimary = true
+			}
+			if tag.TagKey == "acs:ecs:support_eni" && tag.TagValue == "true" {
+				supportENI = true
+			}
+		}
+		if leniPrimary && supportENI {
+			hasMigrationTags = true
+		}
+	}
+	return
+}
+
 func FromPtr[V any, T ~*V](ptr T) V {
 	if ptr == nil {
 		var zero V
