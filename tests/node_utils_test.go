@@ -314,10 +314,11 @@ func GetNodeAffinityForType(nodeType NodeType) map[string]string {
 func GetNodeAffinityExcludeForType(nodeType NodeType) map[string]string {
 	switch nodeType {
 	case NodeTypeECSSharedENI:
-		// For ECS shared ENI nodes, exclude all Lingjun nodes and ECS exclusive ENI nodes
+		// For ECS shared ENI nodes, exclude Lingjun, exclusive ENI, and IP prefix nodes
 		return map[string]string{
 			"alibabacloud.com/lingjun-worker":        "true",
 			"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly",
+			"k8s.aliyun.com/ip-prefix":               "true",
 		}
 	case NodeTypeECSExclusiveENI:
 		// For ECS exclusive ENI nodes, exclude all Lingjun nodes
@@ -709,6 +710,20 @@ func (m NodeCapacityMap) GetQualifiedNodesForTest(nodeType NodeType) []string {
 		}
 	}
 
+	return qualified
+}
+
+// GetQualifiedNodesWithMinCapacity returns nodes meeting shared ENI requirements with a minimum IP capacity threshold
+func (m NodeCapacityMap) GetQualifiedNodesWithMinCapacity(nodeType NodeType, minIPCapacity int) []string {
+	var qualified []string
+	for nodeName, cap := range m {
+		if cap.NodeType != nodeType || !cap.MeetsSharedENIRequirements {
+			continue
+		}
+		if cap.Adapters*cap.IPv4PerAdapter >= minIPCapacity {
+			qualified = append(qualified, nodeName)
+		}
+	}
 	return qualified
 }
 

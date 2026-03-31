@@ -318,40 +318,79 @@ resource "alicloud_cs_managed_kubernetes" "default" {
   }
 }
 
-# 普通节点池。
-resource "alicloud_cs_kubernetes_node_pool" "default" {
-  cluster_id            = alicloud_cs_managed_kubernetes.default.id              # Kubernetes集群名称。
-  node_pool_name        = "default"                                              # 节点池名称。
-  vswitch_ids           = split(",", join(",", alicloud_vswitch.vswitches.*.id)) # 节点池所在的vSwitch。指定一个或多个vSwitch的ID，必须在availability_zone指定的区域中。
+# 普通节点池 - AZ J
+resource "alicloud_cs_kubernetes_node_pool" "default_azj" {
+  cluster_id            = alicloud_cs_managed_kubernetes.default.id
+  node_pool_name        = "default-azj"
+  vswitch_ids           = [alicloud_vswitch.vswitches[0].id]
   instance_types        = var.worker_instance_types
   instance_charge_type  = "PostPaid"
-  desired_size          = 2
+  desired_size          = 1
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
   image_type            = "AliyunLinux3"
-  data_disks {              # 节点数据盘配置。
-    category = "cloud_essd" # 节点数据盘种类。
-    size     = 120          # 节点数据盘大小。
+  data_disks {
+    category = "cloud_essd"
+    size     = 120
   }
-
 }
 
-# 独占ENI节点池。
-resource "alicloud_cs_kubernetes_node_pool" "exclusive_eni" {
-  cluster_id            = alicloud_cs_managed_kubernetes.default.id # Kubernetes集群名称。
-  node_pool_name        = "exclusive_eni"
-  vswitch_ids           = split(",", join(",", alicloud_vswitch.vswitches.*.id)) # 节点池所在的vSwitch。指定一个或多个vSwitch的ID，必须在availability_zone指定的区域中。
+# 普通节点池 - AZ K
+resource "alicloud_cs_kubernetes_node_pool" "default_azk" {
+  cluster_id            = alicloud_cs_managed_kubernetes.default.id
+  node_pool_name        = "default-azk"
+  vswitch_ids           = [alicloud_vswitch.vswitches[1].id]
   instance_types        = var.worker_instance_types
   instance_charge_type  = "PostPaid"
-  desired_size          = 2
+  desired_size          = 1
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
   image_type            = "AliyunLinux3"
-  data_disks {              # 节点数据盘配置。
-    category = "cloud_essd" # 节点数据盘种类。
-    size     = 120          # 节点数据盘大小。
+  data_disks {
+    category = "cloud_essd"
+    size     = 120
+  }
+}
+
+# 独占ENI节点池 - AZ J
+resource "alicloud_cs_kubernetes_node_pool" "exclusive_eni_azj" {
+  cluster_id            = alicloud_cs_managed_kubernetes.default.id
+  node_pool_name        = "exclusive-eni-azj"
+  vswitch_ids           = [alicloud_vswitch.vswitches[0].id]
+  instance_types        = var.worker_instance_types
+  instance_charge_type  = "PostPaid"
+  desired_size          = 1
+  install_cloud_monitor = true
+  system_disk_category  = "cloud_essd"
+  system_disk_size      = 100
+  image_type            = "AliyunLinux3"
+  data_disks {
+    category = "cloud_essd"
+    size     = 120
+  }
+  labels {
+    key   = "k8s.aliyun.com/exclusive-mode-eni-type"
+    value = "eniOnly"
+  }
+}
+
+# 独占ENI节点池 - AZ K
+resource "alicloud_cs_kubernetes_node_pool" "exclusive_eni_azk" {
+  cluster_id            = alicloud_cs_managed_kubernetes.default.id
+  node_pool_name        = "exclusive-eni-azk"
+  vswitch_ids           = [alicloud_vswitch.vswitches[1].id]
+  instance_types        = var.worker_instance_types
+  instance_charge_type  = "PostPaid"
+  desired_size          = 1
+  install_cloud_monitor = true
+  system_disk_category  = "cloud_essd"
+  system_disk_size      = 100
+  image_type            = "AliyunLinux3"
+  data_disks {
+    category = "cloud_essd"
+    size     = 120
   }
   labels {
     key   = "k8s.aliyun.com/exclusive-mode-eni-type"
@@ -389,14 +428,14 @@ resource "kubernetes_config_map_v1" "e2e_ip_prefix" {
 # =============================================================================
 # Phase 3: Create IP Prefix Node Pool (依赖 ConfigMap)
 # =============================================================================
-# IP Prefix 测试节点池
-resource "alicloud_cs_kubernetes_node_pool" "ip_prefix" {
+# IP Prefix 测试节点池 - AZ J
+resource "alicloud_cs_kubernetes_node_pool" "ip_prefix_azj" {
   cluster_id            = alicloud_cs_managed_kubernetes.default.id
-  node_pool_name        = "ip-prefix"
-  vswitch_ids           = split(",", join(",", alicloud_vswitch.vswitches.*.id))
+  node_pool_name        = "ip-prefix-azj"
+  vswitch_ids           = [alicloud_vswitch.vswitches[0].id]
   instance_types        = var.worker_instance_types
   instance_charge_type  = "PostPaid"
-  desired_size          = 2
+  desired_size          = 1
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
@@ -405,18 +444,33 @@ resource "alicloud_cs_kubernetes_node_pool" "ip_prefix" {
     category = "cloud_essd"
     size     = 120
   }
-  # IP Prefix E2E 标识 label：用于 Pod nodeAffinity 调度
-  labels {
-    key   = "k8s.aliyun.com/ip-prefix"
-    value = "true"
-  }
-  # terway dynamic config: 指向预创建的 ConfigMap
   labels {
     key   = "terway-config"
     value = "e2e-ip-prefix"
   }
+  depends_on = [kubernetes_config_map_v1.e2e_ip_prefix]
+}
 
-  # ConfigMap 应该在节点池之前创建
+# IP Prefix 测试节点池 - AZ K
+resource "alicloud_cs_kubernetes_node_pool" "ip_prefix_azk" {
+  cluster_id            = alicloud_cs_managed_kubernetes.default.id
+  node_pool_name        = "ip-prefix-azk"
+  vswitch_ids           = [alicloud_vswitch.vswitches[1].id]
+  instance_types        = var.worker_instance_types
+  instance_charge_type  = "PostPaid"
+  desired_size          = 1
+  install_cloud_monitor = true
+  system_disk_category  = "cloud_essd"
+  system_disk_size      = 100
+  image_type            = "AliyunLinux3"
+  data_disks {
+    category = "cloud_essd"
+    size     = 120
+  }
+  labels {
+    key   = "terway-config"
+    value = "e2e-ip-prefix"
+  }
   depends_on = [kubernetes_config_map_v1.e2e_ip_prefix]
 }
 

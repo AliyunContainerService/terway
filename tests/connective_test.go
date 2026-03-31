@@ -38,16 +38,16 @@ func getStack() []string {
 // for shared ENI mode on both ECS and Lingjun nodes.
 func TestSharedENI_NetworkPolicy_HealthCheck(t *testing.T) {
 	if !testNetworkPolicy {
-		t.Log("Skip networkPolicy tests")
+		t.Skip("Skip networkPolicy tests")
 		return
 	}
 
 	if terway != "terway-eniip" {
-		t.Logf("TestSharedENI_NetworkPolicy_HealthCheck requires terway-eniip daemonset, current: %s, skipping", terway)
+		t.Skipf("TestSharedENI_NetworkPolicy_HealthCheck requires terway-eniip daemonset, current: %s", terway)
 		return
 	}
 
-	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeECSIPPrefix, NodeTypeLingjunSharedENI}
 
 	var feats []features.Feature
 	for _, nodeType := range nodeTypes {
@@ -55,7 +55,7 @@ func TestSharedENI_NetworkPolicy_HealthCheck(t *testing.T) {
 		feats = append(feats, feat)
 	}
 
-	testenv.Test(t, feats...)
+	testenv.TestInParallel(t, feats...)
 
 	if t.Failed() {
 		isFailed.Store(true)
@@ -66,16 +66,16 @@ func TestSharedENI_NetworkPolicy_HealthCheck(t *testing.T) {
 // for shared ENI mode on both ECS and Lingjun nodes.
 func TestSharedENI_NetworkPolicy_DenyIngressSameNode(t *testing.T) {
 	if !testNetworkPolicy {
-		t.Log("Skip networkPolicy tests")
+		t.Skip("Skip networkPolicy tests")
 		return
 	}
 
 	if terway != "terway-eniip" {
-		t.Logf("TestSharedENI_NetworkPolicy_DenyIngressSameNode requires terway-eniip daemonset, current: %s, skipping", terway)
+		t.Skipf("TestSharedENI_NetworkPolicy_DenyIngressSameNode requires terway-eniip daemonset, current: %s", terway)
 		return
 	}
 
-	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeECSIPPrefix, NodeTypeLingjunSharedENI}
 
 	var feats []features.Feature
 	for _, nodeType := range nodeTypes {
@@ -83,7 +83,7 @@ func TestSharedENI_NetworkPolicy_DenyIngressSameNode(t *testing.T) {
 		feats = append(feats, feat)
 	}
 
-	testenv.Test(t, feats...)
+	testenv.TestInParallel(t, feats...)
 
 	if t.Failed() {
 		isFailed.Store(true)
@@ -94,16 +94,16 @@ func TestSharedENI_NetworkPolicy_DenyIngressSameNode(t *testing.T) {
 // for shared ENI mode on both ECS and Lingjun nodes.
 func TestSharedENI_NetworkPolicy_DenyIngressCrossNode(t *testing.T) {
 	if !testNetworkPolicy {
-		t.Log("Skip networkPolicy tests")
+		t.Skip("Skip networkPolicy tests")
 		return
 	}
 
 	if terway != "terway-eniip" {
-		t.Logf("TestSharedENI_NetworkPolicy_DenyIngressCrossNode requires terway-eniip daemonset, current: %s, skipping", terway)
+		t.Skipf("TestSharedENI_NetworkPolicy_DenyIngressCrossNode requires terway-eniip daemonset, current: %s", terway)
 		return
 	}
 
-	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeECSIPPrefix, NodeTypeLingjunSharedENI}
 
 	var feats []features.Feature
 	for _, nodeType := range nodeTypes {
@@ -111,7 +111,7 @@ func TestSharedENI_NetworkPolicy_DenyIngressCrossNode(t *testing.T) {
 		feats = append(feats, feat)
 	}
 
-	testenv.Test(t, feats...)
+	testenv.TestInParallel(t, feats...)
 
 	if t.Failed() {
 		isFailed.Store(true)
@@ -122,16 +122,16 @@ func TestSharedENI_NetworkPolicy_DenyIngressCrossNode(t *testing.T) {
 // for shared ENI mode on both ECS and Lingjun nodes.
 func TestSharedENI_NetworkPolicy_DenyEgressSameNode(t *testing.T) {
 	if !testNetworkPolicy {
-		t.Log("Skip networkPolicy tests")
+		t.Skip("Skip networkPolicy tests")
 		return
 	}
 
 	if terway != "terway-eniip" {
-		t.Logf("TestSharedENI_NetworkPolicy_DenyEgressSameNode requires terway-eniip daemonset, current: %s, skipping", terway)
+		t.Skipf("TestSharedENI_NetworkPolicy_DenyEgressSameNode requires terway-eniip daemonset, current: %s", terway)
 		return
 	}
 
-	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeECSIPPrefix, NodeTypeLingjunSharedENI}
 
 	var feats []features.Feature
 	for _, nodeType := range nodeTypes {
@@ -139,7 +139,7 @@ func TestSharedENI_NetworkPolicy_DenyEgressSameNode(t *testing.T) {
 		feats = append(feats, feat)
 	}
 
-	testenv.Test(t, feats...)
+	testenv.TestInParallel(t, feats...)
 
 	if t.Failed() {
 		isFailed.Store(true)
@@ -150,16 +150,16 @@ func TestSharedENI_NetworkPolicy_DenyEgressSameNode(t *testing.T) {
 // for shared ENI mode on both ECS and Lingjun nodes.
 func TestSharedENI_NetworkPolicy_DenyEgressCrossNode(t *testing.T) {
 	if !testNetworkPolicy {
-		t.Log("Skip networkPolicy tests")
+		t.Skip("Skip networkPolicy tests")
 		return
 	}
 
 	if terway != "terway-eniip" {
-		t.Logf("TestSharedENI_NetworkPolicy_DenyEgressCrossNode requires terway-eniip daemonset, current: %s, skipping", terway)
+		t.Skipf("TestSharedENI_NetworkPolicy_DenyEgressCrossNode requires terway-eniip daemonset, current: %s", terway)
 		return
 	}
 
-	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeECSIPPrefix, NodeTypeLingjunSharedENI}
 
 	var feats []features.Feature
 	for _, nodeType := range nodeTypes {
@@ -167,7 +167,7 @@ func TestSharedENI_NetworkPolicy_DenyEgressCrossNode(t *testing.T) {
 		feats = append(feats, feat)
 	}
 
-	testenv.Test(t, feats...)
+	testenv.TestInParallel(t, feats...)
 
 	if t.Failed() {
 		isFailed.Store(true)
@@ -182,11 +182,11 @@ func TestSharedENI_NetworkPolicy_DenyEgressCrossNode(t *testing.T) {
 // for shared ENI mode on both ECS and Lingjun nodes.
 func TestSharedENI_HostPort_NodeIP(t *testing.T) {
 	if terway != "terway-eniip" {
-		t.Logf("TestSharedENI_HostPort_NodeIP requires terway-eniip daemonset, current: %s, skipping", terway)
+		t.Skipf("TestSharedENI_HostPort_NodeIP requires terway-eniip daemonset, current: %s", terway)
 		return
 	}
 
-	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeECSIPPrefix, NodeTypeLingjunSharedENI}
 
 	var feats []features.Feature
 	for _, nodeType := range nodeTypes {
@@ -205,11 +205,11 @@ func TestSharedENI_HostPort_NodeIP(t *testing.T) {
 // for shared ENI mode on both ECS and Lingjun nodes.
 func TestSharedENI_HostPort_ExternalIP(t *testing.T) {
 	if terway != "terway-eniip" {
-		t.Logf("TestSharedENI_HostPort_ExternalIP requires terway-eniip daemonset, current: %s, skipping", terway)
+		t.Skipf("TestSharedENI_HostPort_ExternalIP requires terway-eniip daemonset, current: %s", terway)
 		return
 	}
 
-	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeLingjunSharedENI}
+	nodeTypes := []NodeType{NodeTypeECSSharedENI, NodeTypeECSIPPrefix, NodeTypeLingjunSharedENI}
 
 	var feats []features.Feature
 	for _, nodeType := range nodeTypes {
@@ -1022,22 +1022,16 @@ func TestNormal_HostNetworkConnectivity(t *testing.T) {
 			return ctx
 		}).
 		Assess("Host network pod can access server", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			server := NewPod("server", config.Namespace()).
-				WithLabels(map[string]string{"app": "server"}).
-				WithContainer("server", nginxImage, nil)
+			server := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "server", Namespace: config.Namespace()}}
+			client := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: config.Namespace()}}
 
-			client := NewPod("client", config.Namespace()).
-				WithLabels(map[string]string{"app": "client"}).
-				WithContainer("client", nginxImage, nil).
-				WithPodAffinity(map[string]string{"app": "server"})
-
-			err := wait.For(conditions.New(config.Client().Resources()).PodReady(client.Pod),
+			err := wait.For(conditions.New(config.Client().Resources()).PodReady(client),
 				wait.WithTimeout(parsedTimeout),
 				wait.WithInterval(1*time.Second))
 			if err != nil {
 				t.Fatalf("wait client ready failed: %v", err)
 			}
-			err = wait.For(conditions.New(config.Client().Resources()).PodReady(server.Pod),
+			err = wait.For(conditions.New(config.Client().Resources()).PodReady(server),
 				wait.WithTimeout(parsedTimeout),
 				wait.WithInterval(1*time.Second))
 			if err != nil {

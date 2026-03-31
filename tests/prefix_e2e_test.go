@@ -169,7 +169,7 @@ func assessSinglePodIPInPrefix(ctx context.Context, t *testing.T, config *envcon
 
 	// Wait for pod to be running
 	err := wait.For(
-		conditions.New(config.Client().Resources()).PodRunning(pod.Pod),
+		conditions.New(config.Client().Resources()).PodReady(pod.Pod),
 		wait.WithTimeout(3*time.Minute),
 		wait.WithInterval(5*time.Second),
 	)
@@ -221,7 +221,7 @@ func assessMultiplePodsIPInPrefix(ctx context.Context, t *testing.T, config *env
 	// Wait for all pods to be running
 	for _, pod := range pods {
 		err := wait.For(
-			conditions.New(config.Client().Resources()).PodRunning(pod.Pod),
+			conditions.New(config.Client().Resources()).PodReady(pod.Pod),
 			wait.WithTimeout(3*time.Minute),
 			wait.WithInterval(5*time.Second),
 		)
@@ -278,7 +278,7 @@ func assessPodRecreationPrefix(ctx context.Context, t *testing.T, config *envcon
 	}
 
 	err := wait.For(
-		conditions.New(config.Client().Resources()).PodRunning(pod.Pod),
+		conditions.New(config.Client().Resources()).PodReady(pod.Pod),
 		wait.WithTimeout(3*time.Minute),
 		wait.WithInterval(5*time.Second),
 	)
@@ -319,7 +319,7 @@ func assessPodRecreationPrefix(ctx context.Context, t *testing.T, config *envcon
 	ctx = AddResourcesForCleanup(ctx, newPod.Pod)
 
 	err = wait.For(
-		conditions.New(config.Client().Resources()).PodRunning(newPod.Pod),
+		conditions.New(config.Client().Resources()).PodReady(newPod.Pod),
 		wait.WithTimeout(3*time.Minute),
 		wait.WithInterval(5*time.Second),
 	)

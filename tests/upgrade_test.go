@@ -4,7 +4,6 @@ package tests
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -262,14 +261,13 @@ func createClientPod(tc NetworkTestCase, namespace, serverNodeName string, svc *
 	var serverAddr string
 
 	if tc.ServiceType == "ClusterIP" {
-		// For ClusterIP, just use the service's cluster IP
 		serverAddr = net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(int(tc.TargetPort)))
 	} else if tc.ServiceType == "NodePort" {
-		// For NodePort, we need to use a node's IP and the node port
+		nodePort := strconv.Itoa(int(svc.Spec.Ports[0].NodePort))
 		if tc.IPv6 {
-			serverAddr = net.JoinHostPort(serverNodeV6.String(), string(svc.Spec.Ports[0].NodePort))
+			serverAddr = net.JoinHostPort(serverNodeV6.String(), nodePort)
 		} else {
-			serverAddr = net.JoinHostPort(serverNodeV4.String(), string(svc.Spec.Ports[0].NodePort))
+			serverAddr = net.JoinHostPort(serverNodeV4.String(), nodePort)
 		}
 	}
 
@@ -394,27 +392,25 @@ func verifyPodStatus(tc NetworkTestCase) func(ctx context.Context, t *testing.T,
 				return false, err
 			}
 
-			// Check if pod completed
-			if clientPod.Status.Phase != corev1.PodRunning {
-				return true, fmt.Errorf("")
-			}
-			if clientPod.Status.Phase == corev1.PodFailed {
-				return false, fmt.Errorf("client pod failed")
-			}
-
-			for _, status := range clientPod.Status.ContainerStatuses {
-				if status.RestartCount > 0 {
-					return false, fmt.Errorf("client pod has failed")
+			switch clientPod.Status.Phase {
+			case corev1.PodFailed:
+				return true, fmt.Errorf("client pod entered Failed phase")
+			case corev1.PodSucceeded:
+				return true, nil
+			case corev1.PodRunning:
+				for _, status := range clientPod.Status.ContainerStatuses {
+					if status.RestartCount > 0 {
+						return true, fmt.Errorf("client pod container %s restarted %d times", status.Name, status.RestartCount)
+					}
 				}
+				return false, nil
+			default:
+				return false, nil
 			}
-
-			return false, nil
 		}, wait.WithTimeout(time.Minute*30), wait.WithInterval(time.Second*10), wait.WithContext(innerCtx))
 
 		if err != nil {
-			if !errors.Is(err, context.DeadlineExceeded) {
-				t.Fatalf("Client pod has failed: %v", err)
-			}
+			t.Fatalf("Client pod verification failed: %v", err)
 		}
 
 		return ctx

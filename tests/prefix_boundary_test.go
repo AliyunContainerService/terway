@@ -232,6 +232,12 @@ func TestPrefix_Boundary_MaxValue(t *testing.T) {
 func assessAPILimitBoundary(ctx context.Context, t *testing.T, config *envconf.Config, nodeName string) context.Context {
 	t.Logf("Testing API limit boundary on node: %s", nodeName)
 
+	// Reset prefix state to ensure clean starting point
+	t.Log("Reset node prefix state before API limit tests")
+	if err := resetNodePrefixState(ctx, config, t, nodeName, 3*time.Minute); err != nil {
+		t.Logf("Warning: resetNodePrefixState failed: %v", err)
+	}
+
 	// Setup Dynamic Config for this node (initial count, will be updated per test case)
 	var err error
 	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true,"ipv4_prefix_count":10}`)
@@ -283,10 +289,9 @@ func assessAPILimitBoundary(ctx context.Context, t *testing.T, config *envconf.C
 
 		t.Logf("%s: successfully allocated %d prefixes", tc.name, len(prefixes))
 
-		// Clean up for next test case
-		err = cleanupNodePrefixes(ctx, config, t, nodeName)
-		if err != nil {
-			t.Logf("Warning: failed to cleanup prefixes: %v", err)
+		// Reset prefix state for next test case (clean up + wait for completion)
+		if err := resetNodePrefixState(ctx, config, t, nodeName, 3*time.Minute); err != nil {
+			t.Logf("Warning: resetNodePrefixState failed between cases: %v", err)
 		}
 	}
 

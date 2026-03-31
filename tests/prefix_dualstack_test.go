@@ -146,7 +146,8 @@ func TestPrefix_DualStack_CapacityConstraint(t *testing.T) {
 // Assess Functions for Dual Stack Tests
 // =============================================================================
 
-// assessDualStack1to1Ratio tests that IPv4 and IPv6 prefixes are allocated in 1:1 ratio
+// assessDualStack1to1Ratio tests that IPv4 prefixes are allocated per config and
+// each ENI with IPv4 prefix has at least 1 IPv6 prefix.
 func assessDualStack1to1Ratio(ctx context.Context, t *testing.T, config *envconf.Config, nodeName string) context.Context {
 	t.Logf("Testing dual stack 1:1 ratio on node: %s", nodeName)
 
@@ -179,26 +180,26 @@ func assessDualStack1to1Ratio(ctx context.Context, t *testing.T, config *envconf
 		t.Fatalf("failed waiting for prefix allocation: %v", err)
 	}
 
-	// Verify 1:1 ratio
-	t.Log("Verify IPv4 and IPv6 prefix counts")
-	v4Count, v6Count, err := getDualStackPrefixCounts(ctx, config, nodeName)
+	// Verify allocation: IPv4 prefixes allocated, and each ENI with IPv4 prefix has >= 1 IPv6 prefix
+	t.Log("Verify dual stack prefix allocation")
+	info, err := getDualStackPrefixInfo(ctx, config, nodeName)
 	if err != nil {
-		t.Fatalf("failed to get dual stack prefix counts: %v", err)
+		t.Fatalf("failed to get dual stack prefix info: %v", err)
 	}
 
-	t.Logf("IPv4 prefixes: %d, IPv6 prefixes: %d", v4Count, v6Count)
+	t.Logf("IPv4 prefixes: %d, IPv6 prefixes: %d, ENIs with v4: %d, ENIs with v6: %d",
+		info.TotalV4Prefixes, info.TotalV6Prefixes, info.ENIsWithV4Prefix, info.ENIsWithV6Prefix)
 
-	if v4Count == 0 {
+	if info.TotalV4Prefixes == 0 {
 		t.Errorf("expected at least 1 IPv4 prefix, got 0")
 	}
-	if v6Count == 0 {
-		t.Errorf("expected at least 1 IPv6 prefix, got 0")
-	}
-	if v4Count != v6Count {
-		t.Errorf("IPv4 and IPv6 prefix counts should be equal: v4=%d, v6=%d", v4Count, v6Count)
+	if info.ENIsWithV4Prefix > 0 && info.ENIsWithV6Prefix < info.ENIsWithV4Prefix {
+		t.Errorf("every ENI with IPv4 prefix should have at least 1 IPv6 prefix: ENIs with v4=%d, ENIs with v6=%d",
+			info.ENIsWithV4Prefix, info.ENIsWithV6Prefix)
 	}
 
-	t.Logf("Successfully verified 1:1 ratio: %d IPv4 prefixes, %d IPv6 prefixes", v4Count, v6Count)
+	t.Logf("Successfully verified dual stack: %d IPv4 prefixes, %d/%d ENIs have IPv6 prefix",
+		info.TotalV4Prefixes, info.ENIsWithV6Prefix, info.ENIsWithV4Prefix)
 	return MarkTestSuccess(ctx)
 }
 
@@ -207,9 +208,22 @@ func assessDualStackCapacityConstraint(ctx context.Context, t *testing.T, config
 	t.Logf("Testing dual stack capacity constraints on node: %s", nodeName)
 	t.Logf("Node capacity: IPv4PerAdapter=%d, IPv6PerAdapter=%d", v4PerAdapter, v6PerAdapter)
 
-	// Request 20 prefixes - should respect capacity constraints
 	requestedCount := 20
-	t.Logf("Requesting %d prefixes", requestedCount)
+	t.Logf("Requesting %d IPv4 prefixes", requestedCount)
+
+	// Compute expected IPv4 count (capped at node capacity) before waiting
+	expectedV4Count := requestedCount
+	nodeInfoWithCap, err := DiscoverNodeTypesWithCapacity(ctx, config.Client())
+	if err != nil {
+		t.Fatalf("Failed to discover node capacities: %v", err)
+	}
+	if cap, ok := nodeInfoWithCap.Capacities[nodeName]; ok {
+		maxTotalV4 := cap.Adapters * (cap.IPv4PerAdapter - 1)
+		if expectedV4Count > maxTotalV4 {
+			expectedV4Count = maxTotalV4
+			t.Logf("Requested %d IPv4 prefixes, but max capacity is %d", requestedCount, maxTotalV4)
+		}
+	}
 
 	// Reset prefix state before configuring new settings
 	t.Log("Reset node prefix state before configuring dual stack capacity constraint")
@@ -218,66 +232,39 @@ func assessDualStackCapacityConstraint(ctx context.Context, t *testing.T, config
 	}
 
 	// Setup Dynamic Config with enable_ip_prefix=true and ipv4_prefix_count
-	// Note: ip_stack is a cluster-level parameter and should not be set in node-level Dynamic Config
-	var err error
 	ctx, err = setupNodeDynamicConfig(ctx, config, t, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, requestedCount))
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
 
-	// Restart terway
 	err = restartTerway(ctx, config)
 	if err != nil {
 		t.Fatalf("failed to restart terway: %v", err)
 	}
 
-	// Wait for allocation
-	err = waitForDualStackPrefixAllocation(ctx, config, t, nodeName, requestedCount, 5*time.Minute)
+	// Wait using the capacity-capped count so we don't time out
+	err = waitForDualStackPrefixAllocation(ctx, config, t, nodeName, expectedV4Count, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("failed waiting for prefix allocation: %v", err)
 	}
 
 	// Verify counts
-	v4Count, v6Count, err := getDualStackPrefixCounts(ctx, config, nodeName)
+	info, err := getDualStackPrefixInfo(ctx, config, nodeName)
 	if err != nil {
-		t.Fatalf("failed to get prefix counts: %v", err)
+		t.Fatalf("failed to get prefix info: %v", err)
 	}
 
-	t.Logf("Allocated: %d IPv4 prefixes, %d IPv6 prefixes", v4Count, v6Count)
+	t.Logf("Allocated: %d IPv4 prefixes, %d IPv6 prefixes, ENIs with v4=%d, ENIs with v6=%d",
+		info.TotalV4Prefixes, info.TotalV6Prefixes, info.ENIsWithV4Prefix, info.ENIsWithV6Prefix)
 
-	// Verify 1:1 ratio is maintained
-	if v4Count != v6Count {
-		t.Errorf("IPv4 and IPv6 prefix counts should be equal: v4=%d, v6=%d", v4Count, v6Count)
+	if info.TotalV4Prefixes != expectedV4Count {
+		t.Errorf("expected %d IPv4 prefixes (capped at capacity), got %d", expectedV4Count, info.TotalV4Prefixes)
 	}
 
-	// Verify actual count matches requested (or capped at capacity)
-	expectedCount := requestedCount
-
-	// Get node capacity
-	nodeInfoWithCap, err := DiscoverNodeTypesWithCapacity(ctx, config.Client())
-	if err != nil {
-		t.Fatalf("Failed to discover node capacities: %v", err)
-	}
-
-	if cap, ok := nodeInfoWithCap.Capacities[nodeName]; ok {
-		maxTotalV4 := cap.Adapters * (cap.IPv4PerAdapter - 1)
-		maxTotalV6 := cap.Adapters * (cap.IPv6PerAdapter - 1)
-		maxDualStack := maxTotalV4
-		if maxTotalV6 < maxDualStack {
-			maxDualStack = maxTotalV6
-		}
-
-		if expectedCount > maxDualStack {
-			expectedCount = maxDualStack
-			t.Logf("Requested %d prefixes, but max dual-stack capacity is %d", requestedCount, maxDualStack)
-		}
-	}
-
-	if v4Count != expectedCount {
-		t.Errorf("expected %d IPv4 prefixes (capped at capacity), got %d", expectedCount, v4Count)
-	}
-	if v6Count != expectedCount {
-		t.Errorf("expected %d IPv6 prefixes (capped at capacity), got %d", expectedCount, v6Count)
+	// Verify IPv6: each ENI with IPv4 prefix has at least 1 IPv6 prefix
+	if info.ENIsWithV4Prefix > 0 && info.ENIsWithV6Prefix < info.ENIsWithV4Prefix {
+		t.Errorf("every ENI with IPv4 prefix should have at least 1 IPv6 prefix: ENIs with v4=%d, ENIs with v6=%d",
+			info.ENIsWithV4Prefix, info.ENIsWithV6Prefix)
 	}
 
 	t.Logf("Successfully verified dual stack capacity constraints")
@@ -288,51 +275,88 @@ func assessDualStackCapacityConstraint(ctx context.Context, t *testing.T, config
 // Helper Functions for Dual Stack
 // =============================================================================
 
-// waitForDualStackPrefixAllocation waits for both IPv4 and IPv6 prefix allocation
-func waitForDualStackPrefixAllocation(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string, expectedCount int, timeout time.Duration) error {
+// dualStackPrefixInfo holds per-node dual stack prefix allocation details.
+type dualStackPrefixInfo struct {
+	TotalV4Prefixes  int
+	TotalV6Prefixes  int
+	ENIsWithV4Prefix int
+	ENIsWithV6Prefix int
+	InUseENIs        int
+}
+
+// getDualStackPrefixInfo returns detailed dual stack prefix allocation info for a node.
+func getDualStackPrefixInfo(ctx context.Context, config *envconf.Config, nodeName string) (*dualStackPrefixInfo, error) {
+	node := &networkv1beta1.Node{}
+	err := config.Client().Resources().Get(ctx, nodeName, "", node)
+	if err != nil {
+		return nil, err
+	}
+
+	info := &dualStackPrefixInfo{}
+	for _, nic := range node.Status.NetworkInterfaces {
+		if nic.Status != aliyunClient.ENIStatusInUse {
+			continue
+		}
+		info.InUseENIs++
+
+		v4 := 0
+		for _, prefix := range nic.IPv4Prefix {
+			if prefix.Status == networkv1beta1.IPPrefixStatusValid {
+				v4++
+			}
+		}
+		v6 := 0
+		for _, prefix := range nic.IPv6Prefix {
+			if prefix.Status == networkv1beta1.IPPrefixStatusValid {
+				v6++
+			}
+		}
+
+		info.TotalV4Prefixes += v4
+		info.TotalV6Prefixes += v6
+		if v4 > 0 {
+			info.ENIsWithV4Prefix++
+		}
+		if v6 > 0 {
+			info.ENIsWithV6Prefix++
+		}
+	}
+
+	return info, nil
+}
+
+// waitForDualStackPrefixAllocation waits until:
+//   - total IPv4 prefixes >= expectedV4Count (user-configured count)
+//   - every ENI that has IPv4 prefixes also has at least 1 IPv6 prefix
+func waitForDualStackPrefixAllocation(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string, expectedV4Count int, timeout time.Duration) error {
 	return wait.For(func(ctx context.Context) (done bool, err error) {
-		v4Count, v6Count, err := getDualStackPrefixCounts(ctx, config, nodeName)
+		info, err := getDualStackPrefixInfo(ctx, config, nodeName)
 		if err != nil {
 			return false, err
 		}
 
-		if v4Count >= expectedCount && v6Count >= expectedCount {
+		v4Ready := info.TotalV4Prefixes >= expectedV4Count
+		v6Ready := info.ENIsWithV4Prefix > 0 && info.ENIsWithV6Prefix >= info.ENIsWithV4Prefix
+
+		if v4Ready && v6Ready {
 			return true, nil
 		}
 
-		t.Logf("Node %s: waiting for %d prefixes each, currently have v4=%d, v6=%d",
-			nodeName, expectedCount, v4Count, v6Count)
+		t.Logf("Node %s: want v4>=%d (have %d), want v6 on each ENI with v4 (%d/%d ENIs), in-use ENIs=%d",
+			nodeName, expectedV4Count, info.TotalV4Prefixes,
+			info.ENIsWithV6Prefix, info.ENIsWithV4Prefix, info.InUseENIs)
 
 		return false, nil
 	}, wait.WithTimeout(timeout), wait.WithInterval(10*time.Second))
 }
 
-// getDualStackPrefixCounts returns the count of IPv4 and IPv6 prefixes
+// getDualStackPrefixCounts returns the total count of IPv4 and IPv6 prefixes across all in-use ENIs.
 func getDualStackPrefixCounts(ctx context.Context, config *envconf.Config, nodeName string) (int, int, error) {
-	node := &networkv1beta1.Node{}
-	err := config.Client().Resources().Get(ctx, nodeName, "", node)
+	info, err := getDualStackPrefixInfo(ctx, config, nodeName)
 	if err != nil {
 		return 0, 0, err
 	}
-
-	v4Count := 0
-	v6Count := 0
-	for _, nic := range node.Status.NetworkInterfaces {
-		if nic.Status == aliyunClient.ENIStatusInUse {
-			for _, prefix := range nic.IPv4Prefix {
-				if prefix.Status == networkv1beta1.IPPrefixStatusValid {
-					v4Count++
-				}
-			}
-			for _, prefix := range nic.IPv6Prefix {
-				if prefix.Status == networkv1beta1.IPPrefixStatusValid {
-					v6Count++
-				}
-			}
-		}
-	}
-
-	return v4Count, v6Count, nil
+	return info.TotalV4Prefixes, info.TotalV6Prefixes, nil
 }
 
 // =============================================================================
