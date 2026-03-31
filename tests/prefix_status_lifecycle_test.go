@@ -28,18 +28,7 @@ import (
 // FrozenExpireAt has passed are reverted back to Valid by the Controller,
 // making them available for allocation again.
 func TestPrefix_Status_FrozenExpireRevert(t *testing.T) {
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	ctx := context.Background()
 	nodeInfo, err := DiscoverNodeTypes(ctx, testenv.EnvConf().Client())
@@ -70,28 +59,13 @@ func TestPrefix_Status_FrozenExpireRevert(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // TestPrefix_Status_PodAllocFromValidOnly tests that Pods only get IPs from
 // Valid prefixes, not from Frozen/Invalid/Deleting ones.
 func TestPrefix_Status_PodAllocFromValidOnly(t *testing.T) {
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	ctx := context.Background()
 	nodeInfo, err := DiscoverNodeTypes(ctx, testenv.EnvConf().Client())
@@ -122,11 +96,7 @@ func TestPrefix_Status_PodAllocFromValidOnly(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // =============================================================================
@@ -144,7 +114,7 @@ func assessFrozenExpireRevert(ctx context.Context, t *testing.T, config *envconf
 	// Step 1: Enable prefix mode with 3 prefixes
 	t.Log("Step 1: Enable prefix mode with ipv4_prefix_count=3")
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, `{"enable_ip_prefix":true,"ipv4_prefix_count":3}`)
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true,"ipv4_prefix_count":3}`)
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
@@ -225,7 +195,7 @@ func assessPodAllocFromValidOnly(ctx context.Context, t *testing.T, config *envc
 	// Step 1: Enable prefix mode with 5 prefixes
 	t.Log("Step 1: Enable prefix mode with ipv4_prefix_count=5")
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, `{"enable_ip_prefix":true,"ipv4_prefix_count":5}`)
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true,"ipv4_prefix_count":5}`)
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}

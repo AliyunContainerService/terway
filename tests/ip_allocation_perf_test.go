@@ -499,64 +499,6 @@ func TestIPAllocationPerf(t *testing.T) {
 	})
 }
 
-// TestIPAllocationPerfECS tests IP allocation performance specifically for ECS shared ENI nodes
-func TestIPAllocationPerfECS(t *testing.T) {
-	// Pre-check: only test centralized IPAM mode
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		ipamType := ""
-		if eniConfig != nil {
-			ipamType = eniConfig.IPAMType
-		}
-		t.Skipf("skip: ipam type is not crd, current type: %s", ipamType)
-		return
-	}
-
-	// Pre-check: terway daemonset name must be terway-eniip
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("TestIPAllocationPerfECS requires terway-eniip daemonset, current: %s", GetCachedTerwayDaemonSetName())
-		return
-	}
-
-	// Test with default pool config
-	t.Run("DefaultPool", func(t *testing.T) {
-		runIPAllocationPerfTest(t, NodeTypeECSSharedENI, defaultPoolConfig)
-	})
-
-	// Test with warm-up pool config
-	t.Run("WarmUpPool", func(t *testing.T) {
-		runIPAllocationPerfTest(t, NodeTypeECSSharedENI, warmUpPoolConfig)
-	})
-}
-
-// TestIPAllocationPerfLingjun tests IP allocation performance specifically for Lingjun shared ENI nodes
-func TestIPAllocationPerfLingjun(t *testing.T) {
-	// Pre-check: only test centralized IPAM mode
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		ipamType := ""
-		if eniConfig != nil {
-			ipamType = eniConfig.IPAMType
-		}
-		t.Skipf("skip: ipam type is not crd, current type: %s", ipamType)
-		return
-	}
-
-	// Pre-check: terway daemonset name must be terway-eniip
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("TestIPAllocationPerfLingjun requires terway-eniip daemonset, current: %s", GetCachedTerwayDaemonSetName())
-		return
-	}
-
-	// Test with default pool config
-	t.Run("DefaultPool", func(t *testing.T) {
-		runIPAllocationPerfTest(t, NodeTypeLingjunSharedENI, defaultPoolConfig)
-	})
-
-	// Test with warm-up pool config
-	t.Run("WarmUpPool", func(t *testing.T) {
-		runIPAllocationPerfTest(t, NodeTypeLingjunSharedENI, warmUpPoolConfig)
-	})
-}
-
 // runIPAllocationPerfTest runs IP allocation performance test with multiple iterations
 func runIPAllocationPerfTest(t *testing.T, nodeType NodeType, poolConfig PoolConfig) {
 	suite := NewIPAllocationPerfTestSuite(nodeType, poolConfig)

@@ -34,25 +34,7 @@ var ipPrefixNodesContextKey = ipPrefixNodesContextKeyType{}
 //   - It validates actual Pod IP allocation against prefix CIDR ranges
 //   - It is a more production-like end-to-end validation
 func TestPrefix_E2E_PodIPAllocation(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		ipamType := ""
-		if eniConfig != nil {
-			ipamType = eniConfig.IPAMType
-		}
-		t.Skipf("skip: ipam type is not crd, current type: %s", ipamType)
-		return
-	}
-
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("TestPrefix_E2E requires terway-eniip daemonset, current: %s", GetCachedTerwayDaemonSetName())
-		return
-	}
-
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("TestPrefix_E2E requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover IP Prefix nodes
 	ctx := context.Background()
@@ -115,31 +97,14 @@ func TestPrefix_E2E_PodIPAllocation(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // TestPrefix_E2E_NodeSetup validates the node configuration flow for IP Prefix mode.
 // It verifies that the ConfigMap, node labels, and Node CR are correctly configured.
 func TestPrefix_E2E_NodeSetup(t *testing.T) {
 	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	ctx := context.Background()
 	nodeInfo, err := DiscoverNodeTypes(ctx, testenv.EnvConf().Client())
@@ -180,11 +145,7 @@ func TestPrefix_E2E_NodeSetup(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // =============================================================================

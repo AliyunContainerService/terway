@@ -740,22 +740,28 @@ func ValidatePodHasPodNetworking(pod *corev1.Pod, pnName string) error {
 
 // ValidatePodResourceRequests validates that pod has the correct resource requests based on ENI attach type
 func ValidatePodResourceRequests(pod *corev1.Pod, eniAttachType networkv1beta1.ENIAttachType) error {
-	var expectedResourceName string
-	switch eniAttachType {
-	case networkv1beta1.ENIOptionTypeENI:
-		expectedResourceName = "aliyun/eni"
-	case networkv1beta1.ENIOptionTypeTrunk, networkv1beta1.ENIOptionTypeDefault:
-		expectedResourceName = "aliyun/member-eni"
-	default:
-		return fmt.Errorf("unknown ENI attach type: %s", eniAttachType)
-	}
-
 	if pod.Spec.Containers[0].Resources.Requests == nil {
 		return fmt.Errorf("pod does not have resource requests")
 	}
 
-	if _, exists := pod.Spec.Containers[0].Resources.Requests[corev1.ResourceName(expectedResourceName)]; !exists {
-		return fmt.Errorf("expected resource request for %s", expectedResourceName)
+	reqs := pod.Spec.Containers[0].Resources.Requests
+	switch eniAttachType {
+	case networkv1beta1.ENIOptionTypeENI:
+		if _, exists := reqs[corev1.ResourceName("aliyun/eni")]; !exists {
+			return fmt.Errorf("expected resource request for aliyun/eni")
+		}
+	case networkv1beta1.ENIOptionTypeTrunk:
+		if _, exists := reqs[corev1.ResourceName("aliyun/member-eni")]; !exists {
+			return fmt.Errorf("expected resource request for aliyun/member-eni")
+		}
+	case networkv1beta1.ENIOptionTypeDefault:
+		_, hasENI := reqs[corev1.ResourceName("aliyun/eni")]
+		_, hasMember := reqs[corev1.ResourceName("aliyun/member-eni")]
+		if !hasENI && !hasMember {
+			return fmt.Errorf("expected resource request for aliyun/eni or aliyun/member-eni (Default attach type)")
+		}
+	default:
+		return fmt.Errorf("unknown ENI attach type: %s", eniAttachType)
 	}
 
 	return nil

@@ -23,21 +23,7 @@ import (
 
 // TestPrefix_Basic_SingleENI tests single ENI prefix allocation
 func TestPrefix_Basic_SingleENI(t *testing.T) {
-	// Pre-check: only test centralized IPAM mode
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover node capacities to find suitable nodes
 	ctx := context.Background()
@@ -83,11 +69,7 @@ func TestPrefix_Basic_SingleENI(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // =============================================================================
@@ -107,7 +89,7 @@ func assessPrefixSingleENI(ctx context.Context, t *testing.T, config *envconf.Co
 	// Configure ipv4_prefix_count=5 via Dynamic Config (node-specific ConfigMap)
 	t.Log("Configure ipv4_prefix_count=5 via Dynamic Config")
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, `{"enable_ip_prefix":true,"ipv4_prefix_count":5}`)
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true,"ipv4_prefix_count":5}`)
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}

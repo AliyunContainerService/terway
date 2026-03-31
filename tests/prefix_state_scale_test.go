@@ -33,19 +33,7 @@ type nodeCapacity struct {
 
 // TestPrefix_State_Transition tests ENI state machine transitions
 func TestPrefix_State_Transition(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover nodes
 	ctx := context.Background()
@@ -78,28 +66,12 @@ func TestPrefix_State_Transition(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // TestPrefix_State_DynamicScaleUp tests dynamic prefix scaling up
 func TestPrefix_State_DynamicScaleUp(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover nodes
 	ctx := context.Background()
@@ -132,11 +104,7 @@ func TestPrefix_State_DynamicScaleUp(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // =============================================================================
@@ -146,19 +114,7 @@ func TestPrefix_State_DynamicScaleUp(t *testing.T) {
 // TestPrefix_Scale_SingleENIPrefixes tests prefix allocation that fits in single ENI
 // Scenario: Set prefix count = (IPv4PerAdapter - 1), expect 1 ENI with correct prefix count
 func TestPrefix_Scale_SingleENIPrefixes(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover node capacities
 	ctx := context.Background()
@@ -207,29 +163,13 @@ func TestPrefix_Scale_SingleENIPrefixes(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // TestPrefix_Scale_MultiENIPrefixes tests prefix allocation requiring multiple ENIs
 // Scenario: Set prefix count = IPv4PerAdapter, expect 2 ENIs with correct prefix distribution
 func TestPrefix_Scale_MultiENIPrefixes(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover node capacities
 	ctx := context.Background()
@@ -278,30 +218,14 @@ func TestPrefix_Scale_MultiENIPrefixes(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // TestPrefix_Scale_MaxCapacity tests maximum capacity prefix allocation across all nodes
 // Scenario: Set prefix count = (Adapters-1)*(IPv4PerAdapter-1), verify each node fills to max
 // Note: Primary NIC is excluded from prefix allocation
 func TestPrefix_Scale_MaxCapacity(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover node capacities
 	ctx := context.Background()
@@ -354,28 +278,12 @@ func TestPrefix_Scale_MaxCapacity(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // TestPrefix_Scale_HighFrequencyPodCreation tests high frequency pod creation with prefixes
 func TestPrefix_Scale_HighFrequencyPodCreation(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover nodes
 	ctx := context.Background()
@@ -408,11 +316,7 @@ func TestPrefix_Scale_HighFrequencyPodCreation(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // =============================================================================
@@ -426,7 +330,7 @@ func assessStateTransition(ctx context.Context, t *testing.T, config *envconf.Co
 	// Step 1: Enable prefix mode with 5 prefixes via Dynamic Config
 	t.Log("Step 1: Enable prefix mode with ipv4_prefix_count=5")
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, `{"enable_ip_prefix":true,"ipv4_prefix_count":5}`)
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true,"ipv4_prefix_count":5}`)
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
@@ -504,7 +408,7 @@ func assessDynamicScaleUp(ctx context.Context, t *testing.T, config *envconf.Con
 	// Initial allocation of 5 prefixes via Dynamic Config
 	t.Log("Step 1: Initial allocation of 5 prefixes")
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, `{"enable_ip_prefix":true,"ipv4_prefix_count":5}`)
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true,"ipv4_prefix_count":5}`)
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
@@ -579,7 +483,7 @@ func assessSingleENIPrefixes(ctx context.Context, t *testing.T, config *envconf.
 
 	// Configure ipv4_prefix_count = (IPv4PerAdapter - 1) via Dynamic Config
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, expectedPrefixes))
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, expectedPrefixes))
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
@@ -635,7 +539,7 @@ func assessMultiENIPrefixes(ctx context.Context, t *testing.T, config *envconf.C
 
 	// Configure ipv4_prefix_count = IPv4PerAdapter via Dynamic Config
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, expectedPrefixes))
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, expectedPrefixes))
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
@@ -709,7 +613,7 @@ func assessMaxCapacity(ctx context.Context, t *testing.T, config *envconf.Config
 	for _, nc := range nodes {
 		t.Logf("Setup Dynamic Config for node %s: maxPrefixes=%d", nc.nodeName, nc.maxPrefixes)
 		var err error
-		ctx, err = setupNodeDynamicConfig(ctx, config, t, nc.nodeName, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, nc.maxPrefixes))
+		ctx, err = setupNodeDynamicConfig(ctx, config, t, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, nc.maxPrefixes))
 		if err != nil {
 			t.Fatalf("failed to setup node dynamic config for node %s: %v", nc.nodeName, err)
 		}
@@ -766,7 +670,7 @@ func assessHighFrequencyPodCreation(ctx context.Context, t *testing.T, config *e
 	// Pre-allocate 20 prefixes (320 IPs) via Dynamic Config
 	t.Log("Step 1: Pre-allocate 20 prefixes")
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, `{"enable_ip_prefix":true,"ipv4_prefix_count":20}`)
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true,"ipv4_prefix_count":20}`)
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}

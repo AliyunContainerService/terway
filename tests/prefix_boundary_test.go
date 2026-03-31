@@ -21,19 +21,7 @@ import (
 
 // TestPrefix_Boundary_APILimit tests the API limit boundary (10 prefixes per call)
 func TestPrefix_Boundary_APILimit(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover node capacities
 	ctx := context.Background()
@@ -79,28 +67,12 @@ func TestPrefix_Boundary_APILimit(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // TestPrefix_Boundary_ENICapacity tests the ENI capacity boundary
 func TestPrefix_Boundary_ENICapacity(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover node capacities
 	ctx := context.Background()
@@ -151,28 +123,12 @@ func TestPrefix_Boundary_ENICapacity(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // TestPrefix_Boundary_ZeroAndMin tests zero and minimum prefix count
 func TestPrefix_Boundary_ZeroAndMin(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover nodes
 	ctx := context.Background()
@@ -205,28 +161,12 @@ func TestPrefix_Boundary_ZeroAndMin(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // TestPrefix_Boundary_MaxValue tests maximum prefix count
 func TestPrefix_Boundary_MaxValue(t *testing.T) {
-	// Pre-checks
-	if eniConfig == nil || eniConfig.IPAMType != "crd" {
-		t.Skipf("skip: ipam type is not crd")
-		return
-	}
-	if GetCachedTerwayDaemonSetName() != "terway-eniip" {
-		t.Skipf("Requires terway-eniip daemonset")
-		return
-	}
-	if !RequireTerwayVersion("v1.17.0") {
-		t.Skipf("Requires terway version >= v1.17.0")
-		return
-	}
+	skipIfNotPrefixTestEnvironment(t)
 
 	// Discover node capacities
 	ctx := context.Background()
@@ -281,11 +221,7 @@ func TestPrefix_Boundary_MaxValue(t *testing.T) {
 		}).
 		Feature()
 
-	testenv.Test(t, feat)
-
-	if t.Failed() {
-		isFailed.Store(true)
-	}
+	runPrefixFeatureTest(t, feat)
 }
 
 // =============================================================================
@@ -298,7 +234,7 @@ func assessAPILimitBoundary(ctx context.Context, t *testing.T, config *envconf.C
 
 	// Setup Dynamic Config for this node (initial count, will be updated per test case)
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, `{"enable_ip_prefix":true,"ipv4_prefix_count":10}`)
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true,"ipv4_prefix_count":10}`)
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
@@ -373,7 +309,7 @@ func assessENICapacityBoundary(ctx context.Context, t *testing.T, config *envcon
 
 	// Setup Dynamic Config for this node
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, requestedCount))
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, requestedCount))
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
@@ -429,7 +365,7 @@ func assessZeroAndMinBoundary(ctx context.Context, t *testing.T, config *envconf
 	// Test Case 1: ipv4_prefix_count=0 via Dynamic Config
 	t.Log("Test Case 1: ipv4_prefix_count=0")
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, `{"enable_ip_prefix":true,"ipv4_prefix_count":0}`)
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true,"ipv4_prefix_count":0}`)
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
@@ -498,7 +434,7 @@ func assessMaxValueBoundary(ctx context.Context, t *testing.T, config *envconf.C
 
 	// Setup Dynamic Config with requested count exceeding capacity
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, nodeName, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, requestedCount))
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, requestedCount))
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
