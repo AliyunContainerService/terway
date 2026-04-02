@@ -1541,6 +1541,15 @@ func assignEniPrefixWithOptions(ctx context.Context, node *networkv1beta1.Node, 
 		"existingV6", existingV6Prefixes, "pendingV6", pendingV6Prefixes, "remainingV6", remainingV6Demand,
 		"existingV4Capacity", existingV4Capacity)
 
+	// Trunk ENI must be created regardless of prefix demand (for member ENI support).
+	for _, option := range options {
+		if option.eniRef == nil && option.eniTypeKey == trunkKey {
+			if eniSpec.EnableIPv4 {
+				option.addIPv4N = 1
+			}
+		}
+	}
+
 	// Check if existing InUse ENIs have enough capacity for remaining demand.
 	// If so, skip creating new ENIs - syncPrefixAllocation will add prefixes to existing ENIs.
 	// This prevents creating unnecessary ENIs when prefix mode is enabled on nodes that
