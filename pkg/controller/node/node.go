@@ -42,6 +42,8 @@ const (
 	ControllerName = "node"
 
 	finalizer = "network.alibabacloud.com/node-controller"
+
+	True = "true"
 )
 
 func init() {
@@ -402,7 +404,7 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		node.Annotations = make(map[string]string)
 	}
 	node.Labels["name"] = k8sNode.Name
-	node.Labels[types.LingJunNodeLabelKey] = "true"
+	node.Labels[types.LingJunNodeLabelKey] = True
 
 	prev := node.Labels[types.ExclusiveENIModeLabel]
 	if prev == "" {
@@ -427,7 +429,7 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		node.Spec.NodeCap.NetworkCardsCount = ptr.To(0)
 		node.Spec.NodeCap.NetworkCards = nil
 
-		isEni, err := r.hasPrimaryENI(ctx, node.Spec.NodeMetadata.InstanceID)
+		isEni, err := r.useECSLink(ctx, node.Spec.NodeMetadata.InstanceID)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
@@ -507,17 +509,41 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	return reconcile.Result{}, err
 }
 
-func (r *ReconcileNode) hasPrimaryENI(ctx context.Context, instanceID string) (bool, error) {
+// useECSLink checks if the instance should use the ECS link for EFLO nodes.
+// Returns true if:
+// 1. Instance has a Primary ENI (new ENI link instances), OR
+// 2. Instance has an ENI with tags leni_primary=true and support_eni=true (migrated instances)
+func (r *ReconcileNode) useECSLink(ctx context.Context, instanceID string) (bool, error) {
 	req := &aliyunClient.DescribeNetworkInterfaceOptions{
-		InstanceID:   &instanceID,
-		InstanceType: ptr.To(aliyunClient.ENITypePrimary),
+		InstanceID: &instanceID,
 	}
-	resp, err := r.aliyun.DescribeNetworkInterfaceV2(ctx, req)
+	enis, err := r.aliyun.DescribeNetworkInterfaceV2(ctx, req)
 	if err != nil {
 		return false, err
 	}
 
-	return len(resp) == 1, nil
+	for _, eni := range enis {
+		// Case 1: New ENI link instances have a Primary ENI
+		if eni.Type == aliyunClient.ENITypePrimary {
+			return true, nil
+		}
+
+		// Case 2: Migrated ENO instances with ECS capability have special tags
+		var leniPrimary, supportENI bool
+		for _, tag := range eni.Tags {
+			if tag.Key == "leni_primary" && tag.Value == True {
+				leniPrimary = true
+			}
+			if tag.Key == "support_eni" && tag.Value == True {
+				supportENI = true
+			}
+		}
+		if leniPrimary && supportENI {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (r *ReconcileNode) delete(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {

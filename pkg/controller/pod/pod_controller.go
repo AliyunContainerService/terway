@@ -662,6 +662,13 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 				Namespace: podENI.Namespace,
 			}
 
+			if enoAPI := podENI.Annotations[types.ENOApi]; enoAPI != "" {
+				if cr.Annotations == nil {
+					cr.Annotations = make(map[string]string)
+				}
+				cr.Annotations[types.ENOApi] = enoAPI
+			}
+
 			err = m.client.Create(ctx, cr)
 			if err != nil {
 				// delete the eni, as we can not store the eni info

@@ -18,6 +18,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	register "github.com/AliyunContainerService/terway/pkg/controller"
@@ -515,6 +516,165 @@ var _ = Describe("Node Controller", func() {
 				Expect(resource.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]).To(Equal("eniOnly"))
 				verifyNetworkCardsCount(ctx, nodeName, 0)
 			})
+		})
+	})
+
+	Context("useECSLink", func() {
+		const nodeName = "test-useECSLink-node"
+
+		AfterEach(func() {
+			cleanupNode(ctx, nodeName)
+		})
+
+		It("should return true when Primary ENI exists (new ENI link instances)", func() {
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-primary",
+					Type:               aliyunClient.ENITypePrimary,
+				},
+				{
+					NetworkInterfaceID: "eni-secondary",
+					Type:               aliyunClient.ENITypeSecondary,
+				},
+			}, nil)
+
+			reconciler := createReconciler(false, true)
+			result, err := reconciler.useECSLink(ctx, "test-instance-id")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(BeTrue())
+		})
+
+		It("should return true when ENI has migration tags (leni_primary=true && support_eni=true)", func() {
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-secondary-1",
+					Type:               aliyunClient.ENITypeSecondary,
+					Tags: []ecs.Tag{
+						{Key: "leni_primary", Value: "true"},
+						{Key: "support_eni", Value: "true"},
+					},
+				},
+				{
+					NetworkInterfaceID: "eni-secondary-2",
+					Type:               aliyunClient.ENITypeSecondary,
+				},
+			}, nil)
+
+			reconciler := createReconciler(false, true)
+			result, err := reconciler.useECSLink(ctx, "test-instance-id")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(BeTrue())
+		})
+
+		It("should return false when only leni_primary tag exists without support_eni", func() {
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-secondary",
+					Type:               aliyunClient.ENITypeSecondary,
+					Tags: []ecs.Tag{
+						{Key: "leni_primary", Value: "true"},
+					},
+				},
+			}, nil)
+
+			reconciler := createReconciler(false, true)
+			result, err := reconciler.useECSLink(ctx, "test-instance-id")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(BeFalse())
+		})
+
+		It("should return false when only support_eni tag exists without leni_primary", func() {
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-secondary",
+					Type:               aliyunClient.ENITypeSecondary,
+					Tags: []ecs.Tag{
+						{Key: "support_eni", Value: "true"},
+					},
+				},
+			}, nil)
+
+			reconciler := createReconciler(false, true)
+			result, err := reconciler.useECSLink(ctx, "test-instance-id")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(BeFalse())
+		})
+
+		It("should return false when no Primary ENI and no migration tags (old ENO link instances)", func() {
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-secondary-1",
+					Type:               aliyunClient.ENITypeSecondary,
+				},
+				{
+					NetworkInterfaceID: "eni-secondary-2",
+					Type:               aliyunClient.ENITypeSecondary,
+				},
+			}, nil)
+
+			reconciler := createReconciler(false, true)
+			result, err := reconciler.useECSLink(ctx, "test-instance-id")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(BeFalse())
+		})
+
+		It("should return false when no ENIs exist", func() {
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{}, nil)
+
+			reconciler := createReconciler(false, true)
+			result, err := reconciler.useECSLink(ctx, "test-instance-id")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(BeFalse())
+		})
+
+		It("should return error when API call fails", func() {
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil, errors.New("API error"))
+
+			reconciler := createReconciler(false, true)
+			_, err := reconciler.useECSLink(ctx, "test-instance-id")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("API error"))
+		})
+
+		It("should return true when migration tags exist on second ENI", func() {
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-secondary-1",
+					Type:               aliyunClient.ENITypeSecondary,
+				},
+				{
+					NetworkInterfaceID: "eni-secondary-2",
+					Type:               aliyunClient.ENITypeSecondary,
+					Tags: []ecs.Tag{
+						{Key: "leni_primary", Value: "true"},
+						{Key: "support_eni", Value: "true"},
+						{Key: "other_tag", Value: "other_value"},
+					},
+				},
+			}, nil)
+
+			reconciler := createReconciler(false, true)
+			result, err := reconciler.useECSLink(ctx, "test-instance-id")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(BeTrue())
+		})
+
+		It("should return false when tag values are not 'true'", func() {
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				{
+					NetworkInterfaceID: "eni-secondary",
+					Type:               aliyunClient.ENITypeSecondary,
+					Tags: []ecs.Tag{
+						{Key: "leni_primary", Value: "false"},
+						{Key: "support_eni", Value: "true"},
+					},
+				},
+			}, nil)
+
+			reconciler := createReconciler(false, true)
+			result, err := reconciler.useECSLink(ctx, "test-instance-id")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(BeFalse())
 		})
 	})
 

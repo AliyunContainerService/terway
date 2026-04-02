@@ -135,19 +135,51 @@ func (r *ReconcileNetworkInterface) Reconcile(ctx context.Context, request recon
 	return reconcile.Result{}, nil
 }
 
+// resolveBackendAPI determines the BackendAPI from NI CR annotation or name prefix (fallback).
+func (r *ReconcileNetworkInterface) resolveBackendAPI(_ context.Context, ni *v1beta1.NetworkInterface) aliyunClient.BackendAPI {
+	// Priority 1: Check NI CR annotation
+	if api := ni.Annotations[types.ENOApi]; api != "" {
+		switch api {
+		case types.APIEcs, types.APIEcsHDeni:
+			return aliyunClient.BackendAPIECS
+		case types.APIEnoHDeni:
+			return aliyunClient.BackendAPIEFLOHDENI
+		}
+	}
+
+	// Priority 2: Fallback to name prefix
+	if strings.HasPrefix(ni.Name, "leni-") {
+		return aliyunClient.BackendAPIEFLO
+	}
+	if strings.HasPrefix(ni.Name, "hdeni-") {
+		return aliyunClient.BackendAPIEFLOHDENI
+	}
+	return aliyunClient.BackendAPIECS
+}
+
+// getECSBackoff returns the appropriate ECS-path backoff for the given NI name.
+// Migrated leni-/hdeni- resources use dedicated backoff configs with initialDelay=4s.
+func (r *ReconcileNetworkInterface) getECSBackoff(niName string) backoff.ExtendedBackoff {
+	if strings.HasPrefix(niName, "leni-") {
+		return backoff.Backoff(backoff.WaitECSLENIStatus)
+	}
+	if strings.HasPrefix(niName, "hdeni-") {
+		return backoff.Backoff(backoff.WaitECSHDENIStatus)
+	}
+	return backoff.Backoff(backoff.WaitENIStatus)
+}
+
 func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface *v1beta1.NetworkInterface) (reconcile.Result, error) {
 	var err error
 
 	if networkInterface.Status.InstanceID != "" {
 		var resp []*aliyunClient.NetworkInterface
-		if strings.HasPrefix(networkInterface.Name, "leni-") || strings.HasPrefix(networkInterface.Name, "hdeni-") {
-			// nb(l1b0k): for now len and hdeni share nearly same status
-			if strings.HasPrefix(networkInterface.Name, "leni-") {
-				ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
-			} else {
-				ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLOHDENI)
-			}
 
+		backend := r.resolveBackendAPI(ctx, networkInterface)
+		ctx = aliyunClient.SetBackendAPI(ctx, backend)
+
+		if backend == aliyunClient.BackendAPIEFLO || backend == aliyunClient.BackendAPIEFLOHDENI {
+			// EFLO path: LENI/HDENI status codes
 			resp, err = r.aliyun.DescribeNetworkInterfaceV2(ctx, &aliyunClient.DescribeNetworkInterfaceOptions{
 				NetworkInterfaceIDs: &[]string{networkInterface.Name},
 				RawStatus:           ptr.To(true),
@@ -191,18 +223,25 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 			}
 
 		} else {
+			// ECS path: standard ENI status codes
+			// for migrated hdeni, set trunkENIID to DenseModeTrunkEniId if it's empty
+			trunkENIID := networkInterface.Status.TrunkENIID
+			if trunkENIID == "" && strings.HasPrefix(networkInterface.Name, "hdeni-") {
+				trunkENIID = "DenseModeTrunkEniId"
+			}
 			err = r.aliyun.AttachNetworkInterfaceV2(ctx, &aliyunClient.AttachNetworkInterfaceOptions{
 				NetworkInterfaceID:     toPtr(networkInterface.Name),
 				InstanceID:             toPtr(networkInterface.Status.InstanceID),
-				TrunkNetworkInstanceID: toPtr(networkInterface.Status.TrunkENIID),
+				TrunkNetworkInstanceID: toPtr(trunkENIID),
 				NetworkCardIndex:       networkInterface.Status.NetworkCardIndex,
 			})
 			if err != nil {
 				return reconcile.Result{}, err
 			}
 
+			bo := r.getECSBackoff(networkInterface.Name)
 			if networkInterface.Status.TrunkENIID == "" {
-				time.Sleep(backoff.Backoff(backoff.WaitENIStatus).InitialDelay)
+				time.Sleep(bo.InitialDelay)
 			} else {
 				time.Sleep(backoff.Backoff(backoff.WaitMemberENIStatus).InitialDelay)
 			}
@@ -216,8 +255,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 			}
 
 			if len(resp) != 1 || resp[0].Status != aliyunClient.ENIStatusInUse {
-				// wait next time
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus))
+				du, err := r.resourceBackoff.Get(networkInterface.Name, bo)
 				if err != nil {
 					return reconcile.Result{}, err
 				}
@@ -293,17 +331,15 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 	return reconcile.Result{}, nil
 }
 
-// put a stand alone detach flow
 func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface *v1beta1.NetworkInterface) (reconcile.Result, error) {
 	var err error
 
 	if networkInterface.Status.InstanceID != "" {
-		if strings.HasPrefix(networkInterface.Name, "leni-") || strings.HasPrefix(networkInterface.Name, "hdeni-") {
-			if strings.HasPrefix(networkInterface.Name, "leni-") {
-				ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
-			} else {
-				ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLOHDENI)
-			}
+		backend := r.resolveBackendAPI(ctx, networkInterface)
+		ctx = aliyunClient.SetBackendAPI(ctx, backend)
+
+		if backend == aliyunClient.BackendAPIEFLO || backend == aliyunClient.BackendAPIEFLOHDENI {
+			// EFLO path: LENI/HDENI status codes
 			resp, err := r.aliyun.DescribeNetworkInterfaceV2(ctx, &aliyunClient.DescribeNetworkInterfaceOptions{
 				NetworkInterfaceIDs: &[]string{networkInterface.Name},
 				RawStatus:           ptr.To(true),
@@ -314,7 +350,6 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 			if len(resp) > 0 {
 				switch resp[0].Status {
 				case aliyunClient.LENIStatusAvailable, aliyunClient.LENIStatusDetachFailed:
-					// networkInterface.Spec.ENI.ID, networkInterface.Status.InstanceID, networkInterface.Status.TrunkENIID
 					err = r.aliyun.DetachNetworkInterfaceV2(ctx, &aliyunClient.DetachNetworkInterfaceOptions{
 						NetworkInterfaceID: toPtr(networkInterface.Name),
 						InstanceID:         toPtr(networkInterface.Status.InstanceID),
@@ -337,6 +372,7 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 			}
 
 		} else {
+			// ECS path
 			var trunkID *string
 			if networkInterface.Status.TrunkENIID != "DenseModeTrunkEniId" {
 				trunkID = toPtr(networkInterface.Status.TrunkENIID)
@@ -351,8 +387,9 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 				return reconcile.Result{}, err
 			}
 
+			bo := r.getECSBackoff(networkInterface.Name)
 			if networkInterface.Status.TrunkENIID == "" {
-				time.Sleep(backoff.Backoff(backoff.WaitENIStatus).InitialDelay)
+				time.Sleep(bo.InitialDelay)
 			} else {
 				time.Sleep(backoff.Backoff(backoff.WaitMemberENIStatus).InitialDelay)
 			}
@@ -366,8 +403,7 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 			}
 
 			if len(enis) > 0 && enis[0].Status != aliyunClient.ENIStatusAvailable {
-				// wait next time
-				du, err := r.resourceBackoff.Get(networkInterface.Name, backoff.Backoff(backoff.WaitENIStatus))
+				du, err := r.resourceBackoff.Get(networkInterface.Name, bo)
 				if err != nil {
 					return reconcile.Result{}, err
 				}
@@ -407,16 +443,9 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 	return reconcile.Result{}, nil
 }
 
-// put a stand alone detach flow
 func (r *ReconcileNetworkInterface) delete(ctx context.Context, networkInterface *v1beta1.NetworkInterface) error {
-
-	if strings.HasPrefix(networkInterface.Name, "leni-") {
-		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLO)
-	} else if strings.HasPrefix(networkInterface.Name, "hdeni-") {
-		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIEFLOHDENI)
-	} else {
-		ctx = aliyunClient.SetBackendAPI(ctx, aliyunClient.BackendAPIECS)
-	}
+	backend := r.resolveBackendAPI(ctx, networkInterface)
+	ctx = aliyunClient.SetBackendAPI(ctx, backend)
 
 	err := r.aliyun.DeleteNetworkInterfaceV2(ctx, networkInterface.Name)
 	if err != nil {
