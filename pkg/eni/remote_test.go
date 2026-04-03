@@ -343,7 +343,10 @@ func TestAllocateWithNotifier_ContextCanceled(t *testing.T) {
 
 	select {
 	case result := <-resp:
-		assert.Nil(t, result)
+		if result != nil {
+			assert.Error(t, result.Err)
+			assert.Contains(t, result.Err.Error(), "allocate remote IP timeout")
+		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timeout waiting for allocation to be canceled")
 	}
@@ -451,7 +454,10 @@ func TestAllocateWithNotifier_PodUIDMismatch(t *testing.T) {
 
 	select {
 	case result := <-resp:
-		assert.Nil(t, result)
+		if result != nil {
+			assert.Error(t, result.Err)
+			assert.Contains(t, result.Err.Error(), "allocate remote IP timeout")
+		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timeout waiting for allocation to fail on UID mismatch")
 	}

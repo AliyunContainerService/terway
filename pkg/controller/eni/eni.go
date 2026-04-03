@@ -202,6 +202,8 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 					NetworkCardIndex:       networkInterface.Status.NetworkCardIndex,
 				})
 				if err != nil {
+					r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventAttachENIFailed,
+						"Failed to attach ENI %s to instance %s: %v", networkInterface.Name, networkInterface.Status.InstanceID, err)
 					return reconcile.Result{}, err
 				}
 				fallthrough
@@ -215,8 +217,12 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 			case aliyunClient.LENIStatusCreateFailed:
 				// release this eni, this status should be on first create
 				r.record.Eventf(networkInterface, corev1.EventTypeWarning, types.EventCreateENIFailed, "backend create failed, will delete")
+				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventCreateENIFailed,
+					"ENI %s creation failed in backend, rolling back", networkInterface.Name)
 				return reconcile.Result{}, r.rollBackPodENI(ctx, networkInterface)
 			case aliyunClient.LENIStatusDetachFailed, aliyunClient.LENIStatusDeleteFailed, aliyunClient.LENIStatusDeleting:
+				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventAttachENIFailed,
+					"ENI %s in unexpected status %s during attach", networkInterface.Name, resp[0].Status)
 				return reconcile.Result{}, fmt.Errorf("unsupported status on attach %s", resp[0].Status)
 			default:
 				return reconcile.Result{}, fmt.Errorf("unknown status %s", resp[0].Status)
@@ -236,6 +242,8 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 				NetworkCardIndex:       networkInterface.Status.NetworkCardIndex,
 			})
 			if err != nil {
+				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventAttachENIFailed,
+					"Failed to attach ENI %s to instance %s: %v", networkInterface.Name, networkInterface.Status.InstanceID, err)
 				return reconcile.Result{}, err
 			}
 
@@ -355,6 +363,8 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 						InstanceID:         toPtr(networkInterface.Status.InstanceID),
 					})
 					if err != nil {
+						r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventDetachENIFailed,
+							"Failed to detach ENI %s from instance %s: %v", networkInterface.Name, networkInterface.Status.InstanceID, err)
 						return reconcile.Result{}, err
 					}
 					fallthrough
@@ -384,6 +394,8 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 				TrunkID:            trunkID,
 			})
 			if err != nil {
+				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventDetachENIFailed,
+					"Failed to detach ENI %s from instance %s: %v", networkInterface.Name, networkInterface.Status.InstanceID, err)
 				return reconcile.Result{}, err
 			}
 
@@ -465,6 +477,29 @@ func (r *ReconcileNetworkInterface) delete(ctx context.Context, networkInterface
 	// wait gone
 	common.WaitDeleted(ctx, r.client, &v1beta1.NetworkInterface{}, networkInterface.Namespace, networkInterface.Name)
 	return nil
+}
+
+// emitEventToPod finds the associated Pod via PodENIRef and emits an event to it
+func (r *ReconcileNetworkInterface) emitEventToPod(ctx context.Context, ni *v1beta1.NetworkInterface, eventType, reason, msgFmt string, args ...interface{}) {
+	if ni.Spec.PodENIRef == nil || ni.Spec.PodENIRef.Name == "" {
+		return
+	}
+
+	l := logr.FromContextOrDiscard(ctx)
+
+	// PodENI name == Pod name, PodENI namespace == Pod namespace
+	pod := &corev1.Pod{}
+	err := r.client.Get(ctx, client.ObjectKey{
+		Namespace: ni.Spec.PodENIRef.Namespace,
+		Name:      ni.Spec.PodENIRef.Name,
+	}, pod)
+	if err != nil {
+		l.V(4).Info("failed to get pod for event emission", "error", err,
+			"namespace", ni.Spec.PodENIRef.Namespace, "name", ni.Spec.PodENIRef.Name)
+		return
+	}
+
+	r.record.Eventf(pod, eventType, reason, msgFmt, args...)
 }
 
 func (r *ReconcileNetworkInterface) rollBackPodENI(ctx context.Context, networkInterface *v1beta1.NetworkInterface) error {
