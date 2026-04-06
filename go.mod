@@ -15,7 +15,7 @@ require (
 	github.com/alibabacloud-go/eflo-controller-20221215/v2 v2.7.0
 	github.com/alibabacloud-go/tea v1.3.11
 	github.com/aliyun/alibaba-cloud-sdk-go v1.63.107
-	github.com/aliyun/credentials-go v1.4.5
+	github.com/aliyun/credentials-go v1.4.12
 	github.com/bits-and-blooms/bitset v1.2.0
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.3.0
