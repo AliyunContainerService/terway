@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -272,6 +273,14 @@ func (r *CRDV2) multiIP(ctx context.Context, cni *daemon.CNI, request ResourceRe
 			select {
 			case <-ctx.Done():
 				l.Info("context cancelled, allocation failed")
+				allocErr := fmt.Errorf("allocate IP timeout")
+				if conditions := r.collectENIConditions(); conditions != "" {
+					allocErr = fmt.Errorf("allocate IP timeout: %s", conditions)
+				}
+				select {
+				case resp <- &AllocResp{Err: allocErr}:
+				default:
+				}
 				return
 			case <-ch:
 				l.V(2).Info("received node change notification, trying to allocate IP")
@@ -392,6 +401,26 @@ func (r *CRDV2) tryAllocateIP(ctx context.Context, cni *daemon.CNI, l logr.Logge
 	r.lock.Unlock()
 
 	return allocResp, true
+}
+
+// collectENIConditions reads ENI conditions from the Node CRD to provide
+// diagnostic information when IP allocation times out.
+func (r *CRDV2) collectENIConditions() string {
+	bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	node := &networkv1beta1.Node{}
+	if err := r.client.Get(bgCtx, client.ObjectKey{Name: r.nodeName}, node); err != nil {
+		return ""
+	}
+
+	var msgs []string
+	for eniID, eni := range node.Status.NetworkInterfaces {
+		for condName, cond := range eni.Conditions {
+			msgs = append(msgs, fmt.Sprintf("%s %s: %s", eniID, condName, cond.Message))
+		}
+	}
+	return strings.Join(msgs, "; ")
 }
 
 func (r *CRDV2) remote(ctx context.Context, cni *daemon.CNI, request ResourceRequest) (chan *AllocResp, []Trace) {

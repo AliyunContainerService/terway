@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -153,6 +154,14 @@ func (r *Remote) Allocate(ctx context.Context, cni *daemon.CNI, request Resource
 			select {
 			case <-ctx.Done():
 				l.Info("context cancelled, allocation failed")
+				bgCtx, bgCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				podENI, _ := getPodENI(bgCtx, r.client, cni.PodNamespace, cni.PodName)
+				bgCancel()
+				errMsg := buildTimeoutErrorMessage(podENI)
+				select {
+				case resp <- &AllocResp{Err: fmt.Errorf("allocate remote IP timeout: %s", errMsg)}:
+				default:
+				}
 				return
 			case <-ch:
 				l.V(2).Info("received PodENI change notification, trying to allocate")
@@ -174,13 +183,23 @@ func (r *Remote) tryAllocatePodENI(ctx context.Context, cni *daemon.CNI, l logr.
 		return nil, false
 	}
 
+	// Extract ENI IDs for logging
+	eniIDs := extractENIIDs(podENI)
+
 	if !podENI.DeletionTimestamp.IsZero() {
-		l.V(2).Info("PodENI is being deleted")
+		l.Info("PodENI is being deleted", "eniIDs", eniIDs)
 		return nil, false
 	}
 
 	if podENI.Status.Phase != podENITypes.ENIPhaseBind {
-		l.V(2).Info("PodENI is not in Bind phase", "phase", podENI.Status.Phase)
+		l.Info("PodENI not ready",
+			"phase", podENI.Status.Phase,
+			"phaseDescription", phaseDescription(podENI.Status.Phase),
+			"eniIDs", eniIDs,
+			"msg", podENI.Status.Msg,
+			"instanceID", podENI.Status.InstanceID,
+			"trunkENIID", podENI.Status.TrunkENIID,
+		)
 		return nil, false
 	}
 
@@ -215,7 +234,7 @@ func (r *Remote) tryAllocatePodENI(ctx context.Context, cni *daemon.CNI, l logr.
 	if r.trunkENI != nil {
 		remote.trunkENI = *r.trunkENI
 	}
-	l.Info("get pod eni success", "uid", podENI.UID)
+	l.Info("get pod eni success", "uid", podENI.UID, "eniIDs", eniIDs)
 
 	metric.ResourcePoolAllocated.WithLabelValues(metric.ResourcePoolTypeRemote).Inc()
 
@@ -274,6 +293,17 @@ func (r *Remote) allocateWithBackoff(ctx context.Context, cni *daemon.CNI, resp 
 		return true, nil
 	})
 
+	if err != nil {
+		if innerErr != nil {
+			err = fmt.Errorf("%w: %s", err, innerErr)
+		}
+		select {
+		case <-ctx.Done():
+		case resp <- &AllocResp{Err: err}:
+		}
+		return
+	}
+
 	var networkResources NetworkResources
 	if podENI != nil {
 		remote := &RemoteIPResource{
@@ -292,7 +322,6 @@ func (r *Remote) allocateWithBackoff(ctx context.Context, cni *daemon.CNI, resp 
 	select {
 	case <-ctx.Done():
 	case resp <- &AllocResp{
-		Err:            err,
 		NetworkConfigs: networkResources,
 	}:
 	}
@@ -304,6 +333,50 @@ func (r *Remote) Release(ctx context.Context, cni *daemon.CNI, request NetworkRe
 
 func (r *Remote) Dispose(n int) int {
 	return 0
+}
+
+// phaseDescription returns a human-readable description of the PodENI phase
+func phaseDescription(phase podENITypes.Phase) string {
+	switch phase {
+	case podENITypes.ENIPhaseInitial, podENITypes.ENIPhaseBinding:
+		// Both Initial and Binding are treated as "Binding" - ENI is being created/attached
+		return "ENI is being created and attached to ECS instance"
+	case podENITypes.ENIPhaseBind:
+		return "ENI successfully bound to ECS instance"
+	case podENITypes.ENIPhaseUnbind:
+		return "ENI detached from ECS instance"
+	case podENITypes.ENIPhaseDetaching:
+		return "ENI is being detached from ECS instance"
+	case podENITypes.ENIPhaseDeleting:
+		return "PodENI is being deleted"
+	default:
+		return fmt.Sprintf("unknown phase: %s", phase)
+	}
+}
+
+// extractENIIDs extracts ENI IDs from PodENI allocations for logging
+func extractENIIDs(podENI *podENITypes.PodENI) []string {
+	var eniIDs []string
+	for _, alloc := range podENI.Spec.Allocations {
+		if alloc.ENI.ID != "" {
+			eniIDs = append(eniIDs, alloc.ENI.ID)
+		}
+	}
+	return eniIDs
+}
+
+// buildTimeoutErrorMessage builds a detailed error message for PodENI allocation timeout
+func buildTimeoutErrorMessage(podENI *podENITypes.PodENI) string {
+	if podENI == nil {
+		return "PodENI not found"
+	}
+	eniIDs := extractENIIDs(podENI)
+	return fmt.Sprintf("ENI %v in phase %q (%s): %s",
+		eniIDs,
+		podENI.Status.Phase,
+		phaseDescription(podENI.Status.Phase),
+		podENI.Status.Msg,
+	)
 }
 
 func getPodENI(ctx context.Context, c client.Client, namespace, name string) (*podENITypes.PodENI, error) {

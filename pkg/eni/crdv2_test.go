@@ -655,6 +655,62 @@ func (m *mockNetworkResource) ToRPC() []*rpc.NetConf {
 }
 
 // ==============================================================================
+// collectENIConditions Tests
+// ==============================================================================
+
+func TestCRDV2_collectENIConditions_NoConditions(t *testing.T) {
+	fakeClient := fake.NewClientBuilder().WithScheme(types.Scheme).WithObjects(&networkv1beta1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+		Status: networkv1beta1.NodeStatus{
+			NetworkInterfaces: map[string]*networkv1beta1.Nic{
+				"eni-1": {
+					ID:     "eni-1",
+					Status: "InUse",
+				},
+			},
+		},
+	}).Build()
+
+	r := &CRDV2{client: fakeClient, nodeName: "node1"}
+	result := r.collectENIConditions()
+	assert.Empty(t, result)
+}
+
+func TestCRDV2_collectENIConditions_WithConditions(t *testing.T) {
+	fakeClient := fake.NewClientBuilder().WithScheme(types.Scheme).WithObjects(&networkv1beta1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+		Status: networkv1beta1.NodeStatus{
+			NetworkInterfaces: map[string]*networkv1beta1.Nic{
+				"eni-bp1fi7h3c8iy5r714zl8": {
+					ID:     "eni-bp1fi7h3c8iy5r714zl8",
+					Status: "InUse",
+					Conditions: map[string]networkv1beta1.Condition{
+						"InsufficientIP": {
+							Message:      "vsw-bp1mh6lpn21jzqllmdsfw ip is not enough",
+							ObservedTime: metav1.Now(),
+						},
+					},
+				},
+			},
+		},
+	}).Build()
+
+	r := &CRDV2{client: fakeClient, nodeName: "node1"}
+	result := r.collectENIConditions()
+	assert.Contains(t, result, "eni-bp1fi7h3c8iy5r714zl8")
+	assert.Contains(t, result, "InsufficientIP")
+	assert.Contains(t, result, "vsw-bp1mh6lpn21jzqllmdsfw ip is not enough")
+}
+
+func TestCRDV2_collectENIConditions_NodeNotFound(t *testing.T) {
+	fakeClient := fake.NewClientBuilder().WithScheme(types.Scheme).Build()
+
+	r := &CRDV2{client: fakeClient, nodeName: "node1"}
+	result := r.collectENIConditions()
+	assert.Empty(t, result)
+}
+
+// ==============================================================================
 // remote method Tests
 // ==============================================================================
 
