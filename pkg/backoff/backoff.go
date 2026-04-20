@@ -14,6 +14,7 @@ const (
 	ENIOps                     = "eni_ops"
 	ENIRelease                 = "eni_release"
 	ENIIPOps                   = "eni_ip_ops"
+	ENIDeleteConfirm           = "eni_delete_confirm"
 	WaitENIIPRemoved           = "wait_eni_ip_removed"
 	WaitENIStatus              = "wait_eni_status"
 	WaitMemberENIStatus        = "wait_member_eni_status"
@@ -80,6 +81,16 @@ var backoffMap = map[string]ExtendedBackoff{
 			Factor:   2,
 			Jitter:   0.5,
 			Steps:    8},
+	},
+	ENIDeleteConfirm: {
+		InitialDelay: 1 * time.Second,
+		Backoff: wait.Backoff{
+			Duration: 2 * time.Second,
+			Factor:   2,
+			Jitter:   0.3,
+			Cap:      10 * time.Second,
+			Steps:    8,
+		},
 	},
 	ENIIPOps: {
 		InitialDelay: 0,
