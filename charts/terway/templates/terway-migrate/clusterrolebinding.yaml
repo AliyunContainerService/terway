@@ -1,0 +1,17 @@
+{{- if .Values.terwayMigrate.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "terway.migrate.name" . }}-binding
+  labels:
+    {{- include "terway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: terway-migrate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "terway.migrate.clusterRoleName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "terway.migrate.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

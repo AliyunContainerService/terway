@@ -49,3 +49,18 @@ Selector labels
 app.kubernetes.io/name: terway
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+Standalone migrate pod resource names.
+*/}}
+{{- define "terway.migrate.name" -}}
+{{- printf "%s-migrate" (include "terway.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "terway.migrate.serviceAccountName" -}}
+{{- include "terway.migrate.name" . }}
+{{- end }}
+
+{{- define "terway.migrate.clusterRoleName" -}}
+{{- printf "%s-role" (include "terway.migrate.name" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
