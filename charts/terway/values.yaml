@@ -125,3 +125,26 @@ terwayControlplane:
   accessSecret: ""
   credentialPath: ""
 
+terwayMigrate:
+  # Deploy a standalone hostNetwork pod for kubectl exec based migrate operations.
+  enabled: false
+
+  image:
+    repository: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway
+    pullPolicy: IfNotPresent
+    tag: "v1.16.7"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  nodeSelector:
+    kubernetes.io/os: linux
+
+  tolerations:
+    - operator: "Exists"
+
+  affinity: {}
+
+  podAnnotations: {}

@@ -12,6 +12,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/ip"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 )
@@ -235,7 +236,26 @@ func (a *ECSService) DeleteNetworkInterface(ctx context.Context, eniID string) e
 		l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(err)).Error(err, "delete eni failed")
 		return err
 	}
-	l.WithValues(LogFieldRequestID, resp.RequestId).Info("delete eni")
+	l.WithValues(LogFieldRequestID, resp.RequestId).Info("delete eni request accepted, polling for deletion")
+
+	// DeleteNetworkInterface is async; poll until the ENI is actually gone.
+	err = backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.ENIDeleteConfirm), func(ctx context.Context) (bool, error) {
+		enis, descErr := a.DescribeNetworkInterface(ctx, "", []string{eniID}, "", "", "", nil)
+		if descErr != nil {
+			l.Info("failed to query eni during deletion check, retrying", "err", descErr)
+			return false, nil
+		}
+		if len(enis) == 0 {
+			return true, nil
+		}
+		l.Info("eni still exists, waiting for deletion", "status", enis[0].Status)
+		return false, nil
+	})
+	if err != nil {
+		return fmt.Errorf("timeout waiting for eni %s to be deleted: %w", eniID, err)
+	}
+
+	l.Info("eni deletion confirmed")
 	return nil
 }
 

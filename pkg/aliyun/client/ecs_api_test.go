@@ -264,6 +264,17 @@ func TestECSService_DeleteNetworkInterface_WithGomonkey(t *testing.T) {
 	)
 	defer patches.Reset()
 
+	// After a successful delete, the code polls DescribeNetworkInterfaces to
+	// confirm the ENI is gone. Return an empty list so the poll succeeds.
+	patches.ApplyFunc(
+		(*ecs.Client).DescribeNetworkInterfaces,
+		func(client *ecs.Client, request *ecs.DescribeNetworkInterfacesRequest) (*ecs.DescribeNetworkInterfacesResponse, error) {
+			return &ecs.DescribeNetworkInterfacesResponse{
+				NetworkInterfaceSets: ecs.NetworkInterfaceSets{},
+			}, nil
+		},
+	)
+
 	// Execute test
 	ctx := context.Background()
 	err := ecsService.DeleteNetworkInterface(

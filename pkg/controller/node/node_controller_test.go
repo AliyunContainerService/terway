@@ -544,14 +544,14 @@ var _ = Describe("Node Controller", func() {
 			Expect(result).To(BeTrue())
 		})
 
-		It("should return true when ENI has migration tags (leni_primary=true && support_eni=true)", func() {
+		It("should return true when ENI has migration tags (leni_primary=true && acs:ecs:support_eni=true)", func() {
 			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
 				{
 					NetworkInterfaceID: "eni-secondary-1",
 					Type:               aliyunClient.ENITypeSecondary,
 					Tags: []ecs.Tag{
-						{Key: "leni_primary", Value: "true"},
-						{Key: "support_eni", Value: "true"},
+						{TagKey: "leni_primary", TagValue: "true"},
+						{TagKey: "acs:ecs:support_eni", TagValue: "true"},
 					},
 				},
 				{
@@ -566,13 +566,13 @@ var _ = Describe("Node Controller", func() {
 			Expect(result).To(BeTrue())
 		})
 
-		It("should return false when only leni_primary tag exists without support_eni", func() {
+		It("should return false when only leni_primary tag exists without acs:ecs:support_eni", func() {
 			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
 				{
 					NetworkInterfaceID: "eni-secondary",
 					Type:               aliyunClient.ENITypeSecondary,
 					Tags: []ecs.Tag{
-						{Key: "leni_primary", Value: "true"},
+						{TagKey: "leni_primary", TagValue: "true"},
 					},
 				},
 			}, nil)
@@ -583,13 +583,13 @@ var _ = Describe("Node Controller", func() {
 			Expect(result).To(BeFalse())
 		})
 
-		It("should return false when only support_eni tag exists without leni_primary", func() {
+		It("should return false when only acs:ecs:support_eni tag exists without leni_primary", func() {
 			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
 				{
 					NetworkInterfaceID: "eni-secondary",
 					Type:               aliyunClient.ENITypeSecondary,
 					Tags: []ecs.Tag{
-						{Key: "support_eni", Value: "true"},
+						{TagKey: "acs:ecs:support_eni", TagValue: "true"},
 					},
 				},
 			}, nil)
@@ -646,9 +646,9 @@ var _ = Describe("Node Controller", func() {
 					NetworkInterfaceID: "eni-secondary-2",
 					Type:               aliyunClient.ENITypeSecondary,
 					Tags: []ecs.Tag{
-						{Key: "leni_primary", Value: "true"},
-						{Key: "support_eni", Value: "true"},
-						{Key: "other_tag", Value: "other_value"},
+						{TagKey: "leni_primary", TagValue: "true"},
+						{TagKey: "acs:ecs:support_eni", TagValue: "true"},
+						{TagKey: "other_tag", TagValue: "other_value"},
 					},
 				},
 			}, nil)
@@ -665,8 +665,8 @@ var _ = Describe("Node Controller", func() {
 					NetworkInterfaceID: "eni-secondary",
 					Type:               aliyunClient.ENITypeSecondary,
 					Tags: []ecs.Tag{
-						{Key: "leni_primary", Value: "false"},
-						{Key: "support_eni", Value: "true"},
+						{TagKey: "leni_primary", TagValue: "false"},
+						{TagKey: "acs:ecs:support_eni", TagValue: "true"},
 					},
 				},
 			}, nil)

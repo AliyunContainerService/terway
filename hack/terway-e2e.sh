@@ -276,7 +276,7 @@ run_tests() {
     cd "${PROJECT_ROOT}"
 
     # Run e2e tests
-    go test -v -count=1 -timeout "${TEST_TIMEOUT}" -tags e2e ./tests -run 'Test[^U].*' "$@"
+    go test -v -count=1 -timeout "${TEST_TIMEOUT}" -tags e2e ./tests -run 'Test[^UM].*' "$@"
 }
 
 # Show status

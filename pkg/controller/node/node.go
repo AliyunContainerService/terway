@@ -510,9 +510,8 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 }
 
 // useECSLink checks if the instance should use the ECS link for EFLO nodes.
-// Returns true if:
-// 1. Instance has a Primary ENI (new ENI link instances), OR
-// 2. Instance has an ENI with tags leni_primary=true and support_eni=true (migrated instances)
+// Returns true if the instance has a Primary ENI (new ENI link instances) or
+// migration tags (leni_primary=true and acs:ecs:support_eni=true).
 func (r *ReconcileNode) useECSLink(ctx context.Context, instanceID string) (bool, error) {
 	req := &aliyunClient.DescribeNetworkInterfaceOptions{
 		InstanceID: &instanceID,
@@ -522,28 +521,8 @@ func (r *ReconcileNode) useECSLink(ctx context.Context, instanceID string) (bool
 		return false, err
 	}
 
-	for _, eni := range enis {
-		// Case 1: New ENI link instances have a Primary ENI
-		if eni.Type == aliyunClient.ENITypePrimary {
-			return true, nil
-		}
-
-		// Case 2: Migrated ENO instances with ECS capability have special tags
-		var leniPrimary, supportENI bool
-		for _, tag := range eni.Tags {
-			if tag.Key == "leni_primary" && tag.Value == True {
-				leniPrimary = true
-			}
-			if tag.Key == "support_eni" && tag.Value == True {
-				supportENI = true
-			}
-		}
-		if leniPrimary && supportENI {
-			return true, nil
-		}
-	}
-
-	return false, nil
+	hasPrimary, hasMigrationTags := aliyunClient.ClassifyENILinkCapability(enis)
+	return hasPrimary || hasMigrationTags, nil
 }
 
 func (r *ReconcileNode) delete(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {

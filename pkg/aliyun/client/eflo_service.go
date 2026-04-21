@@ -8,6 +8,7 @@ import (
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/metric"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	"github.com/go-logr/logr"
@@ -31,16 +32,6 @@ const (
 	APIListElasticNetworkInterfaces  = "ListElasticNetworkInterfaces"
 	APIGetNodeInfoForPod             = "GetNodeInfoForPod"
 )
-
-// getDeleteCheckBackoff returns the backoff configuration for polling ENI deletion status.
-// ~3 retries over ~30s: 4 checks with 10s intervals.
-var getDeleteCheckBackoff = func() wait.Backoff {
-	return wait.Backoff{
-		Duration: 10 * time.Second,
-		Factor:   1,
-		Steps:    4,
-	}
-}
 
 type EFLOService struct {
 	ClientSet        credential.Client
@@ -491,7 +482,7 @@ func (a *EFLOService) DeleteElasticNetworkInterface(ctx context.Context, eniID s
 
 	// Async deletion: poll to confirm the LENI is actually deleted
 	rawStatus := true
-	err = wait.ExponentialBackoffWithContext(ctx, getDeleteCheckBackoff(), func(ctx context.Context) (bool, error) {
+	err = backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.ENIDeleteConfirm), func(ctx context.Context) (bool, error) {
 		enis, descErr := a.DescribeLeniNetworkInterface(ctx, &DescribeNetworkInterfaceOptions{
 			NetworkInterfaceIDs: &[]string{eniID},
 			RawStatus:           &rawStatus,

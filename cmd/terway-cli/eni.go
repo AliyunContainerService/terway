@@ -118,6 +118,25 @@ func getECSClient(region string) (aliClient.ECS, error) {
 	return aliClient.NewECSService(clientMgr, rateLimiter, tracer), nil
 }
 
+// getEFLOControlClient initializes the EFLO Control client with the given region
+func getEFLOControlClient(region string) (aliClient.EFLOControl, error) {
+	if region == "" {
+		return nil, fmt.Errorf("region is required, please specify --region or set REGION_ID environment variable")
+	}
+
+	credProvider := getCredentialProvider()
+
+	clientMgr, err := credential.InitializeClientMgr(region, credProvider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize client manager: %w", err)
+	}
+
+	rateLimiter := aliClient.NewRateLimiter(aliClient.LimitConfig{})
+	tracer := noop.NewTracerProvider().Tracer("terway-cli")
+
+	return aliClient.NewEFLOControlService(clientMgr, rateLimiter, tracer), nil
+}
+
 // isAbnormalStatus checks if an ENI status indicates an abnormal state
 // For ENI (ECS): Available status means not attached, which is abnormal
 // For ENO (LENI): Unattached status means not attached, which is abnormal

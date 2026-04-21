@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
+	"github.com/AliyunContainerService/terway/pkg/backoff"
 )
 
 // Mock ClientSet for EFLO Service testing
@@ -584,8 +585,8 @@ func TestEFLOService_DeleteElasticNetworkInterface_WithGomonkey(t *testing.T) {
 	defer patches.Reset()
 
 	// Fast backoff for testing
-	patches.ApplyGlobalVar(&getDeleteCheckBackoff, func() wait.Backoff {
-		return wait.Backoff{Duration: time.Millisecond, Steps: 4}
+	backoff.OverrideBackoff(map[string]backoff.ExtendedBackoff{
+		backoff.ENIDeleteConfirm: {Backoff: wait.Backoff{Duration: time.Millisecond, Steps: 4}},
 	})
 
 	// Mock ListElasticNetworkInterfaces - behavior controlled by pollResult flag

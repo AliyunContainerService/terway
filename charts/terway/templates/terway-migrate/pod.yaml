@@ -1,0 +1,57 @@
+{{- if .Values.terwayMigrate.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "terway.migrate.name" . }}
+  labels:
+    {{- include "terway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: terway-migrate
+  {{- with .Values.terwayMigrate.podAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  restartPolicy: Always
+  serviceAccountName: {{ include "terway.migrate.serviceAccountName" . }}
+  containers:
+    - name: terway-migrate
+      image: "{{ .Values.terwayMigrate.image.repository }}:{{ .Values.terwayMigrate.image.tag | default .Chart.AppVersion }}"
+      imagePullPolicy: {{ .Values.terwayMigrate.image.pullPolicy }}
+      command:
+        - /bin/bash
+        - -ec
+        - |
+          echo "terway migrate pod is ready; waiting for exec"
+          trap : TERM INT
+          sleep infinity & wait
+      securityContext:
+        allowPrivilegeEscalation: false
+      resources:
+        {{- toYaml .Values.terwayMigrate.resources | nindent 8 }}
+      volumeMounts:
+        - name: addon-token
+          mountPath: "/var/addon"
+          readOnly: true
+  volumes:
+    - name: addon-token
+      secret:
+        secretName: addon.network.token
+        items:
+          - key: addon.token.config
+            path: token-config
+        optional: true
+  {{- with .Values.terwayMigrate.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.terwayMigrate.affinity }}
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.terwayMigrate.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
