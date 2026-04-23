@@ -237,7 +237,7 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		}
 		reclaim.After = &metav1.Duration{Duration: duration}
 
-		if *eniConfig.IdleIPReclaimInterval != "" {
+		if eniConfig.IdleIPReclaimInterval != nil && *eniConfig.IdleIPReclaimInterval != "" {
 			interval, err := time.ParseDuration(*eniConfig.IdleIPReclaimInterval)
 			if err != nil {
 				return reconcile.Result{}, err
@@ -370,7 +370,7 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		}
 		reclaim.After = &metav1.Duration{Duration: duration}
 
-		if *eniConfig.IdleIPReclaimInterval != "" {
+		if eniConfig.IdleIPReclaimInterval != nil && *eniConfig.IdleIPReclaimInterval != "" {
 			interval, err := time.ParseDuration(*eniConfig.IdleIPReclaimInterval)
 			if err != nil {
 				return reconcile.Result{}, err
