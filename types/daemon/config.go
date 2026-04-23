@@ -125,16 +125,14 @@ func (c *Config) Populate() {
 		c.EnablePatchPodIPs = &enable
 	}
 
-	if c.IdleIPReclaimAfter == nil {
-		if c.IdleIPReclaimBatchSize <= 0 {
-			c.IdleIPReclaimBatchSize = 5
-		}
-		if c.IdleIPReclaimInterval == nil {
-			c.IdleIPReclaimInterval = ptr.To("10m")
-		}
-		if c.IdleIPReclaimJitterFactor == nil {
-			c.IdleIPReclaimJitterFactor = ptr.To("0.1")
-		}
+	if c.IdleIPReclaimBatchSize <= 0 {
+		c.IdleIPReclaimBatchSize = 5
+	}
+	if c.IdleIPReclaimInterval == nil {
+		c.IdleIPReclaimInterval = ptr.To("10m")
+	}
+	if c.IdleIPReclaimJitterFactor == nil {
+		c.IdleIPReclaimJitterFactor = ptr.To("0.1")
 	}
 }
 
