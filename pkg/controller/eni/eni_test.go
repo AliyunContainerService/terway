@@ -16,7 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -50,7 +50,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 			ctx := context.Background()
@@ -120,7 +120,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -147,7 +147,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -249,7 +249,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -377,7 +377,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -493,7 +493,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -603,7 +603,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -682,7 +682,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -713,7 +713,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -780,7 +780,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -833,7 +833,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 			ctx := context.Background()
@@ -884,7 +884,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -907,7 +907,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 			eni := &networkv1beta1.NetworkInterface{
@@ -943,7 +943,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1042,7 +1042,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1116,7 +1116,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1157,7 +1157,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1245,7 +1245,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1275,7 +1275,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1305,7 +1305,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1397,7 +1397,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
@@ -1424,7 +1424,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
@@ -1453,7 +1453,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
@@ -1478,7 +1478,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1524,7 +1524,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1558,7 +1558,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1580,7 +1580,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1602,7 +1602,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1621,7 +1621,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1640,7 +1640,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1659,7 +1659,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 
@@ -1681,7 +1681,7 @@ var _ = Describe("Eni controller", func() {
 				client:          k8sClient,
 				scheme:          scheme.Scheme,
 				aliyun:          aliyun,
-				record:          record.NewFakeRecorder(1000),
+				record:          events.NewFakeRecorder(1000),
 				resourceBackoff: NewBackoffManager(),
 			}
 

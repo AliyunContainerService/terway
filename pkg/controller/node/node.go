@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -80,7 +80,7 @@ func init() {
 			Complete(&ReconcileNode{
 				client:          mgr.GetClient(),
 				scheme:          mgr.GetScheme(),
-				record:          mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
+				record:          mgr.GetEventRecorder(utils.EventName(ControllerName)),
 				aliyun:          ctrlCtx.AliyunClient,
 				supportEFLO:     utilfeature.DefaultMutableFeatureGate.Enabled(feature.EFLO),
 				nodePredicate:   nodePredicate,
@@ -97,7 +97,7 @@ type ReconcileNode struct {
 	scheme *runtime.Scheme
 
 	aliyun aliyunClient.OpenAPI
-	record record.EventRecorder
+	record events.EventRecorder
 
 	supportEFLO   bool
 	nodePredicate *predicateForNodeEvent
@@ -146,7 +146,7 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 
 	defer func() {
 		if err != nil {
-			r.record.Event(k8sNode, "Warning", "ConfigError", err.Error())
+			r.record.Eventf(k8sNode, nil, "Warning", "ConfigError", "", err.Error())
 		}
 	}()
 	if utils.ISLingJunNode(k8sNode.Labels) {

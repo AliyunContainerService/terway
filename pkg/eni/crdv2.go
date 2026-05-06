@@ -91,7 +91,7 @@ func NewSharedCRDManager(restConfig *rest.Config, nodeName, namespace string) (*
 	if err = (&nodeReconcile{
 		nodeName: nodeName,
 		client:   mgr.GetClient(),
-		record:   mgr.GetEventRecorderFor("terway-daemon"),
+		record:   mgr.GetEventRecorder("terway-daemon"),
 	}).SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("failed to setup node reconcile controller: %w", err)
 	}

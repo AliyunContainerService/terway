@@ -7,6 +7,7 @@ package testutil
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -26,6 +27,10 @@ func (e *errStatusWriter) Update(ctx context.Context, obj client.Object, opts ..
 
 func (e *errStatusWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 	return e.real.Patch(ctx, obj, patch, opts...)
+}
+
+func (e *errStatusWriter) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+	return e.real.Apply(ctx, obj, opts...)
 }
 
 // ClientWithStatusUpdateErr wraps c and returns statusUpdateErr on Status().Update().

@@ -32,7 +32,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -70,14 +70,14 @@ type ReconcilePodNetworking struct {
 	swPool       *vswitch.SwitchPool
 
 	//record event recorder
-	record record.EventRecorder
+	record events.EventRecorder
 }
 
 // NewReconcilePodNetworking watch pod lifecycle events and sync to podENI resource
 func NewReconcilePodNetworking(mgr manager.Manager, aliyunClient aliyunClient.OpenAPI, swPool *vswitch.SwitchPool) *ReconcilePodNetworking {
 	r := &ReconcilePodNetworking{
 		client:       mgr.GetClient(),
-		record:       mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
+		record:       mgr.GetEventRecorder(utils.EventName(ControllerName)),
 		aliyunClient: aliyunClient,
 		swPool:       swPool,
 	}
@@ -124,11 +124,11 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 		update.Status.VSwitches = statusVSW
 		update.Status.Status = v1beta1.NetworkingStatusReady
 		update.Status.Message = ""
-		m.record.Eventf(update, corev1.EventTypeNormal, types.EventSyncPodNetworkingSucceed, "Synced")
+		m.record.Eventf(update, nil, corev1.EventTypeNormal, types.EventSyncPodNetworkingSucceed, "", "Synced")
 	} else {
 		update.Status.Status = v1beta1.NetworkingStatusFail
 		update.Status.Message = err.Error()
-		m.record.Eventf(update, corev1.EventTypeWarning, types.EventSyncPodNetworkingFailed, "Sync failed %s", err.Error())
+		m.record.Eventf(update, nil, corev1.EventTypeWarning, types.EventSyncPodNetworkingFailed, "", "Sync failed %s", err.Error())
 	}
 
 	err2 := m.client.Status().Update(ctx, update)

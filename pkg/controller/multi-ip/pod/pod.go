@@ -7,7 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,7 +33,7 @@ func init() {
 			Complete(&ReconcilePod{
 				client: mgr.GetClient(),
 				scheme: mgr.GetScheme(),
-				record: mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
+				record: mgr.GetEventRecorder(utils.EventName(ControllerName)),
 			})
 	}, false)
 }
@@ -46,7 +46,7 @@ type ReconcilePod struct {
 	client client.Client
 	scheme *runtime.Scheme
 
-	record record.EventRecorder
+	record events.EventRecorder
 }
 
 func (r *ReconcilePod) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {

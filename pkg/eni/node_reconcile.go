@@ -11,7 +11,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -30,7 +30,7 @@ var _ reconcile.Reconciler = &nodeReconcile{}
 
 type nodeReconcile struct {
 	client client.Client
-	record record.EventRecorder
+	record events.EventRecorder
 
 	once     sync.Once
 	nodeName string
@@ -66,7 +66,7 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 
 	eniConfig, err := daemon.ConfigFromConfigMap(ctx, r.client, node.Name)
 	if err != nil {
-		r.record.Event(k8sNode, "Warning", types.EventConfigError, err.Error())
+		r.record.Eventf(k8sNode, nil, "Warning", types.EventConfigError, "", "%s", err.Error())
 		return reconcile.Result{}, err
 	}
 
@@ -92,7 +92,7 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 		ipv4, ipv6 = true, true
 		if node.Spec.NodeCap.IPv6PerAdapter != node.Spec.NodeCap.IPv4PerAdapter {
 			l.Info("unsupported dual stack instance")
-			r.record.Eventf(node, "Warning", types.EventConfigError, "Instance not support k8s dual stack. ipv4 and ipv6 count is not equal.")
+			r.record.Eventf(node, nil, "Warning", types.EventConfigError, "", "Instance not support k8s dual stack. ipv4 and ipv6 count is not equal.")
 			ipv6 = false
 		}
 	case "ipv6":
@@ -179,7 +179,7 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 	} else {
 		node.Spec.ENISpec.EnableIPPrefix = beforeENISpec.EnableIPPrefix
 		if eniConfig.EnableIPPrefix != beforeENISpec.EnableIPPrefix {
-			r.record.Eventf(k8sNode, "Warning", "PrefixModeImmutable",
+			r.record.Eventf(k8sNode, nil, "Warning", "PrefixModeImmutable", "",
 				"enable_ip_prefix changed in config (want=%v), but Node CR value (%v) is immutable after creation",
 				eniConfig.EnableIPPrefix, beforeENISpec.EnableIPPrefix)
 		}
@@ -276,7 +276,7 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 
 	eniConfig, err := daemon.ConfigFromConfigMap(ctx, r.client, node.Name)
 	if err != nil {
-		r.record.Event(k8sNode, "Warning", types.EventConfigError, err.Error())
+		r.record.Eventf(k8sNode, nil, "Warning", types.EventConfigError, "", "%s", err.Error())
 		return reconcile.Result{}, err
 	}
 
@@ -307,7 +307,7 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	}
 	if len(vswitchOptions) == 0 {
 		err = fmt.Errorf("failed to get vsw for zone %s", node.Spec.NodeMetadata.ZoneID)
-		r.record.Event(k8sNode, "Warning", types.EventConfigError, err.Error())
+		r.record.Eventf(k8sNode, nil, "Warning", types.EventConfigError, "", "%s", err.Error())
 		return reconcile.Result{}, err
 	}
 

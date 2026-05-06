@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
@@ -588,7 +588,7 @@ type ReconcilerBuilder struct {
 	scheme       *runtime.Scheme
 	aliyun       aliyunClient.OpenAPI
 	vswpool      *vswpool.SwitchPool
-	record       record.EventRecorder
+	record       events.EventRecorder
 	tracer       trace.Tracer
 	eniBatchSize int
 	gcPeriod     time.Duration
@@ -631,7 +631,7 @@ func (b *ReconcilerBuilder) WithVSwitchPool(pool *vswpool.SwitchPool) *Reconcile
 }
 
 // WithRecorder sets the event recorder.
-func (b *ReconcilerBuilder) WithRecorder(r record.EventRecorder) *ReconcilerBuilder {
+func (b *ReconcilerBuilder) WithRecorder(r events.EventRecorder) *ReconcilerBuilder {
 	b.record = r
 	return b
 }
@@ -675,7 +675,7 @@ func (b *ReconcilerBuilder) WithENITaskQueue(queue *ENITaskQueue) *ReconcilerBui
 // WithDefaults sets sensible defaults for testing (fake recorder, noop tracer, etc.).
 func (b *ReconcilerBuilder) WithDefaults() *ReconcilerBuilder {
 	if b.record == nil {
-		b.record = record.NewFakeRecorder(1000)
+		b.record = events.NewFakeRecorder(1000)
 	}
 	if b.tracer == nil {
 		b.tracer = noop.NewTracerProvider().Tracer("")

@@ -31,7 +31,7 @@ import (
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	cc "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -71,7 +71,7 @@ var _ = Describe("Node Controller", func() {
 			client:          k8sClient,
 			scheme:          k8sClient.Scheme(),
 			aliyun:          openAPI,
-			record:          record.NewFakeRecorder(1000),
+			record:          events.NewFakeRecorder(1000),
 			centralizedIPAM: centralizedIPAM,
 			supportEFLO:     supportEFLO,
 			nodeStatusCache: ctrlStatus.NewCache[ctrlStatus.NodeStatus](),
