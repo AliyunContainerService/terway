@@ -42,7 +42,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -68,7 +68,7 @@ func init() {
 		r := &ReconcilePod{
 			client:    mgr.GetClient(),
 			scheme:    mgr.GetScheme(),
-			record:    mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
+			record:    mgr.GetEventRecorder(utils.EventName(ControllerName)),
 			aliyun:    ctrlCtx.AliyunClient,
 			swPool:    ctrlCtx.VSwitchPool,
 			trunkMode: *ctrlCtx.Config.EnableTrunk,
@@ -131,7 +131,7 @@ type ReconcilePod struct {
 	swPool *vswitch.SwitchPool
 
 	//record event recorder
-	record record.EventRecorder
+	record events.EventRecorder
 
 	trunkMode bool // use trunk mode or secondary eni mode
 	// deprecated
@@ -334,16 +334,16 @@ func (m *ReconcilePod) recordPodCreate(pod *corev1.Pod, startTime time.Time, err
 	if err == nil || pod == nil {
 		return
 	}
-	m.record.Eventf(pod, corev1.EventTypeWarning,
-		"CniPodCreateError", fmt.Sprintf("PodCreateError: %s, elapsedTime: %s", err, time.Since(startTime)))
+	m.record.Eventf(pod, nil, corev1.EventTypeWarning,
+		"CniPodCreateError", "", "PodCreateError: %s, elapsedTime: %s", err, time.Since(startTime))
 }
 
 func (m *ReconcilePod) recordPodDelete(pod *corev1.Pod, startTime time.Time, err error) {
 	if err == nil || pod == nil {
 		return
 	}
-	m.record.Eventf(pod, corev1.EventTypeWarning,
-		"CniPodDeleteError", fmt.Sprintf("CniPodDeleteError: %s, elapsedTime: %s", err, time.Since(startTime)))
+	m.record.Eventf(pod, nil, corev1.EventTypeWarning,
+		"CniPodDeleteError", "", "CniPodDeleteError: %s, elapsedTime: %s", err, time.Since(startTime))
 }
 
 // podDelete is proceed after pod is deleted
@@ -583,14 +583,14 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 				return
 			}
 			l.WithValues("eni", "").Error(err, "create fail")
-			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventCreateENIFailed, err.Error())
+			m.record.Eventf(podENI, nil, corev1.EventTypeWarning, types.EventCreateENIFailed, "", "%s", err.Error())
 		} else {
 			var ids []string
 			for _, alloc := range podENI.Spec.Allocations {
 				ids = append(ids, alloc.ENI.ID)
 				l.WithValues("eni", alloc.ENI.ID).Info("created")
 			}
-			m.record.Eventf(podENI, corev1.EventTypeNormal, types.EventCreateENISucceed, "create enis %s", strings.Join(ids, ","))
+			m.record.Eventf(podENI, nil, corev1.EventTypeNormal, types.EventCreateENISucceed, "", "create enis %s", strings.Join(ids, ","))
 		}
 	}()
 
@@ -681,7 +681,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 					return innerErr
 				})
 				if innerErr != nil {
-					m.record.Eventf(pod, corev1.EventTypeWarning, types.EventCreateENIFailed, "rollbackErr %s, createErr %s", innerErr, err)
+					m.record.Eventf(pod, nil, corev1.EventTypeWarning, types.EventCreateENIFailed, "", "rollbackErr %s, createErr %s", innerErr, err)
 				}
 
 				return fmt.Errorf("create eni cr err,rollbackErr %s %w", innerErr, err)

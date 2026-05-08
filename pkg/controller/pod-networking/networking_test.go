@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
@@ -62,7 +62,7 @@ var _ = Describe("Networking controller", func() {
 				client:       k8sClient,
 				aliyunClient: openAPI,
 				swPool:       switchPool,
-				record:       record.NewFakeRecorder(100),
+				record:       events.NewFakeRecorder(100),
 			}
 			result, err := controllerReconciler.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: "does-not-exist"},
@@ -93,7 +93,7 @@ var _ = Describe("Networking controller", func() {
 				client:       k8sClient,
 				aliyunClient: openAPI,
 				swPool:       switchPool,
-				record:       record.NewFakeRecorder(100),
+				record:       events.NewFakeRecorder(100),
 			}
 			result, err := controllerReconciler.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: name},
@@ -136,7 +136,7 @@ var _ = Describe("Networking controller", func() {
 				client:       k8sClient,
 				aliyunClient: openAPI,
 				swPool:       switchPool,
-				record:       record.NewFakeRecorder(100),
+				record:       events.NewFakeRecorder(100),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -186,7 +186,7 @@ var _ = Describe("Networking controller", func() {
 				client:       k8sClient,
 				aliyunClient: openAPI,
 				swPool:       switchPool,
-				record:       record.NewFakeRecorder(100),
+				record:       events.NewFakeRecorder(100),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -248,7 +248,7 @@ var _ = Describe("Networking controller", func() {
 				client:       k8sClient,
 				aliyunClient: openAPI,
 				swPool:       switchPool,
-				record:       record.NewFakeRecorder(100),
+				record:       events.NewFakeRecorder(100),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -276,7 +276,7 @@ var _ = Describe("Networking controller", func() {
 				client:       k8sClient,
 				aliyunClient: openAPI,
 				swPool:       switchPool,
-				record:       record.NewFakeRecorder(100),
+				record:       events.NewFakeRecorder(100),
 			}
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -340,7 +340,7 @@ var _ = Describe("Networking controller", func() {
 				client:       k8sClient,
 				aliyunClient: openAPI,
 				swPool:       switchPool,
-				record:       record.NewFakeRecorder(100),
+				record:       events.NewFakeRecorder(100),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{

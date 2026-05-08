@@ -13,7 +13,7 @@ import (
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,7 +40,7 @@ type ReconcileNetworkInterface struct {
 	aliyun aliyunClient.OpenAPI
 
 	//record event recorder
-	record record.EventRecorder
+	record events.EventRecorder
 
 	resourceBackoff *BackoffManager
 }
@@ -69,7 +69,7 @@ func init() {
 				client:          mgr.GetClient(),
 				scheme:          mgr.GetScheme(),
 				aliyun:          ctrlCtx.AliyunClient, // use direct client
-				record:          mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
+				record:          mgr.GetEventRecorder(utils.EventName(ControllerName)),
 				resourceBackoff: NewBackoffManager(),
 			})
 
@@ -216,7 +216,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 				return reconcile.Result{RequeueAfter: du}, nil
 			case aliyunClient.LENIStatusCreateFailed:
 				// release this eni, this status should be on first create
-				r.record.Eventf(networkInterface, corev1.EventTypeWarning, types.EventCreateENIFailed, "backend create failed, will delete")
+				r.record.Eventf(networkInterface, nil, corev1.EventTypeWarning, types.EventCreateENIFailed, "", "backend create failed, will delete")
 				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventCreateENIFailed,
 					"ENI %s creation failed in backend, rolling back", networkInterface.Name)
 				return reconcile.Result{}, r.rollBackPodENI(ctx, networkInterface)
@@ -499,7 +499,7 @@ func (r *ReconcileNetworkInterface) emitEventToPod(ctx context.Context, ni *v1be
 		return
 	}
 
-	r.record.Eventf(pod, eventType, reason, msgFmt, args...)
+	r.record.Eventf(pod, nil, eventType, reason, "", msgFmt, args...)
 }
 
 func (r *ReconcileNetworkInterface) rollBackPodENI(ctx context.Context, networkInterface *v1beta1.NetworkInterface) error {

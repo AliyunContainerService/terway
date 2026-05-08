@@ -12,7 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -182,7 +182,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}
@@ -326,7 +326,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}
@@ -478,7 +478,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}
@@ -632,7 +632,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}
@@ -787,7 +787,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}
@@ -900,7 +900,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}
@@ -1026,7 +1026,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}
@@ -1081,7 +1081,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}
@@ -1131,7 +1131,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}
@@ -1172,7 +1172,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false}
 
@@ -1213,7 +1213,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}
@@ -1330,7 +1330,7 @@ var _ = Describe("Pod controller", func() {
 					scheme:    scheme.Scheme,
 					aliyun:    openAPI,
 					swPool:    switchPool,
-					record:    record.NewFakeRecorder(1000),
+					record:    events.NewFakeRecorder(1000),
 					trunkMode: false,
 					crdMode:   false,
 				}
@@ -1450,7 +1450,7 @@ var _ = Describe("Pod controller", func() {
 					scheme:    scheme.Scheme,
 					aliyun:    openAPI,
 					swPool:    switchPool,
-					record:    record.NewFakeRecorder(1000),
+					record:    events.NewFakeRecorder(1000),
 					trunkMode: false,
 					crdMode:   false,
 				}
@@ -1568,7 +1568,7 @@ var _ = Describe("Pod controller", func() {
 					scheme:    scheme.Scheme,
 					aliyun:    openAPI,
 					swPool:    switchPool,
-					record:    record.NewFakeRecorder(1000),
+					record:    events.NewFakeRecorder(1000),
 					trunkMode: false,
 					crdMode:   false,
 				}
@@ -1646,7 +1646,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}
@@ -1761,7 +1761,7 @@ var _ = Describe("Pod controller", func() {
 				scheme:    scheme.Scheme,
 				aliyun:    openAPI,
 				swPool:    switchPool,
-				record:    record.NewFakeRecorder(1000),
+				record:    events.NewFakeRecorder(1000),
 				trunkMode: false,
 				crdMode:   false,
 			}

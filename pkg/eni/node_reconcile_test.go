@@ -10,7 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
@@ -83,7 +83,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 
 			// Patch runERDMADevicePlugin method to avoid starting real device plugin
@@ -182,7 +182,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 
 			// Patch runERDMADevicePlugin method to avoid starting real device plugin
@@ -283,7 +283,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 
 			// Patch runERDMADevicePlugin method to avoid starting real device plugin
@@ -385,7 +385,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 
 			// Patch runERDMADevicePlugin method to avoid starting real device plugin
@@ -486,7 +486,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 
 			// Patch runERDMADevicePlugin method to avoid starting real device plugin
@@ -597,7 +597,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 
 			// Patch runERDMADevicePlugin method to avoid starting real device plugin
@@ -701,7 +701,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 
 			// Patch runERDMADevicePlugin method to avoid starting real device plugin
@@ -793,7 +793,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 
 			// Patch runERDMADevicePlugin method to avoid starting real device plugin
@@ -887,7 +887,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 
 			// Patch runERDMADevicePlugin method to avoid starting real device plugin
@@ -995,7 +995,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName + "-eflo-reclaim",
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 
 			// Patch runERDMADevicePlugin method to avoid starting real device plugin
@@ -1099,7 +1099,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName + "-no-reclaim",
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 
 			// Patch runERDMADevicePlugin method to avoid starting real device plugin
@@ -1191,7 +1191,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
 			defer devicePluginPatches.Reset()
@@ -1254,7 +1254,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
 			defer devicePluginPatches.Reset()
@@ -1346,7 +1346,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
 			defer devicePluginPatches.Reset()
@@ -1427,7 +1427,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
 			defer devicePluginPatches.Reset()
@@ -1498,7 +1498,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
 			defer devicePluginPatches.Reset()
@@ -1571,7 +1571,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
 			defer devicePluginPatches.Reset()
@@ -1645,7 +1645,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
 			defer devicePluginPatches.Reset()
@@ -1714,7 +1714,7 @@ var _ = Describe("Node controller", func() {
 			controllerReconciler := &nodeReconcile{
 				client:   k8sClient,
 				nodeName: nodeName,
-				record:   record.NewFakeRecorder(100),
+				record:   events.NewFakeRecorder(100),
 			}
 			devicePluginPatches := patchRunERDMADevicePlugin(controllerReconciler)
 			defer devicePluginPatches.Reset()

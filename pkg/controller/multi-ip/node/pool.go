@@ -31,7 +31,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -147,7 +147,7 @@ func init() {
 			Reconciler: &ReconcileNode{
 				client:             mgr.GetClient(),
 				scheme:             mgr.GetScheme(),
-				record:             mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
+				record:             mgr.GetEventRecorder(utils.EventName(ControllerName)),
 				aliyun:             ctrlCtx.AliyunClient,
 				vswpool:            ctrlCtx.VSwitchPool,
 				fullSyncNodePeriod: fullSyncPeriod,
@@ -191,7 +191,7 @@ type NodeStatus struct {
 type ReconcileNode struct {
 	client client.Client
 	scheme *runtime.Scheme
-	record record.EventRecorder
+	record events.EventRecorder
 
 	aliyun  aliyunClient.OpenAPI
 	vswpool *vswitch.SwitchPool
@@ -458,7 +458,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	}
 	enis, err = n.aliyun.DescribeNetworkInterfaceV2(ctx, opts)
 	if err != nil {
-		n.record.Event(node, corev1.EventTypeWarning, EventSyncOpenAPIFailed, fmt.Sprintf("Failed to describe network interfaces: %v", err))
+		n.record.Eventf(node, nil, corev1.EventTypeWarning, EventSyncOpenAPIFailed, "", "Failed to describe network interfaces: %v", err)
 		return err
 	}
 
@@ -583,7 +583,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	node.Status.LastSyncOpenAPITime = metav1.Now()
 
 	MetaCtx(ctx).NeedSyncOpenAPI.Store(false)
-	n.record.Event(node, corev1.EventTypeNormal, EventSyncOpenAPISuccess, fmt.Sprintf("Successfully synced %d ENIs from OpenAPI", len(enis)))
+	n.record.Eventf(node, nil, corev1.EventTypeNormal, EventSyncOpenAPISuccess, "", "Successfully synced %d ENIs from OpenAPI", len(enis))
 	return nil
 }
 
@@ -991,9 +991,9 @@ func (n *ReconcileNode) syncTaskQueueStatus(ctx context.Context, node *networkv1
 				l.Info("ENI attach completed", "eni", task.ENIID,
 					"ipv4Count", len(nic.IPv4), "ipv6Count", len(nic.IPv6),
 					"ipv4PrefixCount", len(nic.IPv4Prefix), "ipv6PrefixCount", len(nic.IPv6Prefix))
-				n.record.Event(node, corev1.EventTypeNormal, "ENIAttachSuccess",
-					fmt.Sprintf("ENI %s is now ready with %d IPv4, %d IPv6, %d IPv4Prefixes, %d IPv6Prefixes",
-						task.ENIID, len(nic.IPv4), len(nic.IPv6), len(nic.IPv4Prefix), len(nic.IPv6Prefix)))
+				n.record.Eventf(node, nil, corev1.EventTypeNormal, "ENIAttachSuccess", "",
+					"ENI %s is now ready with %d IPv4, %d IPv6, %d IPv4Prefixes, %d IPv6Prefixes",
+					task.ENIID, len(nic.IPv4), len(nic.IPv6), len(nic.IPv4Prefix), len(nic.IPv6Prefix))
 			} else {
 				// should not happen
 				nic.Status = aliyunClient.ENIStatusDeleting
@@ -1008,8 +1008,8 @@ func (n *ReconcileNode) syncTaskQueueStatus(ctx context.Context, node *networkv1
 			}
 
 			l.Error(task.Error, "ENI attach failed", "eni", task.ENIID, "status", task.Status)
-			n.record.Event(node, corev1.EventTypeWarning, "ENIAttachFailed",
-				fmt.Sprintf("ENI %s attach failed: %s", task.ENIID, errMsg))
+			n.record.Eventf(node, nil, corev1.EventTypeWarning, "ENIAttachFailed", "",
+				"ENI %s attach failed: %s", task.ENIID, errMsg)
 		}
 
 		MetaCtx(ctx).StatusChanged.Store(true)
@@ -1142,7 +1142,7 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	updateCrCondition(options)
 
 	if err != nil {
-		n.record.Event(node, corev1.EventTypeWarning, EventAllocIPFailed, err.Error())
+		n.record.Eventf(node, nil, corev1.EventTypeWarning, EventAllocIPFailed, "", "%s", err.Error())
 	}
 
 	// the err is kept
@@ -1756,15 +1756,15 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 			// wait eni detached
 			err := n.aliyun.DeleteNetworkInterfaceV2(ctx, eni.ID)
 			if err != nil {
-				n.record.Event(node, corev1.EventTypeWarning, types.EventDeleteENIFailed,
-					fmt.Sprintf("Failed to delete ENI %s: %v", eni.ID, err))
+				n.record.Eventf(node, nil, corev1.EventTypeWarning, types.EventDeleteENIFailed, "",
+					"Failed to delete ENI %s: %v", eni.ID, err)
 				log.Error(err, "run gc failed")
 				continue
 			}
 			MetaCtx(ctx).StatusChanged.Store(true)
 
-			n.record.Event(node, corev1.EventTypeNormal, types.EventDeleteENISucceed,
-				fmt.Sprintf("Successfully deleted ENI %s", eni.ID))
+			n.record.Eventf(node, nil, corev1.EventTypeNormal, types.EventDeleteENISucceed, "",
+				"Successfully deleted ENI %s", eni.ID)
 			log.Info("run gc succeed, eni removed", "eni", eni.ID)
 			// remove from status
 			delete(node.Status.NetworkInterfaces, eni.ID)
@@ -2005,8 +2005,8 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			// block
 			n.vswpool.Block(createOpts.NetworkInterfaceOptions.VSwitchID)
 		}
-		n.record.Event(node, corev1.EventTypeWarning, types.EventCreateENIFailed,
-			fmt.Sprintf("Failed to create ENI type=%s vsw=%s: %v", opt.eniTypeKey.ENIType, vsw.ID, err))
+		n.record.Eventf(node, nil, corev1.EventTypeWarning, types.EventCreateENIFailed, "",
+			"Failed to create ENI type=%s vsw=%s: %v", opt.eniTypeKey.ENIType, vsw.ID, err)
 		return err
 	}
 
@@ -2050,9 +2050,9 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 
 	MetaCtx(ctx).StatusChanged.Store(true)
 
-	n.record.Event(node, corev1.EventTypeNormal, types.EventCreateENISucceed,
-		fmt.Sprintf("ENI %s created (IPv4=%d IPv4Prefix=%d), attach in progress",
-			result.NetworkInterfaceID, ipv4Count, ipv4PrefixCount))
+	n.record.Eventf(node, nil, corev1.EventTypeNormal, types.EventCreateENISucceed, "",
+		"ENI %s created (IPv4=%d IPv4Prefix=%d), attach in progress",
+		result.NetworkInterfaceID, ipv4Count, ipv4PrefixCount)
 
 	// Return immediately, don't block waiting for attach
 	return nil

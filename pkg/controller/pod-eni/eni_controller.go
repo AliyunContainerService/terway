@@ -38,7 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -74,7 +74,7 @@ func init() {
 		r := &ReconcilePodENI{
 			client:          mgr.GetClient(),
 			scheme:          mgr.GetScheme(),
-			record:          mgr.GetEventRecorderFor(utils.EventName(ControllerName)),
+			record:          mgr.GetEventRecorder(utils.EventName(ControllerName)),
 			aliyun:          ctrlCtx.AliyunClient,
 			trunkMode:       *ctrlCtx.Config.EnableTrunk,
 			crdMode:         ctrlCtx.Config.IPAMType == types.IPAMTypeCRD,
@@ -122,7 +122,7 @@ type ReconcilePodENI struct {
 	aliyun aliyunClient.OpenAPI
 
 	//record event recorder
-	record record.EventRecorder
+	record events.EventRecorder
 
 	trunkMode bool // use trunk mode or secondary eni mode
 	// deprecated remove after we deprecated eniOnly
@@ -199,8 +199,8 @@ func (m *ReconcilePodENI) recordPodENIDeleteErr(podEni *v1beta1.PodENI, startTim
 	if getErr := m.client.Get(context.Background(), k8stypes.NamespacedName{Namespace: podEni.Namespace, Name: podEni.Name}, pod); getErr != nil {
 		return
 	}
-	m.record.Eventf(pod, corev1.EventTypeWarning,
-		"CniPodENIDeleteErr", fmt.Sprintf("CniPodENIDeleteErr: %s, elapsedTime: %s", err, time.Since(startTime)))
+	m.record.Eventf(pod, nil, corev1.EventTypeWarning,
+		"CniPodENIDeleteErr", "", "CniPodENIDeleteErr: %s, elapsedTime: %s", err, time.Since(startTime))
 }
 
 func (m *ReconcilePodENI) recordPodENICreateErr(podEni *v1beta1.PodENI, startTime time.Time, err error) {
@@ -211,8 +211,8 @@ func (m *ReconcilePodENI) recordPodENICreateErr(podEni *v1beta1.PodENI, startTim
 	if getErr := m.client.Get(context.Background(), k8stypes.NamespacedName{Namespace: podEni.Namespace, Name: podEni.Name}, pod); getErr != nil {
 		return
 	}
-	m.record.Eventf(pod, corev1.EventTypeWarning,
-		"CniCreateENIError", fmt.Sprintf("CniCreateENIError: %s, elapsedTime: %s", err, time.Since(startTime)))
+	m.record.Eventf(pod, nil, corev1.EventTypeWarning,
+		"CniCreateENIError", "", "CniCreateENIError: %s, elapsedTime: %s", err, time.Since(startTime))
 }
 
 // NeedLeaderElection need election
@@ -251,7 +251,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		defer func() {
 			if err != nil {
 				l.Error(err, "detach failed")
-				m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventDetachENIFailed, "%s", err.Error())
+				m.record.Eventf(podENI, nil, corev1.EventTypeWarning, types.EventDetachENIFailed, "", "%s", err.Error())
 			}
 		}()
 		return m.detach(ctx, podENI)
@@ -269,7 +269,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		// for pod require to unbind eni
 		defer func() {
 			if err != nil {
-				m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventAttachENIFailed, "%s", err.Error())
+				m.record.Eventf(podENI, nil, corev1.EventTypeWarning, types.EventAttachENIFailed, "", "%s", err.Error())
 			}
 		}()
 		if len(podENI.Spec.Allocations) == 0 {
@@ -302,7 +302,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 				// reject if a eniOnly pod is trying to use trunk eni
 				for _, alloc := range podENI.Spec.Allocations {
 					if alloc.ENI.AttachmentOptions.Trunk != nil && !*alloc.ENI.AttachmentOptions.Trunk {
-						m.record.Eventf(pod, corev1.EventTypeWarning, types.EventAttachENIFailed, "trunk eni is not allowed for eniOnly pod, you must nodeAffinity to a node with trunk eni")
+						m.record.Eventf(pod, nil, corev1.EventTypeWarning, types.EventAttachENIFailed, "", "trunk eni is not allowed for eniOnly pod, you must nodeAffinity to a node with trunk eni")
 						return reconcile.Result{}, fmt.Errorf("trunk eni is not allowed for eniOnly pod")
 					}
 				}
@@ -383,7 +383,7 @@ func (m *ReconcilePodENI) podENICreate(ctx context.Context, namespacedName clien
 		err = m.client.Status().Update(ctx, podENI)
 		if err != nil {
 			ll.Error(err, "update podENI", "rv", podENI.ResourceVersion)
-			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventUpdatePodENIFailed, "%s", err.Error())
+			m.record.Eventf(podENI, nil, corev1.EventTypeWarning, types.EventUpdatePodENIFailed, "", "%s", err.Error())
 		}
 		ll.Info("attached")
 		// wait status change
@@ -693,9 +693,9 @@ func (m *ReconcilePodENI) attachENI(ctx context.Context, podENI *v1beta1.PodENI,
 	}
 	defer func() {
 		if finalErr != nil {
-			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventAttachENIFailed, finalErr.Error())
+			m.record.Eventf(podENI, nil, corev1.EventTypeWarning, types.EventAttachENIFailed, "", "%s", finalErr.Error())
 		} else {
-			m.record.Eventf(podENI, corev1.EventTypeNormal, types.EventAttachENISucceed, fmt.Sprintf("attached eni %s", strings.Join(allocIDs(podENI), ",")))
+			m.record.Eventf(podENI, nil, corev1.EventTypeNormal, types.EventAttachENISucceed, "", "attached eni %s", strings.Join(allocIDs(podENI), ","))
 		}
 	}()
 
@@ -815,9 +815,9 @@ func (m *ReconcilePodENI) detachMemberENI(ctx context.Context, podENI *v1beta1.P
 
 	defer func() {
 		if err != nil {
-			m.record.Eventf(podENI, corev1.EventTypeWarning, types.EventDetachENIFailed, err.Error())
+			m.record.Eventf(podENI, nil, corev1.EventTypeWarning, types.EventDetachENIFailed, "", "%s", err.Error())
 		} else {
-			m.record.Eventf(podENI, corev1.EventTypeNormal, types.EventDetachENISucceed, fmt.Sprintf("detach eni %s", strings.Join(allocIDs(podENI), ",")))
+			m.record.Eventf(podENI, nil, corev1.EventTypeNormal, types.EventDetachENISucceed, "", "detach eni %s", strings.Join(allocIDs(podENI), ","))
 		}
 	}()
 	for _, alloc := range podENI.Spec.Allocations {
