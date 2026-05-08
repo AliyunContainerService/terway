@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
+	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
 	"github.com/AliyunContainerService/terway/pkg/feature"
 	"go.opentelemetry.io/otel"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 )
 
 var _ ENI = &APIFacade{}

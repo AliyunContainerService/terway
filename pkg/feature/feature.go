@@ -31,5 +31,5 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	EFLO:                 {Default: true, PreRelease: featuregate.Alpha},
 	KubeProxyReplacement: {Default: false, PreRelease: featuregate.Alpha},
 	WriteCNIConfFirst:    {Default: false, PreRelease: featuregate.Alpha},
-	ENIAttributeBasic:   {Default: false, PreRelease: featuregate.Alpha},
+	ENIAttributeBasic:    {Default: false, PreRelease: featuregate.Alpha},
 }

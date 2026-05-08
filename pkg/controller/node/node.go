@@ -146,7 +146,7 @@ func (r *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 
 	defer func() {
 		if err != nil {
-			r.record.Eventf(k8sNode, nil, "Warning", "ConfigError", "", err.Error())
+			r.record.Eventf(k8sNode, nil, corev1.EventTypeWarning, types.EventConfigError, types.ActionConfig, err.Error())
 		}
 	}()
 	if utils.ISLingJunNode(k8sNode.Labels) {

@@ -8,9 +8,9 @@ import (
 
 func TestIsSingleENIQuery(t *testing.T) {
 	tests := []struct {
-		name     string
-		opts     []DescribeNetworkInterfaceOption
-		wantID   string
+		name       string
+		opts       []DescribeNetworkInterfaceOption
+		wantID     string
 		wantSingle bool
 	}{
 		{
@@ -20,7 +20,7 @@ func TestIsSingleENIQuery(t *testing.T) {
 					NetworkInterfaceIDs: &[]string{"eni-123"},
 				},
 			},
-			wantID:   "eni-123",
+			wantID:     "eni-123",
 			wantSingle: true,
 		},
 		{
@@ -68,7 +68,7 @@ func TestIsSingleENIQuery(t *testing.T) {
 			opts: []DescribeNetworkInterfaceOption{
 				&DescribeNetworkInterfaceOptions{
 					NetworkInterfaceIDs: &[]string{"eni-123"},
-					VPCID:              strToPtr("vpc-abc"),
+					VPCID:               strToPtr("vpc-abc"),
 				},
 			},
 			wantSingle: false,
@@ -78,7 +78,7 @@ func TestIsSingleENIQuery(t *testing.T) {
 			opts: []DescribeNetworkInterfaceOption{
 				&DescribeNetworkInterfaceOptions{
 					NetworkInterfaceIDs: &[]string{"eni-123"},
-					Tags:               &map[string]string{"k": "v"},
+					Tags:                &map[string]string{"k": "v"},
 				},
 			},
 			wantSingle: false,
@@ -88,7 +88,7 @@ func TestIsSingleENIQuery(t *testing.T) {
 			opts: []DescribeNetworkInterfaceOption{
 				&DescribeNetworkInterfaceOptions{
 					NetworkInterfaceIDs: &[]string{"eni-123"},
-					Status:             strToPtr("InUse"),
+					Status:              strToPtr("InUse"),
 				},
 			},
 			wantSingle: false,
@@ -98,7 +98,7 @@ func TestIsSingleENIQuery(t *testing.T) {
 			opts: []DescribeNetworkInterfaceOption{
 				&DescribeNetworkInterfaceOptions{
 					NetworkInterfaceIDs: &[]string{"eni-123"},
-					InstanceType:       strToPtr("Secondary"),
+					InstanceType:        strToPtr("Secondary"),
 				},
 			},
 			wantSingle: false,
@@ -108,10 +108,10 @@ func TestIsSingleENIQuery(t *testing.T) {
 			opts: []DescribeNetworkInterfaceOption{
 				&DescribeNetworkInterfaceOptions{
 					NetworkInterfaceIDs: &[]string{"eni-123"},
-					RawStatus:          boolToPtr(true),
+					RawStatus:           boolToPtr(true),
 				},
 			},
-			wantID:   "eni-123",
+			wantID:     "eni-123",
 			wantSingle: true,
 		},
 	}

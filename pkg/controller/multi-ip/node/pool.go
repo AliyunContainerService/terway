@@ -458,7 +458,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	}
 	enis, err = n.aliyun.DescribeNetworkInterfaceV2(ctx, opts)
 	if err != nil {
-		n.record.Eventf(node, nil, corev1.EventTypeWarning, EventSyncOpenAPIFailed, "", "Failed to describe network interfaces: %v", err)
+		n.record.Eventf(node, nil, corev1.EventTypeWarning, EventSyncOpenAPIFailed, types.ActionSyncOpenAPI, "Failed to describe network interfaces: %v", err)
 		return err
 	}
 
@@ -583,7 +583,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 	node.Status.LastSyncOpenAPITime = metav1.Now()
 
 	MetaCtx(ctx).NeedSyncOpenAPI.Store(false)
-	n.record.Eventf(node, nil, corev1.EventTypeNormal, EventSyncOpenAPISuccess, "", "Successfully synced %d ENIs from OpenAPI", len(enis))
+	n.record.Eventf(node, nil, corev1.EventTypeNormal, EventSyncOpenAPISuccess, types.ActionSyncOpenAPI, "Successfully synced %d ENIs from OpenAPI", len(enis))
 	return nil
 }
 
@@ -991,7 +991,7 @@ func (n *ReconcileNode) syncTaskQueueStatus(ctx context.Context, node *networkv1
 				l.Info("ENI attach completed", "eni", task.ENIID,
 					"ipv4Count", len(nic.IPv4), "ipv6Count", len(nic.IPv6),
 					"ipv4PrefixCount", len(nic.IPv4Prefix), "ipv6PrefixCount", len(nic.IPv6Prefix))
-				n.record.Eventf(node, nil, corev1.EventTypeNormal, "ENIAttachSuccess", "",
+				n.record.Eventf(node, nil, corev1.EventTypeNormal, types.EventAttachENISucceed, types.ActionAttachENI,
 					"ENI %s is now ready with %d IPv4, %d IPv6, %d IPv4Prefixes, %d IPv6Prefixes",
 					task.ENIID, len(nic.IPv4), len(nic.IPv6), len(nic.IPv4Prefix), len(nic.IPv6Prefix))
 			} else {
@@ -1008,7 +1008,7 @@ func (n *ReconcileNode) syncTaskQueueStatus(ctx context.Context, node *networkv1
 			}
 
 			l.Error(task.Error, "ENI attach failed", "eni", task.ENIID, "status", task.Status)
-			n.record.Eventf(node, nil, corev1.EventTypeWarning, "ENIAttachFailed", "",
+			n.record.Eventf(node, nil, corev1.EventTypeWarning, types.EventAttachENIFailed, types.ActionAttachENI,
 				"ENI %s attach failed: %s", task.ENIID, errMsg)
 		}
 
@@ -1142,7 +1142,7 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	updateCrCondition(options)
 
 	if err != nil {
-		n.record.Eventf(node, nil, corev1.EventTypeWarning, EventAllocIPFailed, "", "%s", err.Error())
+		n.record.Eventf(node, nil, corev1.EventTypeWarning, EventAllocIPFailed, types.ActionAllocIP, "%s", err.Error())
 	}
 
 	// the err is kept
@@ -1756,14 +1756,14 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 			// wait eni detached
 			err := n.aliyun.DeleteNetworkInterfaceV2(ctx, eni.ID)
 			if err != nil {
-				n.record.Eventf(node, nil, corev1.EventTypeWarning, types.EventDeleteENIFailed, "",
+				n.record.Eventf(node, nil, corev1.EventTypeWarning, types.EventDeleteENIFailed, types.ActionDeleteENI,
 					"Failed to delete ENI %s: %v", eni.ID, err)
 				log.Error(err, "run gc failed")
 				continue
 			}
 			MetaCtx(ctx).StatusChanged.Store(true)
 
-			n.record.Eventf(node, nil, corev1.EventTypeNormal, types.EventDeleteENISucceed, "",
+			n.record.Eventf(node, nil, corev1.EventTypeNormal, types.EventDeleteENISucceed, types.ActionDeleteENI,
 				"Successfully deleted ENI %s", eni.ID)
 			log.Info("run gc succeed, eni removed", "eni", eni.ID)
 			// remove from status
@@ -2005,7 +2005,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 			// block
 			n.vswpool.Block(createOpts.NetworkInterfaceOptions.VSwitchID)
 		}
-		n.record.Eventf(node, nil, corev1.EventTypeWarning, types.EventCreateENIFailed, "",
+		n.record.Eventf(node, nil, corev1.EventTypeWarning, types.EventCreateENIFailed, types.ActionCreateENI,
 			"Failed to create ENI type=%s vsw=%s: %v", opt.eniTypeKey.ENIType, vsw.ID, err)
 		return err
 	}
@@ -2050,7 +2050,7 @@ func (n *ReconcileNode) createENI(ctx context.Context, node *networkv1beta1.Node
 
 	MetaCtx(ctx).StatusChanged.Store(true)
 
-	n.record.Eventf(node, nil, corev1.EventTypeNormal, types.EventCreateENISucceed, "",
+	n.record.Eventf(node, nil, corev1.EventTypeNormal, types.EventCreateENISucceed, types.ActionCreateENI,
 		"ENI %s created (IPv4=%d IPv4Prefix=%d), attach in progress",
 		result.NetworkInterfaceID, ipv4Count, ipv4PrefixCount)
 
