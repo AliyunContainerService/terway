@@ -240,7 +240,7 @@ func (a *ECSService) DeleteNetworkInterface(ctx context.Context, eniID string) e
 
 	// DeleteNetworkInterface is async; poll until the ENI is actually gone.
 	err = backoff.ExponentialBackoffWithInitialDelay(ctx, backoff.Backoff(backoff.ENIDeleteConfirm), func(ctx context.Context) (bool, error) {
-		enis, descErr := a.DescribeNetworkInterface(ctx, "", []string{eniID}, "", "", "", nil)
+		enis, descErr := a.describeNetworkInterfaceByID(ctx, eniID)
 		if descErr != nil {
 			l.Info("failed to query eni during deletion check, retrying", "err", descErr)
 			return false, nil
@@ -271,7 +271,7 @@ func (a *ECSService) WaitForNetworkInterface(ctx context.Context, eniID string, 
 	start := time.Now()
 	err := wait.ExponentialBackoff(backoff,
 		func() (done bool, err error) {
-			eni, err := a.DescribeNetworkInterface(ctx, "", []string{eniID}, "", "", "", nil)
+			eni, err := a.describeNetworkInterfaceByID(ctx, eniID)
 			if err != nil {
 				return false, nil
 			}

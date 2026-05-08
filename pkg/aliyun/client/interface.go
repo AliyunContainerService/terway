@@ -37,6 +37,8 @@ type ECS interface {
 	UnAssignIpv6Addresses(ctx context.Context, eniID string, ips []netip.Addr) error
 	DescribeInstanceTypes(ctx context.Context, types []string) ([]ecs.InstanceType, error)
 
+	DescribeNetworkInterfaceAttribute(ctx context.Context, eniID string) (*NetworkInterface, error)
+
 	DescribeNetworkInterface2(ctx context.Context, opts ...DescribeNetworkInterfaceOption) ([]*NetworkInterface, error)
 	DetachNetworkInterface2(ctx context.Context, opts ...DetachNetworkInterfaceOption) error
 	AssignPrivateIPAddress2(ctx context.Context, opts ...AssignPrivateIPAddressOption) ([]IPSet, error)

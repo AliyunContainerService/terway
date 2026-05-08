@@ -44,13 +44,14 @@ func InitializeClientMgr(regionID string, credProvider provider.CredentialsProvi
 	if err != nil {
 		return nil, err
 	}
-	clientMgr := NewClientMgr(credProvider, ecsClient, ecsv2Client, vpcClient, efloClient, eflov2Client, efloControllerClient)
+	clientMgr := NewClientMgr(regionID, credProvider, ecsClient, ecsv2Client, vpcClient, efloClient, eflov2Client, efloControllerClient)
 	return clientMgr, nil
 }
 
 // wire.go:
 
-func NewClientMgr(credProvider provider.CredentialsProvider,
+func NewClientMgr(regionID string,
+	credProvider provider.CredentialsProvider,
 	ecsClient ECSClient,
 	ecsV2Client ECSV2Client,
 	vpcClient VPCClient, efloClient EFLOClient,
@@ -58,6 +59,7 @@ func NewClientMgr(credProvider provider.CredentialsProvider,
 
 	return &ClientMgr{
 
+		regionID:             regionID,
 		provider:             credProvider,
 		ecsV2Client:          ecsV2Client,
 		ecsClient:            ecsClient,

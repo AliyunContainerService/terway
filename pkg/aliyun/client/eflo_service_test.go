@@ -50,6 +50,10 @@ func (m *mockClientSetForEFLO) EFLOController() *eflocontroller20221215.Client {
 	return nil
 }
 
+func (m *mockClientSetForEFLO) RegionID() string {
+	return "cn-hangzhou"
+}
+
 // Helper function to create EFLOService for testing
 func createTestEFLOServiceForAPI() *EFLOService {
 	rateLimiter := NewRateLimiter(LimitConfig{})

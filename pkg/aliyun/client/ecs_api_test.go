@@ -26,7 +26,8 @@ import (
 
 // Mock ClientSet for testing
 type mockClientSetForAPI struct {
-	ecsClient *ecs.Client
+	ecsClient   *ecs.Client
+	ecsV2Client *ecs20140526.Client
 }
 
 func (m *mockClientSetForAPI) ECS() *ecs.Client {
@@ -34,7 +35,7 @@ func (m *mockClientSetForAPI) ECS() *ecs.Client {
 }
 
 func (m *mockClientSetForAPI) ECSV2() *ecs20140526.Client {
-	return nil
+	return m.ecsV2Client
 }
 
 func (m *mockClientSetForAPI) VPC() *vpc.Client {
@@ -51,6 +52,10 @@ func (m *mockClientSetForAPI) EFLOV2() *eflo20220530.Client {
 
 func (m *mockClientSetForAPI) EFLOController() *eflocontroller20221215.Client {
 	return nil
+}
+
+func (m *mockClientSetForAPI) RegionID() string {
+	return "cn-hangzhou"
 }
 
 // Helper function to create ECSService for testing
@@ -284,6 +289,32 @@ func TestECSService_DeleteNetworkInterface_WithGomonkey(t *testing.T) {
 
 	// Verify result
 	assert.NoError(t, err)
+}
+
+func TestECSService_DescribeNetworkInterfaceAttribute_NilBody(t *testing.T) {
+	rateLimiter := NewRateLimiter(LimitConfig{})
+	tracer := otel.Tracer("test")
+	ecsService := &ECSService{
+		RateLimiter: rateLimiter,
+		Tracer:      tracer,
+		ClientSet: &mockClientSetForAPI{
+			ecsV2Client: &ecs20140526.Client{},
+		},
+	}
+
+	patches := gomonkey.ApplyFunc(
+		(*ecs20140526.Client).DescribeNetworkInterfaceAttribute,
+		func(client *ecs20140526.Client, request *ecs20140526.DescribeNetworkInterfaceAttributeRequest) (*ecs20140526.DescribeNetworkInterfaceAttributeResponse, error) {
+			assert.Equal(t, "eni-test-001", *request.NetworkInterfaceId)
+			return &ecs20140526.DescribeNetworkInterfaceAttributeResponse{}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ni, err := ecsService.DescribeNetworkInterfaceAttribute(context.Background(), "eni-test-001")
+	assert.Error(t, err)
+	assert.Nil(t, ni)
+	assert.Contains(t, err.Error(), "empty response body")
 }
 
 func TestECSService_AssignPrivateIPAddress_WithGomonkey(t *testing.T) {

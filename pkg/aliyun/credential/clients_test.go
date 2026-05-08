@@ -119,6 +119,7 @@ func TestInitializeClientMgr(t *testing.T) {
 	require.NotNil(t, c.EFLOV2())
 	require.NotNil(t, c.EFLOController())
 	require.NotNil(t, c.ECSV2())
+	require.Equal(t, "cn-test", c.RegionID())
 }
 
 func TestV1Warp_GetCredentials(t *testing.T) {

@@ -5,7 +5,10 @@ import (
 	"errors"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
+	"github.com/AliyunContainerService/terway/pkg/feature"
 	"go.opentelemetry.io/otel"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -63,6 +66,16 @@ func (a *APIFacade) CreateNetworkInterfaceV2(ctx context.Context, opts ...Create
 func (a *APIFacade) DescribeNetworkInterfaceV2(ctx context.Context, opts ...DescribeNetworkInterfaceOption) ([]*NetworkInterface, error) {
 	switch GetBackendAPI(ctx) {
 	case BackendAPIECS:
+		if eniID, ok := isSingleENIQuery(opts); ok && utilfeature.DefaultFeatureGate.Enabled(feature.ENIAttributeBasic) {
+			ni, err := a.ecsService.DescribeNetworkInterfaceAttribute(ctx, eniID)
+			if err != nil {
+				if apiErr.ErrorCodeIsAny(err, apiErr.ErrInvalidENINotFound) {
+					return nil, nil
+				}
+				return nil, err
+			}
+			return []*NetworkInterface{ni}, nil
+		}
 		return a.ecsService.DescribeNetworkInterface2(ctx, opts...)
 	case BackendAPIEFLO:
 		return a.efloService.DescribeLeniNetworkInterface(ctx, opts...)
@@ -70,6 +83,22 @@ func (a *APIFacade) DescribeNetworkInterfaceV2(ctx context.Context, opts ...Desc
 		return a.efloService.DescribeHDENI(ctx, opts...)
 	}
 	return nil, ErrNotImplemented
+}
+
+// isSingleENIQuery returns the ENI ID if opts describe a single-ENI-by-ID
+// query with no additional filters (InstanceID, VPCID, Tags, Status, InstanceType).
+func isSingleENIQuery(opts []DescribeNetworkInterfaceOption) (string, bool) {
+	o := &DescribeNetworkInterfaceOptions{}
+	for _, opt := range opts {
+		opt.ApplyTo(o)
+	}
+	if o.NetworkInterfaceIDs == nil || len(*o.NetworkInterfaceIDs) != 1 {
+		return "", false
+	}
+	if o.InstanceID != nil || o.VPCID != nil || o.Tags != nil || o.Status != nil || o.InstanceType != nil {
+		return "", false
+	}
+	return (*o.NetworkInterfaceIDs)[0], true
 }
 
 func (a *APIFacade) AttachNetworkInterfaceV2(ctx context.Context, opts ...AttachNetworkInterfaceOption) error {
