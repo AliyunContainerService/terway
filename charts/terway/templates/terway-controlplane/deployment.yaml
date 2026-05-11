@@ -36,6 +36,13 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsUser: 1000
+          ports:
+            - name: healthz
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 8081
+              protocol: TCP
           env:
           {{- toYaml .Values.terwayControlplane.envs | nindent 12 }}
           livenessProbe:
