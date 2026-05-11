@@ -111,6 +111,7 @@ terwayControlplane:
   enableTrunk: false
   ipStack: ipv4
   enableTrace: false
+  metricsBindAddress: "0"
   controllers:
     - pod-eni
     - pod

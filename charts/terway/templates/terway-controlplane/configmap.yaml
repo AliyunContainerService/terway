@@ -35,6 +35,7 @@ data:
     ipStack: "{{ .Values.terwayControlplane.ipStack }}"
     enableTrunk: {{.Values.terwayControlplane.enableTrunk}}
     enableTrace: {{.Values.terwayControlplane.enableTrace}}
+    metricsBindAddress: "{{.Values.terwayControlplane.metricsBindAddress}}"
     centralizedIPAM: {{.Values.centralizedIPAM}}
     {{- with .Values.terwayControlplane.controllers }}
     controllers:

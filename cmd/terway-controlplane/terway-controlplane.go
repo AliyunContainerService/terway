@@ -88,6 +88,8 @@ func init() {
 	utilruntime.Must(networkv1beta1.AddToScheme(scheme))
 
 	metrics.Registry.MustRegister(metric.OpenAPILatency)
+	metrics.Registry.MustRegister(metric.RateLimiterLatency)
+	metrics.Registry.MustRegister(metric.ConfigInfo)
 }
 
 func main() {
@@ -124,6 +126,16 @@ func main() {
 	}
 	backoff.OverrideBackoff(cfg.BackoffOverride)
 	utils.SetStsKinds(cfg.CustomStatefulWorkloadKinds)
+
+	metric.SetConfigMetrics([]metric.ControllerConcurrentConfig{
+		{Name: "pod", MaxConcurrent: cfg.PodMaxConcurrent},
+		{Name: "pod-eni", MaxConcurrent: cfg.PodENIMaxConcurrent},
+		{Name: "node", MaxConcurrent: cfg.NodeMaxConcurrent},
+		{Name: "eni", MaxConcurrent: cfg.ENIMaxConcurrent},
+		{Name: "multi-ip-node", MaxConcurrent: cfg.MultiIPNodeMaxConcurrent},
+		{Name: "multi-ip-pod", MaxConcurrent: cfg.MultiIPPodMaxConcurrent},
+		{Name: "pod-networking", MaxConcurrent: 1},
+	})
 
 	log.Info("using config", "config", cfg)
 
