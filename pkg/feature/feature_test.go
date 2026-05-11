@@ -30,6 +30,11 @@ func TestFeatureGates(t *testing.T) {
 	assert.Contains(t, defaultKubernetesFeatureGates, WriteCNIConfFirst)
 	spec = defaultKubernetesFeatureGates[WriteCNIConfFirst]
 	assert.False(t, spec.Default)
+
+	// Test ENIAttributeBasic feature gate
+	assert.Contains(t, defaultKubernetesFeatureGates, ENIAttributeBasic)
+	spec = defaultKubernetesFeatureGates[ENIAttributeBasic]
+	assert.False(t, spec.Default)
 }
 
 func TestFeatureGateValues(t *testing.T) {
@@ -51,6 +56,10 @@ func TestFeatureGateValues(t *testing.T) {
 	// Test WriteCNIConfFirst
 	enabled = gate.Enabled(WriteCNIConfFirst)
 	assert.False(t, enabled, "WriteCNIConfFirst should be disabled by default")
+
+	// Test ENIAttributeBasic
+	enabled = gate.Enabled(ENIAttributeBasic)
+	assert.False(t, enabled, "ENIAttributeBasic should be disabled by default")
 }
 
 func TestFeatureGateString(t *testing.T) {
@@ -59,4 +68,5 @@ func TestFeatureGateString(t *testing.T) {
 	assert.Equal(t, "EFLO", string(EFLO))
 	assert.Equal(t, "KubeProxyReplacement", string(KubeProxyReplacement))
 	assert.Equal(t, "WriteCNIConfFirst", string(WriteCNIConfFirst))
+	assert.Equal(t, "ENIAttributeBasic", string(ENIAttributeBasic))
 }

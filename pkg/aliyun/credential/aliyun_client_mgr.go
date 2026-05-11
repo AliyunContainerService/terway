@@ -31,6 +31,7 @@ type Client interface {
 	EFLO() *eflo.Client
 	EFLOV2() *eflo20220530.Client
 	EFLOController() *eflocontroller20221215.Client
+	RegionID() string
 }
 
 var (
@@ -116,6 +117,8 @@ func ProviderV2(providers provider.CredentialsProvider) credential.Credential {
 type ClientMgr struct {
 	provider provider.CredentialsProvider
 
+	regionID string
+
 	ecsClient            ECSClient
 	ecsV2Client          ECSV2Client
 	vpcClient            VPCClient
@@ -124,6 +127,10 @@ type ClientMgr struct {
 	efloControllerClient EFLOControllerClient
 
 	sync.RWMutex
+}
+
+func (c *ClientMgr) RegionID() string {
+	return c.regionID
 }
 
 func (c *ClientMgr) ECS() *ecs.Client {

@@ -124,11 +124,11 @@ func (m *ReconcilePodNetworking) Reconcile(ctx context.Context, request reconcil
 		update.Status.VSwitches = statusVSW
 		update.Status.Status = v1beta1.NetworkingStatusReady
 		update.Status.Message = ""
-		m.record.Eventf(update, nil, corev1.EventTypeNormal, types.EventSyncPodNetworkingSucceed, "", "Synced")
+		m.record.Eventf(update, nil, corev1.EventTypeNormal, types.EventSyncPodNetworkingSucceed, types.ActionSyncPodNetworking, "Synced")
 	} else {
 		update.Status.Status = v1beta1.NetworkingStatusFail
 		update.Status.Message = err.Error()
-		m.record.Eventf(update, nil, corev1.EventTypeWarning, types.EventSyncPodNetworkingFailed, "", "Sync failed %s", err.Error())
+		m.record.Eventf(update, nil, corev1.EventTypeWarning, types.EventSyncPodNetworkingFailed, types.ActionSyncPodNetworking, "Sync failed %s", err.Error())
 	}
 
 	err2 := m.client.Status().Update(ctx, update)

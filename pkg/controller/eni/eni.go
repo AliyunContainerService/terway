@@ -202,7 +202,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 					NetworkCardIndex:       networkInterface.Status.NetworkCardIndex,
 				})
 				if err != nil {
-					r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventAttachENIFailed,
+					r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventAttachENIFailed, types.ActionAttachENI,
 						"Failed to attach ENI %s to instance %s: %v", networkInterface.Name, networkInterface.Status.InstanceID, err)
 					return reconcile.Result{}, err
 				}
@@ -216,12 +216,20 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 				return reconcile.Result{RequeueAfter: du}, nil
 			case aliyunClient.LENIStatusCreateFailed:
 				// release this eni, this status should be on first create
-				r.record.Eventf(networkInterface, nil, corev1.EventTypeWarning, types.EventCreateENIFailed, "", "backend create failed, will delete")
-				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventCreateENIFailed,
+				var podObjRef *corev1.ObjectReference
+				if networkInterface.Spec.PodENIRef != nil {
+					podObjRef = &corev1.ObjectReference{
+						Kind:      "Pod",
+						Namespace: networkInterface.Spec.PodENIRef.Namespace,
+						Name:      networkInterface.Spec.PodENIRef.Name,
+					}
+				}
+				r.record.Eventf(networkInterface, podObjRef, corev1.EventTypeWarning, types.EventCreateENIFailed, types.ActionCreateENI, "backend create failed, will delete")
+				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventCreateENIFailed, types.ActionCreateENI,
 					"ENI %s creation failed in backend, rolling back", networkInterface.Name)
 				return reconcile.Result{}, r.rollBackPodENI(ctx, networkInterface)
 			case aliyunClient.LENIStatusDetachFailed, aliyunClient.LENIStatusDeleteFailed, aliyunClient.LENIStatusDeleting:
-				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventAttachENIFailed,
+				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventAttachENIFailed, types.ActionAttachENI,
 					"ENI %s in unexpected status %s during attach", networkInterface.Name, resp[0].Status)
 				return reconcile.Result{}, fmt.Errorf("unsupported status on attach %s", resp[0].Status)
 			default:
@@ -242,7 +250,7 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 				NetworkCardIndex:       networkInterface.Status.NetworkCardIndex,
 			})
 			if err != nil {
-				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventAttachENIFailed,
+				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventAttachENIFailed, types.ActionAttachENI,
 					"Failed to attach ENI %s to instance %s: %v", networkInterface.Name, networkInterface.Status.InstanceID, err)
 				return reconcile.Result{}, err
 			}
@@ -363,7 +371,7 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 						InstanceID:         toPtr(networkInterface.Status.InstanceID),
 					})
 					if err != nil {
-						r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventDetachENIFailed,
+						r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventDetachENIFailed, types.ActionDetachENI,
 							"Failed to detach ENI %s from instance %s: %v", networkInterface.Name, networkInterface.Status.InstanceID, err)
 						return reconcile.Result{}, err
 					}
@@ -394,7 +402,7 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 				TrunkID:            trunkID,
 			})
 			if err != nil {
-				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventDetachENIFailed,
+				r.emitEventToPod(ctx, networkInterface, corev1.EventTypeWarning, types.EventDetachENIFailed, types.ActionDetachENI,
 					"Failed to detach ENI %s from instance %s: %v", networkInterface.Name, networkInterface.Status.InstanceID, err)
 				return reconcile.Result{}, err
 			}
@@ -479,15 +487,15 @@ func (r *ReconcileNetworkInterface) delete(ctx context.Context, networkInterface
 	return nil
 }
 
-// emitEventToPod finds the associated Pod via PodENIRef and emits an event to it
-func (r *ReconcileNetworkInterface) emitEventToPod(ctx context.Context, ni *v1beta1.NetworkInterface, eventType, reason, msgFmt string, args ...interface{}) {
+// emitEventToPod finds the associated Pod via PodENIRef and emits an event to it,
+// with the NetworkInterface as the related secondary object.
+func (r *ReconcileNetworkInterface) emitEventToPod(ctx context.Context, ni *v1beta1.NetworkInterface, eventType, reason, action, msgFmt string, args ...interface{}) {
 	if ni.Spec.PodENIRef == nil || ni.Spec.PodENIRef.Name == "" {
 		return
 	}
 
 	l := logr.FromContextOrDiscard(ctx)
 
-	// PodENI name == Pod name, PodENI namespace == Pod namespace
 	pod := &corev1.Pod{}
 	err := r.client.Get(ctx, client.ObjectKey{
 		Namespace: ni.Spec.PodENIRef.Namespace,
@@ -499,7 +507,7 @@ func (r *ReconcileNetworkInterface) emitEventToPod(ctx context.Context, ni *v1be
 		return
 	}
 
-	r.record.Eventf(pod, nil, eventType, reason, "", msgFmt, args...)
+	r.record.Eventf(pod, ni, eventType, reason, action, msgFmt, args...)
 }
 
 func (r *ReconcileNetworkInterface) rollBackPodENI(ctx context.Context, networkInterface *v1beta1.NetworkInterface) error {

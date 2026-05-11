@@ -20,6 +20,10 @@ const (
 	KubeProxyReplacement featuregate.Feature = "KubeProxyReplacement"
 
 	WriteCNIConfFirst featuregate.Feature = "WriteCNIConfFirst"
+
+	// ENIAttributeBasic switches single-ENI queries from DescribeNetworkInterfaces
+	// to DescribeNetworkInterfaceAttribute(Attribute='basic') for faster responses.
+	ENIAttributeBasic featuregate.Feature = "ENIAttributeBasic"
 )
 
 var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
@@ -27,4 +31,5 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	EFLO:                 {Default: true, PreRelease: featuregate.Alpha},
 	KubeProxyReplacement: {Default: false, PreRelease: featuregate.Alpha},
 	WriteCNIConfFirst:    {Default: false, PreRelease: featuregate.Alpha},
+	ENIAttributeBasic:    {Default: false, PreRelease: featuregate.Alpha},
 }

@@ -44,6 +44,10 @@ func (m *mockClientSetForVPC) EFLOController() *eflocontroller20221215.Client {
 	return nil
 }
 
+func (m *mockClientSetForVPC) RegionID() string {
+	return "cn-hangzhou"
+}
+
 // Helper function to create VPCService for testing
 func createTestVPCServiceForAPI() *VPCService {
 	rateLimiter := NewRateLimiter(LimitConfig{})

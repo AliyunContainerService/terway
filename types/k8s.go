@@ -103,11 +103,30 @@ const (
 	EventDeleteENIFailed  = "DeleteENIFailed"
 
 	EventUpdatePodENIFailed = "UpdatePodENIFailed"
+	EventDeletePodENIFailed = "DeletePodENIFailed"
+
+	EventPodCreateFailed = "PodCreateFailed"
+	EventPodDeleteFailed = "PodDeleteFailed"
 
 	EventSyncPodNetworkingSucceed = "SyncPodNetworkingSucceed"
 	EventSyncPodNetworkingFailed  = "SyncPodNetworkingFailed"
 
 	EventConfigError = "ConfigError"
+)
+
+// event actions used by events.EventRecorder
+const (
+	ActionCreateENI         = "CreateENI"
+	ActionAttachENI         = "AttachENI"
+	ActionDetachENI         = "DetachENI"
+	ActionDeleteENI         = "DeleteENI"
+	ActionUpdatePodENI      = "UpdatePodENI"
+	ActionSyncPodNetworking = "SyncPodNetworking"
+	ActionConfig            = "Config"
+	ActionAllocIP           = "AllocIP"
+	ActionSyncOpenAPI       = "SyncOpenAPI"
+	ActionCreatePod         = "CreatePod"
+	ActionDeletePod         = "DeletePod"
 )
 
 // PodUseENI whether pod is use podENI cr res

@@ -335,7 +335,7 @@ func (m *ReconcilePod) recordPodCreate(pod *corev1.Pod, startTime time.Time, err
 		return
 	}
 	m.record.Eventf(pod, nil, corev1.EventTypeWarning,
-		"CniPodCreateError", "", "PodCreateError: %s, elapsedTime: %s", err, time.Since(startTime))
+		types.EventPodCreateFailed, types.ActionCreatePod, "Pod create error: %s, elapsedTime: %s", err, time.Since(startTime))
 }
 
 func (m *ReconcilePod) recordPodDelete(pod *corev1.Pod, startTime time.Time, err error) {
@@ -343,7 +343,7 @@ func (m *ReconcilePod) recordPodDelete(pod *corev1.Pod, startTime time.Time, err
 		return
 	}
 	m.record.Eventf(pod, nil, corev1.EventTypeWarning,
-		"CniPodDeleteError", "", "CniPodDeleteError: %s, elapsedTime: %s", err, time.Since(startTime))
+		types.EventPodDeleteFailed, types.ActionDeletePod, "Pod delete error: %s, elapsedTime: %s", err, time.Since(startTime))
 }
 
 // podDelete is proceed after pod is deleted
@@ -583,14 +583,14 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 				return
 			}
 			l.WithValues("eni", "").Error(err, "create fail")
-			m.record.Eventf(podENI, nil, corev1.EventTypeWarning, types.EventCreateENIFailed, "", "%s", err.Error())
+			m.record.Eventf(podENI, pod, corev1.EventTypeWarning, types.EventCreateENIFailed, types.ActionCreateENI, "%s", err.Error())
 		} else {
 			var ids []string
 			for _, alloc := range podENI.Spec.Allocations {
 				ids = append(ids, alloc.ENI.ID)
 				l.WithValues("eni", alloc.ENI.ID).Info("created")
 			}
-			m.record.Eventf(podENI, nil, corev1.EventTypeNormal, types.EventCreateENISucceed, "", "create enis %s", strings.Join(ids, ","))
+			m.record.Eventf(podENI, pod, corev1.EventTypeNormal, types.EventCreateENISucceed, types.ActionCreateENI, "create enis %s", strings.Join(ids, ","))
 		}
 	}()
 
@@ -681,7 +681,7 @@ func (m *ReconcilePod) createENI(ctx context.Context, allocs *[]*v1beta1.Allocat
 					return innerErr
 				})
 				if innerErr != nil {
-					m.record.Eventf(pod, nil, corev1.EventTypeWarning, types.EventCreateENIFailed, "", "rollbackErr %s, createErr %s", innerErr, err)
+					m.record.Eventf(pod, cr, corev1.EventTypeWarning, types.EventCreateENIFailed, types.ActionCreateENI, "rollbackErr %s, createErr %s", innerErr, err)
 				}
 
 				return fmt.Errorf("create eni cr err,rollbackErr %s %w", innerErr, err)

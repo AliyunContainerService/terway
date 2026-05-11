@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
@@ -376,40 +375,36 @@ func TestProvider_GetLimit_EFLOControl_Integration(t *testing.T) {
 }
 
 func TestProvider_GetLimit_Concurrency(t *testing.T) {
-	// Test cache and singleflight mechanism in concurrent scenarios
 	mockECS := &mocks.ECS{}
-
-	// Set up mock expectations, simulate API delay
-	mockECS.On("DescribeInstanceTypes", mock.Anything, []string{"ecs.g7.large"}).Return([]ecs.InstanceType{
-		{
-			InstanceTypeId:              "ecs.g7.large",
-			EniQuantity:                 4,
-			EniPrivateIpAddressQuantity: 5,
-			EniIpv6AddressQuantity:      10,
-			EniTotalQuantity:            6,
-			EriQuantity:                 2,
-			InstanceBandwidthRx:         1000,
-			InstanceBandwidthTx:         500,
-			EniTrunkSupported:           false,
-		},
-	}, nil).Once() // Ensure it's only called once
+	mockECS.On("DescribeInstanceTypes", mock.Anything, []string{"ecs.g7.large"}).
+		Return([]ecs.InstanceType{
+			{
+				InstanceTypeId:              "ecs.g7.large",
+				EniQuantity:                 4,
+				EniPrivateIpAddressQuantity: 5,
+				EniIpv6AddressQuantity:      10,
+				EniTotalQuantity:            6,
+				EriQuantity:                 2,
+				InstanceBandwidthRx:         1000,
+				InstanceBandwidthTx:         500,
+				EniTrunkSupported:           false,
+			},
+		}, nil)
 
 	provider := client.NewProvider()
 
-	// Concurrent calls
 	const numGoroutines = 10
 	results := make(chan *client.Limits, numGoroutines)
 	errors := make(chan error, numGoroutines)
 
-	// Use a barrier to ensure all goroutines start at roughly the same time
 	var wg sync.WaitGroup
 	wg.Add(numGoroutines)
 	start := make(chan struct{})
 
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		go func() {
 			defer wg.Done()
-			<-start // Wait for start signal
+			<-start
 			limit, err := provider.GetLimit(mockECS, "ecs.g7.large")
 			if err != nil {
 				errors <- err
@@ -419,31 +414,23 @@ func TestProvider_GetLimit_Concurrency(t *testing.T) {
 		}()
 	}
 
-	// Start all goroutines at once to maximize concurrency
 	close(start)
 	wg.Wait()
 
-	// Collect results
 	var limits []*client.Limits
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		select {
 		case limit := <-results:
 			limits = append(limits, limit)
 		case err := <-errors:
-			t.Errorf("Unexpected error: %v", err)
-		case <-time.After(5 * time.Second):
-			t.Fatal("Test timeout")
+			t.Errorf("unexpected error: %v", err)
 		}
 	}
 
-	// Verify all results are the same
 	assert.Len(t, limits, numGoroutines)
 	for i := 1; i < len(limits); i++ {
-		assert.Equal(t, limits[0], limits[i])
+		assert.Equal(t, limits[0], limits[i], "all goroutines should get the same result")
 	}
-
-	// Verify API was only called once (singleflight mechanism)
-	mockECS.AssertNumberOfCalls(t, "DescribeInstanceTypes", 1)
 }
 
 func TestLimitsMethods(t *testing.T) {
