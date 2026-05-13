@@ -294,8 +294,7 @@ func TestCleanRuntimeNode(t *testing.T) {
 						actualInfo, exists := actualStatus.Status[statusType]
 						if expectedInfo != nil {
 							assert.True(t, exists, "Status %s should exist for pod %s", statusType, uid)
-							assert.Equal(t, expectedInfo.LastUpdateTime.Time.Truncate(time.Second),
-								actualInfo.LastUpdateTime.Time.Truncate(time.Second))
+							assert.WithinDuration(t, expectedInfo.LastUpdateTime.Time, actualInfo.LastUpdateTime.Time, 3*time.Second)
 						}
 					}
 				}

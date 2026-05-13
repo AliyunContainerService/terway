@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/binary"
 	"net"
 	"runtime"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/AliyunContainerService/terway/types"
@@ -570,6 +572,270 @@ func TestGcTCFiltersKeepsExistingIP(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, filtersAfter, "Filter for existing IP should be kept")
 
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// ipv6VlanFilter builds the 4-key U32 egress filter that EnsureVlanTag creates for an IPv6 src address.
+// Keys are at offsets 8,12,16,20 in the IPv6 header (source address field).
+func ipv6VlanFilter(linkIndex int, ip net.IP, vid uint16) *netlink.U32 {
+	ip = ip.To16()
+	vlanAct := netlink.NewVlanKeyAction()
+	vlanAct.Attrs().Action = netlink.TC_ACT_PIPE
+	vlanAct.Action = netlink.TCA_VLAN_KEY_PUSH
+	vlanAct.Vid = vid
+
+	keys := make([]netlink.TcU32Key, 4)
+	for i := 0; i < 4; i++ {
+		keys[i] = netlink.TcU32Key{
+			Mask: 0xffffffff,
+			Val:  binary.BigEndian.Uint32(ip[i*4 : i*4+4]),
+			Off:  int32(8 + i*4),
+		}
+	}
+	return &netlink.U32{
+		FilterAttrs: netlink.FilterAttrs{
+			LinkIndex: linkIndex,
+			Parent:    netlink.HANDLE_MIN_EGRESS,
+			Priority:  50002,
+			Protocol:  uint16(unix.ETH_P_IPV6),
+		},
+		Sel: &netlink.TcU32Sel{
+			Nkeys: 4,
+			Flags: netlink.TC_U32_TERMINAL,
+			Keys:  keys,
+		},
+		Actions: []netlink.Action{vlanAct},
+	}
+}
+
+func addClsact(t *testing.T, link netlink.Link) {
+	t.Helper()
+	qdisc := &netlink.GenericQdisc{
+		QdiscAttrs: netlink.QdiscAttrs{
+			LinkIndex: link.Attrs().Index,
+			Handle:    netlink.MakeHandle(0xffff, 0),
+			Parent:    netlink.HANDLE_CLSACT,
+		},
+		QdiscType: "clsact",
+	}
+	require.NoError(t, netlink.QdiscAdd(qdisc))
+}
+
+// TestGcTCFilters_IPv6_GCsStaleFilter verifies that an IPv6 VLAN push filter
+// at priority 50002 is deleted when its src IP is absent from existIP.
+func TestGcTCFilters_IPv6_GCsStaleFilter(t *testing.T) {
+	testNS := setupTestNS(t)
+	defer cleanupTestNS(t, testNS)
+
+	err := testNS.Do(func(ns.NetNS) error {
+		dummy := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "gc-v6-stale"}}
+		require.NoError(t, netlink.LinkAdd(dummy))
+		link, err := netlink.LinkByName("gc-v6-stale")
+		require.NoError(t, err)
+		require.NoError(t, netlink.LinkSetUp(link))
+		addClsact(t, link)
+
+		podIP := net.ParseIP("fd00::1")
+		require.NoError(t, netlink.FilterAdd(ipv6VlanFilter(link.Attrs().Index, podIP, 100)))
+
+		filtersBefore, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+		require.NoError(t, err)
+		assert.NotEmpty(t, filtersBefore)
+
+		// fd00::1 NOT in existIP → filter should be GC'd
+		gcTCFilters([]netlink.Link{link}, sets.New[string]("fd00::2"))
+
+		filtersAfter, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+		require.NoError(t, err)
+		assert.Empty(t, filtersAfter, "stale IPv6 VLAN filter should be deleted")
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestGcTCFilters_IPv6_KeepsLiveFilter verifies that an IPv6 VLAN push filter
+// at priority 50002 is retained when its src IP is present in existIP.
+func TestGcTCFilters_IPv6_KeepsLiveFilter(t *testing.T) {
+	testNS := setupTestNS(t)
+	defer cleanupTestNS(t, testNS)
+
+	err := testNS.Do(func(ns.NetNS) error {
+		dummy := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "gc-v6-live"}}
+		require.NoError(t, netlink.LinkAdd(dummy))
+		link, err := netlink.LinkByName("gc-v6-live")
+		require.NoError(t, err)
+		require.NoError(t, netlink.LinkSetUp(link))
+		addClsact(t, link)
+
+		podIP := net.ParseIP("fd00::1")
+		require.NoError(t, netlink.FilterAdd(ipv6VlanFilter(link.Attrs().Index, podIP, 100)))
+
+		// fd00::1 IS in existIP → filter should be kept
+		gcTCFilters([]netlink.Link{link}, sets.New[string]("fd00::1"))
+
+		filtersAfter, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+		require.NoError(t, err)
+		assert.NotEmpty(t, filtersAfter, "live IPv6 VLAN filter should be kept")
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestGcTCFilters_DualStack_SelectiveGC verifies that with both an IPv4 filter
+// (priority 50001) and an IPv6 filter (priority 50002), only the stale one is removed.
+func TestGcTCFilters_DualStack_SelectiveGC(t *testing.T) {
+	testNS := setupTestNS(t)
+	defer cleanupTestNS(t, testNS)
+
+	err := testNS.Do(func(ns.NetNS) error {
+		dummy := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "gc-dual"}}
+		require.NoError(t, netlink.LinkAdd(dummy))
+		link, err := netlink.LinkByName("gc-dual")
+		require.NoError(t, err)
+		require.NoError(t, netlink.LinkSetUp(link))
+		addClsact(t, link)
+
+		// IPv4 filter for 192.168.1.2 (alive) at priority 50001
+		vlanActV4 := netlink.NewVlanKeyAction()
+		vlanActV4.Attrs().Action = netlink.TC_ACT_PIPE
+		vlanActV4.Action = netlink.TCA_VLAN_KEY_PUSH
+		vlanActV4.Vid = 100
+		v4Filter := &netlink.U32{
+			FilterAttrs: netlink.FilterAttrs{
+				LinkIndex: link.Attrs().Index,
+				Parent:    netlink.HANDLE_MIN_EGRESS,
+				Priority:  50001,
+				Protocol:  uint16(unix.ETH_P_IP),
+			},
+			Sel: &netlink.TcU32Sel{
+				Nkeys: 1,
+				Flags: netlink.TC_U32_TERMINAL,
+				Keys:  []netlink.TcU32Key{{Mask: 0xffffffff, Val: 0xc0a80102, Off: 12}},
+			},
+			Actions: []netlink.Action{vlanActV4},
+		}
+		require.NoError(t, netlink.FilterAdd(v4Filter))
+
+		// IPv6 filter for fd00::1 (stale) at priority 50002
+		require.NoError(t, netlink.FilterAdd(ipv6VlanFilter(link.Attrs().Index, net.ParseIP("fd00::1"), 100)))
+
+		// existIP: IPv4 192.168.1.2 alive, IPv6 fd00::1 absent
+		existIP := sets.New[string]("192.168.1.2")
+		gcTCFilters([]netlink.Link{link}, existIP)
+
+		filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+		require.NoError(t, err)
+
+		var v4Alive, v6Alive bool
+		for _, f := range filters {
+			u32, ok := f.(*netlink.U32)
+			if !ok {
+				continue
+			}
+			switch u32.Attrs().Priority {
+			case 50001:
+				v4Alive = true
+			case 50002:
+				v6Alive = true
+			}
+		}
+		assert.True(t, v4Alive, "IPv4 filter for live IP should be kept")
+		assert.False(t, v6Alive, "IPv6 filter for stale IP should be deleted")
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// legacyIPv6VlanFilter builds an old-style IPv6 VLAN filter that uses
+// ETH_P_IP and priority 50001, as older builds created.
+func legacyIPv6VlanFilter(linkIndex int, ip net.IP, vid uint16) *netlink.U32 {
+	ip = ip.To16()
+	vlanAct := netlink.NewVlanKeyAction()
+	vlanAct.Attrs().Action = netlink.TC_ACT_PIPE
+	vlanAct.Action = netlink.TCA_VLAN_KEY_PUSH
+	vlanAct.Vid = vid
+
+	keys := make([]netlink.TcU32Key, 4)
+	for i := 0; i < 4; i++ {
+		keys[i] = netlink.TcU32Key{
+			Mask: 0xffffffff,
+			Val:  binary.BigEndian.Uint32(ip[i*4 : i*4+4]),
+			Off:  int32(8 + i*4),
+		}
+	}
+	return &netlink.U32{
+		FilterAttrs: netlink.FilterAttrs{
+			LinkIndex: linkIndex,
+			Parent:    netlink.HANDLE_MIN_EGRESS,
+			Priority:  50001,
+			Protocol:  uint16(unix.ETH_P_IP),
+		},
+		Sel: &netlink.TcU32Sel{
+			Nkeys: 4,
+			Flags: netlink.TC_U32_TERMINAL,
+			Keys:  keys,
+		},
+		Actions: []netlink.Action{vlanAct},
+	}
+}
+
+// TestGcTCFilters_LegacyIPv6_GCsStaleFilter verifies that legacy IPv6 VLAN
+// filters (priority 50001, ETH_P_IP, 4 keys) are GC'd when the IP is stale.
+func TestGcTCFilters_LegacyIPv6_GCsStaleFilter(t *testing.T) {
+	testNS := setupTestNS(t)
+	defer cleanupTestNS(t, testNS)
+
+	err := testNS.Do(func(ns.NetNS) error {
+		dummy := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "gc-legacy-v6"}}
+		require.NoError(t, netlink.LinkAdd(dummy))
+		link, err := netlink.LinkByName("gc-legacy-v6")
+		require.NoError(t, err)
+		require.NoError(t, netlink.LinkSetUp(link))
+		addClsact(t, link)
+
+		podIP := net.ParseIP("fd00::1")
+		require.NoError(t, netlink.FilterAdd(legacyIPv6VlanFilter(link.Attrs().Index, podIP, 100)))
+
+		filtersBefore, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+		require.NoError(t, err)
+		assert.NotEmpty(t, filtersBefore)
+
+		// fd00::1 NOT in existIP → legacy filter should be GC'd
+		gcTCFilters([]netlink.Link{link}, sets.New[string]("fd00::2"))
+
+		filtersAfter, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+		require.NoError(t, err)
+		assert.Empty(t, filtersAfter, "stale legacy IPv6 VLAN filter should be deleted")
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestGcTCFilters_LegacyIPv6_KeepsLiveFilter verifies that legacy IPv6 VLAN
+// filters are retained when the IP is still alive.
+func TestGcTCFilters_LegacyIPv6_KeepsLiveFilter(t *testing.T) {
+	testNS := setupTestNS(t)
+	defer cleanupTestNS(t, testNS)
+
+	err := testNS.Do(func(ns.NetNS) error {
+		dummy := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "gc-legacy-v6-k"}}
+		require.NoError(t, netlink.LinkAdd(dummy))
+		link, err := netlink.LinkByName("gc-legacy-v6-k")
+		require.NoError(t, err)
+		require.NoError(t, netlink.LinkSetUp(link))
+		addClsact(t, link)
+
+		podIP := net.ParseIP("fd00::1")
+		require.NoError(t, netlink.FilterAdd(legacyIPv6VlanFilter(link.Attrs().Index, podIP, 100)))
+
+		// fd00::1 IS in existIP → legacy filter should be kept
+		gcTCFilters([]netlink.Link{link}, sets.New[string]("fd00::1"))
+
+		filtersAfter, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+		require.NoError(t, err)
+		assert.NotEmpty(t, filtersAfter, "live legacy IPv6 VLAN filter should be kept")
 		return nil
 	})
 	require.NoError(t, err)

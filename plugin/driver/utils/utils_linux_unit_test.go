@@ -12,7 +12,9 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 	k8snet "k8s.io/apimachinery/pkg/util/net"
 
 	terwayTypes "github.com/AliyunContainerService/terway/types"
@@ -987,4 +989,217 @@ func TestDelLinkByName_OtherError(t *testing.T) {
 	// Should return error for non-LinkNotFoundError
 	assert.Error(t, err)
 	_ = linkByNameErr
+}
+
+// TestEnsureVlanTag verifies that EnsureVlanTag creates TC egress VLAN push filters
+// with the correct protocol and priority for each IP family.
+func TestEnsureVlanTag(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("Skipping test that requires root privileges")
+	}
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	testNS, err := testutils.NewNS()
+	require.NoError(t, err)
+	defer testNS.Close()
+
+	const vid = uint16(100)
+
+	ipv4Net := &net.IPNet{IP: net.ParseIP("10.0.0.1").To4(), Mask: net.CIDRMask(32, 32)}
+	ipv6Net := &net.IPNet{IP: net.ParseIP("fd00::1"), Mask: net.CIDRMask(128, 128)}
+
+	t.Run("IPv4 only", func(t *testing.T) {
+		require.NoError(t, testNS.Do(func(_ ns.NetNS) error {
+			link, err := createDummy(t, "vlan-v4")
+			if err != nil {
+				return err
+			}
+			defer netlink.LinkDel(link)
+
+			ipNetSet := &terwayTypes.IPNetSet{IPv4: ipv4Net}
+			if err := EnsureVlanTag(context.Background(), link, ipNetSet, vid); err != nil {
+				return err
+			}
+
+			filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+			if err != nil {
+				return err
+			}
+			found := findVlanFilter(filters, uint16(unix.ETH_P_IP), 50001, vid)
+			if !found {
+				return fmt.Errorf("expected IPv4 VLAN push filter at priority 50001 with ETH_P_IP")
+			}
+			return nil
+		}))
+	})
+
+	t.Run("IPv6 only", func(t *testing.T) {
+		require.NoError(t, testNS.Do(func(_ ns.NetNS) error {
+			link, err := createDummy(t, "vlan-v6")
+			if err != nil {
+				return err
+			}
+			defer netlink.LinkDel(link)
+
+			ipNetSet := &terwayTypes.IPNetSet{IPv6: ipv6Net}
+			if err := EnsureVlanTag(context.Background(), link, ipNetSet, vid); err != nil {
+				return err
+			}
+
+			filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+			if err != nil {
+				return err
+			}
+			found := findVlanFilter(filters, uint16(unix.ETH_P_IPV6), 50002, vid)
+			if !found {
+				return fmt.Errorf("expected IPv6 VLAN push filter at priority 50002 with ETH_P_IPV6")
+			}
+			return nil
+		}))
+	})
+
+	t.Run("Dual stack", func(t *testing.T) {
+		require.NoError(t, testNS.Do(func(_ ns.NetNS) error {
+			link, err := createDummy(t, "vlan-dual")
+			if err != nil {
+				return err
+			}
+			defer netlink.LinkDel(link)
+
+			ipNetSet := &terwayTypes.IPNetSet{IPv4: ipv4Net, IPv6: ipv6Net}
+			if err := EnsureVlanTag(context.Background(), link, ipNetSet, vid); err != nil {
+				return err
+			}
+
+			filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+			if err != nil {
+				return err
+			}
+			if !findVlanFilter(filters, uint16(unix.ETH_P_IP), 50001, vid) {
+				return fmt.Errorf("expected IPv4 VLAN push filter at priority 50001")
+			}
+			if !findVlanFilter(filters, uint16(unix.ETH_P_IPV6), 50002, vid) {
+				return fmt.Errorf("expected IPv6 VLAN push filter at priority 50002")
+			}
+			return nil
+		}))
+	})
+
+	t.Run("Idempotent: calling twice does not duplicate filters", func(t *testing.T) {
+		require.NoError(t, testNS.Do(func(_ ns.NetNS) error {
+			link, err := createDummy(t, "vlan-idem")
+			if err != nil {
+				return err
+			}
+			defer netlink.LinkDel(link)
+
+			ipNetSet := &terwayTypes.IPNetSet{IPv4: ipv4Net, IPv6: ipv6Net}
+			for i := 0; i < 2; i++ {
+				if err := EnsureVlanTag(context.Background(), link, ipNetSet, vid); err != nil {
+					return fmt.Errorf("call %d: %w", i+1, err)
+				}
+			}
+
+			filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+			if err != nil {
+				return err
+			}
+			v4Count := countVlanFilters(filters, uint16(unix.ETH_P_IP), 50001)
+			v6Count := countVlanFilters(filters, uint16(unix.ETH_P_IPV6), 50002)
+			if v4Count != 1 {
+				return fmt.Errorf("expected exactly 1 IPv4 VLAN filter, got %d", v4Count)
+			}
+			if v6Count != 1 {
+				return fmt.Errorf("expected exactly 1 IPv6 VLAN filter, got %d", v6Count)
+			}
+			return nil
+		}))
+	})
+
+	t.Run("VID change replaces old filter", func(t *testing.T) {
+		require.NoError(t, testNS.Do(func(_ ns.NetNS) error {
+			link, err := createDummy(t, "vlan-vid")
+			if err != nil {
+				return err
+			}
+			defer netlink.LinkDel(link)
+
+			ipNetSet := &terwayTypes.IPNetSet{IPv4: ipv4Net}
+			if err := EnsureVlanTag(context.Background(), link, ipNetSet, vid); err != nil {
+				return err
+			}
+			const newVid = uint16(200)
+			if err := EnsureVlanTag(context.Background(), link, ipNetSet, newVid); err != nil {
+				return err
+			}
+
+			filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+			if err != nil {
+				return err
+			}
+			if findVlanFilter(filters, uint16(unix.ETH_P_IP), 50001, vid) {
+				return fmt.Errorf("old VID %d filter should have been removed", vid)
+			}
+			if !findVlanFilter(filters, uint16(unix.ETH_P_IP), 50001, newVid) {
+				return fmt.Errorf("new VID %d filter not found", newVid)
+			}
+			return nil
+		}))
+	})
+}
+
+func createDummy(t *testing.T, name string) (netlink.Link, error) {
+	t.Helper()
+	dummy := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: name}}
+	if err := netlink.LinkAdd(dummy); err != nil {
+		return nil, fmt.Errorf("add dummy %s: %w", name, err)
+	}
+	link, err := netlink.LinkByName(name)
+	if err != nil {
+		return nil, fmt.Errorf("get dummy %s: %w", name, err)
+	}
+	return link, nil
+}
+
+func findVlanFilter(filters []netlink.Filter, proto uint16, priority uint16, vid uint16) bool {
+	for _, f := range filters {
+		u32, ok := f.(*netlink.U32)
+		if !ok {
+			continue
+		}
+		if u32.Attrs().Protocol != proto || u32.Attrs().Priority != priority {
+			continue
+		}
+		if len(u32.Actions) != 1 {
+			continue
+		}
+		act, ok := u32.Actions[0].(*netlink.VlanAction)
+		if !ok || act.Action != netlink.TCA_VLAN_KEY_PUSH || act.Vid != vid {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func countVlanFilters(filters []netlink.Filter, proto uint16, priority uint16) int {
+	n := 0
+	for _, f := range filters {
+		u32, ok := f.(*netlink.U32)
+		if !ok {
+			continue
+		}
+		if u32.Attrs().Protocol != proto || u32.Attrs().Priority != priority {
+			continue
+		}
+		if len(u32.Actions) != 1 {
+			continue
+		}
+		if _, ok := u32.Actions[0].(*netlink.VlanAction); ok {
+			n++
+		}
+	}
+	return n
 }
