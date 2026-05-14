@@ -473,6 +473,15 @@ func EnsureVlanTag(ctx context.Context, link netlink.Link, ipNetSet *terwayTypes
 	}
 
 	exec := func(ipNet *net.IPNet) error {
+		proto := uint16(unix.ETH_P_IP)
+		priority := uint16(50001)
+		if ipNet.IP.To4() == nil {
+			proto = uint16(unix.ETH_P_IPV6)
+			// IPv6 must use a separate priority — Linux TC U32 hash tables at a
+			// given priority are protocol-specific and cannot mix ETH_P_IP and
+			// ETH_P_IPV6 at the same priority slot.
+			priority = 50002
+		}
 		vlanAct := netlink.NewVlanKeyAction()
 		vlanAct.Attrs().Action = netlink.TC_ACT_PIPE
 		vlanAct.Action = netlink.TCA_VLAN_KEY_PUSH
@@ -481,8 +490,8 @@ func EnsureVlanTag(ctx context.Context, link netlink.Link, ipNetSet *terwayTypes
 			FilterAttrs: netlink.FilterAttrs{
 				LinkIndex: link.Attrs().Index,
 				Parent:    netlink.HANDLE_MIN_EGRESS,
-				Priority:  50001,
-				Protocol:  uint16(unix.ETH_P_IP),
+				Priority:  priority,
+				Protocol:  proto,
 			},
 			Actions: []netlink.Action{vlanAct},
 		}
@@ -493,7 +502,7 @@ func EnsureVlanTag(ctx context.Context, link netlink.Link, ipNetSet *terwayTypes
 			if !ok {
 				continue
 			}
-			if u32.Attrs().LinkIndex != link.Attrs().Index || u32.Attrs().Protocol != unix.ETH_P_IP || len(u32.Actions) == 0 || u32.Sel == nil {
+			if u32.Attrs().LinkIndex != link.Attrs().Index || u32.Attrs().Protocol != proto || len(u32.Actions) == 0 || u32.Sel == nil {
 				continue
 			}
 			act, ok := u32.Actions[0].(*netlink.VlanAction)
@@ -527,6 +536,9 @@ func EnsureVlanTag(ctx context.Context, link netlink.Link, ipNetSet *terwayTypes
 	}
 	if ipNetSet.IPv6 != nil {
 		err = exec(NewIPNetWithMaxMask(ipNetSet.IPv6))
+		if err != nil {
+			return err
+		}
 	}
 	return err
 }

@@ -527,6 +527,9 @@ func (n *networkService) gcPods(ctx context.Context) error {
 			if pod.PodIPs.IPv4 != nil {
 				existIPs.Insert(pod.PodIPs.IPv4.String())
 			}
+			if pod.PodIPs.IPv6 != nil {
+				existIPs.Insert(pod.PodIPs.IPv6.String())
+			}
 		}
 	}
 
@@ -544,6 +547,9 @@ func (n *networkService) gcPods(ctx context.Context) error {
 			}
 			if podRes.PodInfo.PodIPs.IPv4 != nil {
 				existIPs.Insert(podRes.PodInfo.PodIPs.IPv4.String())
+			}
+			if podRes.PodInfo.PodIPs.IPv6 != nil {
+				existIPs.Insert(podRes.PodInfo.PodIPs.IPv6.String())
 			}
 		}
 

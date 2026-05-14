@@ -265,7 +265,7 @@ func TestFilterBySrcIP_WithFilters(t *testing.T) {
 		assert.Nil(t, foundFilter)
 	})
 
-	// Test 3: U32 filter with wrong protocol (should skip)
+	// Test 3: U32 filter with mismatched protocol (backward compat: match by keys only)
 	t.Run("u32 filter with wrong protocol", func(t *testing.T) {
 		_, ipNet, _ := net.ParseCIDR("192.168.3.100/32")
 
@@ -286,10 +286,12 @@ func TestFilterBySrcIP_WithFilters(t *testing.T) {
 		})
 		defer patches.Reset()
 
-		// Should not find filter with wrong protocol
+		// Backward compat: FilterBySrcIP matches by keys only, ignoring protocol.
+		// Old builds always used ETH_P_IP even for IPv6, so we must find and clean
+		// those filters regardless of the protocol field.
 		foundFilter, err := FilterBySrcIP(link, netlink.MakeHandle(1, 0), ipNet)
 		require.NoError(t, err)
-		assert.Nil(t, foundFilter)
+		assert.NotNil(t, foundFilter)
 	})
 
 	// Test 4: U32 filter with nil Sel (should skip)

@@ -19,11 +19,16 @@ import (
 
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
-	"golang.org/x/sys/unix"
 )
 
 // FilterBySrcIP found u32 filter by pod ip
-// used for prio only
+// used for prio only.
+//
+// Note: match keys are family-specific (IPv4 → 1 key at off=12; IPv6 → 4 keys
+// at off=8/12/16/20), so the key set alone disambiguates address family. We
+// intentionally do not compare u32.Protocol here so this lookup tolerates
+// existing filters created with either ETH_P_IP or ETH_P_IPV6 (older builds
+// always used ETH_P_IP for both families).
 func FilterBySrcIP(link netlink.Link, parent uint32, ipNet *net.IPNet) (*netlink.U32, error) {
 	filters, err := netlink.FilterList(link, parent)
 	if err != nil {
@@ -40,9 +45,7 @@ OUT:
 		if !ok {
 			continue
 		}
-		if u32.Attrs().LinkIndex != link.Attrs().Index ||
-			u32.Protocol != unix.ETH_P_IP ||
-			u32.Sel == nil {
+		if u32.Attrs().LinkIndex != link.Attrs().Index || u32.Sel == nil {
 			continue
 		}
 
