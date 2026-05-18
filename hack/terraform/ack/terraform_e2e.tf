@@ -113,6 +113,12 @@ variable "ip_stack" {
   default     = "ipv4"
 }
 
+variable "deploy_terway" {
+  description = "Whether to deploy terway via helm post cluster creation. Atomic with ip_stack."
+  type        = bool
+  default     = true
+}
+
 variable "cluster_profile" {
   description = "The profile of the cluster."
   type        = string
@@ -316,6 +322,13 @@ resource "alicloud_cs_managed_kubernetes" "default" {
       disabled = lookup(addons.value, "disabled", null)
     }
   }
+
+  lifecycle {
+    precondition {
+      condition     = !(var.ip_stack == "dual" && !var.deploy_terway)
+      error_message = "Dual stack requires deploy_terway=true (BYO is not supported with dual stack)."
+    }
+  }
 }
 
 # 普通节点池 - AZ J
@@ -416,8 +429,8 @@ resource "kubernetes_config_map_v1" "e2e_ip_prefix" {
 
   data = {
     eni_conf = jsonencode({
-      enable_ip_prefix = true
-      ipv4_prefix_count  = 3
+      enable_ip_prefix  = true
+      ipv4_prefix_count = 3
     })
   }
 
@@ -499,4 +512,14 @@ output "kubeconfig_expiration" {
 output "kubeconfig_file_path" {
   description = "The file path where kubeconfig is saved"
   value       = "kubeconfig-${local.k8s_name_terway}"
+}
+
+output "deploy_terway" {
+  description = "Whether terway should be deployed via helm post cluster creation."
+  value       = var.deploy_terway
+}
+
+output "ip_stack" {
+  description = "The IP stack of the cluster."
+  value       = var.ip_stack
 }

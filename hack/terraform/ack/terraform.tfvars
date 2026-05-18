@@ -24,7 +24,7 @@ terway_vswitch_ids = []
 terway_vswitch_cidrs = ["172.17.0.0/16", "172.18.0.0/16"]
 
 # 工作节点实例类型
-worker_instance_types = ["ecs.g7ne.2xlarge", "ecs.g7ne.4xlarge"]
+worker_instance_types = ["ecs.g7nex.2xlarge", "ecs.g7nex.4xlarge", "ecs.g7ne.xlarge", "ecs.g9i.2xlarge", "ecs.g9i.3xlarge"]
 
 # 集群名称前缀
 k8s_name_prefix = "tf-ack-hangzhou"
@@ -53,6 +53,10 @@ timezone = "Asia/Shanghai"
 
 # IP 协议栈 (ipv4 或 ipv6 或 dual)
 ip_stack = "ipv4"
+
+# 是否在集群创建后通过 helm 部署 terway，与 ip_stack 原子配置
+# 注意: 当 ip_stack = "dual" 时必须为 true（双栈不支持 BYO 部署）
+deploy_terway = true
 
 # 集群配置模板
 cluster_profile = "Default"
