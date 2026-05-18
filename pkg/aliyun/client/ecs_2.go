@@ -135,6 +135,19 @@ func (a *ECSService) UnAssignPrivateIPAddresses2(ctx context.Context, eniID stri
 		return nil
 	}
 
+	var hasIP, hasPrefix bool
+	for _, item := range ips {
+		if item.Prefix != "" {
+			hasPrefix = true
+		} else if item.IPAddress != "" {
+			hasIP = true
+		}
+	}
+	// ECS does not allow unassigning both individual IPs and prefixes in the same request.
+	if hasIP && hasPrefix {
+		return ErrInvalidArgs
+	}
+
 	ctx, span := a.Tracer.Start(ctx, APIUnAssignPrivateIPAddresses)
 	defer span.End()
 
@@ -250,12 +263,25 @@ func (a *ECSService) AssignIpv6Addresses2(ctx context.Context, opts ...AssignIPv
 // UnAssignIpv6Addresses2 remove ip from eni
 // return ok if 1. eni is released 2. ip is already released 3. release success
 func (a *ECSService) UnAssignIpv6Addresses2(ctx context.Context, eniID string, ips []IPSet) error {
-	ctx, span := a.Tracer.Start(ctx, APIUnAssignIpv6Addresses)
-	defer span.End()
-
 	if len(ips) == 0 {
 		return nil
 	}
+
+	var hasIP, hasPrefix bool
+	for _, item := range ips {
+		if item.Prefix != "" {
+			hasPrefix = true
+		} else if item.IPAddress != "" {
+			hasIP = true
+		}
+	}
+	// ECS does not allow unassigning both individual IPs and prefixes in the same request.
+	if hasIP && hasPrefix {
+		return ErrInvalidArgs
+	}
+
+	ctx, span := a.Tracer.Start(ctx, APIUnAssignIpv6Addresses)
+	defer span.End()
 
 	err := a.RateLimiter.Wait(ctx, APIUnAssignIpv6Addresses)
 	if err != nil {
@@ -264,10 +290,21 @@ func (a *ECSService) UnAssignIpv6Addresses2(ctx context.Context, eniID string, i
 
 	req := ecs.CreateUnassignIpv6AddressesRequest()
 	req.NetworkInterfaceId = eniID
-	str := lo.Map(ips, func(item IPSet, _ int) string {
-		return item.IPAddress
-	})
-	req.Ipv6Address = &str
+
+	var ipAddrs, prefixes []string
+	for _, item := range ips {
+		if item.Prefix != "" {
+			prefixes = append(prefixes, string(item.Prefix))
+		} else if item.IPAddress != "" {
+			ipAddrs = append(ipAddrs, item.IPAddress)
+		}
+	}
+	if len(ipAddrs) > 0 {
+		req.Ipv6Address = &ipAddrs
+	}
+	if len(prefixes) > 0 {
+		req.Ipv6Prefix = &prefixes
+	}
 
 	l := LogFields(logf.FromContext(ctx), req)
 

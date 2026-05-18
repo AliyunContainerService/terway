@@ -320,24 +320,12 @@ func TestECSService_UnAssignPrivateIPAddresses2_OnlyPrefix(t *testing.T) {
 func TestECSService_UnAssignPrivateIPAddresses2_MixedIPAndPrefix(t *testing.T) {
 	ecsService := createTestECSServiceForAPI()
 
-	patches := gomonkey.ApplyFunc(
-		(*ecs.Client).UnassignPrivateIpAddresses,
-		func(client *ecs.Client, request *ecs.UnassignPrivateIpAddressesRequest) (*ecs.UnassignPrivateIpAddressesResponse, error) {
-			assert.NotNil(t, request.PrivateIpAddress)
-			assert.Equal(t, []string{"10.0.0.1"}, *request.PrivateIpAddress)
-			assert.NotNil(t, request.Ipv4Prefix)
-			assert.Equal(t, []string{"10.0.0.16/28"}, *request.Ipv4Prefix)
-			return &ecs.UnassignPrivateIpAddressesResponse{RequestId: "req-2"}, nil
-		},
-	)
-	defer patches.Reset()
-
 	ctx := context.Background()
 	err := ecsService.UnAssignPrivateIPAddresses2(ctx, "eni-1", []IPSet{
 		{IPAddress: "10.0.0.1"},
 		{Prefix: "10.0.0.16/28"},
 	})
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, ErrInvalidArgs)
 }
 
 func TestECSService_UnAssignPrivateIPAddresses2_EmptyInput(t *testing.T) {
@@ -402,6 +390,36 @@ func TestECSService_AssignIpv6Addresses2_Error(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.True(t, apiErr.ErrorCodeIs(err, "InvalidParameter"))
+}
+
+func TestECSService_UnAssignIpv6Addresses2_OnlyPrefix(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*ecs.Client).UnassignIpv6Addresses,
+		func(client *ecs.Client, request *ecs.UnassignIpv6AddressesRequest) (*ecs.UnassignIpv6AddressesResponse, error) {
+			assert.NotNil(t, request.Ipv6Prefix)
+			assert.Equal(t, []string{"2408:4005:3af:6d03:be7a::/80"}, *request.Ipv6Prefix)
+			assert.Nil(t, request.Ipv6Address)
+			return &ecs.UnassignIpv6AddressesResponse{RequestId: "req-1"}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	err := ecsService.UnAssignIpv6Addresses2(ctx, "eni-1", []IPSet{{Prefix: "2408:4005:3af:6d03:be7a::/80"}})
+	assert.NoError(t, err)
+}
+
+func TestECSService_UnAssignIpv6Addresses2_MixedIPAndPrefix(t *testing.T) {
+	ecsService := createTestECSServiceForAPI()
+
+	ctx := context.Background()
+	err := ecsService.UnAssignIpv6Addresses2(ctx, "eni-1", []IPSet{
+		{IPAddress: "2001:db8::1"},
+		{Prefix: "2408:4005:3af:6d03:be7a::/80"},
+	})
+	assert.ErrorIs(t, err, ErrInvalidArgs)
 }
 
 func TestECSService_UnAssignIpv6Addresses2_Error(t *testing.T) {
