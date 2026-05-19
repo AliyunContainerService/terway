@@ -8,7 +8,7 @@
 #
 # 选项:
 #   -t, --tag <tag>              镜像 tag (默认: 从 git 获取 short commit)
-#   -r, --registry <registry>    镜像仓库地址 (默认: registry-vpc.cn-hangzhou.aliyuncs.com/l1b0k)
+#   -r, --registry <registry>    镜像仓库地址 (必填，或通过 TERWAY_IMAGE_REGISTRY 环境变量提供)
 #   -p, --pull-policy <policy>   镜像拉取策略 (默认: IfNotPresent)
 #   -d, --daemon-mode <mode>     Daemon 模式: ENIMultiIP|ENIDirectIP (默认: ENIMultiIP)
 #   --enable-dp-v2               启用 Datapath V2
@@ -34,19 +34,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TERRAFORM_STATE_FILE="${SCRIPT_DIR}/terraform.tfstate"
 VALUES_OUTPUT_FILE="${SCRIPT_DIR}/terway-values.yaml"
 
-# 动态获取项目根目录和 Chart 路径
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-CHART_PATH="${PROJECT_ROOT}/charts/terway"
+# 动态获取项目根目录和 Chart 路径 (允许通过环境变量覆盖, 便于在临时副本中运行此脚本)
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
+CHART_PATH="${CHART_PATH:-${PROJECT_ROOT}/charts/terway}"
 
 # 默认配置
-DEFAULT_REGISTRY="registry-vpc.cn-hangzhou.aliyuncs.com/l1b0k"
 DEFAULT_PULL_POLICY="IfNotPresent"
 DEFAULT_DAEMON_MODE="ENIMultiIP"
 DEFAULT_IP_STACK="ipv4"
 
 # 用户配置（优先从命令行，其次从环境变量，最后使用默认值）
 TERWAY_TAG="${TERWAY_IMAGE_TAG:-}"
-TERWAY_REGISTRY="${TERWAY_IMAGE_REGISTRY:-$DEFAULT_REGISTRY}"
+# 镜像仓库无默认值，必须通过 --registry 或 TERWAY_IMAGE_REGISTRY 提供（避免在开源模板中固化个人仓库）
+TERWAY_REGISTRY="${TERWAY_IMAGE_REGISTRY:-}"
 TERWAY_PULL_POLICY="${TERWAY_IMAGE_PULL_POLICY:-$DEFAULT_PULL_POLICY}"
 TERWAY_DAEMON_MODE="${TERWAY_DAEMON_MODE:-$DEFAULT_DAEMON_MODE}"
 TERWAY_ENABLE_DP_V2="${TERWAY_ENABLE_DP_V2:-false}"
@@ -192,27 +192,17 @@ read_terraform_config() {
         exit 1
     fi
 
-    # 从 terraform.tfstate 读取配置
+    # 集群级配置: 从 terraform output 读取 (var 通过 -var= 注入时不写回 state, jq .variables 拿不到)
+    REGION=$(terraform -chdir="${SCRIPT_DIR}" output -raw region_id 2>/dev/null || echo "cn-hangzhou")
+    SERVICE_CIDR=$(terraform -chdir="${SCRIPT_DIR}" output -raw service_cidr 2>/dev/null || echo "192.168.0.0/16")
+    KUBECONFIG_FILE="${SCRIPT_DIR}/$(terraform -chdir="${SCRIPT_DIR}" output -raw kubeconfig_file_path)"
+
+    # 资源级信息: 从 tfstate 读取 (output 不暴露这些 ID)
     CLUSTER_ID=$(jq -r '.resources[] | select(.type=="alicloud_cs_managed_kubernetes" and .name=="default") | .instances[0].attributes.id' "${TERRAFORM_STATE_FILE}")
-    REGION=$(jq -r '.variables.region_id.value // "cn-hangzhou"' "${TERRAFORM_STATE_FILE}")
-    SERVICE_CIDR=$(jq -r '.variables.service_cidr.value // "192.168.0.0/16"' "${TERRAFORM_STATE_FILE}")
-
-    # 获取 VPC ID
     VPC_ID=$(jq -r '.resources[] | select(.type=="alicloud_vpc" and .name=="default") | .instances[0].attributes.id' "${TERRAFORM_STATE_FILE}")
-
-    # 获取节点交换机 ID
     VSWITCH_IDS=$(jq -r '.resources[] | select(.type=="alicloud_vswitch" and .name=="vswitches") | .instances[].attributes.id' "${TERRAFORM_STATE_FILE}" | tr '\n' ',' | sed 's/,$//')
-
-    # 获取 Terway 交换机 ID
     TERWAY_VSWITCH_IDS=$(jq -r '.resources[] | select(.type=="alicloud_vswitch" and .name=="terway_vswitches") | .instances[].attributes.id' "${TERRAFORM_STATE_FILE}" | tr '\n' ',' | sed 's/,$//')
-
-    # 获取安全组 ID (从集群信息)
     SECURITY_GROUP_ID=$(jq -r '.resources[] | select(.type=="alicloud_cs_managed_kubernetes" and .name=="default") | .instances[0].attributes.security_group_id' "${TERRAFORM_STATE_FILE}")
-
-    # 获取 kubeconfig 文件名
-    KUBECONFIG_NAME=$(jq -r '.variables.k8s_name_prefix.value // "tf-ack-hangzhou-terway"' "${TERRAFORM_STATE_FILE}")
-    KUBECONFIG_SUFFIX=$(jq -r '.resources[] | select(.type=="random_string" and .name=="cluster_suffix") | .instances[0].attributes.result' "${TERRAFORM_STATE_FILE}")
-    KUBECONFIG_FILE="${SCRIPT_DIR}/kubeconfig-${KUBECONFIG_NAME}-${KUBECONFIG_SUFFIX}"
 
     log_info "Cluster ID: ${CLUSTER_ID}"
     log_info "Region: ${REGION}"
@@ -372,6 +362,12 @@ verify_deployment() {
 main() {
     # 解析命令行参数
     parse_args "$@"
+
+    if [[ -z "${TERWAY_REGISTRY}" ]]; then
+        log_error "Image registry is required. Pass --registry <registry> or set TERWAY_IMAGE_REGISTRY."
+        log_error "Example: --registry registry-vpc.cn-hangzhou.aliyuncs.com/<your-namespace>"
+        exit 2
+    fi
 
     # 如果没有指定 tag，使用 git commit
     if [[ -z "${TERWAY_TAG}" ]]; then

@@ -85,6 +85,49 @@ e2e-migrate-test: ## Run e2e migration tests only.
 e2e-test-all: ## Run all e2e tests (functional + upgrade + migrate).
 	go test -v -count=1 -timeout 120m -tags e2e ./tests $(TESTARGS)
 
+##@ ACK E2E Cluster
+
+ACK_CLUSTER_DIR := hack/terraform/ack
+
+# Each `ack-cluster-*` target materializes an isolated workdir under
+# $(ACK_CLUSTER_DIR)/runs/, so multiple clusters can coexist (e.g. running
+# byo-ipv4 and ack-dual side-by-side for comparison).
+#
+# `make ack-destroy WORKDIR=...` and `make ack-kubeconfig WORKDIR=...` accept
+# an explicit workdir; without WORKDIR they default to the most recent run.
+
+.PHONY: ack-cluster-byo-ipv4
+ack-cluster-byo-ipv4: ## Create ACK cluster: ipv4, BYO CNI (helm-installed terway).
+	$(ACK_CLUSTER_DIR)/e2e-cluster.sh create byo-ipv4
+
+.PHONY: ack-cluster-ack-ipv4
+ack-cluster-ack-ipv4: ## Create ACK cluster: ipv4, terway-eniip installed by ACK addon.
+	$(ACK_CLUSTER_DIR)/e2e-cluster.sh create ack-ipv4
+
+.PHONY: ack-cluster-ack-dual
+ack-cluster-ack-dual: ## Create ACK cluster: dual stack, terway-eniip installed by ACK addon.
+	$(ACK_CLUSTER_DIR)/e2e-cluster.sh create ack-dual
+
+.PHONY: ack-list
+ack-list: ## List active ACK cluster workdirs.
+	@$(ACK_CLUSTER_DIR)/e2e-cluster.sh list
+
+.PHONY: ack-destroy
+ack-destroy: ## Destroy a workdir cluster. Use WORKDIR=<path> (defaults to most recent run).
+	@if [ -n "$(WORKDIR)" ]; then \
+		$(ACK_CLUSTER_DIR)/e2e-cluster.sh destroy "$(WORKDIR)"; \
+	else \
+		set -e; \
+		latest=$$(ls -dt $(ACK_CLUSTER_DIR)/runs/*/ 2>/dev/null | head -1); \
+		if [ -z "$$latest" ]; then echo "No runs found. Specify WORKDIR=<path>."; exit 1; fi; \
+		echo "WORKDIR not set; destroying most recent: $$latest"; \
+		$(ACK_CLUSTER_DIR)/e2e-cluster.sh destroy "$$latest"; \
+	fi
+
+.PHONY: ack-kubeconfig
+ack-kubeconfig: ## Print kubeconfig path. Use WORKDIR=<path> (defaults to most recent run).
+	@$(ACK_CLUSTER_DIR)/e2e-cluster.sh kubeconfig $(WORKDIR)
+
 ##@ Build
 
 .PHONY: build
