@@ -226,8 +226,6 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 						}
 					}
 				case dataPathIPvlan:
-					datapath = dataPathIPvlan
-
 					if _switchDataPathV2() {
 						datapath = dataPathV2
 					} else {
