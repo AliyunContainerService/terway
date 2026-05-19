@@ -15,10 +15,10 @@ import (
 	"github.com/Jeffail/gabs/v2"
 	"github.com/samber/lo"
 	"github.com/spf13/cobra"
+	ctrl "sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/AliyunContainerService/terway/types"
-	ctrl "sigs.k8s.io/controller-runtime/pkg/manager/signals"
 )
 
 var readFunc func(name string) ([]byte, error)
@@ -210,12 +210,15 @@ func runCilium(cfg *PolicyConfig) error {
 		"--enable-service-topology=true",
 		"--k8s-heartbeat-timeout=0",
 		"--enable-session-affinity=true",
-		"--install-iptables-rules=false",
+		"--install-iptables-rules=true",
 		"--enable-l7-proxy=false",
 		"--ipam=delegated-plugin",
 		"--enable-bandwidth-manager=true",
 		"--agent-health-port=" + cfg.HealthCheckPort,
 		"--enable-tcx=false",
+		"--enable-l2-announcements=false",
+		"--enable-dynamic-config=false",
+		"--enable-bgp-control-plane=false",
 	}
 
 	if cfg.EnableNetworkPolicy {
@@ -227,7 +230,7 @@ func runCilium(cfg *PolicyConfig) error {
 
 	switch cfg.Datapath {
 	case dataPathIPvlan:
-		args = append(args, "--datapath-mode=ipvlan")
+		return fmt.Errorf("ipvlan is not supported")
 	case dataPathV2:
 		args = append(args, "--datapath-mode=veth")
 

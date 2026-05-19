@@ -9,7 +9,7 @@ data:
     k8s-namespace: kube-system
     identity-gc-interval: 10m
     identity-heartbeat-timeout: 20m
-    gops-port: 0
+    enable-gops: false
     ipam: delegated-plugin
     enable-cilium-endpoint-slice: true
     set-cilium-node-taints: false

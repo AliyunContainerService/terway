@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Thu, 13 Nov 2025 15:08:54 +0800
+Subject: feat(daemon): add disable per-packet LB policy flag
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ bpf/bpf_lxc.c                       | 5 +++--
+ daemon/cmd/daemon_main.go           | 3 +++
+ pkg/datapath/linux/config/config.go | 4 +++-
+ pkg/option/config.go                | 4 ++++
+ 4 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index 3c443909dc..664799d8ea 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -62,11 +62,12 @@
+  * Furthermore, since SCTP cannot be handled as part of bpf_sock, also
+  * enable per-packet LB is SCTP is enabled.
+  */
+-#if !defined(ENABLE_SOCKET_LB_FULL) || \
++#if (!defined(ENABLE_SOCKET_LB_FULL) || \
+     defined(ENABLE_SOCKET_LB_HOST_ONLY) || \
+     defined(ENABLE_L7_LB)               || \
+     defined(ENABLE_SCTP)                || \
+-    defined(ENABLE_CLUSTER_AWARE_ADDRESSING)
++    defined(ENABLE_CLUSTER_AWARE_ADDRESSING)) && \
++    !defined(DISABLE_PER_PACKET_LB)
+ # define ENABLE_PER_PACKET_LB 1
+ #endif
+ 
+diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
+index 9499317cce..0ba99bdb9b 100644
+--- a/daemon/cmd/daemon_main.go
++++ b/daemon/cmd/daemon_main.go
+@@ -935,6 +935,9 @@ func InitGlobalFlags(logger *slog.Logger, cmd *cobra.Command, vp *viper.Viper) {
+ 	flags.Bool(option.EnableInClusterLoadBalance, false, "Enable k8s in cluster loadbalance")
+ 	option.BindEnv(vp, option.EnableInClusterLoadBalance)
+ 
++	flags.Bool(option.DisablePerPacketLB, false, "Disable per-packet LB policy")
++	option.BindEnv(vp, option.DisablePerPacketLB)
++
+ 	if err := vp.BindPFlags(flags); err != nil {
+ 		logging.Fatal(logger, "BindPFlags failed", logfields.Error, err)
+ 	}
+diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
+index 25e9ce5004..e613bceafb 100644
+--- a/pkg/datapath/linux/config/config.go
++++ b/pkg/datapath/linux/config/config.go
+@@ -154,7 +154,9 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
+ 			cDefinesMap["CILIUM_IPV4_FRAG_MAP_MAX_ENTRIES"] = fmt.Sprintf("%d", option.Config.FragmentsMapEntries)
+ 		}
+ 	}
+-
++	if option.Config.DisablePerPacketLB {
++		cDefinesMap["DISABLE_PER_PACKET_LB"] = "1"
++	}
+ 	// --- WARNING: THIS CONFIGURATION METHOD IS DEPRECATED, SEE FUNCTION DOC ---
+ 
+ 	cDefinesMap["UNKNOWN_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameUnknown))
+diff --git a/pkg/option/config.go b/pkg/option/config.go
+index 00739138a0..208cec7c3e 100644
+--- a/pkg/option/config.go
++++ b/pkg/option/config.go
+@@ -1063,6 +1063,7 @@ const (
+ 
+ 	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
+ 	EnableInClusterLoadBalance = "enable-in-cluster-loadbalance"
++	DisablePerPacketLB         = "disable-per-package-lb"
+ )
+ 
+ // Default string arguments
+@@ -2026,6 +2027,8 @@ type DaemonConfig struct {
+ 
+ 	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
+ 	EnableInClusterLoadBalance bool
++
++	DisablePerPacketLB bool
+ }
+ 
+ var (
+@@ -2739,6 +2742,7 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
+ 	c.BootIDFile = vp.GetString(BootIDFilename)
+ 
+ 	c.EnableInClusterLoadBalance = vp.GetBool(EnableInClusterLoadBalance)
++	c.DisablePerPacketLB = vp.GetBool(DisablePerPacketLB)
+ 
+ 	c.ServiceNoBackendResponse = vp.GetString(ServiceNoBackendResponse)
+ 	switch c.ServiceNoBackendResponse {
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Thu, 13 Nov 2025 15:02:38 +0800
+Subject: lb: enable in cluster load balancer
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ bpf/bpf_lxc.c             | 4 ++--
+ daemon/cmd/daemon_main.go | 3 +++
+ pkg/option/config.go      | 8 ++++++++
+ 3 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index 15d1c15736..3c443909dc 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -99,7 +99,7 @@ static __always_inline int __per_packet_lb_svc_xlate_4(void *ctx, struct iphdr *
+ 
+ 	lb4_fill_key(&key, &tuple);
+ 
+-	svc = lb4_lookup_service(&key, is_defined(ENABLE_NODEPORT));
++	svc = lb4_lookup_service(&key, true);
+ 	if (svc) {
+ #if defined(ENABLE_L7_LB)
+ 		if (lb4_svc_is_l7_loadbalancer(svc)) {
+@@ -173,7 +173,7 @@ static __always_inline int __per_packet_lb_svc_xlate_6(void *ctx, struct ipv6hdr
+ 	 * the CT entry for destination endpoints where we can't encode the
+ 	 * state in the address.
+ 	 */
+-	svc = lb6_lookup_service(&key, is_defined(ENABLE_NODEPORT));
++	svc = lb6_lookup_service(&key, true);
+ 	if (svc) {
+ #if defined(ENABLE_L7_LB)
+ 		if (lb6_svc_is_l7_loadbalancer(svc)) {
+diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
+index 2c12bc4252..9499317cce 100644
+--- a/daemon/cmd/daemon_main.go
++++ b/daemon/cmd/daemon_main.go
+@@ -932,6 +932,9 @@ func InitGlobalFlags(logger *slog.Logger, cmd *cobra.Command, vp *viper.Viper) {
+ 	flags.Float64(option.ConnectivityProbeFrequencyRatio, defaults.ConnectivityProbeFrequencyRatio, "Ratio of the connectivity probe frequency vs resource usage, a float in [0, 1]. 0 will give more frequent probing, 1 will give less frequent probing. Probing frequency is dynamically adjusted based on the cluster size.")
+ 	option.BindEnv(vp, option.ConnectivityProbeFrequencyRatio)
+ 
++	flags.Bool(option.EnableInClusterLoadBalance, false, "Enable k8s in cluster loadbalance")
++	option.BindEnv(vp, option.EnableInClusterLoadBalance)
++
+ 	if err := vp.BindPFlags(flags); err != nil {
+ 		logging.Fatal(logger, "BindPFlags failed", logfields.Error, err)
+ 	}
+diff --git a/pkg/option/config.go b/pkg/option/config.go
+index da4d726438..00739138a0 100644
+--- a/pkg/option/config.go
++++ b/pkg/option/config.go
+@@ -1060,6 +1060,9 @@ const (
+ 
+ 	// ConnectivityProbeFrequencyRatio is the name of the option to specify the connectivity probe frequency
+ 	ConnectivityProbeFrequencyRatio = "connectivity-probe-frequency-ratio"
++
++	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
++	EnableInClusterLoadBalance = "enable-in-cluster-loadbalance"
+ )
+ 
+ // Default string arguments
+@@ -2020,6 +2023,9 @@ type DaemonConfig struct {
+ 
+ 	// ConnectivityProbeFrequencyRatio is the ratio of the connectivity probe frequency vs resource consumption
+ 	ConnectivityProbeFrequencyRatio float64
++
++	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
++	EnableInClusterLoadBalance bool
+ }
+ 
+ var (
+@@ -2732,6 +2738,8 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
+ 	c.EnableIPSecEncryptedOverlay = vp.GetBool(EnableIPSecEncryptedOverlay)
+ 	c.BootIDFile = vp.GetString(BootIDFilename)
+ 
++	c.EnableInClusterLoadBalance = vp.GetBool(EnableInClusterLoadBalance)
++
+ 	c.ServiceNoBackendResponse = vp.GetString(ServiceNoBackendResponse)
+ 	switch c.ServiceNoBackendResponse {
+ 	case ServiceNoBackendResponseReject, ServiceNoBackendResponseDrop:
+-- 
+2.50.1 (Apple Git-155)
+

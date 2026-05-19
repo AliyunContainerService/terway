@@ -1,0 +1,574 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Tue, 21 Oct 2025 15:26:32 +0800
+Subject: terway: cni
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ bpf/bpf_host.c                                |  6 +-
+ bpf/bpf_lxc.c                                 | 21 +++++--
+ bpf/include/bpf/config/lxc.h                  |  2 +
+ bpf/include/bpf/ctx/skb.h                     |  5 ++
+ bpf/lib/nodeport_egress.h                     | 22 ++++++--
+ daemon/cmd/daemon_main.go                     |  3 +
+ pkg/datapath/config/lxc_config.go             |  4 +-
+ pkg/datapath/linux/bandwidth/ops.go           |  1 +
+ pkg/datapath/linux/config/config.go           |  4 ++
+ pkg/datapath/loader/loader.go                 |  1 +
+ pkg/datapath/loader/tc.go                     |  6 ++
+ pkg/datapath/loader/template.go               |  4 ++
+ pkg/datapath/types/config.go                  |  1 +
+ pkg/defaults/node.go                          |  1 +
+ pkg/endpoint/api.go                           |  4 ++
+ pkg/endpoint/endpoint.go                      |  3 +
+ pkg/endpoint/restore.go                       |  8 +++
+ pkg/endpoint/terway.go                        |  9 +++
+ pkg/option/config.go                          |  1 +
+ pkg/testutils/endpoint.go                     |  4 ++
+ .../chaining/generic-veth/generic-veth.go     | 55 +++++++++++++++++++
+ plugins/cilium-cni/chaining/terway/terway.go  | 28 ++++++++++
+ plugins/cilium-cni/cmd/cmd.go                 |  1 +
+ 23 files changed, 182 insertions(+), 12 deletions(-)
+ create mode 100644 pkg/endpoint/terway.go
+ create mode 100644 plugins/cilium-cni/chaining/terway/terway.go
+
+diff --git a/bpf/bpf_host.c b/bpf/bpf_host.c
+index 65fb86627c..3ac8130dc7 100644
+--- a/bpf/bpf_host.c
++++ b/bpf/bpf_host.c
+@@ -1339,7 +1339,7 @@ int cil_to_netdev(struct __ctx_buff *ctx)
+ 	};
+ 	__be16 __maybe_unused proto = 0;
+ 	__u32 vlan_id;
+-	int ret = CTX_ACT_OK;
++	int ret = CTX_ACT_PIPE;
+ 	__s8 ext_err = 0;
+ 
+ 	bpf_clear_meta(ctx);
+@@ -1642,6 +1642,10 @@ exit:
+ 			  TRACE_EP_ID_UNKNOWN, THIS_INTERFACE_IFINDEX,
+ 			  trace.reason, trace.monitor, proto);
+ 
++    if ( ret == CTX_ACT_OK ) {
++        return CTX_ACT_PIPE;
++    }
++
+ 	return ret;
+ 
+ drop_err:
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index 9e92cfa3a3..15d1c15736 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -751,9 +751,15 @@ ct_recreate6:
+ 	}
+ #endif
+ 	if (is_defined(ENABLE_HOST_ROUTING)) {
+-		int oif = 0;
++		int oif = CONFIG(parent_dev_ifindex);
+ 
+-		ret = fib_redirect_v6(ctx, ETH_HLEN, ip6, false, false, ext_err, &oif);
++		if (oif > 0) {
++			ret = ipv6_l3(ctx, ETH_HLEN, NULL, NULL, METRIC_EGRESS);
++			if (ret == CTX_ACT_OK)
++				ret = redirect_neigh(oif, NULL, 0, 0);
++		} else {
++			ret = fib_redirect_v6(ctx, ETH_HLEN, ip6, false, false, ext_err, &oif);
++		}
+ 		/* Error handling for local routes - just pass the packet to the kernel stack */
+ 		if (ret == DROP_NO_FIB && *ext_err == BPF_FIB_LKUP_RET_NOT_FWDED)
+ 			goto pass_to_stack;
+@@ -1310,10 +1316,15 @@ skip_vtep:
+ #endif /* TUNNEL_MODE */
+ 
+ 	if (is_defined(ENABLE_HOST_ROUTING)) {
+-		int oif = 0;
++		int oif = CONFIG(parent_dev_ifindex);
+ 
+-		ret = fib_redirect_v4(ctx, ETH_HLEN, ip4, false, false, ext_err, &oif);
+-		/* Error handling for local routes - just pass the packet to the kernel stack */
++		if (oif > 0) {
++			ret = ipv4_l3(ctx, ETH_HLEN, NULL, NULL, ip4);
++			if (ret == CTX_ACT_OK)
++				ret = redirect_neigh(oif, NULL, 0, 0);
++		} else {
++			ret = fib_redirect_v4(ctx, ETH_HLEN, ip4, false, false, ext_err, &oif);
++		}		/* Error handling for local routes - just pass the packet to the kernel stack */
+ 		if (ret == DROP_NO_FIB && *ext_err == BPF_FIB_LKUP_RET_NOT_FWDED) {
+ 			if (!revalidate_data(ctx, &data, &data_end, &ip4))
+ 				return DROP_INVALID;
+diff --git a/bpf/include/bpf/config/lxc.h b/bpf/include/bpf/config/lxc.h
+index 8d5f47bc6e..776ea39662 100644
+--- a/bpf/include/bpf/config/lxc.h
++++ b/bpf/include/bpf/config/lxc.h
+@@ -17,3 +17,5 @@ DECLARE_CONFIG(union v6addr, endpoint_ipv6, "The endpoint's IPv6 address")
+ 
+ DECLARE_CONFIG(__u64, endpoint_netns_cookie, "The endpoint's network namespace cookie")
+ #define ENDPOINT_NETNS_COOKIE CONFIG(endpoint_netns_cookie) /* Backwards compatibility */
++
++DECLARE_CONFIG(int, parent_dev_ifindex, "The endpoint's parent if index")
+diff --git a/bpf/include/bpf/ctx/skb.h b/bpf/include/bpf/ctx/skb.h
+index aff5ebb91f..ac9ef06734 100644
+--- a/bpf/include/bpf/ctx/skb.h
++++ b/bpf/include/bpf/ctx/skb.h
+@@ -19,12 +19,17 @@
+ # define TC_ACT_SHOT		2
+ #endif
+ 
++#ifndef TC_ACT_PIPE
++# define TC_ACT_PIPE		3
++#endif
++
+ #ifndef TC_ACT_REDIRECT
+ # define TC_ACT_REDIRECT	7
+ #endif
+ 
+ #define CTX_ACT_OK		TC_ACT_OK
+ #define CTX_ACT_DROP		TC_ACT_SHOT
++#define CTX_ACT_PIPE		TC_ACT_PIPE
+ #define CTX_ACT_TX		TC_ACT_REDIRECT
+ #define CTX_ACT_REDIRECT	TC_ACT_REDIRECT
+ 
+diff --git a/bpf/lib/nodeport_egress.h b/bpf/lib/nodeport_egress.h
+index 8b2eb8f51f..487dccc381 100644
+--- a/bpf/lib/nodeport_egress.h
++++ b/bpf/lib/nodeport_egress.h
+@@ -140,10 +140,13 @@ int tail_handle_snat_fwd_ipv6(struct __ctx_buff *ctx)
+ 	 * This can happen for egress gateway traffic that needs to egress from
+ 	 * the interface to which the egress IP is assigned to.
+ 	 */
+-	if (ret == CTX_ACT_OK)
++	if (ret == CTX_ACT_OK) {
+ 		send_trace_notify6(ctx, NODEPORT_OBS_POINT_EGRESS, src_id, UNKNOWN_ID,
+ 				   &saddr, TRACE_EP_ID_UNKNOWN, THIS_INTERFACE_IFINDEX,
+ 				   trace.reason, trace.monitor);
++		/* Return CTX_ACT_PIPE to allow subsequent tc filters to process */
++		return CTX_ACT_PIPE;
++	}
+ 
+ 	return ret;
+ }
+@@ -275,10 +278,13 @@ int tail_handle_nat_fwd_ipv6(struct __ctx_buff *ctx)
+ 	if (IS_ERR(ret))
+ 		return send_drop_notify_error_ext(ctx, src_id, ret, ext_err, METRIC_EGRESS);
+ 
+-	if (ret == CTX_ACT_OK)
++	if (ret == CTX_ACT_OK) {
+ 		send_trace_notify(ctx, NODEPORT_OBS_POINT_EGRESS, src_id, UNKNOWN_ID,
+ 				  TRACE_EP_ID_UNKNOWN, THIS_INTERFACE_IFINDEX,
+ 				  trace.reason, trace.monitor, bpf_htons(ETH_P_IPV6));
++		/* Return CTX_ACT_PIPE to allow subsequent tc filters to process */
++		return CTX_ACT_PIPE;
++	}
+ 
+ 	return ret;
+ }
+@@ -453,10 +459,13 @@ int tail_handle_snat_fwd_ipv4(struct __ctx_buff *ctx)
+ 	 * This can happen for egress gateway traffic that needs to egress from
+ 	 * the interface to which the egress IP is assigned to.
+ 	 */
+-	if (ret == CTX_ACT_OK)
++	if (ret == CTX_ACT_OK) {
+ 		send_trace_notify4(ctx, NODEPORT_OBS_POINT_EGRESS, src_id, UNKNOWN_ID,
+ 				   saddr, TRACE_EP_ID_UNKNOWN, THIS_INTERFACE_IFINDEX,
+ 				   trace.reason, trace.monitor);
++		/* Return CTX_ACT_PIPE to allow subsequent tc filters to process */
++		return CTX_ACT_PIPE;
++	}
+ 
+ 	return ret;
+ }
+@@ -596,10 +605,13 @@ int tail_handle_nat_fwd_ipv4(struct __ctx_buff *ctx)
+ 	if (IS_ERR(ret))
+ 		return send_drop_notify_error_ext(ctx, src_id, ret, ext_err, METRIC_EGRESS);
+ 
+-	if (ret == CTX_ACT_OK)
++	if (ret == CTX_ACT_OK) {
+ 		send_trace_notify(ctx, NODEPORT_OBS_POINT_EGRESS, src_id, UNKNOWN_ID,
+ 				  TRACE_EP_ID_UNKNOWN, THIS_INTERFACE_IFINDEX,
+ 				  trace.reason, trace.monitor, bpf_htons(ETH_P_IP));
++		/* Return CTX_ACT_PIPE to allow subsequent tc filters to process */
++		return CTX_ACT_PIPE;
++	}
+ 
+ 	return ret;
+ }
+@@ -731,7 +743,7 @@ handle_nat_fwd(struct __ctx_buff *ctx, __u32 cluster_id, __u32 src_id,
+ 	       __be16 proto, bool revdnat_only, struct trace_ctx *trace __maybe_unused,
+ 		   __s8 *ext_err __maybe_unused)
+ {
+-	int ret = CTX_ACT_OK;
++	int ret = CTX_ACT_PIPE;
+ 	__u32 cb_nat_flags = 0;
+ 
+ 	if (revdnat_only)
+diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
+index 0e0dd76bda..2c12bc4252 100644
+--- a/daemon/cmd/daemon_main.go
++++ b/daemon/cmd/daemon_main.go
+@@ -1176,6 +1176,9 @@ func initEnv(logger *slog.Logger, vp *viper.Viper) {
+ 
+ 	switch option.Config.DatapathMode {
+ 	case datapathOption.DatapathModeVeth:
++		if option.Config.TCFilterPriority <= 20000 {
++			option.Config.TCFilterPriority = 25000
++		}
+ 	case datapathOption.DatapathModeNetkit, datapathOption.DatapathModeNetkitL2:
+ 		// For netkit we enable also tcx for all non-netkit devices.
+ 		// The underlying kernel does support it given tcx got merged
+diff --git a/pkg/datapath/config/lxc_config.go b/pkg/datapath/config/lxc_config.go
+index c2ca2f629f..d5fcf8a92f 100644
+--- a/pkg/datapath/config/lxc_config.go
++++ b/pkg/datapath/config/lxc_config.go
+@@ -28,6 +28,8 @@ type BPFLXC struct {
+ 	NATIPv4Masquerade [4]byte `config:"nat_ipv4_masquerade"`
+ 	// Masquerade address for IPv6 traffic.
+ 	NATIPv6Masquerade [16]byte `config:"nat_ipv6_masquerade"`
++	// The endpoint's parent if index.
++	ParentDevIfindex int32 `config:"parent_dev_ifindex"`
+ 	// The log level for policy verdicts in workload endpoints.
+ 	PolicyVerdictLogFilter uint32 `config:"policy_verdict_log_filter"`
+ 	// Pull security context from IP cache.
+@@ -44,5 +46,5 @@ func NewBPFLXC(node Node) *BPFLXC {
+ 		0x0, 0x0, [8]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ 		[4]byte{0x0, 0x0, 0x0, 0x0},
+ 		[16]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+-		0x0, false, 0x0, node}
++		0, 0x0, false, 0x0, node}
+ }
+diff --git a/pkg/datapath/linux/bandwidth/ops.go b/pkg/datapath/linux/bandwidth/ops.go
+index e9214303c1..4f8b3774d2 100644
+--- a/pkg/datapath/linux/bandwidth/ops.go
++++ b/pkg/datapath/linux/bandwidth/ops.go
+@@ -42,6 +42,7 @@ func (*ops) Prune(context.Context, statedb.ReadTxn, iter.Seq2[*tables.BandwidthQ
+ 
+ // Update implements reconciler.Operations.
+ func (ops *ops) Update(ctx context.Context, txn statedb.ReadTxn, _ statedb.Revision, q *tables.BandwidthQDisc) error {
++	return nil
+ 	if !ops.isEnabled() {
+ 		// Probe results show that the system doesn't support BandwidthManager, so
+ 		// bail out.
+diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
+index 20b46c0864..25e9ce5004 100644
+--- a/pkg/datapath/linux/config/config.go
++++ b/pkg/datapath/linux/config/config.go
+@@ -351,6 +351,10 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
+ 	cDefinesMap["NAT_46X64_PREFIX_2"] = "0"
+ 	cDefinesMap["NAT_46X64_PREFIX_3"] = "0"
+ 
++	if !option.Config.EnableHostLegacyRouting {
++		cDefinesMap["ENABLE_HOST_ROUTING"] = "1"
++	}
++
+ 	if h.kprCfg.EnableNodePort {
+ 		if option.Config.EnableHealthDatapath {
+ 			cDefinesMap["ENABLE_HEALTH_CHECK"] = "1"
+diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
+index 80060b3c2b..79c2c411d8 100644
+--- a/pkg/datapath/loader/loader.go
++++ b/pkg/datapath/loader/loader.go
+@@ -590,6 +590,7 @@ func endpointRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNode
+ 		renames["cilium_calls_custom"] = bpf.LocalMapName(callsmap.CustomCallsMapName, uint16(ep.GetID()))
+ 	}
+ 
++	cfg.ParentDevIfindex = int32(ep.GetParentIfIndex())
+ 	return cfg, renames
+ }
+ 
+diff --git a/pkg/datapath/loader/tc.go b/pkg/datapath/loader/tc.go
+index daba0edd55..2d0b50e996 100644
+--- a/pkg/datapath/loader/tc.go
++++ b/pkg/datapath/loader/tc.go
+@@ -205,6 +205,12 @@ func removeTCFilters(device netlink.Link, parent uint32) error {
+ 	}
+ 
+ 	for _, f := range filters {
++		if f.Type() != "netkit" {
++			_, ok := f.(*netlink.BpfFilter)
++			if !ok {
++				continue
++			}
++		}
+ 		if err := netlink.FilterDel(f); err != nil {
+ 			return err
+ 		}
+diff --git a/pkg/datapath/loader/template.go b/pkg/datapath/loader/template.go
+index ebef75b822..30f1d427d1 100644
+--- a/pkg/datapath/loader/template.go
++++ b/pkg/datapath/loader/template.go
+@@ -88,6 +88,10 @@ func (t *templateCfg) GetIfIndex() int {
+ 	return templateIfIndex
+ }
+ 
++func (t *templateCfg) GetParentIfIndex() int {
++	return 0
++}
++
+ // IPv4Address always returns an IP in the documentation prefix (RFC5737) as
+ // a nonsense address that should typically not be routable.
+ func (t *templateCfg) IPv4Address() netip.Addr {
+diff --git a/pkg/datapath/types/config.go b/pkg/datapath/types/config.go
+index 3fd612c778..db368c6db9 100644
+--- a/pkg/datapath/types/config.go
++++ b/pkg/datapath/types/config.go
+@@ -36,6 +36,7 @@ type LoadTimeConfiguration interface {
+ 	IPv6Address() netip.Addr
+ 	GetNodeMAC() mac.MAC
+ 	GetIfIndex() int
++	GetParentIfIndex() int
+ 	GetEndpointNetNsCookie() uint64
+ 
+ 	// GetPolicyVerdictLogFilter returns the PolicyVerdictLogFilter for the endpoint
+diff --git a/pkg/defaults/node.go b/pkg/defaults/node.go
+index 4cfeef0027..d3cb0f3756 100644
+--- a/pkg/defaults/node.go
++++ b/pkg/defaults/node.go
+@@ -72,5 +72,6 @@ var (
+ 		"lxc",
+ 		"cni",
+ 		"docker",
++		"cali",
+ 	}
+ )
+diff --git a/pkg/endpoint/api.go b/pkg/endpoint/api.go
+index 0838b33c53..42a862c67f 100644
+--- a/pkg/endpoint/api.go
++++ b/pkg/endpoint/api.go
+@@ -168,6 +168,10 @@ func NewEndpointFromChangeModel(ctx context.Context, logger *slog.Logger, dnsRul
+ 		ep.properties = model.Properties
+ 	}
+ 
++	if ep.parentIfIndex == 0 {
++		return nil, fmt.Errorf("parentIfIndex is 0")
++	}
++
+ 	return ep, nil
+ }
+ 
+diff --git a/pkg/endpoint/endpoint.go b/pkg/endpoint/endpoint.go
+index 5c736dce5e..291777e2b8 100644
+--- a/pkg/endpoint/endpoint.go
++++ b/pkg/endpoint/endpoint.go
+@@ -466,6 +466,9 @@ type Endpoint struct {
+ 	NetNsCookie uint64
+ 
+ 	ctMapGC ctmap.GCRunner
++
++	// eniInterfaceIndex the actual nic id route to this eni
++	eniInterfaceIndex int64
+ }
+ 
+ // GetPolicyNames returns the policy names for this endpoint.
+diff --git a/pkg/endpoint/restore.go b/pkg/endpoint/restore.go
+index 17e1928e0b..464290c31e 100644
+--- a/pkg/endpoint/restore.go
++++ b/pkg/endpoint/restore.go
+@@ -456,6 +456,7 @@ func (e *Endpoint) toSerializedEndpoint() *serializableEndpoint {
+ 		CiliumEndpointUID:        e.ciliumEndpointUID,
+ 		Properties:               e.properties,
+ 		NetnsCookie:              e.NetNsCookie,
++		//EniInterfaceIndex:        e.eniInterfaceIndex,
+ 	}
+ }
+ 
+@@ -577,6 +578,8 @@ type serializableEndpoint struct {
+ 
+ 	// NetnsCookie is the network namespace cookie of the Endpoint.
+ 	NetnsCookie uint64
++
++	EniInterfaceIndex int64
+ }
+ 
+ // UnmarshalJSON expects that the contents of `raw` are a serializableEndpoint,
+@@ -640,4 +643,9 @@ func (ep *Endpoint) fromSerializedEndpoint(r *serializableEndpoint) {
+ 		ep.properties = map[string]any{}
+ 	}
+ 	ep.NetNsCookie = r.NetnsCookie
++
++	if ep.parentIfIndex == 0 {
++		// migrate to parentIfIndex
++		ep.parentIfIndex = int(r.EniInterfaceIndex)
++	}
+ }
+diff --git a/pkg/endpoint/terway.go b/pkg/endpoint/terway.go
+new file mode 100644
+index 0000000000..5fe16f8e7c
+--- /dev/null
++++ b/pkg/endpoint/terway.go
+@@ -0,0 +1,9 @@
++package endpoint
++
++func (e *Endpoint) GetENIIndex() int64 {
++	return e.eniInterfaceIndex
++}
++
++func (ep *epInfoCache) GetENIIndex() int64 {
++	return int64(ep.parentIfIndex)
++}
+diff --git a/pkg/option/config.go b/pkg/option/config.go
+index 8ce57f5611..da4d726438 100644
+--- a/pkg/option/config.go
++++ b/pkg/option/config.go
+@@ -2138,6 +2138,7 @@ func (c *DaemonConfig) TunnelingEnabled() bool {
+ // AreDevicesRequired returns true if the agent needs to attach to the native
+ // devices to implement some features.
+ func (c *DaemonConfig) AreDevicesRequired(kprCfg kpr.KPRConfig) bool {
++	return true
+ 	return kprCfg.EnableNodePort || c.EnableHostFirewall || c.EnableWireguard ||
+ 		c.EnableL2Announcements || c.ForceDeviceRequired || c.EnableIPSec
+ }
+diff --git a/pkg/testutils/endpoint.go b/pkg/testutils/endpoint.go
+index e38f7e2392..a3a45cde40 100644
+--- a/pkg/testutils/endpoint.go
++++ b/pkg/testutils/endpoint.go
+@@ -111,6 +111,10 @@ func (e *TestEndpoint) SetIdentity(secID int64, newEndpoint bool) {
+ 	e.Identity = identity.NewIdentity(identity.NumericIdentity(secID), labels.NewLabelsFromModel([]string{"bar"}))
+ }
+ 
++func (e *TestEndpoint) GetParentIfIndex() int {
++	return 0
++}
++
+ func (e *TestEndpoint) StateDir() string {
+ 	if e.State != "" {
+ 		return e.State
+diff --git a/plugins/cilium-cni/chaining/generic-veth/generic-veth.go b/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
+index f80bb74563..2d092b5cd4 100644
+--- a/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
++++ b/plugins/cilium-cni/chaining/generic-veth/generic-veth.go
+@@ -7,6 +7,7 @@ import (
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	"net"
+ 
+ 	cniTypes "github.com/containernetworking/cni/pkg/types"
+ 	cniTypesVer "github.com/containernetworking/cni/pkg/types/100"
+@@ -179,6 +180,7 @@ func (f *GenericVethChainer) Add(ctx context.Context, pluginCtx chainingapi.Plug
+ 	hostMac = peer.Attrs().HardwareAddr.String()
+ 	vethHostName = peer.Attrs().Name
+ 	vethHostIdx = peer.Attrs().Index
++	eniIndex := getEniInterfaceIndex(vethIP, vethIPv6)
+ 
+ 	switch {
+ 	case vethHostName == "":
+@@ -193,6 +195,9 @@ func (f *GenericVethChainer) Add(ctx context.Context, pluginCtx chainingapi.Plug
+ 	case vethHostIdx == 0:
+ 		err = errors.New("unable to determine index interface of veth pair on the host side")
+ 		return
++	case eniIndex <= 0:
++		err = errors.New("unable to determine eni index of veth pair on the host side")
++		return
+ 	}
+ 
+ 	var disabled = false
+@@ -229,6 +234,10 @@ func (f *GenericVethChainer) Add(ctx context.Context, pluginCtx chainingapi.Plug
+ 			// All routing is performed by the Linux stack
+ 			RequireRouting: &disabled,
+ 		},
++		Properties: map[string]interface{}{
++			"terway-eni-index": fmt.Sprintf("%d", eniIndex),
++		},
++		ParentInterfaceIndex: eniIndex,
+ 	}
+ 
+ 	scopedLogger := pluginCtx.Logger.With(
+@@ -317,3 +326,49 @@ func (f *GenericVethChainer) Status(ctx context.Context, pluginCtx chainingapi.P
+ func init() {
+ 	chainingapi.Register("generic-veth", &GenericVethChainer{})
+ }
++
++func getEniInterfaceIndex(v4, v6 string) int64 {
++	if v4 != "" {
++		rules, err := netlink.RuleList(netlink.FAMILY_V4)
++		if err != nil {
++			return 0
++		}
++		for _, rule := range rules {
++			if rule.Src == nil {
++				continue
++			}
++			if rule.Src.IP.Equal(net.ParseIP(v4)) {
++				return int64(getGW(netlink.FAMILY_V4, rule.Table))
++			}
++		}
++	}
++	if v6 != "" {
++		rules, err := netlink.RuleList(netlink.FAMILY_V6)
++		if err != nil {
++			return 0
++		}
++		for _, rule := range rules {
++			if rule.Src == nil {
++				continue
++			}
++			if rule.Src.IP.Equal(net.ParseIP(v6)) {
++				return int64(getGW(netlink.FAMILY_V6, rule.Table))
++			}
++		}
++	}
++	return 0
++}
++
++func getGW(family int, table int) int {
++	routes, err := netlink.RouteListFiltered(family, &netlink.Route{Table: table}, netlink.RT_FILTER_TABLE)
++	if err != nil {
++		return 0
++	}
++	for _, route := range routes {
++		// only single route for now
++		if route.Src == nil {
++			return route.LinkIndex
++		}
++	}
++	return 0
++}
+diff --git a/plugins/cilium-cni/chaining/terway/terway.go b/plugins/cilium-cni/chaining/terway/terway.go
+new file mode 100644
+index 0000000000..e140cb821f
+--- /dev/null
++++ b/plugins/cilium-cni/chaining/terway/terway.go
+@@ -0,0 +1,28 @@
++// Copyright 2019 Authors of Cilium
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package terway
++
++import (
++	chainingapi "github.com/cilium/cilium/plugins/cilium-cni/chaining/api"
++	genericveth "github.com/cilium/cilium/plugins/cilium-cni/chaining/generic-veth"
++)
++
++var (
++	name = "terway-chainer"
++)
++
++func init() {
++	chainingapi.Register(name, &genericveth.GenericVethChainer{})
++}
+diff --git a/plugins/cilium-cni/cmd/cmd.go b/plugins/cilium-cni/cmd/cmd.go
+index 885e10017f..933c7472d7 100644
+--- a/plugins/cilium-cni/cmd/cmd.go
++++ b/plugins/cilium-cni/cmd/cmd.go
+@@ -48,6 +48,7 @@ import (
+ 	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/azure"
+ 	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/flannel"
+ 	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/generic-veth"
++	_ "github.com/cilium/cilium/plugins/cilium-cni/chaining/terway"
+ 	"github.com/cilium/cilium/plugins/cilium-cni/lib"
+ 	"github.com/cilium/cilium/plugins/cilium-cni/types"
+ )
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,103 @@
+From 9dca17303093945238f5aecf9f11518e23d1849b Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.dev@gmail.com>
+Date: Wed, 13 May 2026 14:10:16 +0800
+Subject: [PATCH] feat(k8s): skip CRD register/wait for CPIP, CNC, CL2AP in
+ Terway integration
+
+Remove unconditional registration and agent-side wait for three CRDs that
+are unused in the Terway-Cilium integration:
+
+- CiliumPodIPPool (CPIP): Terway owns IPAM, multi-pool unused.
+- CiliumNodeConfig (CNC): per-node dynamic-config not used; agent runs
+  with --enable-dynamic-config=false.
+- CiliumL2AnnouncementPolicy (CL2AP): service VIPs handled by Aliyun SLB,
+  no ARP/NDP announcement needed.
+
+Both the operator-side creator (CustomResourceDefinitionList) and the
+agent-side waiter (agentCRDResourceNames / AllCiliumCRDResourceNames)
+must stay in sync, otherwise SyncCRDs fatals on missing CRDs.
+
+CiliumCIDRGroup is kept (still gated by EnableCiliumNetworkPolicy).
+---
+ pkg/k8s/apis/cilium.io/client/register.go | 17 +++++------------
+ pkg/k8s/synced/crd.go                     |  9 ++++-----
+ 2 files changed, 9 insertions(+), 17 deletions(-)
+
+diff --git a/pkg/k8s/apis/cilium.io/client/register.go b/pkg/k8s/apis/cilium.io/client/register.go
+index 216ed4b5b4..149a9c749a 100644
+--- a/pkg/k8s/apis/cilium.io/client/register.go
++++ b/pkg/k8s/apis/cilium.io/client/register.go
+@@ -131,10 +131,8 @@ func CustomResourceDefinitionList() map[string]*CRDList {
+ 			Name:     CEGPCRDName,
+ 			FullName: k8sconstv2.CEGPName,
+ 		},
+-		synced.CRDResourceName(k8sconstv2.CNCName): {
+-			Name:     CNCCRDName,
+-			FullName: k8sconstv2.CNCName,
+-		},
++		// terway: removed CNC (CiliumNodeConfig) — Terway integration uses a single
++		// ConfigMap and disables --enable-dynamic-config; do not install this CRD.
+ 		synced.CRDResourceName(k8sconstv2alpha1.CESName): {
+ 			Name:     CESCRDName,
+ 			FullName: k8sconstv2alpha1.CESName,
+@@ -179,14 +177,9 @@ func CustomResourceDefinitionList() map[string]*CRDList {
+ 			Name:     CCGCRDName,
+ 			FullName: k8sconstv2.CCGName,
+ 		},
+-		synced.CRDResourceName(k8sconstv2alpha1.L2AnnouncementName): {
+-			Name:     L2AnnouncementCRDName,
+-			FullName: k8sconstv2alpha1.L2AnnouncementName,
+-		},
+-		synced.CRDResourceName(k8sconstv2alpha1.CPIPName): {
+-			Name:     CPIPCRDName,
+-			FullName: k8sconstv2alpha1.CPIPName,
+-		},
++		// terway: removed CiliumL2AnnouncementPolicy — service VIPs are handled by
++		// Aliyun SLB, no L2 announcement on cloud nodes.
++		// terway: removed CiliumPodIPPool — Terway owns IPAM, multi-pool unused.
+ 		synced.CRDResourceName(k8sconstv2alpha1.CGCCName): {
+ 			Name:     CGCCCRDName,
+ 			FullName: k8sconstv2alpha1.CGCCName,
+diff --git a/pkg/k8s/synced/crd.go b/pkg/k8s/synced/crd.go
+index 6ba9f43810..430b548751 100644
+--- a/pkg/k8s/synced/crd.go
++++ b/pkg/k8s/synced/crd.go
+@@ -41,10 +41,10 @@ func CRDResourceName(crd string) string {
+ }
+ 
+ func agentCRDResourceNames() []string {
++	// terway: removed CPIPName (CiliumPodIPPool) — Terway owns IPAM, multi-pool unused.
+ 	result := []string{
+ 		CRDResourceName(v2.CNName),
+ 		CRDResourceName(v2.CIDName),
+-		CRDResourceName(v2alpha1.CPIPName),
+ 	}
+ 
+ 	if !option.Config.DisableCiliumEndpointCRD {
+@@ -86,9 +86,9 @@ func agentCRDResourceNames() []string {
+ 		result = append(result, CRDResourceName(v2.BGPNCOName))
+ 	}
+ 
++	// terway: removed L2AnnouncementName — service VIPs are handled by Aliyun SLB.
+ 	result = append(result,
+ 		CRDResourceName(v2.LBIPPoolName),
+-		CRDResourceName(v2alpha1.L2AnnouncementName),
+ 	)
+ 
+ 	return result
+@@ -123,10 +123,9 @@ func GatewayAPIResourceNames() []string {
+ // AllCiliumCRDResourceNames returns a list of all Cilium CRD resource names
+ // that the cilium operator or testsuite may register.
+ func AllCiliumCRDResourceNames() []string {
++	// terway: removed CNCName (CiliumNodeConfig) — Terway integration disables
++	// --enable-dynamic-config and uses a single ConfigMap, no per-node overrides.
+ 	res := append(AgentCRDResourceNames(), GatewayAPIResourceNames()...)
+-	res = append(res,
+-		CRDResourceName(v2.CNCName),
+-	)
+ 	return res
+ }
+ 
+-- 
+2.50.1 (Apple Git-155)
+

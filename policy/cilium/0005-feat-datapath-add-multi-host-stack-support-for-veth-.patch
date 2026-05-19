@@ -1,84 +1,86 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: l1b0k <libokang.lbk@alibaba-inc.com>
-Date: Tue, 2 Sep 2025 11:28:33 +0800
+From: l1b0k <libokang.dev@gmail.com>
+Date: Mon, 9 Mar 2026 16:11:17 +0800
 Subject: =?UTF-8?q?feat(datapath):=20add=20multi-host=20stack=20support=20?=
  =?UTF-8?q?for=20veth=20datapath-=20Implement=20host=20stack=20CIDR=20map?=
  =?UTF-8?q?=20and=20related=20functions=0A-=20Add=20support=20for=20multip?=
  =?UTF-8?q?le=20host=20stack=20CIDRs=20in=20veth=20datapath=20mode=0A-=20U?=
  =?UTF-8?q?pdate=20bpf=5Flxc=20to=20handle=20multiple=20host=20stack=20CID?=
  =?UTF-8?q?Rs=0A-=20Modify=20daemon=20initialization=20to=20set=20up=20hos?=
- =?UTF-8?q?t=20stack=20CIDR=20map=0A-=20Remove=20redundant=20host=20IP=20s?=
- =?UTF-8?q?ynchronization=20logic?=
+ =?UTF-8?q?t=20stack=20CIDR=20map?=
 
-Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+Signed-off-by: l1b0k <libokang.dev@gmail.com>
 ---
- bpf/bpf_lxc.c                           |  12 +-
- bpf/lib/eps.h                           |   5 +
- bpf/lib/maps.h                          |  15 +++
- daemon/cmd/daemon.go                    |   8 ++
+ bpf/bpf_lxc.c                           |   9 ++
+ bpf/include/bpf/config/lxc.h            |   3 +
+ bpf/lib/host_stack.h                    |  29 +++++
+ daemon/cmd/daemon.go                    |   5 +
  daemon/cmd/daemon_main.go               |   3 +
- daemon/cmd/hoststack-cidr.go            |  47 ++++++++
- pkg/datapath/linux/config/config.go     |  11 ++
- pkg/maps/hoststackcidr/hoststackcidr.go | 150 ++++++++++++++++++++++++
- pkg/option/config.go                    |   5 +
- 9 files changed, 254 insertions(+), 2 deletions(-)
+ daemon/cmd/hoststack-cidr.go            |  48 ++++++++
+ pkg/datapath/config/lxc_config.go       |   4 +-
+ pkg/datapath/linux/config/config.go     |  13 ++
+ pkg/datapath/loader/loader.go           |   8 ++
+ pkg/maps/hoststackcidr/hoststackcidr.go | 151 ++++++++++++++++++++++++
+ pkg/option/config.go                    |   4 +
+ 11 files changed, 276 insertions(+), 1 deletion(-)
+ create mode 100644 bpf/lib/host_stack.h
  create mode 100644 daemon/cmd/hoststack-cidr.go
  create mode 100644 pkg/maps/hoststackcidr/hoststackcidr.go
 
 diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
-index 596dcdd30d..30cc8f6c19 100644
+index 664799d8ea..6c3e82cd77 100644
 --- a/bpf/bpf_lxc.c
 +++ b/bpf/bpf_lxc.c
-@@ -14,7 +14,10 @@
- #define IS_BPF_LXC 1
+@@ -55,6 +55,7 @@
+ #include "lib/nodeport.h"
+ #include "lib/policy_log.h"
+ #include "lib/vtep.h"
++#include "lib/host_stack.h"
  
- #define EVENT_SOURCE LXC_ID
-+
-+#ifndef ENABLE_MULTI_HOST_STACK
- #define LOCAL_DNS_IP 0x0A14FEA9
-+#endif
+ /* Per-packet LB is needed if all LB cases can not be handled in bpf_sock.
+  * Most services with L7 LB flag can not be redirected to their proxy port
+@@ -1319,6 +1320,14 @@ skip_vtep:
+ 	if (is_defined(ENABLE_HOST_ROUTING)) {
+ 		int oif = CONFIG(parent_dev_ifindex);
  
- #include "lib/auth.h"
- #include "lib/tailcall.h"
-@@ -1272,8 +1275,13 @@ maybe_pass_to_stack: __maybe_unused;
- 		int oif = 0;
- #endif
- 
--        if (ip4->daddr == LOCAL_DNS_IP )
--            goto pass_to_stack;
 +#ifdef ENABLE_MULTI_HOST_STACK
 +		if (lookup_ip4_hoststack(ip4->daddr, 0 ))
 +			goto pass_to_stack;
 +#else
-+		if (ip4->daddr == LOCAL_DNS_IP )
++		if (ip4->daddr == CONFIG(local_host_stack_ipv4).be32)
 +			goto pass_to_stack;
 +#endif
- 
++
  		if (oif > 0) {
  			ret = ipv4_l3(ctx, ETH_HLEN, NULL, NULL, ip4);
-diff --git a/bpf/lib/eps.h b/bpf/lib/eps.h
-index c76f3dc68d..241789d546 100644
---- a/bpf/lib/eps.h
-+++ b/bpf/lib/eps.h
-@@ -95,3 +95,8 @@ ipcache_lookup4(const void *map, __be32 addr, __u32 prefix, __u32 cluster_id)
- 	ipcache_lookup6(&IPCACHE_MAP, addr, V6_CACHE_KEY_LEN, cluster_id)
- #define lookup_ip4_remote_endpoint(addr, cluster_id) \
- 	ipcache_lookup4(&IPCACHE_MAP, addr, V4_CACHE_KEY_LEN, cluster_id)
+ 			if (ret == CTX_ACT_OK)
+diff --git a/bpf/include/bpf/config/lxc.h b/bpf/include/bpf/config/lxc.h
+index 776ea39662..7c7e8ee0af 100644
+--- a/bpf/include/bpf/config/lxc.h
++++ b/bpf/include/bpf/config/lxc.h
+@@ -19,3 +19,6 @@ DECLARE_CONFIG(__u64, endpoint_netns_cookie, "The endpoint's network namespace c
+ #define ENDPOINT_NETNS_COOKIE CONFIG(endpoint_netns_cookie) /* Backwards compatibility */
+ 
+ DECLARE_CONFIG(int, parent_dev_ifindex, "The endpoint's parent if index")
 +
-+#define lookup_ip6_hoststack(addr, cluster_id) \
-+	ipcache_lookup6(&terway_host_stack_cidr, addr, V6_CACHE_KEY_LEN, cluster_id)
-+#define lookup_ip4_hoststack(addr, cluster_id) \
-+	ipcache_lookup4(&terway_host_stack_cidr, addr, V4_CACHE_KEY_LEN, cluster_id)
-\ No newline at end of file
-diff --git a/bpf/lib/maps.h b/bpf/lib/maps.h
-index ee514400f4..b6ad2d84ae 100644
---- a/bpf/lib/maps.h
-+++ b/bpf/lib/maps.h
-@@ -297,3 +297,18 @@ tail_call_internal(struct __ctx_buff *ctx, const __u32 index, __s8 *ext_err)
- 	return DROP_MISSED_TAIL_CALL;
- }
- #endif /* SKIP_CALLS_MAP */
++DECLARE_CONFIG(union v4addr, local_host_stack_ipv4, "IPv4 address for single host stack pass-through (default 169.254.20.10)")
++#define LOCAL_HOST_STACK_IPV4 CONFIG(local_host_stack_ipv4) /* Backwards compatibility */
+diff --git a/bpf/lib/host_stack.h b/bpf/lib/host_stack.h
+new file mode 100644
+index 0000000000..87ded982fc
+--- /dev/null
++++ b/bpf/lib/host_stack.h
+@@ -0,0 +1,29 @@
++/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
++/* Copyright Authors of Terway */
 +
++#pragma once
++
++#include "common.h"
++
++#include <linux/ip.h>
++#include "ipv6.h"
++#include "eps.h"
 +
 +struct host_stack_value {
 +	__u32		action;
@@ -93,58 +95,61 @@ index ee514400f4..b6ad2d84ae 100644
 +	__uint(max_entries, 256);
 +	__uint(map_flags, BPF_F_NO_PREALLOC);
 +} terway_host_stack_cidr __section_maps_btf;
++
++#define lookup_ip6_hoststack(addr, cluster_id) \
++	ipcache_lookup6(&terway_host_stack_cidr, addr, V6_CACHE_KEY_LEN, cluster_id)
++#define lookup_ip4_hoststack(addr, cluster_id) \
++	ipcache_lookup4(&terway_host_stack_cidr, addr, V4_CACHE_KEY_LEN, cluster_id)
 \ No newline at end of file
 diff --git a/daemon/cmd/daemon.go b/daemon/cmd/daemon.go
-index 40aef24988..1ce95572ac 100644
+index dcfa14bac0..0cd1ae7e25 100644
 --- a/daemon/cmd/daemon.go
 +++ b/daemon/cmd/daemon.go
-@@ -387,6 +387,14 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
- 	}
- 	lbmap.Init(lbmapInitParams)
+@@ -274,6 +274,11 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
  
-+	// no bother for ipvlan
-+	if option.Config.DatapathMode == datapathOption.DatapathModeVeth {
-+		err = initHostStackCIDR()
-+		if err != nil {
-+			return nil, nil, fmt.Errorf("unable to initialize host stack CIDR: %w", err)
-+		}
+ 	ctmap.InitMapInfo(params.MetricsRegistry, option.Config.EnableIPv4, option.Config.EnableIPv6, params.KPRConfig.EnableNodePort)
+ 
++	err = initHostStackCIDR(params.Logger)
++	if err != nil {
++		return nil, nil, fmt.Errorf("unable to initialize host stack CIDR: %w", err)
 +	}
 +
- 	params.NodeManager.Subscribe(params.Datapath.Node())
- 
  	identity.IterateReservedIdentities(func(_ identity.NumericIdentity, _ *identity.Identity) {
+ 		metrics.Identity.WithLabelValues(identity.ReservedIdentityType).Inc()
+ 		metrics.IdentityLabelSources.WithLabelValues(labels.LabelSourceReserved).Inc()
 diff --git a/daemon/cmd/daemon_main.go b/daemon/cmd/daemon_main.go
-index 5a80538e8d..1b8e51ea63 100644
+index 0ba99bdb9b..784facc4ad 100644
 --- a/daemon/cmd/daemon_main.go
 +++ b/daemon/cmd/daemon_main.go
-@@ -378,6 +378,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
- 	flags.Bool(option.EnableInClusterLoadBalance, false, "Enable k8s in cluster loadbalance")
- 	option.BindEnv(vp, option.EnableInClusterLoadBalance)
+@@ -938,6 +938,9 @@ func InitGlobalFlags(logger *slog.Logger, cmd *cobra.Command, vp *viper.Viper) {
+ 	flags.Bool(option.DisablePerPacketLB, false, "Disable per-packet LB policy")
+ 	option.BindEnv(vp, option.DisablePerPacketLB)
  
 +	flags.StringSlice(option.TerwayHostStackCIDR, []string{"169.254.20.10/32"}, "CIDRs to route traffic to host stack, this is node level config, if you change this config, you need to restart this node")
 +	option.BindEnv(vp, option.TerwayHostStackCIDR)
 +
- 	flags.Bool(option.EnableL7Proxy, defaults.EnableL7Proxy, "Enable L7 proxy for L7 policy enforcement")
- 	option.BindEnv(vp, option.EnableL7Proxy)
- 
+ 	if err := vp.BindPFlags(flags); err != nil {
+ 		logging.Fatal(logger, "BindPFlags failed", logfields.Error, err)
+ 	}
 diff --git a/daemon/cmd/hoststack-cidr.go b/daemon/cmd/hoststack-cidr.go
 new file mode 100644
-index 0000000000..9e6f6e8326
+index 0000000000..98d0e28dc7
 --- /dev/null
 +++ b/daemon/cmd/hoststack-cidr.go
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,48 @@
 +package cmd
 +
 +import (
 +	"fmt"
++	"log/slog"
 +	"net/netip"
 +
 +	"github.com/cilium/cilium/pkg/maps/hoststackcidr"
 +	"github.com/cilium/cilium/pkg/option"
 +)
 +
-+func initHostStackCIDR() error {
-+	if err := hoststackcidr.HostStackCIDRMap().OpenOrCreate(); err != nil {
++func initHostStackCIDR(logger *slog.Logger) error {
++	if err := hoststackcidr.HostStackCIDRMap(nil).OpenOrCreate(); err != nil {
 +		return fmt.Errorf("failed to create host stack CIDR map: %w", err)
 +	}
 +
@@ -154,17 +159,17 @@ index 0000000000..9e6f6e8326
 +	}
 +
 +	for prefix := range exists {
-+		log.Debugf("host stack CIDR entry: %s", prefix)
++		logger.Debug("host stack CIDR entry: %s", prefix)
 +	}
 +
 +	for _, cidr := range option.Config.HostStackCIDRs {
 +		expect, err := netip.ParsePrefix(cidr)
 +		if err != nil {
-+			log.Debugf("parse cidr error, ignored : %s", err)
++			logger.Debug("parse cidr error, ignored : %s", err)
 +		} else {
 +			err = hoststackcidr.AddCIDREntry(expect, 0)
 +			if err != nil {
-+				log.WithError(err).Warn("Failed to add default host stack CIDR entry")
++				logger.Error("Failed to add default host stack CIDR entry", "error", err)
 +			} else {
 +				delete(exists, expect)
 +			}
@@ -174,20 +179,43 @@ index 0000000000..9e6f6e8326
 +	for prefix := range exists {
 +		err = hoststackcidr.DeleteCIDREntry(prefix)
 +		if err != nil {
-+			log.WithError(err).Warn("Failed to delete default host stack CIDR entry")
++			logger.Warn("Failed to delete default host stack CIDR entry", "error", err)
 +		}
 +	}
 +
 +	return nil
 +}
+diff --git a/pkg/datapath/config/lxc_config.go b/pkg/datapath/config/lxc_config.go
+index d5fcf8a92f..c6874af1ff 100644
+--- a/pkg/datapath/config/lxc_config.go
++++ b/pkg/datapath/config/lxc_config.go
+@@ -24,6 +24,8 @@ type BPFLXC struct {
+ 	InterfaceIfindex uint32 `config:"interface_ifindex"`
+ 	// MAC address of the interface the bpf program is attached to.
+ 	InterfaceMAC [8]byte `config:"interface_mac"`
++	// IPv4 address for single host stack pass-through (default 169.254.20.10).
++	LocalHostStackIPv4 [4]byte `config:"local_host_stack_ipv4"`
+ 	// Masquerade address for IPv4 traffic.
+ 	NATIPv4Masquerade [4]byte `config:"nat_ipv4_masquerade"`
+ 	// Masquerade address for IPv6 traffic.
+@@ -44,7 +46,7 @@ func NewBPFLXC(node Node) *BPFLXC {
+ 	return &BPFLXC{0x5dc, 0x0, [4]byte{0x0, 0x0, 0x0, 0x0},
+ 		[16]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ 		0x0, 0x0, [8]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+-		[4]byte{0x0, 0x0, 0x0, 0x0},
++		[4]byte{0x0, 0x0, 0x0, 0x0}, [4]byte{0x0, 0x0, 0x0, 0x0},
+ 		[16]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ 		0, 0x0, false, 0x0, node}
+ }
 diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
-index 28ff4c121f..0901a7e695 100644
+index e613bceafb..36a5dacd25 100644
 --- a/pkg/datapath/linux/config/config.go
 +++ b/pkg/datapath/linux/config/config.go
-@@ -1096,6 +1096,17 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, devices []strin
- 	case datapathOption.DatapathModeVeth:
- 		fmt.Fprintf(fw, "#define DATAPATH_VETH 1\n")
+@@ -930,6 +930,19 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, devices []strin
+ 		}
+ 	}
  
++	if !e.IsHost() {
 +		hasExtra := false
 +		for _, hostStack := range option.Config.HostStackCIDRs {
 +			if hostStack != "169.254.20.10/32" {
@@ -198,16 +226,36 @@ index 28ff4c121f..0901a7e695 100644
 +		if hasExtra {
 +			fmt.Fprintf(fw, "#define ENABLE_MULTI_HOST_STACK 1\n")
 +		}
++	}
 +
- 		if !e.IsHost() {
- 			if e.GetENIIndex() == 0 {
- 				return fmt.Errorf("ENI index is 0")
+ 	if e.IsHost() {
+ 		// Only used to differentiate between host endpoint template and other templates.
+ 		fmt.Fprintf(fw, "#define HOST_ENDPOINT 1\n")
+diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
+index 79c2c411d8..926296e444 100644
+--- a/pkg/datapath/loader/loader.go
++++ b/pkg/datapath/loader/loader.go
+@@ -591,6 +591,14 @@ func endpointRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNode
+ 	}
+ 
+ 	cfg.ParentDevIfindex = int32(ep.GetParentIfIndex())
++
++	// Single host stack IP for pass-through when not using multi-host-stack map.
++	if len(option.Config.HostStackCIDRs) == 1 {
++		if p, err := netip.ParsePrefix(option.Config.HostStackCIDRs[0]); err == nil && p.Addr().Is4() {
++			cfg.LocalHostStackIPv4 = p.Addr().As4()
++		}
++	}
++
+ 	return cfg, renames
+ }
+ 
 diff --git a/pkg/maps/hoststackcidr/hoststackcidr.go b/pkg/maps/hoststackcidr/hoststackcidr.go
 new file mode 100644
-index 0000000000..97ddc373fc
+index 0000000000..0d4de4e3ae
 --- /dev/null
 +++ b/pkg/maps/hoststackcidr/hoststackcidr.go
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,151 @@
 +package hoststackcidr
 +
 +import (
@@ -220,6 +268,7 @@ index 0000000000..97ddc373fc
 +	"github.com/cilium/ebpf"
 +
 +	"github.com/cilium/cilium/pkg/bpf"
++	"github.com/cilium/cilium/pkg/metrics"
 +	"github.com/cilium/cilium/pkg/option"
 +)
 +
@@ -236,7 +285,7 @@ index 0000000000..97ddc373fc
 +	hostStackCIDRMapOnce sync.Once
 +)
 +
-+func HostStackCIDRMap() *bpf.Map {
++func HostStackCIDRMap(registry *metrics.Registry) *bpf.Map {
 +	hostStackCIDRMapOnce.Do(func() {
 +		hostStackCIDRMap = bpf.NewMap(MapName,
 +			ebpf.LPMTrie,
@@ -244,7 +293,7 @@ index 0000000000..97ddc373fc
 +			&HostStackCIDRValue{},
 +			MaxEntries,
 +			0,
-+		).WithCache().WithPressureMetric().
++		).WithCache().WithPressureMetric(registry).
 +			WithEvents(option.Config.GetEventBufferConfig(MapName))
 +	})
 +	return hostStackCIDRMap
@@ -331,13 +380,13 @@ index 0000000000..97ddc373fc
 +	key := NewHostStackCIDRKey(prefix)
 +	value := &HostStackCIDRValue{Action: action}
 +
-+	return HostStackCIDRMap().Update(key, value)
++	return HostStackCIDRMap(nil).Update(key, value)
 +}
 +
 +// DeleteCIDREntry removes a CIDR entry from the host stack CIDR map
 +func DeleteCIDREntry(prefix netip.Prefix) error {
 +	key := NewHostStackCIDRKey(prefix)
-+	return HostStackCIDRMap().Delete(key)
++	return HostStackCIDRMap(nil).Delete(key)
 +}
 +
 +// DumpToMap dumps the contents of the host stack CIDR map
@@ -352,27 +401,26 @@ index 0000000000..97ddc373fc
 +		}
 +	}
 +
-+	if err := HostStackCIDRMap().DumpWithCallback(callback); err != nil {
++	if err := HostStackCIDRMap(nil).DumpWithCallback(callback); err != nil {
 +		return nil, fmt.Errorf("unable to read host stack CIDR map: %w", err)
 +	}
 +
 +	return result, nil
 +}
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 7d8dcd0f8f..533fd5a2ba 100644
+index 208cec7c3e..5a243fd81b 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
-@@ -1235,6 +1235,8 @@ const (
- 	BPFEventsTraceEnabled = "bpf-events-trace-enabled"
- 
- 	DisablePerPacketLB = "disable-per-package-lb"
-+
-+	TerwayHostStackCIDR = "terway-host-stack-cidr"
+@@ -1064,6 +1064,7 @@ const (
+ 	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
+ 	EnableInClusterLoadBalance = "enable-in-cluster-loadbalance"
+ 	DisablePerPacketLB         = "disable-per-package-lb"
++	TerwayHostStackCIDR        = "terway-host-stack-cidr"
  )
  
  // Default string arguments
-@@ -2438,6 +2440,8 @@ type DaemonConfig struct {
- 	EnableSocketLBPodConnectionTermination bool
+@@ -2029,6 +2030,8 @@ type DaemonConfig struct {
+ 	EnableInClusterLoadBalance bool
  
  	DisablePerPacketLB bool
 +
@@ -380,9 +428,9 @@ index 7d8dcd0f8f..533fd5a2ba 100644
  }
  
  var (
-@@ -3175,6 +3179,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
- 	c.EnableIPSecEncryptedOverlay = vp.GetBool(EnableIPSecEncryptedOverlay)
+@@ -2743,6 +2746,7 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
  
+ 	c.EnableInClusterLoadBalance = vp.GetBool(EnableInClusterLoadBalance)
  	c.DisablePerPacketLB = vp.GetBool(DisablePerPacketLB)
 +	c.HostStackCIDRs = vp.GetStringSlice(TerwayHostStackCIDR)
  
