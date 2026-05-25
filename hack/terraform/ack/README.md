@@ -66,6 +66,7 @@ terraform apply ...
 - `cluster_addons` is not a variable any more — it is computed in `locals.all_addons` from `cluster_mode` (see `terraform_e2e.tf`).
 
 Two lifecycle preconditions enforce ACK API constraints before apply:
+
 1. `byo + dual` is rejected (ACK requires CNI for dual stack).
 2. `dual` requires `service_cidr` to contain both IPv4 and IPv6 CIDRs.
 
