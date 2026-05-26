@@ -24,7 +24,7 @@ terway_vswitch_ids = []
 terway_vswitch_cidrs = ["172.17.0.0/16", "172.18.0.0/16"]
 
 # 工作节点实例类型
-worker_instance_types = ["ecs.g7ne.2xlarge", "ecs.g7ne.4xlarge"]
+worker_instance_types = ["ecs.g7nex.2xlarge", "ecs.g7nex.4xlarge", "ecs.g7ne.xlarge", "ecs.g9i.2xlarge", "ecs.g9i.3xlarge"]
 
 # 集群名称前缀
 k8s_name_prefix = "tf-ack-hangzhou"
@@ -36,7 +36,8 @@ k8s_name_prefix = "tf-ack-hangzhou"
 # Kubernetes 版本
 kubernetes_version = "1.34.3-aliyun.1"
 
-# 服务网络 CIDR
+# 服务网络 CIDR (dual stack 时需逗号分隔: "ipv4-cidr,ipv6-cidr")
+# e2e-cluster.sh 会按 profile 通过 -var 注入对应值。
 service_cidr = "192.168.0.0/16"
 
 # RRSA 设置 (RAM Roles for Service Accounts)
@@ -51,8 +52,12 @@ deletion_protection = false
 # 时区
 timezone = "Asia/Shanghai"
 
-# IP 协议栈 (ipv4 或 ipv6 或 dual)
+# IP 协议栈 (ipv4 或 dual)。e2e-cluster.sh 会按 profile 通过 -var 注入对应值。
 ip_stack = "ipv4"
+
+# CNI 部署模式: "byo" (helm chart 自装 terway) 或 "ack" (ACK addon 自动装 terway-eniip)。
+# e2e-cluster.sh 会按 profile 通过 -var 注入对应值。
+cluster_mode = "ack"
 
 # 集群配置模板
 cluster_profile = "Default"
@@ -97,25 +102,5 @@ audit_log_enabled = false
 # ============================================
 # 组件配置
 # ============================================
-
-cluster_addons = [
-  {
-    name     = "metrics-server"
-    disabled = true
-  },
-  {
-    name = "coredns"
-  },
-  {
-    name     = "kube-flannel-ds"
-    disabled = true
-  },
-  {
-    name     = "csi-plugin"
-    disabled = true
-  },
-  {
-    name     = "nginx-ingress-controller"
-    disabled = true
-  }
-]
+# cluster_addons 由 terraform_e2e.tf 中 locals.all_addons 根据 cluster_mode 自动生成,
+# 不再通过 tfvars 手动配置, 避免与 cluster_mode (byo/ack) 决策不一致。

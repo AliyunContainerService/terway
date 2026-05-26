@@ -28,3 +28,10 @@ Thumbs.db
 
 kubeconfig*
 /ack/terway-values.yaml
+
+# Per-cluster workdirs (created by e2e-cluster.sh)
+/ack/runs/
+# Saved plans
+*.tfplan
+tfplan
+tfdestroy

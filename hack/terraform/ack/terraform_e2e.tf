@@ -49,16 +49,6 @@ variable "worker_instance_types" {
   default     = ["ecs.g7ne.2xlarge", "ecs.g7ne.4xlarge"]
 }
 
-variable "cluster_addons" {
-  type = list(object({
-    name     = optional(string)
-    config   = optional(string)
-    disabled = optional(bool)
-  }))
-  default = [
-  ]
-}
-
 variable "k8s_name_prefix" {
   description = "The name prefix used to create managed kubernetes cluster."
   default     = "tf-ack-hangzhou"
@@ -111,6 +101,40 @@ variable "ip_stack" {
   description = "The IP stack of the cluster."
   type        = string
   default     = "ipv4"
+}
+
+variable "cluster_mode" {
+  description = "CNI deployment mode: \"byo\" (no terway addon, deploy terway via helm chart after cluster creation) or \"ack\" (ACK installs terway-eniip addon at cluster creation; terway-controlplane is hosted by Aliyun in managed clusters)."
+  type        = string
+  default     = "ack"
+  validation {
+    condition     = contains(["byo", "ack"], var.cluster_mode)
+    error_message = "cluster_mode must be \"byo\" or \"ack\"."
+  }
+}
+
+# terway-controlplane addon config (ACK mode only). Values are passed verbatim
+# to the addon via jsonencode(). Set to null/{} to omit the config block.
+variable "terway_controlplane_config" {
+  description = "Config map passed to the terway-controlplane addon (ACK mode). Keys/values are serialized via jsonencode."
+  type        = map(string)
+  default = {
+    ENITrunking = "true"
+  }
+}
+
+# terway-eniip addon config (ACK mode only). Values are passed verbatim to the
+# addon via jsonencode(). NetworkPolicy=false disables in-tree eBPF policy
+# enforcement so external policy engines (e.g. poseidon TrafficPolicy) can drive
+# the data plane without conflict.
+variable "terway_eniip_config" {
+  description = "Config map passed to the terway-eniip addon (ACK mode). Keys/values are serialized via jsonencode."
+  type        = map(string)
+  default = {
+    IPVlan        = "false"
+    NetworkPolicy = "false"
+    ENITrunking   = "true"
+  }
 }
 
 variable "cluster_profile" {
@@ -210,6 +234,28 @@ locals {
   managed_nodepool_name   = "managed-node-pool"
   autoscale_nodepool_name = "autoscale-node-pool"
   log_project_name        = "log-for-${local.k8s_name_terway}"
+
+  # cluster_addons 由 cluster_mode 决定:
+  #   byo: 仅 base_addons (禁用 flannel/csi/etc.; 集群无 CNI, 由 helm chart 装 terway)
+  #   ack: base_addons + terway-eniip (由 ACK 自动安装; 托管版下 terway-controlplane 在阿里云后台托管)
+  base_addons = [
+    { name = "metrics-server", disabled = true },
+    { name = "coredns" },
+    { name = "kube-flannel-ds", disabled = true },
+    { name = "csi-plugin", disabled = true },
+    { name = "nginx-ingress-controller", disabled = true },
+  ]
+  terway_addons = [
+    {
+      name   = "terway-controlplane"
+      config = length(var.terway_controlplane_config) > 0 ? jsonencode(var.terway_controlplane_config) : null
+    },
+    {
+      name   = "terway-eniip"
+      config = length(var.terway_eniip_config) > 0 ? jsonencode(var.terway_eniip_config) : null
+    },
+  ]
+  all_addons = concat(local.base_addons, var.cluster_mode == "ack" ? local.terway_addons : [])
 }
 
 # 节点ECS实例配置。将查询满足CPU、Memory要求的ECS实例类型。
@@ -307,13 +353,24 @@ resource "alicloud_cs_managed_kubernetes" "default" {
   # 控制平面日志组件
   control_plane_log_components = var.control_plane_log_components
 
-  # 组件管理
+  # 组件管理 (由 locals.all_addons 根据 cluster_mode 决定是否注入 terway-eniip)
   dynamic "addons" {
-    for_each = var.cluster_addons
+    for_each = local.all_addons
     content {
       name     = lookup(addons.value, "name", null)
       config   = lookup(addons.value, "config", null)
       disabled = lookup(addons.value, "disabled", null)
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !(var.cluster_mode == "byo" && var.ip_stack == "dual")
+      error_message = "byo + dual is not supported by ACK API (creating a dual-stack cluster without a CNI plugin is rejected with IPv6DependencyNotSatisfied.NetworkPlugin)."
+    }
+    precondition {
+      condition     = var.ip_stack != "dual" || length(split(",", var.service_cidr)) >= 2
+      error_message = "dual stack requires service_cidr to contain both IPv4 and IPv6 CIDRs (comma-separated, e.g. \"192.168.0.0/16,fd00:1234::/112\")."
     }
   }
 }
@@ -416,8 +473,8 @@ resource "kubernetes_config_map_v1" "e2e_ip_prefix" {
 
   data = {
     eni_conf = jsonencode({
-      enable_ip_prefix = true
-      ipv4_prefix_count  = 3
+      enable_ip_prefix  = true
+      ipv4_prefix_count = 3
     })
   }
 
@@ -499,4 +556,24 @@ output "kubeconfig_expiration" {
 output "kubeconfig_file_path" {
   description = "The file path where kubeconfig is saved"
   value       = "kubeconfig-${local.k8s_name_terway}"
+}
+
+output "cluster_mode" {
+  description = "CNI deployment mode: \"byo\" (helm chart post-creation) or \"ack\" (terway-eniip addon at creation)."
+  value       = var.cluster_mode
+}
+
+output "service_cidr" {
+  description = "The service CIDR (IPv4-only or IPv4,IPv6 comma-separated for dual stack)."
+  value       = var.service_cidr
+}
+
+output "region_id" {
+  description = "The Alicloud region ID."
+  value       = var.region_id
+}
+
+output "ip_stack" {
+  description = "The IP stack of the cluster."
+  value       = var.ip_stack
 }
