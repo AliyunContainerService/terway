@@ -157,11 +157,11 @@ func assessDualStack1to1Ratio(ctx context.Context, t *testing.T, config *envconf
 		t.Logf("Warning: resetNodePrefixState failed (node may have no prefixes yet): %v", resetErr)
 	}
 
-	// Setup Dynamic Config with enable_ip_prefix=true
-	// Dual stack mode does not support ipv4_prefix_count; count is determined by system capacity
-	t.Log("Configure enable_ip_prefix=true via Dynamic Config")
+	// Setup Dynamic Config with enable_ip_prefix=true and an explicit ipv4_prefix_count.
+	// ipv4_prefix_count is required in dual-stack mode; only the per-ENI IPv6 prefix is auto-assigned.
+	t.Log("Configure enable_ip_prefix=true and ipv4_prefix_count=3 via Dynamic Config")
 	var err error
-	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true}`)
+	ctx, err = setupNodeDynamicConfig(ctx, config, t, `{"enable_ip_prefix":true,"ipv4_prefix_count":3}`)
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
