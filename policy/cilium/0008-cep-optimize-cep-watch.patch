@@ -1,0 +1,139 @@
+From e4f6dc648d5e8ecb47f9e2e805aa65a3144c8bbb Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Tue, 26 May 2026 19:47:27 +0800
+Subject: [PATCH] cep: optimize cep watch
+
+Reduce agent CEP list/watch load in large clusters by filtering CEPs to
+the local node:
+
+- Watch CEPs with LabelSelector k8s-node-name=<this node> when policy
+  enforcement is "never" (per-node scope is safe since no cross-node
+  label selection is needed).
+- Stamp CEPs at create time with {k8s-node-ip, k8s-node-name} labels
+  instead of mirroring pod labels.
+- Backfill k8s-node-name on existing CEPs after upgrade so the new
+  selector still matches them.
+- Stop mirroring pod label updates to CEP (no longer used for
+  selection).
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ pkg/endpointmanager/endpointsynchronizer.go | 34 +++++++++++++++++++--
+ pkg/k8s/resource_ctors.go                   | 15 ++++++++-
+ pkg/k8s/watchers/pod.go                     |  6 ++--
+ 3 files changed, 47 insertions(+), 8 deletions(-)
+
+diff --git a/pkg/endpointmanager/endpointsynchronizer.go b/pkg/endpointmanager/endpointsynchronizer.go
+index e34df27323..2153a1e0a4 100644
+--- a/pkg/endpointmanager/endpointsynchronizer.go
++++ b/pkg/endpointmanager/endpointsynchronizer.go
+@@ -256,6 +256,33 @@ func (epSync *EndpointSynchronizer) RunK8sCiliumEndpointSync(e *endpoint.Endpoin
+ 							scopedLog.Warn("could not take ownership of existing ciliumendpoint", logfields.Error, err)
+ 							return err
+ 						}
++						// Backfill node-name label on existing CEPs that pre-date the
++						// per-node CEP watch optimization (upgrade path).
++						if localCEP.Labels["k8s-node-name"] != types.GetName() {
++							replaceLabels := []k8s.JSONPatch{
++								{
++									OP:   "replace",
++									Path: "/metadata/labels",
++									Value: map[string]string{
++										"k8s-node-name": types.GetName(),
++									},
++								},
++							}
++							labelsPatch, err := json.Marshal(replaceLabels)
++							if err != nil {
++								scopedLog.Debug("Error marshalling CEP labels", logfields.Error, err)
++								return err
++							}
++							_, err = ciliumClient.CiliumEndpoints(cepOwner.GetNamespace()).Patch(
++								ctx, cepName,
++								k8stypes.JSONPatchType,
++								labelsPatch,
++								meta_v1.PatchOptions{})
++							if err != nil {
++								scopedLog.Debug("Error while updating CiliumEndpoint object with new labels", logfields.Error, err)
++								return err
++							}
++						}
+ 					case k8serrors.IsNotFound(err):
+ 						// We can't create localCEP directly, it must come from the k8s
+ 						// server via an API call.
+@@ -270,9 +297,10 @@ func (epSync *EndpointSynchronizer) RunK8sCiliumEndpointSync(e *endpoint.Endpoin
+ 										UID:        cepOwner.GetUID(),
+ 									},
+ 								},
+-								// Mirror the labels of parent pod in CiliumEndpoint object to enable
+-								// label based selection for CiliumEndpoints.
+-								Labels: cepOwner.GetLabels(),
++								Labels: map[string]string{
++									"k8s-node-ip":   node.GetCiliumEndpointNodeIP(scopedLog),
++									"k8s-node-name": types.GetName(),
++								},
+ 							},
+ 							Status: *mdl,
+ 						}
+diff --git a/pkg/k8s/resource_ctors.go b/pkg/k8s/resource_ctors.go
+index 23558a761e..121b612ab8 100644
+--- a/pkg/k8s/resource_ctors.go
++++ b/pkg/k8s/resource_ctors.go
+@@ -12,6 +12,7 @@ import (
+ 	"github.com/cilium/hive/cell"
+ 	"github.com/spf13/pflag"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/labels"
+ 	k8sRuntime "k8s.io/apimachinery/pkg/runtime"
+ 	"k8s.io/apimachinery/pkg/watch"
+ 	"k8s.io/client-go/tools/cache"
+@@ -32,6 +33,9 @@ import (
+ 	"github.com/cilium/cilium/pkg/k8s/version"
+ 	"github.com/cilium/cilium/pkg/logging/logfields"
+ 	"github.com/cilium/cilium/pkg/node"
++	nodeTypes "github.com/cilium/cilium/pkg/node/types"
++	"github.com/cilium/cilium/pkg/option"
++	"github.com/cilium/cilium/pkg/policy"
+ 	"github.com/cilium/cilium/pkg/promise"
+ )
+ 
+@@ -441,9 +445,18 @@ func CiliumSlimEndpointResource(params CiliumResourceParams, _ *node.LocalNodeSt
+ 	if !params.ClientSet.IsEnabled() {
+ 		return nil, nil
+ 	}
++
++	lb := labels.Set{}
++	if policy.GetPolicyEnabled() == option.NeverEnforce {
++		lb["k8s-node-name"] = nodeTypes.GetName()
++	}
++	params.Logger.Info("watch cep with selector", logfields.Selector, lb.String())
++
+ 	lw := utils.ListerWatcherWithModifiers(
+ 		utils.ListerWatcherFromTyped[*cilium_api_v2.CiliumEndpointList](params.ClientSet.CiliumV2().CiliumEndpoints(slim_corev1.NamespaceAll)),
+-		opts...,
++		func(options *metav1.ListOptions) {
++			options.LabelSelector = lb.String()
++		},
+ 	)
+ 	indexers := cache.Indexers{
+ 		"localNode": func(obj any) ([]string, error) {
+diff --git a/pkg/k8s/watchers/pod.go b/pkg/k8s/watchers/pod.go
+index fcbd6bcbfd..d89b42cd08 100644
+--- a/pkg/k8s/watchers/pod.go
++++ b/pkg/k8s/watchers/pod.go
+@@ -355,10 +355,8 @@ func (k *K8sPodWatcher) updateK8sPodV1(oldK8sPod, newK8sPod *slim_corev1.Pod) er
+ 				return err
+ 			}
+ 
+-			// Synchronize Pod labels with CiliumEndpoint labels if there is a change.
+-			if !option.Config.DisableCiliumEndpointCRD {
+-				updateCiliumEndpointLabels(k.logger, k.clientset, podEP, newK8sPod.Labels)
+-			}
++			// Pod labels are no longer mirrored to CiliumEndpoint; CEP carries
++			// k8s-node-name/k8s-node-ip labels instead to enable per-node CEP watch.
+ 		}
+ 
+ 		if annotationsChanged {
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,5 +1,5 @@
-From 9dca17303093945238f5aecf9f11518e23d1849b Mon Sep 17 00:00:00 2001
-From: l1b0k <libokang.dev@gmail.com>
+From 9b52716691ca2b62ca9c6316d644fca3f5e15160 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Wed, 13 May 2026 14:10:16 +0800
 Subject: [PATCH] feat(k8s): skip CRD register/wait for CPIP, CNC, CL2AP in
  Terway integration
@@ -18,6 +18,8 @@ agent-side waiter (agentCRDResourceNames / AllCiliumCRDResourceNames)
 must stay in sync, otherwise SyncCRDs fatals on missing CRDs.
 
 CiliumCIDRGroup is kept (still gated by EnableCiliumNetworkPolicy).
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
  pkg/k8s/apis/cilium.io/client/register.go | 17 +++++------------
  pkg/k8s/synced/crd.go                     |  9 ++++-----
