@@ -1,15 +1,13 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: l1b0k <libokang.dev@gmail.com>
+From 27b4dae4fd8dcc6fd2878fffd94160d944f76ce6 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Mon, 9 Mar 2026 16:11:17 +0800
-Subject: =?UTF-8?q?feat(datapath):=20add=20multi-host=20stack=20support=20?=
- =?UTF-8?q?for=20veth=20datapath-=20Implement=20host=20stack=20CIDR=20map?=
- =?UTF-8?q?=20and=20related=20functions=0A-=20Add=20support=20for=20multip?=
- =?UTF-8?q?le=20host=20stack=20CIDRs=20in=20veth=20datapath=20mode=0A-=20U?=
- =?UTF-8?q?pdate=20bpf=5Flxc=20to=20handle=20multiple=20host=20stack=20CID?=
- =?UTF-8?q?Rs=0A-=20Modify=20daemon=20initialization=20to=20set=20up=20hos?=
- =?UTF-8?q?t=20stack=20CIDR=20map?=
+Subject: [PATCH] feat(datapath): add multi-host stack support for veth
+ datapath- Implement host stack CIDR map and related functions - Add support
+ for multiple host stack CIDRs in veth datapath mode - Update bpf_lxc to
+ handle multiple host stack CIDRs - Modify daemon initialization to set up
+ host stack CIDR map
 
-Signed-off-by: l1b0k <libokang.dev@gmail.com>
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
  bpf/bpf_lxc.c                           |   9 ++
  bpf/include/bpf/config/lxc.h            |   3 +
@@ -28,7 +26,7 @@ Signed-off-by: l1b0k <libokang.dev@gmail.com>
  create mode 100644 pkg/maps/hoststackcidr/hoststackcidr.go
 
 diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
-index 664799d8ea..6c3e82cd77 100644
+index a681b05bf5..1edbc356f6 100644
 --- a/bpf/bpf_lxc.c
 +++ b/bpf/bpf_lxc.c
 @@ -55,6 +55,7 @@
@@ -39,7 +37,7 @@ index 664799d8ea..6c3e82cd77 100644
  
  /* Per-packet LB is needed if all LB cases can not be handled in bpf_sock.
   * Most services with L7 LB flag can not be redirected to their proxy port
-@@ -1319,6 +1320,14 @@ skip_vtep:
+@@ -1323,6 +1324,14 @@ skip_vtep:
  	if (is_defined(ENABLE_HOST_ROUTING)) {
  		int oif = CONFIG(parent_dev_ifindex);
  
@@ -133,7 +131,7 @@ index 0ba99bdb9b..784facc4ad 100644
  	}
 diff --git a/daemon/cmd/hoststack-cidr.go b/daemon/cmd/hoststack-cidr.go
 new file mode 100644
-index 0000000000..98d0e28dc7
+index 0000000000..9e4cbe8fa5
 --- /dev/null
 +++ b/daemon/cmd/hoststack-cidr.go
 @@ -0,0 +1,48 @@
@@ -159,13 +157,13 @@ index 0000000000..98d0e28dc7
 +	}
 +
 +	for prefix := range exists {
-+		logger.Debug("host stack CIDR entry: %s", prefix)
++		logger.Debug("host stack CIDR entry", "prefix", prefix)
 +	}
 +
 +	for _, cidr := range option.Config.HostStackCIDRs {
 +		expect, err := netip.ParsePrefix(cidr)
 +		if err != nil {
-+			logger.Debug("parse cidr error, ignored : %s", err)
++			logger.Debug("parse cidr error, ignored", "error", err)
 +		} else {
 +			err = hoststackcidr.AddCIDREntry(expect, 0)
 +			if err != nil {
@@ -186,7 +184,7 @@ index 0000000000..98d0e28dc7
 +	return nil
 +}
 diff --git a/pkg/datapath/config/lxc_config.go b/pkg/datapath/config/lxc_config.go
-index d5fcf8a92f..c6874af1ff 100644
+index 789c1d14a8..69b40918dd 100644
 --- a/pkg/datapath/config/lxc_config.go
 +++ b/pkg/datapath/config/lxc_config.go
 @@ -24,6 +24,8 @@ type BPFLXC struct {
@@ -198,14 +196,14 @@ index d5fcf8a92f..c6874af1ff 100644
  	// Masquerade address for IPv4 traffic.
  	NATIPv4Masquerade [4]byte `config:"nat_ipv4_masquerade"`
  	// Masquerade address for IPv6 traffic.
-@@ -44,7 +46,7 @@ func NewBPFLXC(node Node) *BPFLXC {
+@@ -46,7 +48,7 @@ func NewBPFLXC(node Node) *BPFLXC {
  	return &BPFLXC{0x5dc, 0x0, [4]byte{0x0, 0x0, 0x0, 0x0},
  		[16]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
  		0x0, 0x0, [8]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
 -		[4]byte{0x0, 0x0, 0x0, 0x0},
 +		[4]byte{0x0, 0x0, 0x0, 0x0}, [4]byte{0x0, 0x0, 0x0, 0x0},
  		[16]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
- 		0, 0x0, false, 0x0, node}
+ 		0, 0x0, false, false, 0x0, node}
  }
 diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
 index e613bceafb..36a5dacd25 100644
@@ -232,10 +230,10 @@ index e613bceafb..36a5dacd25 100644
  		// Only used to differentiate between host endpoint template and other templates.
  		fmt.Fprintf(fw, "#define HOST_ENDPOINT 1\n")
 diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
-index 79c2c411d8..926296e444 100644
+index 0182404338..50d78efee1 100644
 --- a/pkg/datapath/loader/loader.go
 +++ b/pkg/datapath/loader/loader.go
-@@ -591,6 +591,14 @@ func endpointRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNode
+@@ -600,6 +600,14 @@ func endpointRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNode
  	}
  
  	cfg.ParentDevIfindex = int32(ep.GetParentIfIndex())
@@ -408,10 +406,10 @@ index 0000000000..0d4de4e3ae
 +	return result, nil
 +}
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 208cec7c3e..5a243fd81b 100644
+index 63e1f8995a..ebea1a56f2 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
-@@ -1064,6 +1064,7 @@ const (
+@@ -1067,6 +1067,7 @@ const (
  	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
  	EnableInClusterLoadBalance = "enable-in-cluster-loadbalance"
  	DisablePerPacketLB         = "disable-per-package-lb"
@@ -419,7 +417,7 @@ index 208cec7c3e..5a243fd81b 100644
  )
  
  // Default string arguments
-@@ -2029,6 +2030,8 @@ type DaemonConfig struct {
+@@ -2032,6 +2033,8 @@ type DaemonConfig struct {
  	EnableInClusterLoadBalance bool
  
  	DisablePerPacketLB bool
@@ -428,7 +426,7 @@ index 208cec7c3e..5a243fd81b 100644
  }
  
  var (
-@@ -2743,6 +2746,7 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
+@@ -2746,6 +2749,7 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
  
  	c.EnableInClusterLoadBalance = vp.GetBool(EnableInClusterLoadBalance)
  	c.DisablePerPacketLB = vp.GetBool(DisablePerPacketLB)

@@ -1,4 +1,4 @@
-ARG TERWAY_POLICY_IMAGE=registry-cn-zhangjiakou.ack.aliyuncs.com/acs/terway:policy-004646df@sha256:7a05e3c654977bb5691279c77a8144905edf3a5112f01b206af2dd2af8ac1527
+ARG TERWAY_POLICY_IMAGE=registry-cn-zhangjiakou.ack.aliyuncs.com/acs/terway:policy-14cd6c0e@sha256:ded6e8a952bd33e76a40c828c091f8ea384b161fae1a99f67d31bdeb8e57a7d9
 
 FROM --platform=$TARGETPLATFORM ${TERWAY_POLICY_IMAGE} AS policy-dist
 

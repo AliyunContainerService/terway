@@ -1,10 +1,10 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: l1b0k <libokang.dev@gmail.com>
+From 4cb08a7d0fde447af895d5344688c63398839be6 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Mon, 9 Mar 2026 16:27:19 +0800
-Subject: feat(node): implement NodeMapGarbageCollect for garbage collection of
- stale BPF node map entries
+Subject: [PATCH] feat(node): implement NodeMapGarbageCollect for garbage
+ collection of stale BPF node map entries
 
-Signed-off-by: l1b0k <libokang.dev@gmail.com>
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
  pkg/auth/authmap_gc.go                        |  5 ++
  pkg/datapath/fake/types/node_handler.go       |  3 +
@@ -279,7 +279,7 @@ index ed561dc1b5..cbb7f423b1 100644
  	past := time.Now().Add(-clientGCTimeout)
  	for k, v := range h.clients {
 diff --git a/pkg/node/neighbordiscovery/node_neighbor_discovery.go b/pkg/node/neighbordiscovery/node_neighbor_discovery.go
-index 5ea6007279..30bebe9d6d 100644
+index 03f10f3f26..29e60d3305 100644
 --- a/pkg/node/neighbordiscovery/node_neighbor_discovery.go
 +++ b/pkg/node/neighbordiscovery/node_neighbor_discovery.go
 @@ -190,6 +190,11 @@ func (nnh *nodeNeighborHandler) NodeValidateImplementation(node nodeTypes.Node)

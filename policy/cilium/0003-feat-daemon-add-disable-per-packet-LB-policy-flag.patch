@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 8b12242b89082a5777e25218cf54e7b843e44cfc Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Thu, 13 Nov 2025 15:08:54 +0800
-Subject: feat(daemon): add disable per-packet LB policy flag
+Subject: [PATCH] feat(daemon): add disable per-packet LB policy flag
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
@@ -12,7 +12,7 @@ Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
  4 files changed, 13 insertions(+), 3 deletions(-)
 
 diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
-index 3c443909dc..664799d8ea 100644
+index eb6491d891..a681b05bf5 100644
 --- a/bpf/bpf_lxc.c
 +++ b/bpf/bpf_lxc.c
 @@ -62,11 +62,12 @@
@@ -60,10 +60,10 @@ index 25e9ce5004..e613bceafb 100644
  
  	cDefinesMap["UNKNOWN_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameUnknown))
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 00739138a0..208cec7c3e 100644
+index ebeb6e5deb..63e1f8995a 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
-@@ -1063,6 +1063,7 @@ const (
+@@ -1066,6 +1066,7 @@ const (
  
  	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
  	EnableInClusterLoadBalance = "enable-in-cluster-loadbalance"
@@ -71,7 +71,7 @@ index 00739138a0..208cec7c3e 100644
  )
  
  // Default string arguments
-@@ -2026,6 +2027,8 @@ type DaemonConfig struct {
+@@ -2029,6 +2030,8 @@ type DaemonConfig struct {
  
  	// EnableInClusterLoadBalance enable short circuit for in cluster traffic to externalIP and loadBalancerIP
  	EnableInClusterLoadBalance bool
@@ -80,7 +80,7 @@ index 00739138a0..208cec7c3e 100644
  }
  
  var (
-@@ -2739,6 +2742,7 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
+@@ -2742,6 +2745,7 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
  	c.BootIDFile = vp.GetString(BootIDFilename)
  
  	c.EnableInClusterLoadBalance = vp.GetBool(EnableInClusterLoadBalance)

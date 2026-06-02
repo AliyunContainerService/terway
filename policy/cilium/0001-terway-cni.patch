@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 58b71ad433c8b5d5245c86a8d0eef67d4a5337f9 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Tue, 21 Oct 2025 15:26:32 +0800
-Subject: terway: cni
+Subject: [PATCH] terway: cni
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
@@ -33,10 +33,10 @@ Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
  create mode 100644 plugins/cilium-cni/chaining/terway/terway.go
 
 diff --git a/bpf/bpf_host.c b/bpf/bpf_host.c
-index 65fb86627c..3ac8130dc7 100644
+index 80a49ec748..8d253eb428 100644
 --- a/bpf/bpf_host.c
 +++ b/bpf/bpf_host.c
-@@ -1339,7 +1339,7 @@ int cil_to_netdev(struct __ctx_buff *ctx)
+@@ -1348,7 +1348,7 @@ int cil_to_netdev(struct __ctx_buff *ctx)
  	};
  	__be16 __maybe_unused proto = 0;
  	__u32 vlan_id;
@@ -45,7 +45,7 @@ index 65fb86627c..3ac8130dc7 100644
  	__s8 ext_err = 0;
  
  	bpf_clear_meta(ctx);
-@@ -1642,6 +1642,10 @@ exit:
+@@ -1651,6 +1651,10 @@ exit:
  			  TRACE_EP_ID_UNKNOWN, THIS_INTERFACE_IFINDEX,
  			  trace.reason, trace.monitor, proto);
  
@@ -57,7 +57,7 @@ index 65fb86627c..3ac8130dc7 100644
  
  drop_err:
 diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
-index 9e92cfa3a3..15d1c15736 100644
+index e677f2e2b2..ace5fd819a 100644
 --- a/bpf/bpf_lxc.c
 +++ b/bpf/bpf_lxc.c
 @@ -751,9 +751,15 @@ ct_recreate6:
@@ -78,7 +78,7 @@ index 9e92cfa3a3..15d1c15736 100644
  		/* Error handling for local routes - just pass the packet to the kernel stack */
  		if (ret == DROP_NO_FIB && *ext_err == BPF_FIB_LKUP_RET_NOT_FWDED)
  			goto pass_to_stack;
-@@ -1310,10 +1316,15 @@ skip_vtep:
+@@ -1314,10 +1320,15 @@ skip_vtep:
  #endif /* TUNNEL_MODE */
  
  	if (is_defined(ENABLE_HOST_ROUTING)) {
@@ -217,7 +217,7 @@ index 0e0dd76bda..2c12bc4252 100644
  		// For netkit we enable also tcx for all non-netkit devices.
  		// The underlying kernel does support it given tcx got merged
 diff --git a/pkg/datapath/config/lxc_config.go b/pkg/datapath/config/lxc_config.go
-index c2ca2f629f..d5fcf8a92f 100644
+index 73b83d5033..789c1d14a8 100644
 --- a/pkg/datapath/config/lxc_config.go
 +++ b/pkg/datapath/config/lxc_config.go
 @@ -28,6 +28,8 @@ type BPFLXC struct {
@@ -228,13 +228,13 @@ index c2ca2f629f..d5fcf8a92f 100644
 +	ParentDevIfindex int32 `config:"parent_dev_ifindex"`
  	// The log level for policy verdicts in workload endpoints.
  	PolicyVerdictLogFilter uint32 `config:"policy_verdict_log_filter"`
- 	// Pull security context from IP cache.
-@@ -44,5 +46,5 @@ func NewBPFLXC(node Node) *BPFLXC {
+ 	// Whether to redirect to the proxy via cilium_net (hairpin) or via stack.
+@@ -46,5 +48,5 @@ func NewBPFLXC(node Node) *BPFLXC {
  		0x0, 0x0, [8]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
  		[4]byte{0x0, 0x0, 0x0, 0x0},
  		[16]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
--		0x0, false, 0x0, node}
-+		0, 0x0, false, 0x0, node}
+-		0x0, false, false, 0x0, node}
++		0, 0x0, false, false, 0x0, node}
  }
 diff --git a/pkg/datapath/linux/bandwidth/ops.go b/pkg/datapath/linux/bandwidth/ops.go
 index e9214303c1..4f8b3774d2 100644
@@ -264,10 +264,10 @@ index 20b46c0864..25e9ce5004 100644
  		if option.Config.EnableHealthDatapath {
  			cDefinesMap["ENABLE_HEALTH_CHECK"] = "1"
 diff --git a/pkg/datapath/loader/loader.go b/pkg/datapath/loader/loader.go
-index 80060b3c2b..79c2c411d8 100644
+index cade9593a6..0182404338 100644
 --- a/pkg/datapath/loader/loader.go
 +++ b/pkg/datapath/loader/loader.go
-@@ -590,6 +590,7 @@ func endpointRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNode
+@@ -599,6 +599,7 @@ func endpointRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNode
  		renames["cilium_calls_custom"] = bpf.LocalMapName(callsmap.CustomCallsMapName, uint16(ep.GetID()))
  	}
  
@@ -360,14 +360,14 @@ index 5c736dce5e..291777e2b8 100644
  
  // GetPolicyNames returns the policy names for this endpoint.
 diff --git a/pkg/endpoint/restore.go b/pkg/endpoint/restore.go
-index 17e1928e0b..464290c31e 100644
+index 17e1928e0b..d1df88ab65 100644
 --- a/pkg/endpoint/restore.go
 +++ b/pkg/endpoint/restore.go
 @@ -456,6 +456,7 @@ func (e *Endpoint) toSerializedEndpoint() *serializableEndpoint {
  		CiliumEndpointUID:        e.ciliumEndpointUID,
  		Properties:               e.properties,
  		NetnsCookie:              e.NetNsCookie,
-+		//EniInterfaceIndex:        e.eniInterfaceIndex,
++		EniInterfaceIndex:        int64(e.parentIfIndex),
  	}
  }
  
@@ -406,10 +406,10 @@ index 0000000000..5fe16f8e7c
 +	return int64(ep.parentIfIndex)
 +}
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 8ce57f5611..da4d726438 100644
+index d227234ddc..1a51d90165 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
-@@ -2138,6 +2138,7 @@ func (c *DaemonConfig) TunnelingEnabled() bool {
+@@ -2141,6 +2141,7 @@ func (c *DaemonConfig) TunnelingEnabled() bool {
  // AreDevicesRequired returns true if the agent needs to attach to the native
  // devices to implement some features.
  func (c *DaemonConfig) AreDevicesRequired(kprCfg kpr.KPRConfig) bool {
