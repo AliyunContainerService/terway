@@ -781,6 +781,11 @@ func createHostPortNodeIPTest(nodeType NodeType) features.Feature {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			if state.configured && state.backup != nil {
+				// Delete pods first so CNI DEL runs while portmap is still in the chain;
+				// otherwise portmap DNAT rules leak on the node and break IPv6 hostPort
+				// on subsequent rounds (nftables rejects duplicate rules).
+				deleteHostPortPods(ctx, t, config, serverName, clientName)
+
 				err := RestoreENIConfig(ctx, config, state.backup)
 				if err != nil {
 					t.Logf("Warning: failed to restore eni-config: %v", err)
@@ -956,6 +961,11 @@ func createHostPortExternalIPTest(nodeType NodeType) features.Feature {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			if state.configured && state.backup != nil {
+				// Delete pods first so CNI DEL runs while portmap is still in the chain;
+				// otherwise portmap DNAT rules leak on the node and break IPv6 hostPort
+				// on subsequent rounds (nftables rejects duplicate rules).
+				deleteHostPortPods(ctx, t, config, serverName, clientName)
+
 				err := RestoreENIConfig(ctx, config, state.backup)
 				if err != nil {
 					t.Logf("Warning: failed to restore eni-config: %v", err)
@@ -968,6 +978,21 @@ func createHostPortExternalIPTest(nodeType NodeType) features.Feature {
 			return ctx
 		}).
 		Feature()
+}
+
+func deleteHostPortPods(ctx context.Context, t *testing.T, config *envconf.Config, names ...string) {
+	for _, name := range names {
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: config.Namespace()}}
+		if err := config.Client().Resources().Delete(ctx, pod); err != nil {
+			t.Logf("Warning: failed to delete pod %s: %v", name, err)
+			continue
+		}
+		err := wait.For(conditions.New(config.Client().Resources()).ResourceDeleted(pod),
+			wait.WithInterval(1*time.Second), wait.WithImmediate(), wait.WithTimeout(1*time.Minute))
+		if err != nil {
+			t.Logf("Warning: waiting for pod %s deletion: %v", name, err)
+		}
+	}
 }
 
 // =============================================================================
