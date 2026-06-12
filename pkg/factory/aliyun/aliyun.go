@@ -504,16 +504,39 @@ func (a *Aliyun) GetAttachedNetworkInterface(trunkENIID string) ([]*daemon.ENI, 
 }
 
 func validateIPInMetadata(ctx context.Context, expect []netip.Addr, getExist func() []netip.Addr) error {
-	return wait.PollUntilContextTimeout(ctx, metadataPollInterval, metadataWaitTimeout, false, func(ctx context.Context) (bool, error) {
-		exists := getExist()
-		return sets.New[netip.Addr](exists...).HasAll(expect...), nil
+	var lastExist []netip.Addr
+	err := wait.PollUntilContextTimeout(ctx, metadataPollInterval, metadataWaitTimeout, false, func(ctx context.Context) (bool, error) {
+		lastExist = getExist()
+		return sets.New[netip.Addr](lastExist...).HasAll(expect...), nil
 	})
+	if err != nil {
+		existSet := sets.New[netip.Addr](lastExist...)
+		var missing []netip.Addr
+		for _, ip := range expect {
+			if !existSet.Has(ip) {
+				missing = append(missing, ip)
+			}
+		}
+		klog.Errorf("validateIPInMetadata: timeout, expect %v, missing %v, metadata has %v", expect, missing, lastExist)
+	}
+	return err
 }
 
 func validateIPNotInMetadata(ctx context.Context, gone []netip.Addr, getExist func() []netip.Addr) error {
-	return wait.PollUntilContextTimeout(ctx, metadataPollInterval, metadataWaitTimeout, false, func(ctx context.Context) (bool, error) {
-		exists := getExist()
-
-		return !sets.New[netip.Addr](exists...).HasAny(gone...), nil
+	var lastExist []netip.Addr
+	err := wait.PollUntilContextTimeout(ctx, metadataPollInterval, metadataWaitTimeout, false, func(ctx context.Context) (bool, error) {
+		lastExist = getExist()
+		return !sets.New[netip.Addr](lastExist...).HasAny(gone...), nil
 	})
+	if err != nil {
+		existSet := sets.New[netip.Addr](lastExist...)
+		var remaining []netip.Addr
+		for _, ip := range gone {
+			if existSet.Has(ip) {
+				remaining = append(remaining, ip)
+			}
+		}
+		klog.Errorf("validateIPNotInMetadata: timeout, expect gone %v, still present %v, metadata has %v", gone, remaining, lastExist)
+	}
+	return err
 }
