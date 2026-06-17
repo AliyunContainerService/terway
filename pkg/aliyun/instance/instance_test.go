@@ -170,6 +170,41 @@ var _ = Describe("Metadata BDD Tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(instanceID2).To(Equal("test-instance-id"))
 		})
+
+		It("Test cached values for all methods", func() {
+			Init(&ECS{})
+			instance := GetInstanceMeta()
+
+			regionID1, err := instance.GetRegionID()
+			Expect(err).NotTo(HaveOccurred())
+			regionID2, err := instance.GetRegionID()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(regionID1).To(Equal(regionID2))
+
+			zoneID1, err := instance.GetZoneID()
+			Expect(err).NotTo(HaveOccurred())
+			zoneID2, err := instance.GetZoneID()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(zoneID1).To(Equal(zoneID2))
+
+			vswitchID1, err := instance.GetVSwitchID()
+			Expect(err).NotTo(HaveOccurred())
+			vswitchID2, err := instance.GetVSwitchID()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(vswitchID1).To(Equal(vswitchID2))
+
+			mac1, err := instance.GetPrimaryMAC()
+			Expect(err).NotTo(HaveOccurred())
+			mac2, err := instance.GetPrimaryMAC()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mac1).To(Equal(mac2))
+
+			instanceType1, err := instance.GetInstanceType()
+			Expect(err).NotTo(HaveOccurred())
+			instanceType2, err := instance.GetInstanceType()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(instanceType1).To(Equal(instanceType2))
+		})
 	})
 
 	Context("Error handling", func() {

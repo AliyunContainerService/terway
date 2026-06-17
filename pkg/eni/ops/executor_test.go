@@ -44,18 +44,13 @@ func TestExecutor_GetTimeout(t *testing.T) {
 	timeout = exec.GetTimeout(efloCtx, "leni-12345")
 	assert.Equal(t, 5*time.Minute, timeout)
 
-	// HDENI (EFLO path)
-	efloHDCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIEFLOHDENI)
-	timeout = exec.GetTimeout(efloHDCtx, "hdeni-12345")
-	assert.Equal(t, 5*time.Minute, timeout)
-
 	// Migrated LENI on ECS path
 	timeout = exec.GetTimeout(ecsCtx, "leni-12345")
 	assert.Equal(t, 3*time.Minute, timeout)
 
-	// Migrated HDENI on ECS path
-	timeout = exec.GetTimeout(ecsCtx, "hdeni-12345")
-	assert.Equal(t, 3*time.Minute, timeout)
+	// EFLO backend with regular ENI (not leni-)
+	timeout = exec.GetTimeout(efloCtx, "eni-12345")
+	assert.Equal(t, 2*time.Minute, timeout)
 }
 
 func TestExecutor_GetInitialDelay(t *testing.T) {
@@ -347,19 +342,13 @@ func TestExecutor_getBackoff(t *testing.T) {
 	assert.NotNil(t, bo)
 	assert.Equal(t, 18*time.Second, bo.InitialDelay)
 
-	// HDENI (EFLO path)
-	efloHDCtx := aliyunClient.SetBackendAPI(context.Background(), aliyunClient.BackendAPIEFLOHDENI)
-	bo = exec.getBackoff(efloHDCtx, "hdeni-12345")
-	assert.NotNil(t, bo)
-	assert.Equal(t, 18*time.Second, bo.InitialDelay)
-
 	// Migrated LENI on ECS path
 	bo = exec.getBackoff(ecsCtx, "leni-12345")
 	assert.Equal(t, 4*time.Second, bo.InitialDelay)
 
-	// Migrated HDENI on ECS path
-	bo = exec.getBackoff(ecsCtx, "hdeni-12345")
-	assert.Equal(t, 4*time.Second, bo.InitialDelay)
+	// EFLO backend with regular ENI (not leni-)
+	bo = exec.getBackoff(efloCtx, "eni-12345")
+	assert.NotNil(t, bo)
 }
 
 func TestNewExecutor(t *testing.T) {

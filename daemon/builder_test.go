@@ -772,12 +772,20 @@ func TestNetworkServiceBuilder_PostInitForCRDV2(t *testing.T) {
 	tests := []struct {
 		name             string
 		hasExistingError bool
+		enableIPv6       bool
+		ipv6PrefixCount  int
 		expectedError    bool
 	}{
 		{
 			name:             "existing error returns early",
 			hasExistingError: true,
 			expectedError:    true,
+		},
+		{
+			name:            "prefix validation fails",
+			enableIPv6:      true,
+			ipv6PrefixCount: 5,
+			expectedError:   true,
 		},
 	}
 
@@ -786,8 +794,14 @@ func TestNetworkServiceBuilder_PostInitForCRDV2(t *testing.T) {
 			builder := &NetworkServiceBuilder{
 				ctx:       context.Background(),
 				namespace: "kube-system",
-				config:    &daemon.Config{IPStack: "ipv4"},
-				service:   &networkService{},
+				config: &daemon.Config{
+					IPStack:         "ipv4",
+					EnableIPPrefix:  true,
+					IPv6PrefixCount: tc.ipv6PrefixCount,
+				},
+				service: &networkService{
+					enableIPv6: tc.enableIPv6,
+				},
 			}
 
 			if tc.hasExistingError {
@@ -803,6 +817,152 @@ func TestNetworkServiceBuilder_PostInitForCRDV2(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNetworkServiceBuilder_PostInitForCRDV2_SharedMgrError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	patches.ApplyFunc(eni.NewSharedCRDManager, func(config interface{}, nodeName, namespace string) (*eni.SharedCRDManager, error) {
+		return nil, errors.New("shared mgr error")
+	})
+
+	mockK8s := k8smocks.NewKubernetes(t)
+	mockK8s.On("GetRestConfig").Return(nil).Maybe()
+	mockK8s.On("NodeName").Return("test-node").Maybe()
+
+	builder := &NetworkServiceBuilder{
+		ctx:       context.Background(),
+		namespace: "kube-system",
+		config:    &daemon.Config{IPStack: "ipv4"},
+		service:   &networkService{k8s: mockK8s},
+	}
+
+	result := builder.PostInitForCRDV2()
+	assert.NotNil(t, result.err)
+	assert.Contains(t, result.err.Error(), "shared mgr error")
+}
+
+func TestNetworkServiceBuilder_PostInitForCRDV2_HappyPath(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	mockSharedMgr := &eni.SharedCRDManager{}
+	patches.ApplyFunc(eni.NewSharedCRDManager, func(config interface{}, nodeName, namespace string) (*eni.SharedCRDManager, error) {
+		return mockSharedMgr, nil
+	})
+	patches.ApplyMethodFunc(mockSharedMgr, "Start", func(ctx context.Context, wg *sync.WaitGroup) {})
+
+	patches.ApplyFunc(eni.NewCRDV2, func(sharedMgr *eni.SharedCRDManager, nodeName string) eni.NetworkInterface {
+		return &mockNetworkInterface{}
+	})
+	patches.ApplyFunc(eni.NewManager, func(pool *daemon.PoolConfig, syncPeriod time.Duration, nis []eni.NetworkInterface, policy daemon.EniSelectionPolicy, k8s interface{}) *eni.Manager {
+		return &eni.Manager{}
+	})
+	patches.ApplyMethodFunc(&eni.Manager{}, "Run", func(ctx context.Context, wg *sync.WaitGroup, podResources []daemon.PodResources) error {
+		return nil
+	})
+
+	mockK8s := k8smocks.NewKubernetes(t)
+	mockK8s.On("GetRestConfig").Return(nil).Maybe()
+	mockK8s.On("NodeName").Return("test-node").Maybe()
+	mockK8s.On("GetLocalPods", mock.Anything).Return([]*daemon.PodInfo{}, nil).Maybe()
+
+	builder := &NetworkServiceBuilder{
+		ctx:       context.Background(),
+		namespace: "kube-system",
+		config:    &daemon.Config{IPStack: "ipv4"},
+		service: &networkService{
+			k8s:        mockK8s,
+			resourceDB: &builderMockStorage{listResult: []interface{}{}},
+		},
+	}
+
+	result := builder.PostInitForCRDV2()
+	assert.Nil(t, result.err)
+}
+
+func TestNetworkServiceBuilder_PostInitForCRDV2_PrefixMode(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	mockSharedMgr := &eni.SharedCRDManager{}
+	patches.ApplyFunc(eni.NewSharedCRDManager, func(config interface{}, nodeName, namespace string) (*eni.SharedCRDManager, error) {
+		return mockSharedMgr, nil
+	})
+	patches.ApplyMethodFunc(mockSharedMgr, "Start", func(ctx context.Context, wg *sync.WaitGroup) {})
+
+	patches.ApplyFunc(eni.NewLocalDelegate, func(sharedMgr *eni.SharedCRDManager, nodeName string, enableIPv4, enableIPv6 bool) eni.NetworkInterface {
+		return &mockNetworkInterface{}
+	})
+	patches.ApplyFunc(eni.NewRemoteV2, func(sharedMgr *eni.SharedCRDManager, nodeName string) *eni.RemoteV2 {
+		return &eni.RemoteV2{}
+	})
+	patches.ApplyFunc(eni.NewManager, func(pool *daemon.PoolConfig, syncPeriod time.Duration, nis []eni.NetworkInterface, policy daemon.EniSelectionPolicy, k8s interface{}) *eni.Manager {
+		return &eni.Manager{}
+	})
+	patches.ApplyMethodFunc(&eni.Manager{}, "Run", func(ctx context.Context, wg *sync.WaitGroup, podResources []daemon.PodResources) error {
+		return nil
+	})
+
+	mockK8s := k8smocks.NewKubernetes(t)
+	mockK8s.On("GetRestConfig").Return(nil).Maybe()
+	mockK8s.On("NodeName").Return("test-node").Maybe()
+	mockK8s.On("GetLocalPods", mock.Anything).Return([]*daemon.PodInfo{}, nil).Maybe()
+
+	builder := &NetworkServiceBuilder{
+		ctx:       context.Background(),
+		namespace: "kube-system",
+		config:    &daemon.Config{IPStack: "ipv4", EnableIPPrefix: true},
+		service: &networkService{
+			k8s:        mockK8s,
+			resourceDB: &builderMockStorage{listResult: []interface{}{}},
+			enableIPv4: true,
+		},
+	}
+
+	result := builder.PostInitForCRDV2()
+	assert.Nil(t, result.err)
+}
+
+func TestNetworkServiceBuilder_PostInitForLegacyMode_Eflo(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	patches.ApplyFunc(backoff.OverrideBackoff, func(m map[string]backoff.ExtendedBackoff) {})
+	patches.ApplyFunc(eni.NewRemote, func(client ctrlclient.Client, trunkENI *daemon.ENI, notifier *eni.Notifier) *eni.Remote {
+		return &eni.Remote{}
+	})
+	patches.ApplyFunc(eni.NewManager, func(pool *daemon.PoolConfig, syncPeriod time.Duration, nis []eni.NetworkInterface, policy daemon.EniSelectionPolicy, k8s interface{}) *eni.Manager {
+		return &eni.Manager{}
+	})
+	patches.ApplyMethodFunc(&eni.Manager{}, "Run", func(ctx context.Context, wg *sync.WaitGroup, podResources []daemon.PodResources) error {
+		return nil
+	})
+
+	mockK8s := k8smocks.NewKubernetes(t)
+	mockK8s.On("SetCustomStatefulWorkloadKinds", mock.Anything).Return(nil)
+	mockK8s.On("GetClient").Return(nil).Maybe()
+	mockK8s.On("GetLocalPods", mock.Anything).Return([]*daemon.PodInfo{}, nil).Maybe()
+
+	builder := &NetworkServiceBuilder{
+		ctx:  context.Background(),
+		eflo: true,
+		config: &daemon.Config{
+			IPStack: "ipv4",
+		},
+		service: &networkService{
+			k8s:        mockK8s,
+			resourceDB: &builderMockStorage{listResult: []interface{}{}},
+		},
+	}
+
+	result := builder.PostInitForLegacyMode()
+	assert.Nil(t, result.err)
 }
 
 // builderMockStorage implements storage.Storage for testing
@@ -1635,6 +1795,58 @@ func TestGetDatapath(t *testing.T) {
 	}
 }
 
+func TestNetworkServiceBuilder_RunENIMgrWithPodResources(t *testing.T) {
+	t.Run("existing error returns early", func(t *testing.T) {
+		builder := &NetworkServiceBuilder{
+			ctx:     context.Background(),
+			service: &networkService{},
+			err:     errors.New("existing error"),
+		}
+		result := builder.RunENIMgrWithPodResources(context.Background(), &eni.Manager{}, nil)
+		assert.NotNil(t, result.err)
+	})
+
+	t.Run("run error", func(t *testing.T) {
+		runtime.GC()
+		patches := gomonkey.NewPatches()
+		defer func() {
+			patches.Reset()
+			runtime.GC()
+		}()
+		patches.ApplyMethodFunc(&eni.Manager{}, "Run", func(ctx context.Context, wg *sync.WaitGroup, podResources []daemon.PodResources) error {
+			return errors.New("run error")
+		})
+		builder := &NetworkServiceBuilder{
+			ctx:     context.Background(),
+			service: &networkService{},
+		}
+		mgr := &eni.Manager{}
+		result := builder.RunENIMgrWithPodResources(context.Background(), mgr, []daemon.PodResources{{PodInfo: &daemon.PodInfo{Name: "pod-1"}}})
+		assert.NotNil(t, result.err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		runtime.GC()
+		patches := gomonkey.NewPatches()
+		defer func() {
+			patches.Reset()
+			runtime.GC()
+		}()
+		patches.ApplyMethodFunc(&eni.Manager{}, "Run", func(ctx context.Context, wg *sync.WaitGroup, podResources []daemon.PodResources) error {
+			return nil
+		})
+		builder := &NetworkServiceBuilder{
+			ctx:     context.Background(),
+			service: &networkService{},
+		}
+		mgr := &eni.Manager{}
+		podRes := []daemon.PodResources{{PodInfo: &daemon.PodInfo{Name: "pod-1"}}}
+		result := builder.RunENIMgrWithPodResources(context.Background(), mgr, podRes)
+		assert.Nil(t, result.err)
+		assert.Equal(t, mgr, result.service.eniMgr)
+	})
+}
+
 func TestValidatePrefixConfig(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -1742,4 +1954,80 @@ func TestValidatePrefixConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNetworkServiceBuilder_PostInitForLegacyMode_SetupAliyunClientError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	mockK8s := k8smocks.NewKubernetes(t)
+	mockK8s.On("SetCustomStatefulWorkloadKinds", mock.Anything).Return(nil).Maybe()
+
+	mockMeta := instancemocks.NewInterface(t)
+	mockMeta.On("GetRegionID").Return("", errors.New("no region")).Maybe()
+	instance.Init(mockMeta)
+
+	b := &NetworkServiceBuilder{
+		ctx:        context.Background(),
+		daemonMode: daemon.ModeENIMultiIP,
+		config:     &daemon.Config{},
+		service:    &networkService{k8s: mockK8s, resourceDB: storage.NewMemoryStorage()},
+	}
+	result := b.PostInitForLegacyMode()
+	assert.Error(t, result.err)
+	assert.Contains(t, result.err.Error(), "no region")
+}
+
+func TestNetworkServiceBuilder_PostInitForLegacyMode_InitInstanceLimitError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	mockK8s := k8smocks.NewKubernetes(t)
+	mockK8s.On("SetCustomStatefulWorkloadKinds", mock.Anything).Return(nil).Maybe()
+	mockK8s.On("Node").Return((*corev1.Node)(nil)).Maybe()
+
+	patches.ApplyPrivateMethod(&NetworkServiceBuilder{}, "setupAliyunClient", func(_ *NetworkServiceBuilder) error {
+		return nil
+	})
+
+	b := &NetworkServiceBuilder{
+		ctx:        context.Background(),
+		daemonMode: daemon.ModeENIMultiIP,
+		config:     &daemon.Config{},
+		service:    &networkService{k8s: mockK8s, resourceDB: storage.NewMemoryStorage()},
+	}
+	result := b.PostInitForLegacyMode()
+	assert.Error(t, result.err)
+	assert.Contains(t, result.err.Error(), "k8s node not found")
+}
+
+func TestNetworkServiceBuilder_PostInitForLegacyMode_SetupENIManagerError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	mockK8s := k8smocks.NewKubernetes(t)
+	mockK8s.On("SetCustomStatefulWorkloadKinds", mock.Anything).Return(nil).Maybe()
+
+	patches.ApplyPrivateMethod(&NetworkServiceBuilder{}, "setupAliyunClient", func(_ *NetworkServiceBuilder) error {
+		return nil
+	})
+	patches.ApplyPrivateMethod(&NetworkServiceBuilder{}, "initInstanceLimit", func(_ *NetworkServiceBuilder) error {
+		return nil
+	})
+	patches.ApplyPrivateMethod(&NetworkServiceBuilder{}, "setupENIManager", func(_ *NetworkServiceBuilder) error {
+		return errors.New("eni manager error")
+	})
+
+	b := &NetworkServiceBuilder{
+		ctx:        context.Background(),
+		daemonMode: daemon.ModeENIMultiIP,
+		config:     &daemon.Config{},
+		service:    &networkService{k8s: mockK8s, resourceDB: storage.NewMemoryStorage()},
+	}
+	result := b.PostInitForLegacyMode()
+	assert.Error(t, result.err)
+	assert.Contains(t, result.err.Error(), "eni manager error")
 }

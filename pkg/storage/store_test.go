@@ -514,6 +514,99 @@ func BenchmarkMemoryStorage_Get(b *testing.B) {
 	}
 }
 
+// TestDiskStorage_NewDiskStorage_MkdirError tests error when MkdirAll fails
+func TestDiskStorage_NewDiskStorage_MkdirError(t *testing.T) {
+	tempDir := t.TempDir()
+	// Create a regular file, then try to use it as a parent directory
+	filePath := filepath.Join(tempDir, "file.txt")
+	os.WriteFile(filePath, []byte("test"), 0644)
+	dbPath := filepath.Join(filePath, "nested", "test.db")
+
+	serializer := func(v interface{}) ([]byte, error) { return json.Marshal(v) }
+	deserializer := func(data []byte) (interface{}, error) {
+		var result interface{}
+		return result, json.Unmarshal(data, &result)
+	}
+
+	_, err := NewDiskStorage("test", dbPath, serializer, deserializer)
+	if err == nil {
+		t.Error("Expected error when MkdirAll fails")
+	}
+}
+
+// TestDiskStorage_NewDiskStorage_BoltOpenError tests error when bolt.Open fails
+func TestDiskStorage_NewDiskStorage_BoltOpenError(t *testing.T) {
+	tempDir := t.TempDir()
+	// Use a directory as the DB file path — bolt.Open on a directory fails
+	dbPath := filepath.Join(tempDir, "db_dir")
+	if err := os.MkdirAll(dbPath, 0700); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+
+	serializer := func(v interface{}) ([]byte, error) { return json.Marshal(v) }
+	deserializer := func(data []byte) (interface{}, error) {
+		var result interface{}
+		return result, json.Unmarshal(data, &result)
+	}
+
+	_, err := NewDiskStorage("test", dbPath, serializer, deserializer)
+	if err == nil {
+		t.Error("Expected error when bolt.Open fails")
+	}
+}
+
+// TestDiskStorage_Put_DBClosedError tests Put when DB is closed
+func TestDiskStorage_Put_DBClosedError(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+
+	serializer := func(v interface{}) ([]byte, error) { return json.Marshal(v) }
+	deserializer := func(data []byte) (interface{}, error) {
+		var result interface{}
+		return result, json.Unmarshal(data, &result)
+	}
+
+	storage, err := NewDiskStorage("test", dbPath, serializer, deserializer)
+	if err != nil {
+		t.Fatalf("NewDiskStorage failed: %v", err)
+	}
+
+	if ds, ok := storage.(*DiskStorage); ok {
+		ds.db.Close()
+	}
+
+	err = storage.Put("key", "value")
+	if err == nil {
+		t.Error("Expected error when DB is closed")
+	}
+}
+
+// TestDiskStorage_Delete_DBClosedError tests Delete when DB is closed
+func TestDiskStorage_Delete_DBClosedError(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+
+	serializer := func(v interface{}) ([]byte, error) { return json.Marshal(v) }
+	deserializer := func(data []byte) (interface{}, error) {
+		var result interface{}
+		return result, json.Unmarshal(data, &result)
+	}
+
+	storage, err := NewDiskStorage("test", dbPath, serializer, deserializer)
+	if err != nil {
+		t.Fatalf("NewDiskStorage failed: %v", err)
+	}
+
+	if ds, ok := storage.(*DiskStorage); ok {
+		ds.db.Close()
+	}
+
+	err = storage.Delete("key")
+	if err == nil {
+		t.Error("Expected error when DB is closed")
+	}
+}
+
 // BenchmarkDiskStorage_Put benchmarks Put operation on DiskStorage
 func BenchmarkDiskStorage_Put(b *testing.B) {
 	tempDir := b.TempDir()

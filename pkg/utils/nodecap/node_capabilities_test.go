@@ -2,6 +2,7 @@ package nodecap
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -179,4 +180,26 @@ func TestLoad_WithMultipleKeys(t *testing.T) {
 	assert.Equal(t, "value1", store.Get("key1"))
 	assert.Equal(t, "value2", store.Get("key2"))
 	assert.Equal(t, "value3", store.Get("key3"))
+}
+
+func TestGetNodeCapabilities(t *testing.T) {
+	// Global capabilitiesStore is initialized via init(); file doesn't exist in test env
+	value := GetNodeCapabilities("nonexistent_key")
+	assert.Equal(t, "", value)
+}
+
+func TestSave_IniLoadDirectoryError(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "test_save_ini_error")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Use a directory as the "file" — ini.Load will fail with non-IsNotExist error
+	dirAsFile := filepath.Join(tempDir, "subdir", "capabilities")
+	err = os.MkdirAll(dirAsFile, 0700)
+	assert.NoError(t, err)
+
+	store := NewFileNodeCapabilities(dirAsFile)
+	store.Set("key", "value")
+	err = store.Save()
+	assert.Error(t, err)
 }

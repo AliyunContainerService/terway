@@ -3,6 +3,7 @@ package eni
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -308,6 +309,206 @@ func TestGetENIs_GetENIsMACError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, enis)
 }
+
+func TestGetENIByMac_GetENIPrimaryIPError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	patches.ApplyFunc(metadata.GetENIID, func(mac string) (string, error) {
+		return "eni-test", nil
+	})
+	patches.ApplyFunc(metadata.GetENIPrimaryIP, func(mac string) (net.IP, error) {
+		return nil, errors.New("primary ip error")
+	})
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	m := NewENIMetadata(true, false)
+	eni, err := m.GetENIByMac("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, eni)
+	assert.Contains(t, err.Error(), "primary ip")
+}
+
+func TestGetENIByMac_GetENIGatewayError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	patches.ApplyFunc(metadata.GetENIID, func(mac string) (string, error) {
+		return "eni-test", nil
+	})
+	patches.ApplyFunc(metadata.GetENIPrimaryIP, func(mac string) (net.IP, error) {
+		return net.ParseIP("192.168.1.1"), nil
+	})
+	patches.ApplyFunc(metadata.GetENIGateway, func(mac string) (net.IP, error) {
+		return nil, errors.New("gateway error")
+	})
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	m := NewENIMetadata(true, false)
+	eni, err := m.GetENIByMac("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, eni)
+	assert.Contains(t, err.Error(), "gateway")
+}
+
+func TestGetENIByMac_GetVSwitchCIDRError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	patches.ApplyFunc(metadata.GetENIID, func(mac string) (string, error) {
+		return "eni-test", nil
+	})
+	patches.ApplyFunc(metadata.GetENIPrimaryIP, func(mac string) (net.IP, error) {
+		return net.ParseIP("192.168.1.1"), nil
+	})
+	patches.ApplyFunc(metadata.GetENIGateway, func(mac string) (net.IP, error) {
+		return net.ParseIP("192.168.1.254"), nil
+	})
+	patches.ApplyFunc(metadata.GetVSwitchCIDR, func(mac string) (*net.IPNet, error) {
+		return nil, errors.New("vswitch cidr error")
+	})
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	m := NewENIMetadata(true, false)
+	eni, err := m.GetENIByMac("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, eni)
+	assert.Contains(t, err.Error(), "vSwitchCIDR")
+}
+
+func TestGetENIByMac_GetENIV6GatewayError(t *testing.T) {
+	runtime.GC()
+	_, cidr, _ := net.ParseCIDR("192.168.1.0/24")
+	patches := gomonkey.NewPatches()
+	patches.ApplyFunc(metadata.GetENIID, func(mac string) (string, error) {
+		return "eni-test", nil
+	})
+	patches.ApplyFunc(metadata.GetENIPrimaryIP, func(mac string) (net.IP, error) {
+		return net.ParseIP("192.168.1.1"), nil
+	})
+	patches.ApplyFunc(metadata.GetENIGateway, func(mac string) (net.IP, error) {
+		return net.ParseIP("192.168.1.254"), nil
+	})
+	patches.ApplyFunc(metadata.GetVSwitchCIDR, func(mac string) (*net.IPNet, error) {
+		return cidr, nil
+	})
+	patches.ApplyFunc(metadata.GetENIV6Gateway, func(mac string) (net.IP, error) {
+		return nil, errors.New("ipv6 gateway error")
+	})
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	m := NewENIMetadata(true, true)
+	eni, err := m.GetENIByMac("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, eni)
+	assert.Contains(t, err.Error(), "ipv6 gateway")
+}
+
+func TestGetENIByMac_GetVSwitchIPv6CIDRError(t *testing.T) {
+	runtime.GC()
+	_, cidr, _ := net.ParseCIDR("192.168.1.0/24")
+	patches := gomonkey.NewPatches()
+	patches.ApplyFunc(metadata.GetENIID, func(mac string) (string, error) {
+		return "eni-test", nil
+	})
+	patches.ApplyFunc(metadata.GetENIPrimaryIP, func(mac string) (net.IP, error) {
+		return net.ParseIP("192.168.1.1"), nil
+	})
+	patches.ApplyFunc(metadata.GetENIGateway, func(mac string) (net.IP, error) {
+		return net.ParseIP("192.168.1.254"), nil
+	})
+	patches.ApplyFunc(metadata.GetVSwitchCIDR, func(mac string) (*net.IPNet, error) {
+		return cidr, nil
+	})
+	patches.ApplyFunc(metadata.GetENIV6Gateway, func(mac string) (net.IP, error) {
+		return net.ParseIP("fd00::1"), nil
+	})
+	patches.ApplyFunc(metadata.GetVSwitchIPv6CIDR, func(mac string) (*net.IPNet, error) {
+		return nil, errors.New("vswitch ipv6 cidr error")
+	})
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	m := NewENIMetadata(true, true)
+	eni, err := m.GetENIByMac("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, eni)
+	assert.Contains(t, err.Error(), "vSwitchIPv6CIDR")
+}
+
+func TestGetENIByMac_GetENIVSwitchIDError(t *testing.T) {
+	runtime.GC()
+	_, cidr, _ := net.ParseCIDR("192.168.1.0/24")
+	patches := gomonkey.NewPatches()
+	patches.ApplyFunc(metadata.GetENIID, func(mac string) (string, error) {
+		return "eni-test", nil
+	})
+	patches.ApplyFunc(metadata.GetENIPrimaryIP, func(mac string) (net.IP, error) {
+		return net.ParseIP("192.168.1.1"), nil
+	})
+	patches.ApplyFunc(metadata.GetENIGateway, func(mac string) (net.IP, error) {
+		return net.ParseIP("192.168.1.254"), nil
+	})
+	patches.ApplyFunc(metadata.GetVSwitchCIDR, func(mac string) (*net.IPNet, error) {
+		return cidr, nil
+	})
+	patches.ApplyFunc(metadata.GetENIVSwitchID, func(mac string) (string, error) {
+		return "", errors.New("vswitch id error")
+	})
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	m := NewENIMetadata(true, false)
+	eni, err := m.GetENIByMac("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, eni)
+	assert.Contains(t, err.Error(), "vswitch")
+}
+
+func TestGetENIs_GetENIByMacError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	patches.ApplyFunc(instance.GetInstanceMeta, func() instance.Interface {
+		return &mockInstanceMeta2{}
+	})
+	patches.ApplyFunc(metadata.GetENIsMAC, func() ([]string, error) {
+		return []string{"mac1"}, nil
+	})
+	patches.ApplyFunc(metadata.GetENIID, func(mac string) (string, error) {
+		return "", errors.New("get eni id failed")
+	})
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	m := NewENIMetadata(true, false)
+	enis, err := m.GetENIs(true)
+	assert.Error(t, err)
+	assert.Nil(t, enis)
+}
+
+type mockInstanceMeta2 struct{}
+
+func (m *mockInstanceMeta2) GetRegionID() (string, error)     { return "", nil }
+func (m *mockInstanceMeta2) GetZoneID() (string, error)       { return "", nil }
+func (m *mockInstanceMeta2) GetVSwitchID() (string, error)    { return "", nil }
+func (m *mockInstanceMeta2) GetPrimaryMAC() (string, error)   { return "mac0", nil }
+func (m *mockInstanceMeta2) GetInstanceID() (string, error)   { return "", nil }
+func (m *mockInstanceMeta2) GetInstanceType() (string, error) { return "", nil }
 
 func TestGetENIPrivateIPv6AddressesByMACv2(t *testing.T) {
 	tests := []struct {

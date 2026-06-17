@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
 	eflocontroller20221215 "github.com/alibabacloud-go/eflo-controller-20221215/v2/client"
+	"github.com/alibabacloud-go/tea/tea"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
@@ -1085,4 +1087,177 @@ func TestEFLOService_WaitForLeniNetworkInterface_WithGomonkey(t *testing.T) {
 	assert.Equal(t, "vsw-test-001", result.VSwitchID)
 	assert.Equal(t, "10.0.0.100", result.PrivateIPAddress)
 	assert.Equal(t, "02:11:22:33:44:55", result.MacAddress)
+}
+
+func TestEFLOService_UnAssignLeniPrivateIPAddresses2_WithIPName(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	callCount := 0
+	patches := gomonkey.ApplyFunc(
+		(*eflo.Client).UnassignLeniPrivateIpAddress,
+		func(client *eflo.Client, request *eflo.UnassignLeniPrivateIpAddressRequest) (*eflo.UnassignLeniPrivateIpAddressResponse, error) {
+			callCount++
+			assert.Equal(t, "leni-test-001", request.ElasticNetworkInterfaceId)
+			return &eflo.UnassignLeniPrivateIpAddressResponse{Code: 0, Message: "Success", RequestId: "req-id"}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	err := efloService.UnAssignLeniPrivateIPAddresses2(
+		ctx,
+		"leni-test-001",
+		[]IPSet{
+			{IPAddress: "10.0.0.101", Primary: false, IPName: "ip-name-001"},
+			{IPAddress: "10.0.0.102", Primary: false}, // empty IPName → skip
+		},
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, callCount)
+}
+
+func TestEFLOService_UnAssignLeniPrivateIPAddresses2_Error(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*eflo.Client).UnassignLeniPrivateIpAddress,
+		func(client *eflo.Client, request *eflo.UnassignLeniPrivateIpAddressRequest) (*eflo.UnassignLeniPrivateIpAddressResponse, error) {
+			return nil, fmt.Errorf("api error")
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	err := efloService.UnAssignLeniPrivateIPAddresses2(
+		ctx,
+		"leni-test-001",
+		[]IPSet{
+			{IPAddress: "10.0.0.101", Primary: false, IPName: "ip-name-001"},
+		},
+	)
+
+	assert.Error(t, err)
+}
+
+func TestEFLOService_WaitForLeniNetworkInterface_EmptyENIID(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	ctx := context.Background()
+	_, err := efloService.WaitForLeniNetworkInterface(
+		ctx,
+		"",
+		"InUse",
+		wait.Backoff{Duration: time.Millisecond, Steps: 1},
+		false,
+	)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "eniID not set")
+}
+
+func TestEFLOService_WaitForLeniNetworkInterface_IgnoreNotExist(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*eflo.Client).ListElasticNetworkInterfaces,
+		func(_ *eflo.Client, _ *eflo.ListElasticNetworkInterfacesRequest) (*eflo.ListElasticNetworkInterfacesResponse, error) {
+			return &eflo.ListElasticNetworkInterfacesResponse{
+				Code: 0, Message: "Success", RequestId: "req-list",
+				Content: eflo.Content{Data: []eflo.DataItem{}},
+			}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	result, err := efloService.WaitForLeniNetworkInterface(
+		ctx,
+		"leni-test-001",
+		"InUse",
+		wait.Backoff{Duration: time.Millisecond, Steps: 1},
+		true, // ignoreNotExist → returns ErrNotFound when empty
+	)
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestEFLOService_DetachLeni_ResourceNotFound(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*eflo20220530.Client).DetachElasticNetworkInterface,
+		func(_ *eflo20220530.Client, _ *eflo20220530.DetachElasticNetworkInterfaceRequest) (*eflo20220530.DetachElasticNetworkInterfaceResponse, error) {
+			// Return a server error with the ErrEfloResourceNotFound (1011) code
+			return nil, &tea.SDKError{Code: stringPtr("1011"), Message: stringPtr("resource not found")}
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	err := efloService.DetachLeni(
+		ctx,
+		WithNetworkInterfaceIDForEFLODetach("leni-test-001"),
+		WithInstanceIDForEFLODetach("i-test-001"),
+	)
+
+	assert.NoError(t, err)
+}
+
+func TestEFLOService_DetachLeni_NilResponseBody(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*eflo20220530.Client).DetachElasticNetworkInterface,
+		func(_ *eflo20220530.Client, _ *eflo20220530.DetachElasticNetworkInterfaceRequest) (*eflo20220530.DetachElasticNetworkInterfaceResponse, error) {
+			return &eflo20220530.DetachElasticNetworkInterfaceResponse{Body: nil}, nil
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	err := efloService.DetachLeni(
+		ctx,
+		WithNetworkInterfaceIDForEFLODetach("leni-test-001"),
+		WithInstanceIDForEFLODetach("i-test-001"),
+	)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty response body")
+}
+
+func TestEFLOService_AssignLeniPrivateIPAddress2_ListIPsFails(t *testing.T) {
+	efloService := createTestEFLOServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*eflo.Client).AssignLeniPrivateIpAddress,
+		func(_ *eflo.Client, _ *eflo.AssignLeniPrivateIpAddressRequest) (*eflo.AssignLeniPrivateIpAddressResponse, error) {
+			return &eflo.AssignLeniPrivateIpAddressResponse{
+				Code: 0, Message: "Success", RequestId: "req-id",
+				Content: eflo.Content{
+					ElasticNetworkInterfaceId: "leni-test-001",
+					IpName:                    "ip-test-001",
+				},
+			}, nil
+		},
+	)
+	patches.ApplyFunc(
+		(*eflo.Client).ListLeniPrivateIpAddresses,
+		func(_ *eflo.Client, _ *eflo.ListLeniPrivateIpAddressesRequest) (*eflo.ListLeniPrivateIpAddressesResponse, error) {
+			return nil, fmt.Errorf("list failed")
+		},
+	)
+	defer patches.Reset()
+
+	ctx := context.Background()
+	result, err := efloService.AssignLeniPrivateIPAddress2(
+		ctx,
+		WithNetworkInterfaceIDForEFLOAssign("leni-test-001"),
+	)
+
+	// When list fails, the function retries then returns IPSet with IPName only
+	assert.Error(t, err)
+	assert.Len(t, result, 1)
+	assert.Equal(t, "ip-test-001", result[0].IPName)
 }

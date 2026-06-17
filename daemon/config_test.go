@@ -866,3 +866,124 @@ func TestDetDynamicConfig(t *testing.T) {
 	assert.Equal(t, "foo", label)
 	assert.Nil(t, err)
 }
+
+func TestGetPoolConfig_ENIOnly_MaxENICap(t *testing.T) {
+	instance.Init(&Mock{regionID: "r", zoneID: "z", vSwitchID: "v", instanceID: "i"})
+	cfg := &daemon.Config{
+		MaxPoolSize: 100,
+		MinPoolSize: 1,
+		EniCapRatio: 1,
+		MaxENI:      3,
+	}
+	limit := &client.Limits{Adapters: 10, IPv4PerAdapter: 5}
+	poolConfig, err := getPoolConfig(cfg, daemon.ModeENIOnly, limit)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, poolConfig.Capacity)
+}
+
+func TestGetPoolConfig_ENIOnly_MinENI(t *testing.T) {
+	instance.Init(&Mock{regionID: "r", zoneID: "z", vSwitchID: "v", instanceID: "i"})
+	cfg := &daemon.Config{
+		MaxPoolSize: 5,
+		MinPoolSize: 1,
+		MinENI:      2,
+		EniCapRatio: 1,
+	}
+	limit := &client.Limits{Adapters: 10, IPv4PerAdapter: 5}
+	_, err := getPoolConfig(cfg, daemon.ModeENIOnly, limit)
+	assert.NoError(t, err)
+}
+
+func TestGetPoolConfig_ENIOnly_MinPoolSizeExceedsMax(t *testing.T) {
+	instance.Init(&Mock{regionID: "r", zoneID: "z", vSwitchID: "v", instanceID: "i"})
+	cfg := &daemon.Config{
+		MaxPoolSize: 2,
+		MinPoolSize: 10,
+		EniCapRatio: 1,
+	}
+	limit := &client.Limits{Adapters: 10, IPv4PerAdapter: 5}
+	_, err := getPoolConfig(cfg, daemon.ModeENIOnly, limit)
+	assert.NoError(t, err)
+}
+
+func TestGetPoolConfig_ENIOnly_ERDMA(t *testing.T) {
+	instance.Init(&Mock{regionID: "r", zoneID: "z", vSwitchID: "v", instanceID: "i"})
+	cfg := &daemon.Config{
+		MaxPoolSize: 5,
+		MinPoolSize: 1,
+		EniCapRatio: 1,
+		EnableERDMA: true,
+	}
+	limit := &client.Limits{Adapters: 10, IPv4PerAdapter: 5, ERdmaAdapters: 4}
+	poolConfig, err := getPoolConfig(cfg, daemon.ModeENIOnly, limit)
+	assert.NoError(t, err)
+	assert.Equal(t, 4, poolConfig.ERdmaCapacity)
+}
+
+func TestGetPoolConfig_ENIMultiIP_MaxENICap(t *testing.T) {
+	instance.Init(&Mock{regionID: "r", zoneID: "z", vSwitchID: "v", instanceID: "i"})
+	cfg := &daemon.Config{
+		MaxPoolSize: 100,
+		MinPoolSize: 1,
+		EniCapRatio: 1,
+		MaxENI:      2,
+	}
+	limit := &client.Limits{Adapters: 10, IPv4PerAdapter: 5, MemberAdapterLimit: 5}
+	poolConfig, err := getPoolConfig(cfg, daemon.ModeENIMultiIP, limit)
+	assert.NoError(t, err)
+	assert.Equal(t, 10, poolConfig.Capacity)
+}
+
+func TestGetPoolConfig_ENIMultiIP_MinENI(t *testing.T) {
+	instance.Init(&Mock{regionID: "r", zoneID: "z", vSwitchID: "v", instanceID: "i"})
+	cfg := &daemon.Config{
+		MaxPoolSize: 50,
+		MinPoolSize: 1,
+		MinENI:      3,
+		EniCapRatio: 1,
+	}
+	limit := &client.Limits{Adapters: 10, IPv4PerAdapter: 5, MemberAdapterLimit: 5}
+	poolConfig, err := getPoolConfig(cfg, daemon.ModeENIMultiIP, limit)
+	assert.NoError(t, err)
+	assert.Equal(t, 15, poolConfig.MinPoolSize)
+}
+
+func TestGetPoolConfig_ENIMultiIP_MinPoolSizeExceedsMax(t *testing.T) {
+	instance.Init(&Mock{regionID: "r", zoneID: "z", vSwitchID: "v", instanceID: "i"})
+	cfg := &daemon.Config{
+		MaxPoolSize: 2,
+		MinPoolSize: 100,
+		EniCapRatio: 1,
+	}
+	limit := &client.Limits{Adapters: 10, IPv4PerAdapter: 5, MemberAdapterLimit: 5}
+	poolConfig, err := getPoolConfig(cfg, daemon.ModeENIMultiIP, limit)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, poolConfig.MinPoolSize)
+}
+
+func TestGetPoolConfig_ENIMultiIP_MaxPoolSizeExceedsCapacity(t *testing.T) {
+	instance.Init(&Mock{regionID: "r", zoneID: "z", vSwitchID: "v", instanceID: "i"})
+	cfg := &daemon.Config{
+		MaxPoolSize: 1000,
+		MinPoolSize: 1,
+		EniCapRatio: 1,
+	}
+	limit := &client.Limits{Adapters: 10, IPv4PerAdapter: 5, MemberAdapterLimit: 5}
+	poolConfig, err := getPoolConfig(cfg, daemon.ModeENIMultiIP, limit)
+	assert.NoError(t, err)
+	assert.Equal(t, 45, poolConfig.MaxPoolSize)
+}
+
+func TestGetPoolConfig_ENIMultiIP_ERDMA(t *testing.T) {
+	instance.Init(&Mock{regionID: "r", zoneID: "z", vSwitchID: "v", instanceID: "i"})
+	cfg := &daemon.Config{
+		MaxPoolSize: 5,
+		MinPoolSize: 1,
+		EniCapRatio: 1,
+		EnableERDMA: true,
+	}
+	limit := &client.Limits{Adapters: 10, IPv4PerAdapter: 5, MemberAdapterLimit: 5, ERdmaAdapters: 3}
+	poolConfig, err := getPoolConfig(cfg, daemon.ModeENIMultiIP, limit)
+	assert.NoError(t, err)
+	assert.Equal(t, 10, poolConfig.ERdmaCapacity)
+}

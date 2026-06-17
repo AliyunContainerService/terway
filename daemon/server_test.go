@@ -50,6 +50,21 @@ func Test_ensureCNIConfig(t *testing.T) {
 	_ = ensureCNIConfig()
 }
 
+func Test_ensureCNIConfig_WriteCNIConfFirst(t *testing.T) {
+	err := utilfeature.DefaultMutableFeatureGate.SetFromMap(map[string]bool{
+		"WriteCNIConfFirst": true,
+	})
+	assert.NoError(t, err)
+	defer func() {
+		_ = utilfeature.DefaultMutableFeatureGate.SetFromMap(map[string]bool{
+			"WriteCNIConfFirst": false,
+		})
+	}()
+
+	err = ensureCNIConfig()
+	assert.NoError(t, err)
+}
+
 // newMockStorage creates a new mock storage with default expectations
 func newMockStorage(t *testing.T) *storagemocks.Storage {
 	mockStorage := storagemocks.NewStorage(t)
@@ -2052,4 +2067,237 @@ func TestNetworkServiceBuilder_setupENIManager_Success(t *testing.T) {
 	err := builder.setupENIManager()
 	assert.NoError(t, err)
 	assert.NotNil(t, builder.service.eniMgr)
+}
+
+func TestRun_HappyPath(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	patches.ApplyFunc(os.MkdirAll, func(path string, perm os.FileMode) error {
+		return nil
+	})
+	mockLock := &filemutex.FileMutex{}
+	patches.ApplyFunc(filemutex.New, func(filename string) (*filemutex.FileMutex, error) {
+		return mockLock, nil
+	})
+	patches.ApplyMethodFunc(mockLock, "TryLock", func() error {
+		return nil
+	})
+	patches.ApplyMethodFunc(mockLock, "Unlock", func() error {
+		return nil
+	})
+	patches.ApplyFunc(wait.PollUntilContextTimeout, func(ctx context.Context, interval, timeout time.Duration, immediate bool, condition wait.ConditionWithContextFunc) error {
+		return nil
+	})
+
+	mockListener := &mockNetListener{
+		acceptChan: make(chan net.Conn),
+		closeChan:  make(chan struct{}),
+	}
+	patches.ApplyFunc(newUnixListener, func(addr string) (net.Listener, error) {
+		return mockListener, nil
+	})
+	patches.ApplyFunc(newNetworkService, func(ctx context.Context, configFilePath, daemonMode string) (*networkService, error) {
+		return &networkService{}, nil
+	})
+	patches.ApplyFunc(stackTriger, func() {})
+	patches.ApplyFunc(runDebugServer, func(ctx context.Context, wg *sync.WaitGroup, debugSocketListen string) error {
+		return nil
+	})
+	patches.ApplyFunc(ensureCNIConfig, func() error {
+		return nil
+	})
+
+	mockGrpcServer := grpc.NewServer()
+	patches.ApplyFunc(grpc.NewServer, func(opts ...grpc.ServerOption) *grpc.Server {
+		return mockGrpcServer
+	})
+	patches.ApplyMethodFunc(mockGrpcServer, "Serve", func(l net.Listener) error {
+		<-l.(*mockNetListener).closeChan
+		return nil
+	})
+	patches.ApplyMethodFunc(mockGrpcServer, "Stop", func() {})
+	patches.ApplyFunc(rpc.RegisterTerwayBackendServer, func(s grpc.ServiceRegistrar, srv rpc.TerwayBackendServer) {})
+	patches.ApplyFunc(rpc.RegisterTerwayTracingServer, func(s grpc.ServiceRegistrar, srv rpc.TerwayTracingServer) {})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := Run(ctx, "/tmp/test.sock", "127.0.0.1:0", "/tmp/config.json", "ENIMultiIP")
+	assert.NoError(t, err)
+}
+
+func TestRun_EnsureCNIConfigFailure(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	patches.ApplyFunc(os.MkdirAll, func(path string, perm os.FileMode) error {
+		return nil
+	})
+	mockLock := &filemutex.FileMutex{}
+	patches.ApplyFunc(filemutex.New, func(filename string) (*filemutex.FileMutex, error) {
+		return mockLock, nil
+	})
+	patches.ApplyMethodFunc(mockLock, "TryLock", func() error { return nil })
+	patches.ApplyMethodFunc(mockLock, "Unlock", func() error { return nil })
+	patches.ApplyFunc(wait.PollUntilContextTimeout, func(ctx context.Context, interval, timeout time.Duration, immediate bool, condition wait.ConditionWithContextFunc) error {
+		return nil
+	})
+	mockListener := &mockNetListener{
+		acceptChan: make(chan net.Conn),
+		closeChan:  make(chan struct{}),
+	}
+	patches.ApplyFunc(newUnixListener, func(addr string) (net.Listener, error) {
+		return mockListener, nil
+	})
+	patches.ApplyFunc(newNetworkService, func(ctx context.Context, configFilePath, daemonMode string) (*networkService, error) {
+		return &networkService{}, nil
+	})
+	patches.ApplyFunc(stackTriger, func() {})
+	patches.ApplyFunc(runDebugServer, func(ctx context.Context, wg *sync.WaitGroup, debugSocketListen string) error {
+		return nil
+	})
+	patches.ApplyFunc(ensureCNIConfig, func() error {
+		return assert.AnError
+	})
+
+	mockGrpcServer := grpc.NewServer()
+	patches.ApplyFunc(grpc.NewServer, func(opts ...grpc.ServerOption) *grpc.Server {
+		return mockGrpcServer
+	})
+	patches.ApplyMethodFunc(mockGrpcServer, "Serve", func(l net.Listener) error {
+		<-l.(*mockNetListener).closeChan
+		return nil
+	})
+	patches.ApplyMethodFunc(mockGrpcServer, "Stop", func() {})
+	patches.ApplyFunc(rpc.RegisterTerwayBackendServer, func(s grpc.ServiceRegistrar, srv rpc.TerwayBackendServer) {})
+	patches.ApplyFunc(rpc.RegisterTerwayTracingServer, func(s grpc.ServiceRegistrar, srv rpc.TerwayTracingServer) {})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := Run(ctx, "/tmp/test.sock", "127.0.0.1:0", "/tmp/config.json", "ENIMultiIP")
+	assert.Error(t, err)
+}
+
+func TestRun_DebugServerFailure(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	patches.ApplyFunc(os.MkdirAll, func(path string, perm os.FileMode) error {
+		return nil
+	})
+	mockLock := &filemutex.FileMutex{}
+	patches.ApplyFunc(filemutex.New, func(filename string) (*filemutex.FileMutex, error) {
+		return mockLock, nil
+	})
+	patches.ApplyMethodFunc(mockLock, "TryLock", func() error { return nil })
+	patches.ApplyMethodFunc(mockLock, "Unlock", func() error { return nil })
+	patches.ApplyFunc(wait.PollUntilContextTimeout, func(ctx context.Context, interval, timeout time.Duration, immediate bool, condition wait.ConditionWithContextFunc) error {
+		return nil
+	})
+	patches.ApplyFunc(newUnixListener, func(addr string) (net.Listener, error) {
+		return &mockNetListener{acceptChan: make(chan net.Conn), closeChan: make(chan struct{})}, nil
+	})
+	patches.ApplyFunc(newNetworkService, func(ctx context.Context, configFilePath, daemonMode string) (*networkService, error) {
+		return &networkService{}, nil
+	})
+	patches.ApplyFunc(stackTriger, func() {})
+	patches.ApplyFunc(runDebugServer, func(ctx context.Context, wg *sync.WaitGroup, debugSocketListen string) error {
+		return assert.AnError
+	})
+
+	mockGrpcServer := grpc.NewServer()
+	patches.ApplyFunc(grpc.NewServer, func(opts ...grpc.ServerOption) *grpc.Server {
+		return mockGrpcServer
+	})
+	patches.ApplyFunc(rpc.RegisterTerwayBackendServer, func(s grpc.ServiceRegistrar, srv rpc.TerwayBackendServer) {})
+	patches.ApplyFunc(rpc.RegisterTerwayTracingServer, func(s grpc.ServiceRegistrar, srv rpc.TerwayTracingServer) {})
+
+	ctx := context.Background()
+	err := Run(ctx, "/tmp/test.sock", "127.0.0.1:0", "/tmp/config.json", "ENIMultiIP")
+	assert.Error(t, err)
+}
+
+func TestEnsureCNIConfig_SuccessfulCopy(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "src.conf")
+	dstPath := filepath.Join(tmpDir, "dst.conf")
+	assert.NoError(t, os.WriteFile(srcPath, []byte(`{"cniVersion":"0.3.1"}`), 0o600))
+
+	srcFile, err := os.Open(srcPath)
+	assert.NoError(t, err)
+
+	dstFile, err := os.Create(dstPath)
+	assert.NoError(t, err)
+
+	patches.ApplyFunc(os.Open, func(name string) (*os.File, error) {
+		return srcFile, nil
+	})
+	patches.ApplyFunc(os.OpenFile, func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		return dstFile, nil
+	})
+
+	err = ensureCNIConfig()
+	assert.NoError(t, err)
+}
+
+func TestEnsureCNIConfig_DstOpenError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "src.conf")
+	assert.NoError(t, os.WriteFile(srcPath, []byte(`{}`), 0o600))
+
+	srcFile, err := os.Open(srcPath)
+	assert.NoError(t, err)
+
+	patches.ApplyFunc(os.Open, func(name string) (*os.File, error) {
+		return srcFile, nil
+	})
+	patches.ApplyFunc(os.OpenFile, func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		return nil, assert.AnError
+	})
+
+	err = ensureCNIConfig()
+	assert.Error(t, err)
+}
+
+func TestNewUnixListener_MkdirError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	patches.ApplyFunc(os.MkdirAll, func(path string, perm os.FileMode) error {
+		return assert.AnError
+	})
+
+	l, err := newUnixListener("/tmp/test.sock")
+	assert.Error(t, err)
+	assert.Nil(t, l)
+	assert.Contains(t, err.Error(), "error create socket dir")
+}
+
+func TestRunDebugServer_UnixListenError(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() { patches.Reset(); runtime.GC() }()
+
+	patches.ApplyFunc(newUnixListener, func(addr string) (net.Listener, error) {
+		return nil, assert.AnError
+	})
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	err := runDebugServer(ctx, &wg, "unix:///invalid/path/debug.sock")
+	assert.Error(t, err)
 }

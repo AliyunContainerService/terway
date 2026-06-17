@@ -6,7 +6,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+
+	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
+	"github.com/AliyunContainerService/terway/pkg/controller/common"
 )
 
 func TestPredicateNode(t *testing.T) {
@@ -185,4 +189,89 @@ func TestPredicateForNodeEvent_CreateDeleteUpdateGeneric(t *testing.T) {
 		e := event.CreateEvent{Object: &corev1.Pod{}}
 		assert.False(t, p.Create(e))
 	})
+}
+
+func TestNeedUpdate(t *testing.T) {
+	tests := []struct {
+		name     string
+		node     *networkv1beta1.Node
+		nodeInfo *common.NodeInfo
+		want     bool
+	}{
+		{
+			name: "no update needed",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						InstanceType: "ecs.g6.xlarge",
+						InstanceID:   "i-123",
+						ZoneID:       "cn-hangzhou-a",
+						RegionID:     "cn-hangzhou",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						NetworkCardsCount: ptr.To(1),
+					},
+				},
+			},
+			nodeInfo: &common.NodeInfo{
+				InstanceType: "ecs.g6.xlarge",
+				InstanceID:   "i-123",
+				ZoneID:       "cn-hangzhou-a",
+				RegionID:     "cn-hangzhou",
+			},
+			want: false,
+		},
+		{
+			name: "instance type changed",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						InstanceType: "ecs.g5.xlarge",
+						InstanceID:   "i-123",
+						ZoneID:       "cn-hangzhou-a",
+						RegionID:     "cn-hangzhou",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						NetworkCardsCount: ptr.To(1),
+					},
+				},
+			},
+			nodeInfo: &common.NodeInfo{
+				InstanceType: "ecs.g6.xlarge",
+				InstanceID:   "i-123",
+				ZoneID:       "cn-hangzhou-a",
+				RegionID:     "cn-hangzhou",
+			},
+			want: true,
+		},
+		{
+			name: "network cards count is nil",
+			node: &networkv1beta1.Node{
+				Spec: networkv1beta1.NodeSpec{
+					NodeMetadata: networkv1beta1.NodeMetadata{
+						InstanceType: "ecs.g6.xlarge",
+						InstanceID:   "i-123",
+						ZoneID:       "cn-hangzhou-a",
+						RegionID:     "cn-hangzhou",
+					},
+					NodeCap: networkv1beta1.NodeCap{
+						NetworkCardsCount: nil,
+					},
+				},
+			},
+			nodeInfo: &common.NodeInfo{
+				InstanceType: "ecs.g6.xlarge",
+				InstanceID:   "i-123",
+				ZoneID:       "cn-hangzhou-a",
+				RegionID:     "cn-hangzhou",
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := needUpdate(tt.node, tt.nodeInfo)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

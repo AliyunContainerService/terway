@@ -345,3 +345,10 @@ func TestBackoffManagerConcurrentFirstCall(t *testing.T) {
 		t.Errorf("NextTS not set correctly after initial delay")
 	}
 }
+
+func TestNewBackoffManager(t *testing.T) {
+	manager := NewBackoffManager()
+	if manager == nil {
+		t.Fatal("NewBackoffManager should not return nil")
+	}
+}

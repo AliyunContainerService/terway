@@ -493,3 +493,8 @@ func TestSwitchPool_Del(t *testing.T) {
 	// Test deleting with empty string (should not panic)
 	switchPool.Del("")
 }
+
+func TestNewSwitchPool_InvalidDuration(t *testing.T) {
+	_, err := NewSwitchPool(100, "invalid-duration")
+	assert.Error(t, err)
+}

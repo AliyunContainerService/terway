@@ -2381,3 +2381,140 @@ func TestNewK8S_ENIOnlyModeForced(t *testing.T) {
 	assert.NotNil(t, k8sObj.Node(), "Node should be set")
 	assert.Equal(t, "test-node", k8sObj.Node().Name, "Node name should match")
 }
+
+func TestK8s_GetClient(t *testing.T) {
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+	k8sObj := &k8s{client: fakeClient}
+	assert.Equal(t, fakeClient, k8sObj.GetClient())
+}
+
+func TestK8s_SetNodeAllocatablePod(t *testing.T) {
+	k8sObj := &k8s{}
+	err := k8sObj.SetNodeAllocatablePod(10)
+	assert.NoError(t, err)
+}
+
+func TestK8s_RecordNodeEvent(t *testing.T) {
+	broadcaster := record.NewBroadcaster()
+	recorder := broadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "test"})
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+			UID:  "test-uid",
+		},
+	}
+	k8sObj := &k8s{
+		recorder: recorder,
+		node:     node,
+	}
+	// Should not panic
+	k8sObj.RecordNodeEvent(corev1.EventTypeNormal, "TestReason", "Test message")
+}
+
+func TestParseBandwidth_BytesAndInvalidUnit(t *testing.T) {
+	// "B" suffix (bytes)
+	v, err := parseBandwidth("100B")
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(100), v)
+
+	// "X" suffix (unknown unit)
+	_, err = parseBandwidth("100X")
+	assert.Error(t, err)
+}
+
+func TestDeserialize_InvalidJSON(t *testing.T) {
+	_, err := deserialize([]byte("not-json"))
+	assert.Error(t, err)
+}
+
+func TestPodNetworkType_Panic(t *testing.T) {
+	assert.Panics(t, func() {
+		podNetworkType("unknown-mode")
+	})
+}
+
+func TestPatchNodeAnnotations_Empty(t *testing.T) {
+	k8sObj := &k8s{}
+	err := k8sObj.PatchNodeAnnotations(context.Background(), map[string]string{})
+	assert.NoError(t, err)
+}
+
+func TestPatchNodeIPResCondition_RecentHeartbeat(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:              types.SufficientIPCondition,
+					Status:            corev1.ConditionTrue,
+					Reason:            "IPAvailable",
+					Message:           "IP is available",
+					LastHeartbeatTime: metav1.NewTime(time.Now().Add(-1 * time.Minute)), // recent
+				},
+			},
+		},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithStatusSubresource(node).WithObjects(node).Build()
+	k8sObj := &k8s{client: fakeClient, nodeName: "test-node"}
+	// Should return nil without patching (recent heartbeat)
+	err := k8sObj.PatchNodeIPResCondition(corev1.ConditionTrue, "IPAvailable", "IP is available")
+	assert.NoError(t, err)
+}
+
+func TestGetPod_StatefulPodStoragePut(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sts-pod",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{Kind: "StatefulSet", Name: "sts"},
+			},
+		},
+		Spec: corev1.PodSpec{NodeName: "test-node"},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(pod).Build()
+	mockStore := storagemocks.NewStorage(t)
+	mockStore.On("Put", "default/sts-pod", mock.Anything).Return(nil)
+
+	k8sObj := &k8s{
+		client:                  fakeClient,
+		storage:                 mockStore,
+		mode:                    daemon.ModeENIMultiIP,
+		nodeName:                "test-node",
+		statefulWorkloadKindSet: sets.New[string]("statefulset"),
+	}
+
+	podInfo, err := k8sObj.GetPod(context.Background(), "default", "sts-pod", true)
+	assert.NoError(t, err)
+	assert.NotNil(t, podInfo)
+	mockStore.AssertExpectations(t)
+}
+
+func TestGetLocalPods_SkipsHostNetworkPod(t *testing.T) {
+	sch := runtime.NewScheme()
+	_ = corev1.AddToScheme(sch)
+
+	hostNetPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "host-pod", Namespace: "default"},
+		Spec:       corev1.PodSpec{NodeName: "test-node", HostNetwork: true},
+	}
+	regularPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "regular-pod", Namespace: "default"},
+		Spec:       corev1.PodSpec{NodeName: "test-node"},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(sch).WithObjects(hostNetPod, regularPod).Build()
+	k8sObj := &k8s{
+		client:   fakeClient,
+		nodeName: "test-node",
+		mode:     daemon.ModeENIMultiIP,
+	}
+
+	pods, err := k8sObj.GetLocalPods(context.Background())
+	assert.NoError(t, err)
+	// Host network pod should be skipped
+	for _, p := range pods {
+		assert.NotEqual(t, "host-pod", p.Name)
+	}
+}

@@ -266,6 +266,11 @@ func TestDeriveGatewayIP_Extended(t *testing.T) {
 			cidr: "192.168.1.0/30",
 			want: "192.168.1.1",
 		},
+		{
+			name: "Very small subnet /31 - gateway nil",
+			cidr: "192.168.1.0/31",
+			want: "",
+		},
 	}
 
 	for _, tt := range tests {
