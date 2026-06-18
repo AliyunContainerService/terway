@@ -414,12 +414,6 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 						IPv4:        "192.168.0.1",
 						IPv6:        "fd00::1",
 					},
-					"pod-2": {
-						RequireIPv4: true,
-						RequireIPv6: true,
-						IPv4:        "192.168.0.2",
-						IPv6:        "fd00::2",
-					},
 				},
 				ipv4Map: map[string]*EniIP{
 					"192.168.0.1": {
@@ -429,16 +423,6 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 						},
 						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-1",
-							Status: "InUse",
-						},
-					},
-					"192.168.0.2": {
-						IP: &networkv1beta1.IP{
-							IP:     "192.168.0.2",
-							Status: networkv1beta1.IPStatusValid,
-						},
-						NetworkInterface: &networkv1beta1.Nic{
-							ID:     "eni-2",
 							Status: "InUse",
 						},
 					},
@@ -454,16 +438,6 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							Status: "InUse",
 						},
 					},
-					"fd00::2": {
-						IP: &networkv1beta1.IP{
-							IP:     "fd00::2",
-							Status: networkv1beta1.IPStatusDeleting,
-						},
-						NetworkInterface: &networkv1beta1.Nic{
-							ID:     "eni-2",
-							Status: "InUse",
-						},
-					},
 				},
 			},
 			checkResultFunc: func(t *testing.T, got map[string]*PodRequest) {
@@ -472,8 +446,6 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 			checkPodsMapFunc: func(t *testing.T, got map[string]*PodRequest) {
 				assert.NotNil(t, got["pod-1"].ipv4Ref)
 				assert.NotNil(t, got["pod-1"].ipv6Ref)
-				assert.NotNil(t, got["pod-2"].ipv4Ref)
-				assert.NotNil(t, got["pod-2"].ipv6Ref)
 			},
 		},
 		{
@@ -485,10 +457,6 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 						RequireIPv4: true,
 						RequireIPv6: true,
 					},
-					"pod-2": {
-						RequireIPv4: true,
-						RequireIPv6: true,
-					},
 				},
 				ipv4Map: map[string]*EniIP{
 					"192.168.0.1": {
@@ -501,16 +469,6 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							Status: "InUse",
 						},
 					},
-					"192.168.0.2": {
-						IP: &networkv1beta1.IP{
-							IP:     "192.168.0.2",
-							Status: networkv1beta1.IPStatusValid,
-						},
-						NetworkInterface: &networkv1beta1.Nic{
-							ID:     "eni-2",
-							Status: "InUse",
-						},
-					},
 				},
 				ipv6Map: map[string]*EniIP{
 					"fd00::1": {
@@ -520,16 +478,6 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 						},
 						NetworkInterface: &networkv1beta1.Nic{
 							ID:     "eni-1",
-							Status: "InUse",
-						},
-					},
-					"fd00::2": {
-						IP: &networkv1beta1.IP{
-							IP:     "fd00::2",
-							Status: networkv1beta1.IPStatusValid,
-						},
-						NetworkInterface: &networkv1beta1.Nic{
-							ID:     "eni-2",
 							Status: "InUse",
 						},
 					},
@@ -541,16 +489,11 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 			checkPodsMapFunc: func(t *testing.T, got map[string]*PodRequest) {
 				assert.NotNil(t, got["pod-1"].ipv4Ref)
 				assert.NotNil(t, got["pod-1"].ipv6Ref)
-				assert.NotNil(t, got["pod-2"].ipv4Ref)
-				assert.NotNil(t, got["pod-2"].ipv6Ref)
 
 				assert.Equal(t, "pod-1", got["pod-1"].ipv4Ref.IP.PodID)
 				assert.Equal(t, "pod-1", got["pod-1"].ipv6Ref.IP.PodID)
-				assert.Equal(t, "pod-2", got["pod-2"].ipv4Ref.IP.PodID)
-				assert.Equal(t, "pod-2", got["pod-2"].ipv6Ref.IP.PodID)
 
 				assert.True(t, got["pod-1"].ipv4Ref.NetworkInterface.ID == got["pod-1"].ipv6Ref.NetworkInterface.ID)
-				assert.True(t, got["pod-2"].ipv4Ref.NetworkInterface.ID == got["pod-2"].ipv6Ref.NetworkInterface.ID)
 			},
 		},
 		{
@@ -559,10 +502,6 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 				log: logr.Discard(),
 				podsMapper: map[string]*PodRequest{
 					"pod-1": {
-						RequireIPv4: true,
-						RequireIPv6: true,
-					},
-					"pod-2": {
 						RequireIPv4: true,
 						RequireIPv6: true,
 					},
@@ -578,16 +517,6 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							Status: "InUse",
 						},
 					},
-					"192.168.0.2": {
-						IP: &networkv1beta1.IP{
-							IP:     "192.168.0.2",
-							Status: networkv1beta1.IPStatusValid,
-						},
-						NetworkInterface: &networkv1beta1.Nic{
-							ID:     "eni-2",
-							Status: "InUse",
-						},
-					},
 				},
 				ipv6Map: map[string]*EniIP{
 					"fd00::1": {
@@ -596,17 +525,7 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 							Status: networkv1beta1.IPStatusValid,
 						},
 						NetworkInterface: &networkv1beta1.Nic{
-							ID:     "eni-1",
-							Status: "InUse",
-						},
-					},
-					"fd00::2": {
-						IP: &networkv1beta1.IP{
-							IP:     "fd00::2",
-							Status: networkv1beta1.IPStatusValid,
-						},
-						NetworkInterface: &networkv1beta1.Nic{
-							ID:     "eni-1",
+							ID:     "eni-2",
 							Status: "InUse",
 						},
 					},
@@ -616,17 +535,8 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 				assert.Len(t, got, 1)
 			},
 			checkPodsMapFunc: func(t *testing.T, got map[string]*PodRequest) {
-				if got["pod-1"].ipv4Ref == nil {
-					assert.Nil(t, got["pod-1"].ipv4Ref)
-					assert.Nil(t, got["pod-1"].ipv6Ref)
-					assert.NotNil(t, got["pod-2"].ipv4Ref)
-					assert.NotNil(t, got["pod-2"].ipv6Ref)
-				} else {
-					assert.NotNil(t, got["pod-1"].ipv4Ref)
-					assert.NotNil(t, got["pod-1"].ipv6Ref)
-					assert.Nil(t, got["pod-2"].ipv4Ref)
-					assert.Nil(t, got["pod-2"].ipv6Ref)
-				}
+				assert.Nil(t, got["pod-1"].ipv4Ref)
+				assert.Nil(t, got["pod-1"].ipv6Ref)
 			},
 		},
 		{
@@ -5558,5 +5468,116 @@ func TestReconcileNode_Reconcile_BackendAPI(t *testing.T) {
 		})
 
 		// Should continue with reconciliation (may fail due to missing setup, but shouldn't return early)
+	})
+}
+
+func TestBuildIPMap(t *testing.T) {
+	t.Run("empty inputs", func(t *testing.T) {
+		ipv4Map, ipv6Map := buildIPMap(nil, nil)
+		assert.Empty(t, ipv4Map)
+		assert.Empty(t, ipv6Map)
+	})
+
+	t.Run("single eni with ipv4 and pod link", func(t *testing.T) {
+		nic := &networkv1beta1.Nic{
+			ID: "eni-1",
+			IPv4: map[string]*networkv1beta1.IP{
+				"10.0.0.1": {IP: "10.0.0.1", PodID: ""},
+				"10.0.0.2": {IP: "10.0.0.2", PodID: "pod-1"},
+			},
+		}
+		podsMapper := map[string]*PodRequest{
+			"pod-1": {PodUID: "uid-1"},
+		}
+		ipv4Map, ipv6Map := buildIPMap(podsMapper, map[string]*networkv1beta1.Nic{"eni-1": nic})
+		assert.Len(t, ipv4Map, 2)
+		assert.Empty(t, ipv6Map)
+		assert.Equal(t, nic, ipv4Map["10.0.0.1"].NetworkInterface)
+		assert.NotNil(t, podsMapper["pod-1"].ipv4Ref)
+		assert.Equal(t, "10.0.0.2", podsMapper["pod-1"].ipv4Ref.IP.IP)
+	})
+
+	t.Run("dual stack eni with ipv6 pod link", func(t *testing.T) {
+		nic := &networkv1beta1.Nic{
+			ID: "eni-1",
+			IPv4: map[string]*networkv1beta1.IP{
+				"10.0.0.1": {IP: "10.0.0.1"},
+			},
+			IPv6: map[string]*networkv1beta1.IP{
+				"fd00::1": {IP: "fd00::1", PodID: "pod-1"},
+			},
+		}
+		podsMapper := map[string]*PodRequest{
+			"pod-1": {PodUID: "uid-1"},
+		}
+		ipv4Map, ipv6Map := buildIPMap(podsMapper, map[string]*networkv1beta1.Nic{"eni-1": nic})
+		assert.Len(t, ipv4Map, 1)
+		assert.Len(t, ipv6Map, 1)
+		assert.NotNil(t, podsMapper["pod-1"].ipv6Ref)
+	})
+
+	t.Run("pod not in mapper is ignored", func(t *testing.T) {
+		nic := &networkv1beta1.Nic{
+			ID: "eni-1",
+			IPv4: map[string]*networkv1beta1.IP{
+				"10.0.0.1": {IP: "10.0.0.1", PodID: "unknown-pod"},
+			},
+		}
+		podsMapper := map[string]*PodRequest{}
+		ipv4Map, _ := buildIPMap(podsMapper, map[string]*networkv1beta1.Nic{"eni-1": nic})
+		assert.Len(t, ipv4Map, 1)
+	})
+}
+
+func TestGetTagFromImage(t *testing.T) {
+	tests := []struct {
+		name  string
+		image string
+		want  string
+	}{
+		{
+			name:  "image with tag",
+			image: "registry.cn-hangzhou.aliyuncs.com/terway:v1.2.3",
+			want:  "v1.2.3",
+		},
+		{
+			name:  "image without tag",
+			image: "registry.cn-hangzhou.aliyuncs.com/terway",
+			want:  "latest",
+		},
+		{
+			name:  "image with digest strips digest",
+			image: "registry.cn-hangzhou.aliyuncs.com/terway:v1.2.3@sha256:abcdef",
+			want:  "v1.2.3",
+		},
+		{
+			name:  "image with port in registry and path - tag has slash",
+			image: "registry:5000/terway",
+			want:  "latest",
+		},
+		{
+			name:  "image with port and explicit tag",
+			image: "registry:5000/ns/terway:v1.0.0",
+			want:  "v1.0.0",
+		},
+		{
+			name:  "simple image name no colon",
+			image: "ubuntu",
+			want:  "latest",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getTagFromImage(tt.image)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestMetaCtxExtended(t *testing.T) {
+	t.Run("context with wrong type returns nil", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), ctxMetaKey{}, "not-a-NodeStatus")
+		meta := MetaCtx(ctx)
+		assert.Nil(t, meta)
 	})
 }

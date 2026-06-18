@@ -444,3 +444,19 @@ func TestDefaultTracerInit(t *testing.T) {
 		t.Error("Default tracer traceMap should be initialized")
 	}
 }
+
+func TestRegisterResourceMapping(t *testing.T) {
+	RegisterResourceMapping(nil)
+}
+
+func TestGetConfig_TypeExistsResourceNotFound(t *testing.T) {
+	tracer := NewTracer()
+	handler := &MockTraceHandler{config: []MapKeyValueEntry{{Key: "k", Value: "v"}}}
+	tracer.Register("mytype", "resource1", handler)
+
+	// type exists but resource name doesn't
+	_, err := tracer.GetConfig("mytype", "nonexistent_resource")
+	if err == nil {
+		t.Error("Expected error when resource name not found")
+	}
+}

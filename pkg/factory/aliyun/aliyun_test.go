@@ -955,3 +955,69 @@ func TestAliyun_NewAliyun(t *testing.T) {
 	assert.Equal(t, "rg-1", a.resourceGroupID)
 	assert.Equal(t, map[string]string{"key": "value"}, a.eniTags)
 }
+
+func TestAliyun_AssignNIPv4_Error(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	ecsClient.On("AssignPrivateIPAddress", mock.Anything, mock.Anything).Return(nil, fmt.Errorf("assign error"))
+
+	a := &Aliyun{
+		ctx:     context.Background(),
+		openAPI: openAPI,
+	}
+
+	ips, err := a.AssignNIPv4("eni-1", 1, "00:11:22:33:44:55")
+	assert.Error(t, err)
+	assert.Nil(t, ips)
+	assert.Contains(t, err.Error(), "assign error")
+}
+
+func TestAliyun_AssignNIPv6_Error(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	ecsClient.On("AssignIpv6Addresses", mock.Anything, mock.Anything).Return(nil, fmt.Errorf("assign ipv6 error"))
+
+	a := &Aliyun{
+		ctx:     context.Background(),
+		openAPI: openAPI,
+	}
+
+	ips, err := a.AssignNIPv6("eni-1", 1, "00:11:22:33:44:55")
+	assert.Error(t, err)
+	assert.Nil(t, ips)
+	assert.Contains(t, err.Error(), "assign ipv6 error")
+}
+
+func TestAliyun_DeleteNetworkInterface_DeleteError(t *testing.T) {
+	openAPI := mockclient.NewOpenAPI(t)
+	ecsClient := mockclient.NewECS(t)
+	openAPI.On("GetECS").Return(ecsClient).Maybe()
+
+	ecsClient.On("DetachNetworkInterface", mock.Anything, "eni-1", "i-1", "").Return(nil)
+	ecsClient.On("DeleteNetworkInterface", mock.Anything, "eni-1").Return(fmt.Errorf("delete error"))
+
+	a := &Aliyun{
+		openAPI:    openAPI,
+		instanceID: "i-1",
+	}
+
+	err := a.DeleteNetworkInterface("eni-1")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "delete error")
+}
+
+func TestAliyun_LoadNetworkInterface_BothDisabled(t *testing.T) {
+	a := &Aliyun{
+		enableIPv4: false,
+		enableIPv6: false,
+	}
+
+	ipv4, ipv6, err := a.LoadNetworkInterface("00:11:22:33:44:55")
+	assert.NoError(t, err)
+	assert.Nil(t, ipv4)
+	assert.Nil(t, ipv6)
+}

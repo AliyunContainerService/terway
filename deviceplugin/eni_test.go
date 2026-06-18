@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"syscall"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/test/bufconn"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
@@ -510,42 +512,193 @@ func (m *mockFileInfo) Sys() interface{} {
 	return nil
 }
 
-func TestServe(t *testing.T) {
+func TestStop_NilServer(t *testing.T) {
 	p := &ENIDevicePlugin{}
+	err := p.Stop()
+	assert.NoError(t, err)
+	assert.Nil(t, p.server)
+}
 
-	called := make(chan struct{})
-	patches := gomonkey.ApplyMethod(
-		p, "Start",
-		func() error {
-			return nil
+func TestStop_WithServer(t *testing.T) {
+	rpcServer := grpc.NewServer()
+	p := &ENIDevicePlugin{
+		server: rpcServer,
+		stop:   make(chan struct{}, 1),
+	}
+
+	cleanupPatch := gomonkey.ApplyPrivateMethod(p, "cleanup", func(_ *ENIDevicePlugin) error {
+		return nil
+	})
+	defer cleanupPatch.Reset()
+
+	err := p.Stop()
+	assert.NoError(t, err)
+	assert.Nil(t, p.server)
+}
+
+func TestDial_RealSocket(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := tmpDir + "/test.sock"
+
+	listener, err := net.Listen("unix", sockPath)
+	require.NoError(t, err)
+	defer listener.Close()
+
+	srv := grpc.NewServer()
+	go func() { _ = srv.Serve(listener) }()
+	defer srv.Stop()
+
+	conn, closeFn, err := dial(sockPath, 5*time.Second)
+	assert.NoError(t, err)
+	assert.NotNil(t, conn)
+	assert.NotNil(t, closeFn)
+	closeFn()
+}
+
+func TestCleanup_WithMatchingFiles(t *testing.T) {
+	p := &ENIDevicePlugin{
+		eniRes: eniRes{
+			re: regexp.MustCompile(`^.*-eni\.sock`),
 		},
-	)
+	}
+
+	readDirPatch := gomonkey.ApplyFunc(os.ReadDir, func(name string) ([]os.DirEntry, error) {
+		return []os.DirEntry{
+			&mockDirEntry{name: "12345-eni.sock"},
+			&mockDirEntry{name: "other.txt"},
+		}, nil
+	})
+	defer readDirPatch.Reset()
+
+	unlinkCalled := false
+	unlinkPatch := gomonkey.ApplyFunc(syscall.Unlink, func(p string) error {
+		unlinkCalled = true
+		return nil
+	})
+	defer unlinkPatch.Reset()
+
+	err := p.cleanup()
+	assert.NoError(t, err)
+	assert.True(t, unlinkCalled)
+}
+
+func TestCleanup_ReadDirError(t *testing.T) {
+	p := &ENIDevicePlugin{
+		eniRes: eniRes{re: regexp.MustCompile(`^.*-eni\.sock`)},
+	}
+	readDirPatch := gomonkey.ApplyFunc(os.ReadDir, func(name string) ([]os.DirEntry, error) {
+		return nil, fmt.Errorf("read error")
+	})
+	defer readDirPatch.Reset()
+
+	err := p.cleanup()
+	assert.Error(t, err)
+}
+
+func TestAllocate_ERDMA_EmptyDir(t *testing.T) {
+	plugin := NewENIDevicePlugin(3, ENITypeERDMA)
+
+	patches := gomonkey.ApplyFunc(os.ReadDir, func(name string) ([]os.DirEntry, error) {
+		return []os.DirEntry{}, nil
+	})
 	defer patches.Reset()
 
-	register := gomonkey.ApplyMethod(
-		p, "Register",
-		func() error { return nil },
-	)
-	defer register.Reset()
+	request := &pluginapi.AllocateRequest{
+		ContainerRequests: []*pluginapi.ContainerAllocateRequest{{}},
+	}
+	response, err := plugin.Allocate(context.Background(), request)
+	assert.Error(t, err)
+	assert.Nil(t, response)
+	assert.Contains(t, err.Error(), "error read infiniband dir")
+}
 
-	stop := gomonkey.ApplyMethod(
-		p, "Stop",
-		func() error {
-			return nil
+func TestAllocate_ERDMA_MultipleContainers(t *testing.T) {
+	plugin := NewENIDevicePlugin(3, ENITypeERDMA)
+
+	patches := gomonkey.ApplyFunc(os.ReadDir, func(name string) ([]os.DirEntry, error) {
+		return []os.DirEntry{
+			&mockDirEntry{name: "uverbs0", isDevice: true},
+		}, nil
+	})
+	defer patches.Reset()
+
+	request := &pluginapi.AllocateRequest{
+		ContainerRequests: []*pluginapi.ContainerAllocateRequest{{}, {}, {}},
+	}
+	response, err := plugin.Allocate(context.Background(), request)
+	assert.NoError(t, err)
+	assert.Len(t, response.ContainerResponses, 3)
+}
+
+func TestRegister_Success(t *testing.T) {
+	plugin := NewENIDevicePlugin(3, ENITypeENI)
+
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer()
+	pluginapi.RegisterRegistrationServer(server, &mockRegistrationServer{})
+	go func() {
+		_ = server.Serve(listener)
+	}()
+	defer server.Stop()
+
+	patches := gomonkey.ApplyFunc(dial, func(unixSocketPath string, timeout time.Duration) (*grpc.ClientConn, func(), error) {
+		conn, err := grpc.DialContext(
+			context.Background(),
+			"bufnet",
+			grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+				return listener.Dial()
+			}),
+			grpc.WithInsecure(),
+		)
+		return conn, func() { _ = conn.Close() }, err
+	})
+	defer patches.Reset()
+
+	err := plugin.Register(pluginapi.RegisterRequest{
+		Version:      pluginapi.Version,
+		Endpoint:     "test-endpoint",
+		ResourceName: ENIResName,
+	})
+	assert.NoError(t, err)
+}
+
+func TestRegister_DialError(t *testing.T) {
+	plugin := NewENIDevicePlugin(3, ENITypeENI)
+
+	patches := gomonkey.ApplyFunc(dial, func(unixSocketPath string, timeout time.Duration) (*grpc.ClientConn, func(), error) {
+		return nil, nil, fmt.Errorf("dial error")
+	})
+	defer patches.Reset()
+
+	err := plugin.Register(pluginapi.RegisterRequest{
+		Version:      pluginapi.Version,
+		Endpoint:     "test-endpoint",
+		ResourceName: ENIResName,
+	})
+	assert.Error(t, err)
+}
+
+type mockRegistrationServer struct {
+	pluginapi.UnimplementedRegistrationServer
+}
+
+func (m *mockRegistrationServer) Register(ctx context.Context, in *pluginapi.RegisterRequest) (*pluginapi.Empty, error) {
+	return &pluginapi.Empty{}, nil
+}
+
+func TestListAndWatch_SendError(t *testing.T) {
+	plugin := NewENIDevicePlugin(2, ENITypeENI)
+	plugin.stop = make(chan struct{}, 1)
+
+	mockStream := &mockListAndWatchServer{
+		sendFunc: func(response *pluginapi.ListAndWatchResponse) error {
+			return fmt.Errorf("send error")
 		},
-	)
-	defer stop.Reset()
+	}
 
-	watchKubeletRestart := gomonkey.ApplyPrivateMethod(
-		p, "watchKubeletRestart",
-		func() {
-			close(called)
-		},
-	)
-	defer watchKubeletRestart.Reset()
-	p.Serve()
-
-	<-called
+	err := plugin.ListAndWatch(&pluginapi.Empty{}, mockStream)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "send error")
 }
 
 func TestCleanUp(t *testing.T) {
@@ -570,45 +723,17 @@ func TestCleanUp(t *testing.T) {
 }
 
 func TestStart(t *testing.T) {
-	rpcServer := &grpc.Server{}
-
 	p := &ENIDevicePlugin{
-		server: rpcServer,
-		stop:   make(chan struct{}),
-
-		socket: "/tmp/test.sock",
+		socket: t.TempDir() + "/test.sock",
 	}
-
-	called := make(chan struct{})
-	rpcServerServe := gomonkey.ApplyMethod(rpcServer, "Serve", func(_ *grpc.Server, _ net.Listener) error {
-		close(called)
-		return nil
-	})
-	defer rpcServerServe.Reset()
-
-	rpcServerStop := gomonkey.ApplyMethod(rpcServer, "Stop", func(_ *grpc.Server) {})
-	defer rpcServerStop.Reset()
 
 	cleanupPatch := gomonkey.ApplyPrivateMethod(p, "cleanup", func(_ *ENIDevicePlugin) error {
 		return nil
 	})
 	defer cleanupPatch.Reset()
 
-	patches := gomonkey.ApplyFunc(net.Listen, func(_, _ string) (net.Listener, error) {
-		return nil, nil
-	})
-	defer patches.Reset()
-
-	regPatch := gomonkey.ApplyFunc(pluginapi.RegisterDevicePluginServer, func(_ *grpc.Server, _ pluginapi.DevicePluginServer) {})
-	defer regPatch.Reset()
-
-	serverPatch := gomonkey.ApplyFunc(grpc.NewServer, func(_ ...grpc.ServerOption) *grpc.Server {
-		return rpcServer
-	})
-	defer serverPatch.Reset()
-
 	err := p.Start()
 	require.NoError(t, err)
-
-	<-called
+	require.NotNil(t, p.server)
+	require.NotNil(t, p.stop)
 }

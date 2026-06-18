@@ -1743,3 +1743,54 @@ func TestGetECSBackoff(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveBackendAPI(t *testing.T) {
+	r := &ReconcileNetworkInterface{}
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		niName      string
+		annotations map[string]string
+		want        aliyunClient.BackendAPI
+	}{
+		{
+			name:   "no annotation, eni prefix returns ECS",
+			niName: "eni-abc123",
+			want:   aliyunClient.BackendAPIECS,
+		},
+		{
+			name:   "leni prefix returns EFLO",
+			niName: "leni-abc123",
+			want:   aliyunClient.BackendAPIEFLO,
+		},
+		{
+			name:   "annotation ecs returns ECS",
+			niName: "leni-abc123",
+			annotations: map[string]string{
+				terwayTypes.ENOApi: terwayTypes.APIEcs,
+			},
+			want: aliyunClient.BackendAPIECS,
+		},
+		{
+			name:   "unknown annotation falls through to name check",
+			niName: "leni-abc123",
+			annotations: map[string]string{
+				terwayTypes.ENOApi: "unknown-api",
+			},
+			want: aliyunClient.BackendAPIEFLO,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ni := &networkv1beta1.NetworkInterface{}
+			ni.Name = tt.niName
+			ni.Annotations = tt.annotations
+			got := r.resolveBackendAPI(ctx, ni)
+			if got != tt.want {
+				t.Errorf("resolveBackendAPI() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

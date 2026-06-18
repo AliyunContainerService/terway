@@ -525,6 +525,167 @@ func Test_processFrozenExpireAt_IPv6Expired(t *testing.T) {
 	assert.True(t, node.Status.NetworkInterfaces["eni-1"].IPv6Prefix[0].FrozenExpireAt.IsZero())
 }
 
+func TestConvertIPSet(t *testing.T) {
+	t.Run("empty input", func(t *testing.T) {
+		result := convertIPSet(nil)
+		assert.Empty(t, result)
+	})
+
+	t.Run("primary ip", func(t *testing.T) {
+		in := []aliyunClient.IPSet{
+			{IPAddress: "192.168.1.1", Primary: true},
+		}
+		result := convertIPSet(in)
+		assert.Equal(t, networkv1beta1.IPStatusValid, result["192.168.1.1"].Status)
+		assert.True(t, result["192.168.1.1"].Primary)
+	})
+
+	t.Run("available secondary ip", func(t *testing.T) {
+		in := []aliyunClient.IPSet{
+			{IPAddress: "192.168.1.2", Primary: false, IPName: "", IPStatus: "Available"},
+		}
+		result := convertIPSet(in)
+		assert.Equal(t, networkv1beta1.IPStatusValid, result["192.168.1.2"].Status)
+	})
+
+	t.Run("deleting ip - name same as address", func(t *testing.T) {
+		in := []aliyunClient.IPSet{
+			{
+				IPAddress: "192.168.1.3",
+				IPName:    "192.168.1.3",
+				IPStatus:  "Deleting",
+				Primary:   false,
+			},
+		}
+		result := convertIPSet(in)
+		assert.Equal(t, networkv1beta1.IPStatusDeleting, result["192.168.1.3"].Status)
+		assert.Equal(t, "192.168.1.3", result["192.168.1.3"].IPName)
+	})
+
+	t.Run("deleting ip - name different from address", func(t *testing.T) {
+		in := []aliyunClient.IPSet{
+			{
+				IPAddress: "192.168.1.4",
+				IPName:    "eni-ip-name",
+				IPStatus:  "Deleting",
+				Primary:   false,
+			},
+		}
+		result := convertIPSet(in)
+		assert.Equal(t, networkv1beta1.IPStatusDeleting, result["192.168.1.4"].Status)
+		assert.Equal(t, "eni-ip-name", result["192.168.1.4"].IPName)
+	})
+
+	t.Run("non-available ip with IPName but primary - stays valid", func(t *testing.T) {
+		in := []aliyunClient.IPSet{
+			{
+				IPAddress: "192.168.1.5",
+				IPName:    "primary-name",
+				IPStatus:  "Deleting",
+				Primary:   true,
+			},
+		}
+		result := convertIPSet(in)
+		assert.Equal(t, networkv1beta1.IPStatusValid, result["192.168.1.5"].Status)
+	})
+}
+
+func TestNewENIFromAPI(t *testing.T) {
+	t.Run("basic conversion", func(t *testing.T) {
+		eni := &aliyunClient.NetworkInterface{
+			NetworkInterfaceID:          "eni-123",
+			Status:                      aliyunClient.ENIStatusInUse,
+			MacAddress:                  "00:11:22:33:44:55",
+			VSwitchID:                   "vsw-123",
+			SecurityGroupIDs:            []string{"sg-1", "sg-2"},
+			PrivateIPAddress:            "192.168.1.1",
+			NetworkInterfaceTrafficMode: "Standard",
+			Type:                        "Secondary",
+			PrivateIPSets: []aliyunClient.IPSet{
+				{IPAddress: "192.168.1.1", Primary: true},
+				{IPAddress: "192.168.1.2", Primary: false},
+			},
+			IPv6Set: []aliyunClient.IPSet{
+				{IPAddress: "fd00::1", Primary: false},
+			},
+		}
+
+		nic := newENIFromAPI(eni)
+		assert.Equal(t, "eni-123", nic.ID)
+		assert.Equal(t, aliyunClient.ENIStatusInUse, nic.Status)
+		assert.Equal(t, "00:11:22:33:44:55", nic.MacAddress)
+		assert.Equal(t, "vsw-123", nic.VSwitchID)
+		assert.Equal(t, []string{"sg-1", "sg-2"}, nic.SecurityGroupIDs)
+		assert.Equal(t, "192.168.1.1", nic.PrimaryIPAddress)
+		assert.Equal(t, networkv1beta1.NetworkInterfaceTrafficMode("Standard"), nic.NetworkInterfaceTrafficMode)
+		assert.Equal(t, networkv1beta1.ENIType("Secondary"), nic.NetworkInterfaceType)
+		assert.Len(t, nic.IPv4, 2)
+		assert.Len(t, nic.IPv6, 1)
+		assert.Empty(t, nic.IPv4Prefix)
+		assert.Empty(t, nic.IPv6Prefix)
+	})
+
+	t.Run("with prefixes", func(t *testing.T) {
+		eni := &aliyunClient.NetworkInterface{
+			NetworkInterfaceID: "eni-456",
+			IPv4PrefixSets:     []aliyunClient.Prefix{"192.168.1.0/28", "192.168.2.0/28"},
+			IPv6PrefixSets:     []aliyunClient.Prefix{"fd00::/64"},
+		}
+
+		nic := newENIFromAPI(eni)
+		assert.Len(t, nic.IPv4Prefix, 2)
+		assert.Len(t, nic.IPv6Prefix, 1)
+		assert.Equal(t, "192.168.1.0/28", nic.IPv4Prefix[0].Prefix)
+		assert.Equal(t, networkv1beta1.IPPrefixStatusValid, nic.IPv4Prefix[0].Status)
+		assert.Equal(t, "fd00::/64", nic.IPv6Prefix[0].Prefix)
+		assert.Equal(t, networkv1beta1.IPPrefixStatusValid, nic.IPv6Prefix[0].Status)
+	})
+}
+
+func TestIdlesWithAvailable(t *testing.T) {
+	tests := []struct {
+		name  string
+		eniIP map[string]*networkv1beta1.IP
+		want  int
+	}{
+		{
+			name:  "nil map",
+			eniIP: nil,
+			want:  0,
+		},
+		{
+			name: "all idle valid",
+			eniIP: map[string]*networkv1beta1.IP{
+				"1": {PodID: "", Status: networkv1beta1.IPStatusValid},
+				"2": {PodID: "", Status: networkv1beta1.IPStatusValid},
+			},
+			want: 2,
+		},
+		{
+			name: "in use ips not counted",
+			eniIP: map[string]*networkv1beta1.IP{
+				"1": {PodID: "pod-1", Status: networkv1beta1.IPStatusValid},
+				"2": {PodID: "", Status: networkv1beta1.IPStatusValid},
+			},
+			want: 1,
+		},
+		{
+			name: "deleting ips not counted",
+			eniIP: map[string]*networkv1beta1.IP{
+				"1": {PodID: "", Status: networkv1beta1.IPStatusDeleting},
+				"2": {PodID: "", Status: networkv1beta1.IPStatusValid},
+			},
+			want: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IdlesWithAvailable(tt.eniIP)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func Test_processFrozenExpireAt(t *testing.T) {
 	now := time.Now()
 	type args struct {

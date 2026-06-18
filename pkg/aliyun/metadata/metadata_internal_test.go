@@ -282,3 +282,173 @@ func TestGetENIV6Gateway_Abnormal(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, gw)
 }
+
+func TestGetENIPrimaryAddr_GetValueError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", fmt.Errorf("getValue error")
+	})
+	addr, err := GetENIPrimaryAddr("mac1")
+	assert.Error(t, err)
+	assert.False(t, addr.IsValid())
+}
+
+func TestGetENIGatewayAddr_GetValueError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", fmt.Errorf("getValue error")
+	})
+	addr, err := GetENIGatewayAddr("mac1")
+	assert.Error(t, err)
+	assert.False(t, addr.IsValid())
+}
+
+func TestGetVSwitchPrefix_GetValueError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", fmt.Errorf("getValue error")
+	})
+	prefix, err := GetVSwitchPrefix("mac1")
+	assert.Error(t, err)
+	assert.False(t, prefix.IsValid())
+}
+
+func TestGetVSwitchIPv6Prefix_GetValueError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", fmt.Errorf("getValue error")
+	})
+	prefix, err := GetVSwitchIPv6Prefix("mac1")
+	assert.Error(t, err)
+	assert.False(t, prefix.IsValid())
+}
+
+func TestGetENIV6GatewayAddr_GetValueError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", fmt.Errorf("getValue error")
+	})
+	addr, err := GetENIV6GatewayAddr("mac1")
+	assert.Error(t, err)
+	assert.False(t, addr.IsValid())
+}
+
+func TestGetENIGateway_GetValueError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", fmt.Errorf("getValue error")
+	})
+	gw, err := GetENIGateway("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, gw)
+}
+
+func TestGetVSwitchCIDR_GetValueError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", fmt.Errorf("getValue error")
+	})
+	cidr, err := GetVSwitchCIDR("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, cidr)
+}
+
+func TestGetVSwitchIPv6CIDR_GetValueError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", fmt.Errorf("getValue error")
+	})
+	cidr, err := GetVSwitchIPv6CIDR("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, cidr)
+}
+
+func TestGetENIV6Gateway_GetValueError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", fmt.Errorf("getValue error")
+	})
+	gw, err := GetENIV6Gateway("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, gw)
+}
+
+func TestGetIPv4ByMac_GetValueError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", fmt.Errorf("getValue error")
+	})
+	ips, err := GetIPv4ByMac("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, ips)
+}
+
+func TestGetENIPrivateIPs_GetValueError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", fmt.Errorf("getValue error")
+	})
+	ips, err := GetENIPrivateIPs("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, ips)
+}
+
+func TestGetIPv6ByMac_NonNotFoundError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getValue, func(urlStr string) (string, error) {
+		return "", &Error{Code: "500"}
+	})
+	ips, err := GetIPv6ByMac("mac1")
+	assert.Error(t, err)
+	assert.Nil(t, ips)
+}
+
+func TestGetArray_GetWithTokenError(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(getWithToken, func(url string) ([]byte, error) {
+		return nil, fmt.Errorf("getWithToken error")
+	})
+	macs, err := GetENIsMAC()
+	assert.Error(t, err)
+	assert.Nil(t, macs)
+}
+
+func TestGetWithToken_WithRetryNon401Error(t *testing.T) {
+	tokenCache.Delete(TokenURL)
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(withRetry, func(url string, headers [][]string) ([]byte, error) {
+		if url == TokenURL {
+			return []byte("test-token"), nil
+		}
+		return nil, &Error{Code: "500", URL: url}
+	})
+	result, err := getWithToken("http://169.254.169.254/test")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestGetWithToken_TokenFetchError(t *testing.T) {
+	tokenCache.Delete(TokenURL)
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+	patches.ApplyFunc(withRetry, func(url string, headers [][]string) ([]byte, error) {
+		return nil, fmt.Errorf("network error")
+	})
+	result, err := getWithToken("http://169.254.169.254/test")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}

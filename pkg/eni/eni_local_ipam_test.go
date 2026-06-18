@@ -1928,3 +1928,114 @@ func TestPoolStats_DualStack(t *testing.T) {
 	assert.Equal(t, 256, totalV6)
 	assert.Equal(t, 255, idleV6)
 }
+
+func TestCalculateIP_PaddingPath(t *testing.T) {
+	ip, err := calculateIP("0.0.0.0/28", 0)
+	require.NoError(t, err)
+	assert.Equal(t, "0.0.0.0", ip.String())
+
+	ip2, err := calculateIP("0.0.0.0/28", 1)
+	require.NoError(t, err)
+	assert.Equal(t, "0.0.0.1", ip2.String())
+}
+
+func TestCalculateIP_TruncationPath(t *testing.T) {
+	ip, err := calculateIP("255.255.255.0/24", 256)
+	require.NoError(t, err)
+	assert.Equal(t, "0.0.0.0", ip.String())
+}
+
+func TestFindPrefixContainingIP_InvalidCIDRKey(t *testing.T) {
+	prefixMap := map[string]*PrefixInfo{
+		"not-a-cidr": {
+			Prefix:    "not-a-cidr",
+			bitmap:    bitset.New(16),
+			allocated: make(map[string]uint),
+			status:    networkv1beta1.IPPrefixStatusValid,
+		},
+	}
+	ip, _ := netip.ParseAddr("10.0.0.1")
+	prefix, offset, found := findPrefixContainingIP(ip, prefixMap)
+	assert.False(t, found)
+	assert.Empty(t, prefix)
+	assert.Equal(t, uint(0), offset)
+}
+
+func TestSnapshotPrefixMap_InvalidCIDR(t *testing.T) {
+	prefixMap := map[string]*PrefixInfo{
+		"invalid-cidr": {
+			Prefix:    "invalid-cidr",
+			bitmap:    bitset.New(16),
+			allocated: map[string]uint{"pod-1": 0},
+			status:    networkv1beta1.IPPrefixStatusValid,
+		},
+	}
+	result := snapshotPrefixMap(prefixMap)
+	require.Len(t, result, 1)
+	assert.Equal(t, 1, result[0].Used)
+	assert.Empty(t, result[0].Allocations)
+}
+
+func TestReleaseIPv4_PrefixRemovedFromMap(t *testing.T) {
+	ipam := &ENILocalIPAM{
+		ipv4PrefixMap: make(map[string]*PrefixInfo),
+		podToPrefixV4: map[string]string{"pod-1": "10.0.0.0/28"},
+		ipv6PrefixMap: make(map[string]*PrefixInfo),
+		podToPrefixV6: make(map[string]string),
+	}
+	assert.NotPanics(t, func() {
+		ipam.ReleaseIPv4("pod-1")
+	})
+	assert.Contains(t, ipam.podToPrefixV4, "pod-1")
+}
+
+func TestReleaseIPv4_PodNotInAllocated(t *testing.T) {
+	ipam := &ENILocalIPAM{
+		ipv4PrefixMap: map[string]*PrefixInfo{
+			"10.0.0.0/28": {
+				Prefix:    "10.0.0.0/28",
+				bitmap:    bitset.New(16),
+				allocated: make(map[string]uint),
+				status:    networkv1beta1.IPPrefixStatusValid,
+			},
+		},
+		podToPrefixV4: map[string]string{"pod-1": "10.0.0.0/28"},
+		ipv6PrefixMap: make(map[string]*PrefixInfo),
+		podToPrefixV6: make(map[string]string),
+	}
+	assert.NotPanics(t, func() {
+		ipam.ReleaseIPv4("pod-1")
+	})
+}
+
+func TestReleaseIPv6_PrefixRemovedFromMap(t *testing.T) {
+	ipam := &ENILocalIPAM{
+		ipv4PrefixMap: make(map[string]*PrefixInfo),
+		podToPrefixV4: make(map[string]string),
+		ipv6PrefixMap: make(map[string]*PrefixInfo),
+		podToPrefixV6: map[string]string{"pod-1": "fd00::/120"},
+	}
+	assert.NotPanics(t, func() {
+		ipam.ReleaseIPv6("pod-1")
+	})
+	assert.Contains(t, ipam.podToPrefixV6, "pod-1")
+}
+
+func TestReleaseIPv6_PodNotInAllocated(t *testing.T) {
+	ipam := &ENILocalIPAM{
+		ipv4PrefixMap: make(map[string]*PrefixInfo),
+		podToPrefixV4: make(map[string]string),
+		ipv6PrefixMap: map[string]*PrefixInfo{
+			"fd00::/120": {
+				Prefix:    "fd00::/120",
+				bitmap:    bitset.New(256),
+				allocated: make(map[string]uint),
+				status:    networkv1beta1.IPPrefixStatusValid,
+			},
+		},
+		podToPrefixV6: map[string]string{"pod-1": "fd00::/120"},
+	}
+	assert.NotPanics(t, func() {
+		ipam.ReleaseIPv6("pod-1")
+	})
+}

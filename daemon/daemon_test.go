@@ -1652,3 +1652,55 @@ func TestNewServer(t *testing.T) {
 	_, err = newLegacyService(context.Background(), "", "")
 	require.Error(t, err)
 }
+
+func TestNewNetworkService_InvalidConfig(t *testing.T) {
+	_, err := newNetworkService(context.Background(), "/non/existent/config.json", daemon.ModeENIMultiIP)
+	assert.Error(t, err)
+}
+
+func TestNewNetworkService_CRDIPAMType(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	patches.ApplyFunc(daemon.GetConfigFromFileWithMerge, func(configFilePath string, dynamicCfg []byte) (*daemon.Config, error) {
+		return &daemon.Config{
+			Version:  "1",
+			IPAMType: types.IPAMTypeCRD,
+		}, nil
+	})
+	patches.ApplyFunc(newCRDV2Service, func(ctx context.Context, configFilePath, daemonMode string) (*networkService, error) {
+		return &networkService{daemonMode: daemonMode}, nil
+	})
+
+	svc, err := newNetworkService(context.Background(), "/tmp/config.json", daemon.ModeENIMultiIP)
+	assert.NoError(t, err)
+	assert.NotNil(t, svc)
+	assert.Equal(t, daemon.ModeENIMultiIP, svc.daemonMode)
+}
+
+func TestNewNetworkService_LegacyMode(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	patches.ApplyFunc(daemon.GetConfigFromFileWithMerge, func(configFilePath string, dynamicCfg []byte) (*daemon.Config, error) {
+		return &daemon.Config{
+			Version:  "1",
+			IPAMType: "",
+		}, nil
+	})
+	patches.ApplyFunc(newLegacyService, func(ctx context.Context, configFilePath, daemonMode string) (*networkService, error) {
+		return &networkService{daemonMode: daemonMode}, nil
+	})
+
+	svc, err := newNetworkService(context.Background(), "/tmp/config.json", daemon.ModeENIMultiIP)
+	assert.NoError(t, err)
+	assert.NotNil(t, svc)
+}

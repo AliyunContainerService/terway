@@ -143,6 +143,174 @@ func TestToRPC(t *testing.T) {
 
 }
 
+func TestPhaseDescription(t *testing.T) {
+	tests := []struct {
+		phase    networkv1beta1.Phase
+		contains string
+	}{
+		{networkv1beta1.ENIPhaseInitial, "created and attached"},
+		{networkv1beta1.ENIPhaseBinding, "created and attached"},
+		{networkv1beta1.ENIPhaseBind, "successfully bound"},
+		{networkv1beta1.ENIPhaseUnbind, "detached"},
+		{networkv1beta1.ENIPhaseDetaching, "being detached"},
+		{networkv1beta1.ENIPhaseDeleting, "being deleted"},
+		{networkv1beta1.Phase("SomeUnknown"), "unknown phase"},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.phase), func(t *testing.T) {
+			assert.Contains(t, phaseDescription(tt.phase), tt.contains)
+		})
+	}
+}
+
+func TestExtractENIIDs(t *testing.T) {
+	t.Run("no allocations", func(t *testing.T) {
+		podENI := &networkv1beta1.PodENI{}
+		assert.Empty(t, extractENIIDs(podENI))
+	})
+	t.Run("with allocations", func(t *testing.T) {
+		podENI := &networkv1beta1.PodENI{
+			Spec: networkv1beta1.PodENISpec{
+				Allocations: []networkv1beta1.Allocation{
+					{ENI: networkv1beta1.ENI{ID: "eni-aaa"}},
+					{ENI: networkv1beta1.ENI{ID: ""}},
+					{ENI: networkv1beta1.ENI{ID: "eni-bbb"}},
+				},
+			},
+		}
+		ids := extractENIIDs(podENI)
+		assert.Equal(t, []string{"eni-aaa", "eni-bbb"}, ids)
+	})
+}
+
+func TestBuildTimeoutErrorMessage(t *testing.T) {
+	t.Run("nil podENI", func(t *testing.T) {
+		assert.Equal(t, "PodENI not found", buildTimeoutErrorMessage(nil))
+	})
+	t.Run("with podENI", func(t *testing.T) {
+		podENI := &networkv1beta1.PodENI{
+			Spec: networkv1beta1.PodENISpec{
+				Allocations: []networkv1beta1.Allocation{
+					{ENI: networkv1beta1.ENI{ID: "eni-123"}},
+				},
+			},
+			Status: networkv1beta1.PodENIStatus{
+				Phase: networkv1beta1.ENIPhaseBinding,
+				Msg:   "waiting for attach",
+			},
+		}
+		msg := buildTimeoutErrorMessage(podENI)
+		assert.Contains(t, msg, "eni-123")
+		assert.Contains(t, msg, "Binding")
+		assert.Contains(t, msg, "waiting for attach")
+	})
+}
+
+func TestParseExtraRoute(t *testing.T) {
+	t.Run("nil routes", func(t *testing.T) {
+		assert.Nil(t, parseExtraRoute(nil))
+	})
+	t.Run("with routes", func(t *testing.T) {
+		routes := []networkv1beta1.Route{
+			{Dst: "10.0.0.0/8"},
+			{Dst: "172.16.0.0/12"},
+		}
+		result := parseExtraRoute(routes)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "10.0.0.0/8", result[0].Dst)
+		assert.Equal(t, "172.16.0.0/12", result[1].Dst)
+	})
+}
+
+func TestRemoteIPRequest_ResourceType(t *testing.T) {
+	r := &RemoteIPRequest{}
+	assert.Equal(t, ResourceType(ResourceTypeRemoteIP), r.ResourceType())
+}
+
+func TestRemoteIPResource_ResourceType(t *testing.T) {
+	r := &RemoteIPResource{}
+	assert.Equal(t, ResourceType(ResourceTypeRemoteIP), r.ResourceType())
+}
+
+func TestToRPC_ENIInfoMissing(t *testing.T) {
+	l := &RemoteIPResource{
+		podENI: networkv1beta1.PodENI{
+			Spec: networkv1beta1.PodENISpec{
+				Allocations: []networkv1beta1.Allocation{
+					{
+						IPv4:     "192.168.1.1",
+						IPv4CIDR: "192.168.1.0/24",
+						ENI:      networkv1beta1.ENI{ID: "eni-missing", MAC: "aa:bb:cc:dd:ee:ff"},
+					},
+				},
+			},
+			Status: networkv1beta1.PodENIStatus{
+				ENIInfos: map[string]networkv1beta1.ENIInfo{},
+			},
+		},
+	}
+	assert.Nil(t, l.ToRPC())
+}
+
+func TestToRPC_InvalidIPv4CIDR(t *testing.T) {
+	l := &RemoteIPResource{
+		podENI: networkv1beta1.PodENI{
+			Spec: networkv1beta1.PodENISpec{
+				Allocations: []networkv1beta1.Allocation{
+					{
+						IPv4:     "192.168.1.1",
+						IPv4CIDR: "invalid-cidr",
+						ENI:      networkv1beta1.ENI{ID: "eni-1", MAC: "aa:bb:cc:dd:ee:ff"},
+					},
+				},
+			},
+			Status: networkv1beta1.PodENIStatus{
+				ENIInfos: map[string]networkv1beta1.ENIInfo{"eni-1": {}},
+			},
+		},
+	}
+	assert.Nil(t, l.ToRPC())
+}
+
+func TestToRPC_InvalidIPv6CIDR(t *testing.T) {
+	l := &RemoteIPResource{
+		podENI: networkv1beta1.PodENI{
+			Spec: networkv1beta1.PodENISpec{
+				Allocations: []networkv1beta1.Allocation{
+					{
+						IPv6:     "fd00::1",
+						IPv6CIDR: "invalid-cidr",
+						ENI:      networkv1beta1.ENI{ID: "eni-1", MAC: "aa:bb:cc:dd:ee:ff"},
+					},
+				},
+			},
+			Status: networkv1beta1.PodENIStatus{
+				ENIInfos: map[string]networkv1beta1.ENIInfo{"eni-1": {}},
+			},
+		},
+	}
+	assert.Nil(t, l.ToRPC())
+}
+
+func TestToRPC_NoAllocations(t *testing.T) {
+	l := &RemoteIPResource{
+		podENI: networkv1beta1.PodENI{
+			Spec: networkv1beta1.PodENISpec{
+				Allocations: []networkv1beta1.Allocation{},
+			},
+		},
+	}
+	assert.Nil(t, l.ToRPC())
+}
+
+func TestNewRemote(t *testing.T) {
+	trunk := &daemon.ENI{ID: "eni-trunk"}
+	notifier := NewNotifier()
+	r := NewRemote(nil, trunk, notifier)
+	assert.Equal(t, trunk, r.trunkENI)
+	assert.Equal(t, notifier, r.notifier)
+}
+
 func TestAllocateReturnsErrorWhenResourceTypeMismatch(t *testing.T) {
 	r := &Remote{}
 	resp, traces := r.Allocate(context.Background(), &daemon.CNI{}, &LocalIPResource{})

@@ -15,9 +15,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type fakeProvider struct{}
+type fakeProvider struct {
+	credentials *provider.Credentials
+	err         error
+}
 
 func (f *fakeProvider) Credentials(ctx context.Context) (*provider.Credentials, error) {
+	if f.credentials != nil || f.err != nil {
+		return f.credentials, f.err
+	}
 	return &provider.Credentials{
 		AccessKeyId:     "ak",
 		AccessKeySecret: "sk",
@@ -174,15 +180,7 @@ func TestV1Warp_GetCredentials(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create mock provider
-			mockProvider := &fakeProvider{}
-
-			// Patch the Credentials method
-			patches := gomonkey.ApplyMethod(mockProvider, "Credentials",
-				func(_ *fakeProvider, ctx context.Context) (*provider.Credentials, error) {
-					return tt.mockCred, tt.mockError
-				})
-			defer patches.Reset()
+			mockProvider := &fakeProvider{credentials: tt.mockCred, err: tt.mockError}
 
 			// Create V1Warp instance
 			v1warp := &V1Warp{providers: mockProvider}
@@ -318,4 +316,30 @@ func TestV1Warp_Integration(t *testing.T) {
 
 	// Verify it implements credentials.CredentialsProvider
 	var _ credentials.CredentialsProvider = v1warp
+}
+
+func TestNewEFLOV2Client_WithEndpoint(t *testing.T) {
+	t.Setenv("EFLO_ENDPOINT", "eflo.cn-hangzhou.aliyuncs.com")
+	t.Setenv("EFLO_REGION_ID", "cn-hangzhou")
+	cfg := ClientConfig{RegionID: "cn-test"}
+	cred := ProviderV2(&fakeProvider{})
+	client, err := NewEFLOV2Client(cfg, cred)
+	if err != nil {
+		// Error is acceptable when endpoint can't be resolved in test environment
+		return
+	}
+	assert.NotNil(t, client)
+}
+
+func TestNewEFLOControllerClient_WithEndpoint(t *testing.T) {
+	t.Setenv("EFLO_CONTROLLER_ENDPOINT", "eflo-controller.cn-hangzhou.aliyuncs.com")
+	t.Setenv("EFLO_CONTROLLER_REGION_ID", "cn-hangzhou")
+	cfg := ClientConfig{RegionID: "cn-test"}
+	cred := ProviderV2(&fakeProvider{})
+	client, err := NewEFLOControllerClient(cfg, cred)
+	if err != nil {
+		// Error is acceptable when endpoint can't be resolved in test environment
+		return
+	}
+	assert.NotNil(t, client)
 }

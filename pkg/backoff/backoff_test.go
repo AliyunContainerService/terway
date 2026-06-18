@@ -190,6 +190,7 @@ func TestOverrideBackoff(t *testing.T) {
 
 	tests := []struct {
 		name     string
+		setup    map[string]ExtendedBackoff
 		input    map[string]ExtendedBackoff
 		expected map[string]ExtendedBackoff
 	}{
@@ -218,10 +219,26 @@ func TestOverrideBackoff(t *testing.T) {
 				"key1": {InitialDelay: 5},
 			},
 		},
+		{
+			name: "Zero InitialDelay inherits from existing entry",
+			setup: map[string]ExtendedBackoff{
+				"existing": {Backoff: wait.Backoff{Steps: 3}, InitialDelay: 500 * time.Millisecond},
+			},
+			input: map[string]ExtendedBackoff{
+				"existing": {Backoff: wait.Backoff{Steps: 5}, InitialDelay: 0},
+			},
+			expected: map[string]ExtendedBackoff{
+				"existing": {Backoff: wait.Backoff{Steps: 5}, InitialDelay: 500 * time.Millisecond},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			backoffMap = make(map[string]ExtendedBackoff)
+			for k, v := range tt.setup {
+				backoffMap[k] = v
+			}
 			OverrideBackoff(tt.input)
 			for k, v := range tt.expected {
 				if backoffMap[k].InitialDelay != v.InitialDelay {

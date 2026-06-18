@@ -180,6 +180,20 @@ var _ = Describe("RemoteV2", func() {
 			Expect(ch).NotTo(BeNil())
 			Expect(traces).To(BeNil())
 
+			go func() {
+				defer GinkgoRecover()
+				ticker := time.NewTicker(50 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-allocCtx.Done():
+						return
+					case <-ticker.C:
+						notifier.Notify()
+					}
+				}
+			}()
+
 			select {
 			case resp := <-ch:
 				Expect(resp).NotTo(BeNil())
@@ -246,6 +260,20 @@ var _ = Describe("RemoteV2", func() {
 				PodNamespace: "default",
 			}, &RemoteIPRequest{})
 			Expect(ch).NotTo(BeNil())
+
+			go func() {
+				defer GinkgoRecover()
+				ticker := time.NewTicker(50 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-allocCtx.Done():
+						return
+					case <-ticker.C:
+						notifier.Notify()
+					}
+				}
+			}()
 
 			select {
 			case resp := <-ch:

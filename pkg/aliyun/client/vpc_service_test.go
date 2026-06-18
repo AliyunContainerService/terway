@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/agiledragon/gomonkey/v2"
@@ -128,4 +129,51 @@ func TestVPCService_DescribeVSwitchByID_WithGomonkey(t *testing.T) {
 	assert.Len(t, result.Tags.Tag, 1)
 	assert.Equal(t, "Name", result.Tags.Tag[0].Key)
 	assert.Equal(t, "test-vswitch", result.Tags.Tag[0].Value)
+}
+
+func TestVPCService_DescribeVSwitchByID_RateLimiterError(t *testing.T) {
+	vpcService := createTestVPCServiceForAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := vpcService.DescribeVSwitchByID(ctx, "vsw-test-001")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestVPCService_DescribeVSwitchByID_APIError(t *testing.T) {
+	vpcService := createTestVPCServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*vpc.Client).DescribeVSwitches,
+		func(client *vpc.Client, request *vpc.DescribeVSwitchesRequest) (*vpc.DescribeVSwitchesResponse, error) {
+			return nil, fmt.Errorf("api error")
+		},
+	)
+	defer patches.Reset()
+
+	result, err := vpcService.DescribeVSwitchByID(context.Background(), "vsw-test-001")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestVPCService_DescribeVSwitchByID_EmptyResponse(t *testing.T) {
+	vpcService := createTestVPCServiceForAPI()
+
+	patches := gomonkey.ApplyFunc(
+		(*vpc.Client).DescribeVSwitches,
+		func(client *vpc.Client, request *vpc.DescribeVSwitchesRequest) (*vpc.DescribeVSwitchesResponse, error) {
+			return &vpc.DescribeVSwitchesResponse{
+				VSwitches: vpc.VSwitches{
+					VSwitch: []vpc.VSwitch{},
+				},
+			}, nil
+		},
+	)
+	defer patches.Reset()
+
+	result, err := vpcService.DescribeVSwitchByID(context.Background(), "vsw-test-001")
+	assert.Error(t, err)
+	assert.Nil(t, result)
 }

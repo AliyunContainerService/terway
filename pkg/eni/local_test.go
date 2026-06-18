@@ -1944,3 +1944,59 @@ func TestLocal_sync_BroadcastCalled(t *testing.T) {
 		t.Fatal("Broadcast was not called")
 	}
 }
+
+func TestLocalIPResource_ToRPC(t *testing.T) {
+	r := &LocalIPResource{
+		PodID: "default/pod-1",
+		ENI: daemon.ENI{
+			ID:  "eni-123",
+			MAC: "aa:bb:cc:dd:ee:ff",
+			VSwitchCIDR: types.IPNetSet{
+				IPv4: &net.IPNet{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(24, 32)},
+			},
+			GatewayIP: types.IPSet{IPv4: net.ParseIP("10.0.0.1")},
+			ERdma:     true,
+		},
+		IP: types.IPSet2{
+			IPv4: netip.MustParseAddr("10.0.0.5"),
+		},
+	}
+
+	result := r.ToRPC()
+	assert.Len(t, result, 1)
+	assert.NotNil(t, result[0].BasicInfo)
+	assert.Equal(t, "aa:bb:cc:dd:ee:ff", result[0].ENIInfo.MAC)
+	assert.True(t, result[0].ENIInfo.ERDMA)
+	assert.True(t, result[0].DefaultRoute)
+}
+
+func TestLocalIPResource_ToStore_Nil(t *testing.T) {
+	var r *LocalIPResource
+	assert.Nil(t, r.ToStore())
+}
+
+func TestLocalIPResource_ToStore(t *testing.T) {
+	r := &LocalIPResource{
+		ENI: daemon.ENI{
+			ID:  "eni-123",
+			MAC: "aa:bb:cc:dd:ee:ff",
+		},
+		IP: types.IPSet2{
+			IPv4: netip.MustParseAddr("10.0.0.5"),
+		},
+	}
+	items := r.ToStore()
+	assert.Len(t, items, 1)
+	assert.Equal(t, "eni-123", items[0].ENIID)
+	assert.Equal(t, "10.0.0.5", items[0].IPv4)
+}
+
+func Test_parseResourceID_EdgeCases(t *testing.T) {
+	_, _, err := parseResourceID("no-dot-separator")
+	assert.Error(t, err)
+
+	eniID, ip, err := parseResourceID("eni-123.10.0.0.1")
+	assert.NoError(t, err)
+	assert.Equal(t, "eni-123", eniID)
+	assert.Equal(t, "10.0.0.1", ip)
+}

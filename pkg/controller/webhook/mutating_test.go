@@ -11,6 +11,7 @@ import (
 
 	"github.com/agiledragon/gomonkey/v2"
 	"github.com/stretchr/testify/assert"
+	"gomodules.xyz/jsonpatch/v2"
 	corev1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -1340,7 +1341,7 @@ func TestPodNetworkingWebhook_FillBothSecurityGroupIDsAndVSwitchOptions(t *testi
 	assert.NotEmpty(t, resp.Patches)
 }
 
-func TestPodNetworkingWebhook_JsonMarshalError(t *testing.T) {
+func TestPodNetworkingWebhook_CreatePatchError(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta1.AddToScheme(scheme)
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -1381,14 +1382,8 @@ func TestPodNetworkingWebhook_JsonMarshalError(t *testing.T) {
 		return mockConfig, nil
 	})
 
-	// Mock json.Marshal to return error
-	patches.ApplyFunc(json.Marshal, func(v interface{}) ([]byte, error) {
-		// Only fail for PodNetworking type
-		if _, ok := v.(*v1beta1.PodNetworking); ok {
-			return nil, errors.New("marshal error")
-		}
-		// Use original implementation for other types
-		return json.Marshal(v)
+	patches.ApplyFunc(jsonpatch.CreatePatch, func(_, _ []byte) ([]jsonpatch.Operation, error) {
+		return nil, errors.New("create patch error")
 	})
 
 	ctx := context.Background()
@@ -1600,6 +1595,36 @@ func TestPodWebhook_FillDefaultConfig_Success(t *testing.T) {
 		}
 	}
 	assert.True(t, patchFound)
+}
+
+func TestPodNetworkingToPodNetworks(t *testing.T) {
+	pn := &v1beta1.PodNetworking{
+		Spec: v1beta1.PodNetworkingSpec{
+			VSwitchOptions:   []string{"vsw-1", "vsw-2"},
+			SecurityGroupIDs: []string{"sg-1"},
+			ENIOptions: v1beta1.ENIOptions{
+				ENIAttachType: v1beta1.ENIOptionTypeENI,
+			},
+			VSwitchSelectOptions: v1beta1.VSwitchSelectOptions{
+				VSwitchSelectionPolicy: v1beta1.VSwitchSelectionPolicyMost,
+			},
+			AllocationType: v1beta1.AllocationType{
+				Type:            v1beta1.IPAllocTypeElastic,
+				ReleaseStrategy: v1beta1.ReleaseStrategyTTL,
+				ReleaseAfter:    "5m",
+			},
+		},
+	}
+
+	result := podNetworkingToPodNetworks(pn)
+	assert.Equal(t, "eth0", result.Interface)
+	assert.Equal(t, []string{"vsw-1", "vsw-2"}, result.VSwitchOptions)
+	assert.Equal(t, []string{"sg-1"}, result.SecurityGroupIDs)
+	assert.Equal(t, v1beta1.ENIOptionTypeENI, result.ENIOptions.ENIAttachType)
+	assert.Equal(t, v1beta1.VSwitchSelectionPolicyMost, result.VSwitchSelectOptions.VSwitchSelectionPolicy)
+	assert.Equal(t, v1beta1.IPAllocType("Elastic"), result.AllocationType.Type)
+	assert.Equal(t, v1beta1.ReleaseStrategy("TTL"), result.AllocationType.ReleaseStrategy)
+	assert.Equal(t, "5m", string(result.AllocationType.ReleaseAfter))
 }
 
 func TestPodWebhook_FillDefaultConfig_Error(t *testing.T) {

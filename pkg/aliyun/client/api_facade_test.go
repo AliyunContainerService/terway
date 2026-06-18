@@ -2,15 +2,21 @@ package client_test
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
 	"github.com/agiledragon/gomonkey/v2"
+	sdkErr "github.com/aliyun/alibaba-cloud-sdk-go/sdk/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
+	_ "github.com/AliyunContainerService/terway/pkg/feature"
 )
 
 func TestNewAPIFacade(t *testing.T) {
@@ -958,4 +964,68 @@ func TestAPIFacade_WaitForNetworkInterfaceV2(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAPIFacade_DescribeNetworkInterfaceV2_ENIAttributeBasicPath(t *testing.T) {
+	clientSet := &credential.ClientMgr{}
+	facade := client.NewAPIFacade(clientSet, client.LimitConfig{})
+	eniIDs := []string{"eni-test-001"}
+
+	t.Run("ECS with ENIAttributeBasic enabled single ENI - success", func(t *testing.T) {
+		require.NoError(t, utilfeature.DefaultMutableFeatureGate.Set("ENIAttributeBasic=true"))
+		defer utilfeature.DefaultMutableFeatureGate.Set("ENIAttributeBasic=false")
+
+		ecsService := facade.GetECS()
+		patches := gomonkey.ApplyMethod(reflect.TypeOf(ecsService), "DescribeNetworkInterfaceAttribute",
+			func(_ client.ECS, ctx context.Context, eniID string) (*client.NetworkInterface, error) {
+				return &client.NetworkInterface{NetworkInterfaceID: "eni-test-001", Status: "InUse"}, nil
+			})
+		defer patches.Reset()
+
+		ctx := client.SetBackendAPI(context.Background(), client.BackendAPIECS)
+		result, err := facade.DescribeNetworkInterfaceV2(ctx, &client.DescribeNetworkInterfaceOptions{
+			NetworkInterfaceIDs: &eniIDs,
+		})
+		assert.NoError(t, err)
+		assert.Len(t, result, 1)
+		assert.Equal(t, "eni-test-001", result[0].NetworkInterfaceID)
+	})
+
+	t.Run("ECS with ENIAttributeBasic enabled single ENI - not found", func(t *testing.T) {
+		require.NoError(t, utilfeature.DefaultMutableFeatureGate.Set("ENIAttributeBasic=true"))
+		defer utilfeature.DefaultMutableFeatureGate.Set("ENIAttributeBasic=false")
+
+		ecsService := facade.GetECS()
+		patches := gomonkey.ApplyMethod(reflect.TypeOf(ecsService), "DescribeNetworkInterfaceAttribute",
+			func(_ client.ECS, ctx context.Context, eniID string) (*client.NetworkInterface, error) {
+				return nil, apiErr.WarpError(sdkErr.NewServerError(404, fmt.Sprintf("{\"Code\": \"%s\"}", apiErr.ErrInvalidENINotFound), "req-id"))
+			})
+		defer patches.Reset()
+
+		ctx := client.SetBackendAPI(context.Background(), client.BackendAPIECS)
+		result, err := facade.DescribeNetworkInterfaceV2(ctx, &client.DescribeNetworkInterfaceOptions{
+			NetworkInterfaceIDs: &eniIDs,
+		})
+		assert.NoError(t, err)
+		assert.Nil(t, result)
+	})
+
+	t.Run("ECS with ENIAttributeBasic enabled single ENI - other error", func(t *testing.T) {
+		require.NoError(t, utilfeature.DefaultMutableFeatureGate.Set("ENIAttributeBasic=true"))
+		defer utilfeature.DefaultMutableFeatureGate.Set("ENIAttributeBasic=false")
+
+		ecsService := facade.GetECS()
+		patches := gomonkey.ApplyMethod(reflect.TypeOf(ecsService), "DescribeNetworkInterfaceAttribute",
+			func(_ client.ECS, ctx context.Context, eniID string) (*client.NetworkInterface, error) {
+				return nil, fmt.Errorf("network error")
+			})
+		defer patches.Reset()
+
+		ctx := client.SetBackendAPI(context.Background(), client.BackendAPIECS)
+		result, err := facade.DescribeNetworkInterfaceV2(ctx, &client.DescribeNetworkInterfaceOptions{
+			NetworkInterfaceIDs: &eniIDs,
+		})
+		assert.Error(t, err)
+		assert.Nil(t, result)
+	})
 }

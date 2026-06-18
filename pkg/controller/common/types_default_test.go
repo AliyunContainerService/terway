@@ -7,6 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	aliyunClient "github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	"github.com/AliyunContainerService/terway/types"
 )
 
@@ -171,4 +172,54 @@ func TestNodeInfoReturnsErrorWhenInstanceIDEmpty(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Nil(t, nodeInfo)
 	assert.Contains(t, err.Error(), "instanceID")
+}
+
+func TestToNetworkInterfaceCR(t *testing.T) {
+	t.Run("basic conversion without IPv6", func(t *testing.T) {
+		eni := &aliyunClient.NetworkInterface{
+			NetworkInterfaceID: "eni-123",
+			MacAddress:         "00:11:22:33:44:55",
+			VPCID:              "vpc-123",
+			ZoneID:             "cn-hangzhou-a",
+			VSwitchID:          "vsw-123",
+			ResourceGroupID:    "rg-123",
+			SecurityGroupIDs:   []string{"sg-1", "sg-2"},
+			PrivateIPAddress:   "192.168.1.1",
+		}
+
+		cr := ToNetworkInterfaceCR(eni)
+		assert.Equal(t, "eni-123", cr.Name)
+		assert.Equal(t, "eni-123", cr.Spec.ENI.ID)
+		assert.Equal(t, "00:11:22:33:44:55", cr.Spec.ENI.MAC)
+		assert.Equal(t, "vpc-123", cr.Spec.ENI.VPCID)
+		assert.Equal(t, "cn-hangzhou-a", cr.Spec.ENI.Zone)
+		assert.Equal(t, "vsw-123", cr.Spec.ENI.VSwitchID)
+		assert.Equal(t, "rg-123", cr.Spec.ENI.ResourceGroupID)
+		assert.Equal(t, []string{"sg-1", "sg-2"}, cr.Spec.ENI.SecurityGroupIDs)
+		assert.Equal(t, "192.168.1.1", cr.Spec.IPv4)
+		assert.Empty(t, cr.Spec.IPv6)
+		assert.NotNil(t, cr.Spec.ExtraConfig)
+	})
+
+	t.Run("conversion with IPv6", func(t *testing.T) {
+		eni := &aliyunClient.NetworkInterface{
+			NetworkInterfaceID: "eni-456",
+			IPv6Set: []aliyunClient.IPSet{
+				{IPAddress: "fd00::1"},
+				{IPAddress: "fd00::2"},
+			},
+		}
+
+		cr := ToNetworkInterfaceCR(eni)
+		assert.Equal(t, "fd00::1", cr.Spec.IPv6)
+	})
+
+	t.Run("empty IPv6 set", func(t *testing.T) {
+		eni := &aliyunClient.NetworkInterface{
+			NetworkInterfaceID: "eni-789",
+		}
+
+		cr := ToNetworkInterfaceCR(eni)
+		assert.Empty(t, cr.Spec.IPv6)
+	})
 }
