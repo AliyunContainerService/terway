@@ -278,3 +278,11 @@ func Test_isMounted(t *testing.T) {
 func Test_allowEBPFNetworkPolicy(t *testing.T) {
 
 }
+
+func Test_detectMTU(t *testing.T) {
+	mtu := detectMTU()
+	// On a real Linux node, eth0 should exist and have a valid MTU
+	// On CI without eth0, it should fall back to 1500
+	assert.Greater(t, mtu, 0)
+	assert.LessOrEqual(t, mtu, 65535)
+}

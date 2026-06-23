@@ -164,7 +164,33 @@ func setExclusiveMode(store nodecap.NodeCapabilitiesStore, labels map[string]str
 
 	// write cni config
 	if now == types.ExclusiveENIOnly {
-		err = os.WriteFile(cniPath, []byte(eniOnlyCNI), 0644)
+		cniConfig := eniOnlyCNI
+
+		// nodeconfig path never runs processCNIConfig, so _detectMTU may be
+		// unset here; fall back to the real detector so auto_mtu also works
+		// for exclusive ENI-only nodes.
+		detect := _detectMTU
+		if detect == nil {
+			detect = detectMTU
+		}
+
+		if autoMTU := readAutoMTUFromConfig(eniConfBasePath); autoMTU {
+			g, err := gabs.ParseJSON([]byte(eniOnlyCNI))
+			if err != nil {
+				return err
+			}
+			mtu := detect()
+			for _, plugin := range g.Path("plugins").Children() {
+				if pluginType, ok := plugin.Path("type").Data().(string); ok && pluginType == pluginTypeTerway {
+					if err := applyMTU(plugin, mtu); err != nil {
+						return err
+					}
+				}
+			}
+			cniConfig = g.StringIndent("", "  ")
+		}
+
+		err = os.WriteFile(cniPath, []byte(cniConfig), 0644)
 		if err != nil {
 			return err
 		}

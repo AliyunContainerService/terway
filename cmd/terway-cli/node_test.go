@@ -23,6 +23,8 @@ import (
 
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/AliyunContainerService/terway/types/daemon"
+
+	"github.com/Jeffail/gabs/v2"
 )
 
 func TestExclusiveModeNewNode(t *testing.T) {
@@ -91,6 +93,40 @@ func TestExclusiveModeWritesCNIConfigWhenSet(t *testing.T) {
 	content, err := os.ReadFile(cniPath)
 	assert.NoError(t, err)
 	assert.Contains(t, string(content), `"type": "terway"`)
+}
+
+func TestExclusiveModeWritesCNIConfigWithAutoMTU(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	store := nodecap.NewFileNodeCapabilities(tempFile.Name())
+	labels := map[string]string{"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly"}
+	cniPath := tempFile.Name() + "_cni_config"
+	defer os.Remove(cniPath)
+
+	origDetectMTU := _detectMTU
+	defer func() { _detectMTU = origDetectMTU }()
+	_detectMTU = func() int { return 8500 }
+
+	// Mock readAutoMTUFromConfig via getAllConfig (auto_mtu=true in input config)
+	patchGetAllConfig := gomonkey.ApplyFunc(getAllConfig, func(base string) (*TerwayConfig, error) {
+		return &TerwayConfig{
+			cniConfig:           []byte(`{"type":"terway","auto_mtu":true}`),
+			enableNetworkPolicy: true,
+		}, nil
+	})
+	defer patchGetAllConfig.Reset()
+
+	err = setExclusiveMode(store, labels, cniPath)
+	assert.NoError(t, err)
+
+	content, err := os.ReadFile(cniPath)
+	assert.NoError(t, err)
+
+	g, err := gabs.ParseJSON(content)
+	assert.NoError(t, err)
+	assert.Equal(t, float64(8500), g.Path("plugins.0.mtu").Data())
 }
 
 func TestExclusiveModeDoesNotWriteCNIConfigWhenNotSet(t *testing.T) {

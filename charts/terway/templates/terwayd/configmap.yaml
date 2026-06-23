@@ -36,6 +36,7 @@ data:
       "eniip_virtual_type": "datapathv2",
       "host_stack_cidrs": ["169.254.20.10/32"],
 {{- end}}
+      "auto_mtu": {{ .Values.terway.autoMTU | default false }},
       "type": "terway"
     }
   disable_network_policy: {{ not .Values.terway.enableNetworkPolicy | quote }}

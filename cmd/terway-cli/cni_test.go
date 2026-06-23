@@ -837,6 +837,176 @@ func TestGetAllConfig_MissingCniConfig(t *testing.T) {
 	assert.Nil(t, cfg)
 }
 
+func Test_mergeConfigList_autoMTU(t *testing.T) {
+	_switchDataPathV2 = func() bool { return false }
+	origDetectMTU := _detectMTU
+	defer func() { _detectMTU = origDetectMTU }()
+	_detectMTU = func() int { return 9000 }
+
+	out, err := mergeConfigList([][]byte{
+		[]byte(`{
+            "type":"terway",
+            "auto_mtu": true
+        }`)}, &feature{EBPF: true, EDT: true})
+	assert.NoError(t, err)
+
+	g, err := gabs.ParseJSON([]byte(out))
+	assert.NoError(t, err)
+
+	assert.Equal(t, float64(9000), g.Path("plugins.0.mtu").Data())
+	assert.False(t, g.ExistsP("plugins.0.auto_mtu"))
+}
+
+func Test_mergeConfigList_autoMTU_disabled(t *testing.T) {
+	_switchDataPathV2 = func() bool { return false }
+
+	out, err := mergeConfigList([][]byte{
+		[]byte(`{
+            "type":"terway",
+            "foo":"bar"
+        }`)}, &feature{EBPF: true, EDT: true})
+	assert.NoError(t, err)
+
+	g, err := gabs.ParseJSON([]byte(out))
+	assert.NoError(t, err)
+
+	assert.False(t, g.ExistsP("plugins.0.mtu"))
+}
+
+func Test_mergeConfigList_autoMTU_userConfigured(t *testing.T) {
+	_switchDataPathV2 = func() bool { return false }
+	origDetectMTU := _detectMTU
+	defer func() { _detectMTU = origDetectMTU }()
+	_detectMTU = func() int { return 9000 }
+
+	out, err := mergeConfigList([][]byte{
+		[]byte(`{
+            "type":"terway",
+            "auto_mtu": true,
+            "mtu": 1400
+        }`)}, &feature{EBPF: true, EDT: true})
+	assert.NoError(t, err)
+
+	g, err := gabs.ParseJSON([]byte(out))
+	assert.NoError(t, err)
+
+	assert.Equal(t, float64(1400), g.Path("plugins.0.mtu").Data())
+}
+
+func Test_mergeConfigList_autoMTU_noEBPF(t *testing.T) {
+	_switchDataPathV2 = func() bool { return false }
+	origDetectMTU := _detectMTU
+	defer func() { _detectMTU = origDetectMTU }()
+	_detectMTU = func() int { return 9000 }
+
+	out, err := mergeConfigList([][]byte{
+		[]byte(`{
+            "type":"terway",
+            "auto_mtu": true
+        }`)}, &feature{EBPF: false, EDT: false})
+	assert.NoError(t, err)
+
+	g, err := gabs.ParseJSON([]byte(out))
+	assert.NoError(t, err)
+
+	// auto_mtu works regardless of eBPF support
+	assert.Equal(t, float64(9000), g.Path("plugins.0.mtu").Data())
+	assert.False(t, g.ExistsP("plugins.0.auto_mtu"))
+}
+
+func Test_processInput_withAutoMTU(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "cni_test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	originalOutPutPath := outPutPath
+	originalCheckKernelVersion := _checkKernelVersion
+	originalSwitchDataPathV2 := _switchDataPathV2
+	originalDetectMTU := _detectMTU
+	defer func() {
+		outPutPath = originalOutPutPath
+		_checkKernelVersion = originalCheckKernelVersion
+		_switchDataPathV2 = originalSwitchDataPathV2
+		_detectMTU = originalDetectMTU
+	}()
+
+	outPutPath = tempDir + "/output.conflist"
+	_checkKernelVersion = func(major, minor, patch int) bool { return true }
+	_switchDataPathV2 = func() bool { return false }
+	_detectMTU = func() int { return 9000 }
+
+	patchGetAllConfig := gomonkey.ApplyFunc(getAllConfig, func(base string) (*TerwayConfig, error) {
+		return &TerwayConfig{
+			cniConfig:           []byte(`{"type":"terway","auto_mtu":true}`),
+			enableNetworkPolicy: true,
+		}, nil
+	})
+	defer patchGetAllConfig.Reset()
+
+	patchCheckBpfFeature := gomonkey.ApplyFunc(checkBpfFeature, func(key string) (bool, error) {
+		return true, nil
+	})
+	defer patchCheckBpfFeature.Reset()
+
+	err = processInput()
+	assert.NoError(t, err)
+
+	data, err := os.ReadFile(outPutPath)
+	assert.NoError(t, err)
+
+	g, err := gabs.ParseJSON(data)
+	assert.NoError(t, err)
+
+	assert.Equal(t, float64(9000), g.Path("plugins.0.mtu").Data())
+	assert.False(t, g.ExistsP("plugins.0.auto_mtu"))
+}
+
+func Test_processInput_withAutoMTU_disabled(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "cni_test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	originalOutPutPath := outPutPath
+	originalCheckKernelVersion := _checkKernelVersion
+	originalSwitchDataPathV2 := _switchDataPathV2
+	originalDetectMTU := _detectMTU
+	defer func() {
+		outPutPath = originalOutPutPath
+		_checkKernelVersion = originalCheckKernelVersion
+		_switchDataPathV2 = originalSwitchDataPathV2
+		_detectMTU = originalDetectMTU
+	}()
+
+	outPutPath = tempDir + "/output.conflist"
+	_checkKernelVersion = func(major, minor, patch int) bool { return true }
+	_switchDataPathV2 = func() bool { return false }
+	_detectMTU = func() int { return 9000 }
+
+	patchGetAllConfig := gomonkey.ApplyFunc(getAllConfig, func(base string) (*TerwayConfig, error) {
+		return &TerwayConfig{
+			cniConfig:           []byte(`{"type":"terway"}`),
+			enableNetworkPolicy: true,
+		}, nil
+	})
+	defer patchGetAllConfig.Reset()
+
+	patchCheckBpfFeature := gomonkey.ApplyFunc(checkBpfFeature, func(key string) (bool, error) {
+		return true, nil
+	})
+	defer patchCheckBpfFeature.Reset()
+
+	err = processInput()
+	assert.NoError(t, err)
+
+	data, err := os.ReadFile(outPutPath)
+	assert.NoError(t, err)
+
+	g, err := gabs.ParseJSON(data)
+	assert.NoError(t, err)
+
+	assert.False(t, g.ExistsP("plugins.0.mtu"))
+}
+
 func TestGetAllConfig_MissingEniConf(t *testing.T) {
 	// Create temporary directory
 	tempDir, err := os.MkdirTemp("", "getAllConfig_test")

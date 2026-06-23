@@ -31,3 +31,5 @@ func configureNetworkRulesWithConfig(ipv4, ipv6 bool, config *types.SymmetricRou
 }
 
 func mountHostBpf() error { return nil }
+
+func detectMTU() int { return defaultMTU }
