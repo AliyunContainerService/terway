@@ -15,13 +15,11 @@
 #
 # Profiles:
 #   byo-ipv4      single stack ipv4, no terway addon; deploy terway via helm chart afterwards (BYO CNI)
+#   byo-dual      dual stack, no terway addon; deploy terway via helm chart afterwards (BYO CNI)
 #   ack-ipv4      single stack ipv4 + terway-eniip addon installed by ACK
 #   ack-dual      dual stack + terway-eniip addon installed by ACK
 #                 (terway-controlplane is hosted by Aliyun in managed clusters; only a placeholder
 #                  service/terway-controlplane is visible to the user)
-#
-# The combination dual-stack + BYO is unsupported by the ACK API (rejected with
-# IPv6DependencyNotSatisfied.NetworkPlugin).
 #
 
 set -euo pipefail
@@ -73,13 +71,13 @@ profile_to_vars() {
             SERVICE_CIDR="192.168.0.0/16,fd00:1234::/112"
             ;;
         byo-dual)
-            log_error "Profile 'byo-dual' is not supported: ACK API rejects dual-stack clusters without a CNI plugin."
-            log_error "Use one of: byo-ipv4, ack-ipv4, ack-dual."
-            exit 2
+            IP_STACK="dual"
+            CLUSTER_MODE="byo"
+            SERVICE_CIDR="192.168.0.0/16,fd00:1234::/112"
             ;;
         *)
             log_error "Unknown profile: '$profile'"
-            log_error "Valid profiles: byo-ipv4, ack-ipv4, ack-dual"
+            log_error "Valid profiles: byo-ipv4, byo-dual, ack-ipv4, ack-dual"
             exit 2
             ;;
     esac
@@ -117,7 +115,7 @@ EOF
 cmd_create() {
     if [[ $# -lt 1 ]]; then
         log_error "create requires a profile argument"
-        log_error "Valid profiles: byo-ipv4, ack-ipv4, ack-dual"
+        log_error "Valid profiles: byo-ipv4, byo-dual, ack-ipv4, ack-dual"
         exit 2
     fi
     local profile="$1"; shift

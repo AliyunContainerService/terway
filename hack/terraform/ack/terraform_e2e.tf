@@ -365,10 +365,6 @@ resource "alicloud_cs_managed_kubernetes" "default" {
 
   lifecycle {
     precondition {
-      condition     = !(var.cluster_mode == "byo" && var.ip_stack == "dual")
-      error_message = "byo + dual is not supported by ACK API (creating a dual-stack cluster without a CNI plugin is rejected with IPv6DependencyNotSatisfied.NetworkPlugin)."
-    }
-    precondition {
       condition     = var.ip_stack != "dual" || length(split(",", var.service_cidr)) >= 2
       error_message = "dual stack requires service_cidr to contain both IPv4 and IPv6 CIDRs (comma-separated, e.g. \"192.168.0.0/16,fd00:1234::/112\")."
     }
