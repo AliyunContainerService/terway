@@ -152,6 +152,19 @@ func parseRelease(rel string) (major, minor, patch int, ok bool) {
 	return
 }
 
+// detectMTU returns the MTU of eth0. If eth0 is not found, returns defaultMTU.
+func detectMTU() int {
+	link, err := netlink.LinkByName("eth0")
+	if err != nil {
+		return defaultMTU
+	}
+	mtu := link.Attrs().MTU
+	if mtu <= 0 {
+		return defaultMTU
+	}
+	return mtu
+}
+
 func mountHostBpf() error {
 	target := "/sys/fs/bpf"
 

@@ -21,6 +21,12 @@ type switchDataPathV2Func func() bool
 
 var _switchDataPathV2 switchDataPathV2Func
 
+type detectMTUFunc func() int
+
+var _detectMTU detectMTUFunc
+
+const defaultMTU = 1500
+
 const (
 	dataPathDefault = ""
 	dataPathVeth    = "veth"
@@ -69,6 +75,8 @@ func processCNIConfig(cmd *cobra.Command, args []string) error {
 	_checkKernelVersion = checkKernelVersion
 
 	_switchDataPathV2 = switchDataPathV2
+
+	_detectMTU = detectMTU
 
 	err := processInput()
 	if err != nil {
@@ -278,6 +286,15 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 					return "", err
 				}
 			}
+
+			if autoMTU, ok := plugin.Path("auto_mtu").Data().(bool); ok {
+				_ = plugin.Delete("auto_mtu")
+				if autoMTU && _detectMTU != nil {
+					if err = applyMTU(plugin, _detectMTU()); err != nil {
+						return "", err
+					}
+				}
+			}
 		}
 
 		err = g.ArrayConcat(plugin.Data(), "plugins")
@@ -294,6 +311,48 @@ func mergeConfigList(configs [][]byte, f *feature) (string, error) {
 	}
 
 	return g.StringIndent("", "  "), nil
+}
+
+// applyMTU sets the mtu field on the plugin when it is not already set and
+// the detected mtu is positive.
+func applyMTU(plugin *gabs.Container, mtu int) error {
+	if plugin.Exists("mtu") || mtu <= 0 {
+		return nil
+	}
+	_, err := plugin.Set(mtu, "mtu")
+	return err
+}
+
+// readAutoMTUFromConfig reads the auto_mtu setting from the terway plugin
+// in the CNI config file at the given base path.
+func readAutoMTUFromConfig(basePath string) bool {
+	cfg, err := getAllConfig(basePath)
+	if err != nil {
+		return false
+	}
+	input := cfg.cniConfig
+	if cfg.cniConfigList != nil {
+		input = cfg.cniConfigList
+	}
+	c, err := gabs.ParseJSON(input)
+	if err != nil {
+		return false
+	}
+
+	var plugins []*gabs.Container
+	if c.Exists("plugins") {
+		plugins = c.Path("plugins").Children()
+	} else {
+		plugins = []*gabs.Container{c}
+	}
+	for _, plugin := range plugins {
+		if pluginType, ok := plugin.Path("type").Data().(string); ok && pluginType == pluginTypeTerway {
+			if autoMTU, ok := plugin.Path("auto_mtu").Data().(bool); ok {
+				return autoMTU
+			}
+		}
+	}
+	return false
 }
 
 func isMounted(path string) (bool, error) {
