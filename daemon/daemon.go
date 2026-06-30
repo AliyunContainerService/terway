@@ -940,6 +940,11 @@ func runDevicePlugin(daemonMode string, config *daemon.Config, poolConfig *daemo
 			dp := deviceplugin.NewENIDevicePlugin(poolConfig.MaxMemberENI, deviceplugin.ENITypeMember)
 			go dp.Serve()
 		}
+	case daemon.ModeENIOnly:
+		if !config.DisableDevicePlugin {
+			dp := deviceplugin.NewENIDevicePlugin(poolConfig.Capacity, deviceplugin.ENITypeENI)
+			go dp.Serve()
+		}
 	}
 
 	if config.EnableERDMA {
