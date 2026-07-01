@@ -1637,6 +1637,129 @@ func TestRunDevicePlugin(t *testing.T) {
 	}
 }
 
+func TestRunDevicePlugin_ENIOnly(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	var capturedCount int
+	var capturedType string
+
+	dp := deviceplugin.NewENIDevicePlugin(0, deviceplugin.ENITypeENI)
+	serveCalled := make(chan struct{}, 2)
+
+	patches.ApplyFunc(deviceplugin.NewENIDevicePlugin, func(count int, eniType string) *deviceplugin.ENIDevicePlugin {
+		capturedCount = count
+		capturedType = eniType
+		return dp
+	})
+	patches.ApplyMethodFunc(dp, "Serve", func() {
+		serveCalled <- struct{}{}
+	})
+
+	capacity := 5
+	runDevicePlugin(daemon.ModeENIOnly, &daemon.Config{
+		EnableENITrunking: false,
+		EnableERDMA:       false,
+	}, &daemon.PoolConfig{Capacity: capacity})
+
+	select {
+	case <-serveCalled:
+		// Serve was called
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for Serve to be called")
+	}
+
+	assert.Equal(t, capacity, capturedCount, "ENIOnly should register device plugin with poolConfig.Capacity")
+	assert.Equal(t, deviceplugin.ENITypeENI, capturedType, "ENIOnly should register ENITypeENI, not member")
+}
+
+func TestRunDevicePlugin_ENIOnly_DisableDevicePlugin(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	dp := deviceplugin.NewENIDevicePlugin(0, deviceplugin.ENITypeENI)
+	var registeredTypes []string
+
+	patches.ApplyFunc(deviceplugin.NewENIDevicePlugin, func(count int, eniType string) *deviceplugin.ENIDevicePlugin {
+		registeredTypes = append(registeredTypes, eniType)
+		return dp
+	})
+
+	runDevicePlugin(daemon.ModeENIOnly, &daemon.Config{
+		DisableDevicePlugin: true,
+		EnableERDMA:         false,
+	}, &daemon.PoolConfig{Capacity: 5})
+
+	assert.Empty(t, registeredTypes, "ENIOnly should not register device plugin when disabled")
+}
+
+func TestRunDevicePlugin_ENIOnly_NoMemberENI(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	dp := deviceplugin.NewENIDevicePlugin(0, deviceplugin.ENITypeENI)
+
+	var registeredTypes []string
+	serveCalled := make(chan struct{}, 2)
+
+	patches.ApplyFunc(deviceplugin.NewENIDevicePlugin, func(count int, eniType string) *deviceplugin.ENIDevicePlugin {
+		registeredTypes = append(registeredTypes, eniType)
+		return dp
+	})
+	patches.ApplyMethod(dp, "Serve", func() {
+		serveCalled <- struct{}{}
+	})
+
+	runDevicePlugin(daemon.ModeENIOnly, &daemon.Config{
+		EnableENITrunking: false,
+		EnableERDMA:       false,
+	}, &daemon.PoolConfig{Capacity: 3})
+
+	select {
+	case <-serveCalled:
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for Serve to be called")
+	}
+
+	assert.Equal(t, []string{deviceplugin.ENITypeENI}, registeredTypes,
+		"ENIOnly mode should only register ENITypeENI, not member ENI")
+	for _, rt := range registeredTypes {
+		assert.NotEqual(t, deviceplugin.ENITypeMember, rt,
+			"ENIOnly mode must NOT register member-eni device plugin")
+	}
+}
+
+func TestRunDevicePlugin_ENIMultiIP_NoTrunking(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	dp := deviceplugin.NewENIDevicePlugin(0, deviceplugin.ENITypeENI)
+
+	var registeredTypes []string
+
+	patches.ApplyFunc(deviceplugin.NewENIDevicePlugin, func(count int, eniType string) *deviceplugin.ENIDevicePlugin {
+		registeredTypes = append(registeredTypes, eniType)
+		return dp
+	})
+	patches.ApplyMethod(dp, "Serve", func() {})
+
+	// ENIMultiIP without trunking should NOT register any ENI device plugin
+	runDevicePlugin(daemon.ModeENIMultiIP, &daemon.Config{
+		EnableENITrunking: false,
+		EnableERDMA:       false,
+	}, &daemon.PoolConfig{})
+
+	// Give goroutines a moment to execute
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Empty(t, registeredTypes,
+		"ENIMultiIP without trunking and without ERDMA should not register any device plugin")
+}
+
 func TestNewServer(t *testing.T) {
 	patches := gomonkey.NewPatches()
 	defer patches.Reset()

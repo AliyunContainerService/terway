@@ -13,11 +13,14 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
 	clientmocks "github.com/AliyunContainerService/terway/pkg/aliyun/client/mocks"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/credential"
+	eni2 "github.com/AliyunContainerService/terway/pkg/aliyun/eni"
 	"github.com/AliyunContainerService/terway/pkg/aliyun/instance"
 	instancemocks "github.com/AliyunContainerService/terway/pkg/aliyun/instance/mocks"
 	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/eni"
+	"github.com/AliyunContainerService/terway/pkg/factory"
+	"github.com/AliyunContainerService/terway/pkg/factory/aliyun"
 	factorymocks "github.com/AliyunContainerService/terway/pkg/factory/mocks"
 	"github.com/AliyunContainerService/terway/pkg/k8s"
 	k8smocks "github.com/AliyunContainerService/terway/pkg/k8s/mocks"
@@ -1742,4 +1745,179 @@ func TestValidatePrefixConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSetupENIManager_ExclusiveENI_DisablesTrunking verifies that setupENIManager
+// sets EnableENITrunking=false when daemonMode is ModeENIOnly, preventing the
+// trunk ENI initialization path from running.
+func TestSetupENIManager_ExclusiveENI_DisablesTrunking(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	// Setup instance metadata mocks
+	mockMeta := instancemocks.NewInterface(t)
+	mockMeta.On("GetZoneID").Return("cn-hangzhou-a", nil).Maybe()
+	mockMeta.On("GetInstanceID").Return("i-test123", nil).Maybe()
+	mockMeta.On("GetVSwitchID").Return("vsw-test123", nil).Maybe()
+	instance.Init(mockMeta)
+
+	mockK8s := k8smocks.NewKubernetes(t)
+	mockK8s.On("PatchNodeAnnotations", mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockK8s.On("GetClient").Return(nil).Maybe()
+
+	mockECS := clientmocks.NewECS(t)
+	aliyunClient := &client.APIFacade{}
+	patches.ApplyMethodFunc(aliyunClient, "GetECS", func() client.ECS {
+		return mockECS
+	})
+
+	patches.ApplyFunc(getENIConfig, func(cfg *daemon.Config, zoneID string) *daemon.ENIConfig {
+		return &daemon.ENIConfig{SecurityGroupIDs: []string{"sg-123456"}}
+	})
+	patches.ApplyFunc(getPoolConfig, func(cfg *daemon.Config, daemonMode string, limit *client.Limits) (*daemon.PoolConfig, error) {
+		return &daemon.PoolConfig{Capacity: 5, MaxENI: 3}, nil
+	})
+	patches.ApplyFunc(vswpool.NewSwitchPool, func(size int, ttl string) (*vswpool.SwitchPool, error) {
+		return &vswpool.SwitchPool{}, nil
+	})
+
+	// Mock the Aliyun factory constructor with correct signature, and patch its
+	// method on the nil receiver to handle GetAttachedNetworkInterface.
+	patches.ApplyFunc(aliyun.NewAliyun, func(ctx context.Context, openAPI client.OpenAPI, getter eni2.ENIInfoGetter, vsw *vswpool.SwitchPool, cfg *daemon.ENIConfig) *aliyun.Aliyun {
+		return nil
+	})
+	patches.ApplyMethodFunc((*aliyun.Aliyun)(nil), "GetAttachedNetworkInterface", func(trunkENIID string) ([]*daemon.ENI, error) {
+		return []*daemon.ENI{}, nil
+	})
+
+	patches.ApplyFunc(eni.NewRemote, func(c ctrlclient.Client, trunkENI *daemon.ENI, notifier *eni.Notifier) *eni.Remote {
+		return &eni.Remote{}
+	})
+	patches.ApplyFunc(eni.NewManager, func(pool *daemon.PoolConfig, syncPeriod time.Duration, nis []eni.NetworkInterface, policy daemon.EniSelectionPolicy, k k8s.Kubernetes) *eni.Manager {
+		return &eni.Manager{}
+	})
+	patches.ApplyMethodFunc(&eni.Manager{}, "Run", func(ctx context.Context, wg *sync.WaitGroup, podResources []daemon.PodResources) error {
+		return nil
+	})
+	patches.ApplyFunc(runDevicePlugin, func(daemonMode string, config *daemon.Config, poolConfig *daemon.PoolConfig) {})
+	patches.ApplyFunc(preStartResourceManager, func(daemonMode string, k k8s.Kubernetes) error {
+		return nil
+	})
+
+	config := &daemon.Config{
+		IPStack:           "ipv4",
+		IPAMType:          "crd", // prevent GC loop from starting
+		EnableENITrunking: true,  // Should be disabled by setupENIManager for ENIOnly
+		EnableERDMA:       false,
+	}
+
+	builder := &NetworkServiceBuilder{
+		ctx:          context.Background(),
+		daemonMode:   daemon.ModeENIOnly,
+		config:       config,
+		service:      &networkService{k8s: mockK8s, resourceDB: storage.NewMemoryStorage(), enableIPv4: true},
+		aliyunClient: aliyunClient,
+		limit:        &client.Limits{Adapters: 4, IPv4PerAdapter: 10},
+		eflo:         false,
+	}
+
+	err := builder.setupENIManager()
+	assert.NoError(t, err)
+
+	// The key assertion: EnableENITrunking must be false after setupENIManager
+	// when daemonMode is ModeENIOnly
+	assert.False(t, config.EnableENITrunking,
+		"setupENIManager should disable ENI trunking for exclusive ENI mode (ModeENIOnly)")
+}
+
+// TestSetupENIManager_ENIMultiIP_PreservesTrunking verifies that setupENIManager
+// does NOT disable EnableENITrunking when daemonMode is ModeENIMultiIP.
+func TestSetupENIManager_ENIMultiIP_PreservesTrunking(t *testing.T) {
+	runtime.GC()
+	patches := gomonkey.NewPatches()
+	defer func() {
+		patches.Reset()
+		runtime.GC()
+	}()
+
+	mockMeta := instancemocks.NewInterface(t)
+	mockMeta.On("GetZoneID").Return("cn-hangzhou-a", nil).Maybe()
+	mockMeta.On("GetInstanceID").Return("i-test123", nil).Maybe()
+	mockMeta.On("GetVSwitchID").Return("vsw-test123", nil).Maybe()
+	instance.Init(mockMeta)
+
+	mockK8s := k8smocks.NewKubernetes(t)
+	mockK8s.On("PatchNodeAnnotations", mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockK8s.On("GetTrunkID").Return("").Maybe()
+	mockK8s.On("GetClient").Return(nil).Maybe()
+
+	mockECS := clientmocks.NewECS(t)
+	aliyunClient := &client.APIFacade{}
+	patches.ApplyMethodFunc(aliyunClient, "GetECS", func() client.ECS {
+		return mockECS
+	})
+
+	patches.ApplyFunc(getENIConfig, func(cfg *daemon.Config, zoneID string) *daemon.ENIConfig {
+		return &daemon.ENIConfig{SecurityGroupIDs: []string{"sg-123456"}}
+	})
+	patches.ApplyFunc(getPoolConfig, func(cfg *daemon.Config, daemonMode string, limit *client.Limits) (*daemon.PoolConfig, error) {
+		return &daemon.PoolConfig{Capacity: 30, MaxENI: 3, MaxMemberENI: 10}, nil
+	})
+	patches.ApplyFunc(vswpool.NewSwitchPool, func(size int, ttl string) (*vswpool.SwitchPool, error) {
+		return &vswpool.SwitchPool{}, nil
+	})
+
+	patches.ApplyFunc(aliyun.NewAliyun, func(ctx context.Context, openAPI client.OpenAPI, getter eni2.ENIInfoGetter, vsw *vswpool.SwitchPool, cfg *daemon.ENIConfig) *aliyun.Aliyun {
+		return nil
+	})
+	patches.ApplyMethodFunc((*aliyun.Aliyun)(nil), "GetAttachedNetworkInterface", func(trunkENIID string) ([]*daemon.ENI, error) {
+		return []*daemon.ENI{}, nil
+	})
+
+	// initTrunk is called when EnableENITrunking stays true (ENIMultiIP mode)
+	patches.ApplyFunc(initTrunk, func(config *daemon.Config, poolConfig *daemon.PoolConfig, k8sClient k8s.Kubernetes, f factory.Factory) (string, error) {
+		return "", nil
+	})
+
+	patches.ApplyFunc(eni.NewLocal, func(e *daemon.ENI, eniType string, f factory.Factory, poolConfig *daemon.PoolConfig) *eni.Local {
+		return &eni.Local{}
+	})
+	patches.ApplyFunc(eni.NewManager, func(pool *daemon.PoolConfig, syncPeriod time.Duration, nis []eni.NetworkInterface, policy daemon.EniSelectionPolicy, k k8s.Kubernetes) *eni.Manager {
+		return &eni.Manager{}
+	})
+	patches.ApplyMethodFunc(&eni.Manager{}, "Run", func(ctx context.Context, wg *sync.WaitGroup, podResources []daemon.PodResources) error {
+		return nil
+	})
+	patches.ApplyFunc(runDevicePlugin, func(daemonMode string, config *daemon.Config, poolConfig *daemon.PoolConfig) {})
+	patches.ApplyFunc(preStartResourceManager, func(daemonMode string, k k8s.Kubernetes) error {
+		return nil
+	})
+
+	config := &daemon.Config{
+		IPStack:           "ipv4",
+		IPAMType:          "crd", // prevent GC loop from starting
+		EnableENITrunking: true,  // Should remain true for ENIMultiIP
+		EnableERDMA:       false,
+	}
+
+	builder := &NetworkServiceBuilder{
+		ctx:          context.Background(),
+		daemonMode:   daemon.ModeENIMultiIP,
+		config:       config,
+		service:      &networkService{k8s: mockK8s, resourceDB: storage.NewMemoryStorage(), enableIPv4: true},
+		aliyunClient: aliyunClient,
+		limit:        &client.Limits{Adapters: 4, IPv4PerAdapter: 10},
+		eflo:         false,
+	}
+
+	err := builder.setupENIManager()
+	assert.NoError(t, err)
+
+	// EnableENITrunking should NOT be disabled for ENIMultiIP mode
+	assert.True(t, config.EnableENITrunking,
+		"setupENIManager should NOT disable trunking for ENIMultiIP mode")
 }
