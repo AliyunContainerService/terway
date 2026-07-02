@@ -296,6 +296,11 @@ func (b *NetworkServiceBuilder) setupENIManager() error {
 		factory = aliyun.NewAliyun(b.ctx, b.aliyunClient, eni2.NewENIMetadata(enableIPv4, enableIPv6), vswPool, eniConfig)
 	}
 
+	if b.config.EnableENITrunking && b.daemonMode == daemon.ModeENIOnly {
+		b.config.EnableENITrunking = false
+		serviceLog.Info("exclusive eni mode, disable trunking")
+	}
+
 	if b.config.EnableENITrunking {
 		trunkENIID, err = initTrunk(b.config, poolConfig, b.service.k8s, factory)
 		if err != nil {
