@@ -5,6 +5,7 @@ import (
 
 	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"github.com/stretchr/testify/assert"
 	"k8s.io/utils/ptr"
 )
 
@@ -335,4 +336,117 @@ func TestFromAttributeResp_InstanceIDDirectTakesPrecedence(t *testing.T) {
 	if ni.InstanceID != "i-direct" {
 		t.Errorf("expected direct InstanceID to take precedence, got %s", ni.InstanceID)
 	}
+}
+
+func TestClassifyENILinkCapability(t *testing.T) {
+	t.Run("empty list", func(t *testing.T) {
+		hasPrimary, hasMigration := ClassifyENILinkCapability(nil)
+		assert.False(t, hasPrimary)
+		assert.False(t, hasMigration)
+	})
+
+	t.Run("primary ENI", func(t *testing.T) {
+		enis := []*NetworkInterface{
+			{Type: ENITypePrimary},
+		}
+		hasPrimary, hasMigration := ClassifyENILinkCapability(enis)
+		assert.True(t, hasPrimary)
+		assert.False(t, hasMigration)
+	})
+
+	t.Run("migration tags both set", func(t *testing.T) {
+		enis := []*NetworkInterface{
+			{
+				Type: ENITypeSecondary,
+				Tags: []ecs.Tag{
+					{TagKey: "leni_primary", TagValue: "true"},
+					{TagKey: "acs:ecs:support_eni", TagValue: "true"},
+				},
+			},
+		}
+		hasPrimary, hasMigration := ClassifyENILinkCapability(enis)
+		assert.False(t, hasPrimary)
+		assert.True(t, hasMigration)
+	})
+
+	t.Run("only leni_primary tag", func(t *testing.T) {
+		enis := []*NetworkInterface{
+			{
+				Type: ENITypeSecondary,
+				Tags: []ecs.Tag{
+					{TagKey: "leni_primary", TagValue: "true"},
+				},
+			},
+		}
+		_, hasMigration := ClassifyENILinkCapability(enis)
+		assert.False(t, hasMigration)
+	})
+
+	t.Run("primary and migration mixed", func(t *testing.T) {
+		enis := []*NetworkInterface{
+			{Type: ENITypePrimary},
+			{
+				Type: ENITypeSecondary,
+				Tags: []ecs.Tag{
+					{TagKey: "leni_primary", TagValue: "true"},
+					{TagKey: "acs:ecs:support_eni", TagValue: "true"},
+				},
+			},
+		}
+		hasPrimary, hasMigration := ClassifyENILinkCapability(enis)
+		assert.True(t, hasPrimary)
+		assert.True(t, hasMigration)
+	})
+}
+
+func TestIsLENIPrimary(t *testing.T) {
+	t.Run("both tags present", func(t *testing.T) {
+		eni := &NetworkInterface{
+			Type: ENITypeSecondary,
+			Tags: []ecs.Tag{
+				{TagKey: "leni_primary", TagValue: "true"},
+				{TagKey: "acs:ecs:support_eni", TagValue: "true"},
+			},
+		}
+		assert.True(t, IsLENIPrimary(eni))
+	})
+
+	t.Run("only leni_primary tag", func(t *testing.T) {
+		eni := &NetworkInterface{
+			Type: ENITypeSecondary,
+			Tags: []ecs.Tag{
+				{TagKey: "leni_primary", TagValue: "true"},
+			},
+		}
+		assert.False(t, IsLENIPrimary(eni))
+	})
+
+	t.Run("only support_eni tag", func(t *testing.T) {
+		eni := &NetworkInterface{
+			Type: ENITypeSecondary,
+			Tags: []ecs.Tag{
+				{TagKey: "acs:ecs:support_eni", TagValue: "true"},
+			},
+		}
+		assert.False(t, IsLENIPrimary(eni))
+	})
+
+	t.Run("no tags", func(t *testing.T) {
+		eni := &NetworkInterface{
+			Type: ENITypeSecondary,
+		}
+		assert.False(t, IsLENIPrimary(eni))
+	})
+
+	t.Run("tags with wrong values", func(t *testing.T) {
+		eni := &NetworkInterface{
+			Type: ENITypeSecondary,
+			Tags: []ecs.Tag{
+				{TagKey: "leni_primary", TagValue: "false"},
+				{TagKey: "acs:ecs:support_eni", TagValue: "true"},
+			},
+		}
+		assert.False(t, IsLENIPrimary(eni))
+	})
+
 }
