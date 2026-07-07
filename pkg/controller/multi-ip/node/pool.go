@@ -462,9 +462,12 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 		return err
 	}
 
-	// ignore primary eni
+	// ignore primary eni (including migration-tagged LENI primary on lingjun nodes)
 	enis = lo.Filter(enis, func(item *aliyunClient.NetworkInterface, index int) bool {
-		return item.Type != aliyunClient.ENITypePrimary
+		if item.Type == aliyunClient.ENITypePrimary {
+			return false
+		}
+		return !aliyunClient.IsLENIPrimary(item)
 	})
 
 	eniIDMap := map[string]struct{}{}

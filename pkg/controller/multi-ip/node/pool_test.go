@@ -19,6 +19,7 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
 	vswpool "github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -3167,6 +3168,61 @@ var _ = Describe("Test ReconcileNode", func() {
 			By("Syncing network interfaces with API")
 			err := reconciler.syncWithAPI(ctx, node)
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("Should filter out LENI primary ENI with migration tags", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
+			MetaCtx(ctx).NeedSyncOpenAPI.Store(true)
+
+			// Setup mock API
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+
+			// Setup vSwitch
+			mockHelper.SetupVSwitch("vsw-1", &vpc.VSwitch{
+				VSwitchId:               "vsw-1",
+				ZoneId:                  "zone-1",
+				AvailableIpAddressCount: 10,
+				CidrBlock:               "192.168.0.0/16",
+				Ipv6CidrBlock:           "fd00::/64",
+			})
+
+			// Build a LENI primary ENI (migration-tagged, serves as node's primary interface)
+			leniPrimaryENI := BuildMockENI("eni-leni", "Secondary", "InUse", "vsw-1", "zone-1",
+				[]string{"172.16.0.153", "172.16.0.215"}, nil)
+			leniPrimaryENI.Tags = []ecs.Tag{
+				{TagKey: "leni_primary", TagValue: "true"},
+				{TagKey: "acs:ecs:support_eni", TagValue: "true"},
+			}
+
+			// Setup API to return: LENI primary (should be filtered), normal secondary (should be kept)
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				leniPrimaryENI,
+				BuildMockENI("eni-normal", "Secondary", "InUse", "vsw-1", "zone-1",
+					[]string{"192.168.0.10", "192.168.0.11"}, nil),
+			}, nil).Maybe()
+
+			node := NewNodeFactory("lingjun-node").
+				WithECS().
+				WithInstanceID("test-lingjun-instance").
+				Build()
+
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithSyncPeriod(time.Hour).
+				WithDefaults().
+				Build()
+
+			By("Syncing network interfaces with API")
+			err := reconciler.syncWithAPI(ctx, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying LENI primary ENI was filtered out")
+			Expect(node.Status.NetworkInterfaces).To(HaveLen(1))
+			Expect(node.Status.NetworkInterfaces).To(HaveKey("eni-normal"))
+			Expect(node.Status.NetworkInterfaces).NotTo(HaveKey("eni-leni"))
 		})
 	})
 
