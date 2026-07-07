@@ -225,6 +225,22 @@ func LogFields(l logr.Logger, obj any) logr.Logger {
 	return r
 }
 
+// IsLENIPrimary returns true if the ENI has both leni_primary=true and
+// acs:ecs:support_eni=true tags, indicating it's a migrated LENI primary
+// that serves as the node's primary interface.
+func IsLENIPrimary(eni *NetworkInterface) bool {
+	var leniPrimary, supportENI bool
+	for _, tag := range eni.Tags {
+		if tag.TagKey == "leni_primary" && tag.TagValue == "true" {
+			leniPrimary = true
+		}
+		if tag.TagKey == "acs:ecs:support_eni" && tag.TagValue == "true" {
+			supportENI = true
+		}
+	}
+	return leniPrimary && supportENI
+}
+
 // ClassifyENILinkCapability checks whether a list of ENIs indicates ECS link support.
 // hasPrimary is true when a Primary ENI exists (new ENI link instances).
 // hasMigrationTags is true when any non-Primary ENI has both leni_primary=true
@@ -235,17 +251,7 @@ func ClassifyENILinkCapability(enis []*NetworkInterface) (hasPrimary, hasMigrati
 			hasPrimary = true
 			continue
 		}
-
-		var leniPrimary, supportENI bool
-		for _, tag := range eni.Tags {
-			if tag.TagKey == "leni_primary" && tag.TagValue == "true" {
-				leniPrimary = true
-			}
-			if tag.TagKey == "acs:ecs:support_eni" && tag.TagValue == "true" {
-				supportENI = true
-			}
-		}
-		if leniPrimary && supportENI {
+		if IsLENIPrimary(eni) {
 			hasMigrationTags = true
 		}
 	}

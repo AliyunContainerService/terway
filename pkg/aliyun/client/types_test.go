@@ -398,3 +398,55 @@ func TestClassifyENILinkCapability(t *testing.T) {
 		assert.True(t, hasMigration)
 	})
 }
+
+func TestIsLENIPrimary(t *testing.T) {
+	t.Run("both tags present", func(t *testing.T) {
+		eni := &NetworkInterface{
+			Type: ENITypeSecondary,
+			Tags: []ecs.Tag{
+				{TagKey: "leni_primary", TagValue: "true"},
+				{TagKey: "acs:ecs:support_eni", TagValue: "true"},
+			},
+		}
+		assert.True(t, IsLENIPrimary(eni))
+	})
+
+	t.Run("only leni_primary tag", func(t *testing.T) {
+		eni := &NetworkInterface{
+			Type: ENITypeSecondary,
+			Tags: []ecs.Tag{
+				{TagKey: "leni_primary", TagValue: "true"},
+			},
+		}
+		assert.False(t, IsLENIPrimary(eni))
+	})
+
+	t.Run("only support_eni tag", func(t *testing.T) {
+		eni := &NetworkInterface{
+			Type: ENITypeSecondary,
+			Tags: []ecs.Tag{
+				{TagKey: "acs:ecs:support_eni", TagValue: "true"},
+			},
+		}
+		assert.False(t, IsLENIPrimary(eni))
+	})
+
+	t.Run("no tags", func(t *testing.T) {
+		eni := &NetworkInterface{
+			Type: ENITypeSecondary,
+		}
+		assert.False(t, IsLENIPrimary(eni))
+	})
+
+	t.Run("tags with wrong values", func(t *testing.T) {
+		eni := &NetworkInterface{
+			Type: ENITypeSecondary,
+			Tags: []ecs.Tag{
+				{TagKey: "leni_primary", TagValue: "false"},
+				{TagKey: "acs:ecs:support_eni", TagValue: "true"},
+			},
+		}
+		assert.False(t, IsLENIPrimary(eni))
+	})
+
+}
