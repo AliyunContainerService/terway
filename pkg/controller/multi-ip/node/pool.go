@@ -968,9 +968,20 @@ func (n *ReconcileNode) syncTaskQueueStatus(ctx context.Context, node *networkv1
 				nic.PrimaryIPAddress = task.ENIInfo.PrivateIPAddress
 				nic.NetworkInterfaceTrafficMode = networkv1beta1.NetworkInterfaceTrafficMode(task.ENIInfo.NetworkInterfaceTrafficMode)
 
-				// Convert IP sets using existing helper function
-				nic.IPv4 = convertIPSet(task.ENIInfo.PrivateIPSets)
-				nic.IPv6 = convertIPSet(task.ENIInfo.IPv6Set)
+				// Merge IP sets from the task result, preserving existing PodID bindings.
+				// A recovery task may complete after IPs have already been assigned to pods
+				// (the task was submitted when the ENI was Attaching, but by the time it
+				// completes the ENI is InUse with active pod bindings).
+				if nic.IPv4 == nil {
+					nic.IPv4 = convertIPSet(task.ENIInfo.PrivateIPSets)
+				} else {
+					mergeIPMap(l, convertIPSet(task.ENIInfo.PrivateIPSets), nic.IPv4)
+				}
+				if nic.IPv6 == nil {
+					nic.IPv6 = convertIPSet(task.ENIInfo.IPv6Set)
+				} else {
+					mergeIPMap(l, convertIPSet(task.ENIInfo.IPv6Set), nic.IPv6)
+				}
 
 				// IMPORTANT: Update prefixes from DescribeNetworkInterface response.
 				// This ensures prefixes are correctly recorded even if the CreateNetworkInterface

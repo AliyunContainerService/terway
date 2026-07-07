@@ -2722,6 +2722,104 @@ var _ = Describe("Test ReconcileNode", func() {
 		})
 	})
 
+	Context("Test syncTaskQueueStatus preserves PodID", func() {
+		It("Should preserve existing PodID bindings when syncing completed task", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
+
+			// Setup mock API
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, _, _ = mockHelper.GetMocks()
+			openAPI.On("AttachNetworkInterfaceV2", mock.Anything, mock.Anything).Return(nil).Maybe()
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{}, nil).Maybe()
+
+			// Create reconciler with task queue
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithDefaults().
+				Build()
+
+			By("Setting up node with InUse ENI that has an IP already assigned to a Pod")
+			ipv4s := map[string]*networkv1beta1.IP{
+				"10.149.35.182": {
+					IP:      "10.149.35.182",
+					Status:  networkv1beta1.IPStatusValid,
+					Primary: true,
+					PodID:   "kube-system/loongcollector",
+					PodUID:  "uid-loongcollector",
+				},
+				"10.149.38.38": {
+					IP:      "10.149.38.38",
+					Status:  networkv1beta1.IPStatusValid,
+					Primary: false,
+					PodID:   "",
+				},
+			}
+			eniInUse := BuildENIWithCustomIPs("eni-trunk-1", aliyunClient.ENIStatusInUse, ipv4s, nil)
+			eniInUse.NetworkInterfaceType = networkv1beta1.ENITypeTrunk
+
+			node := NewNodeFactory("test-node").
+				WithECS().
+				WithInstanceID("i-test").
+				WithExistingENIs(eniInUse).
+				Build()
+
+			By("Creating completed task with same IPs but without PodID (simulating OpenAPI response)")
+			now := time.Now()
+			eniInfo := &aliyunClient.NetworkInterface{
+				NetworkInterfaceID: "eni-trunk-1",
+				Type:               string(networkv1beta1.ENITypeTrunk),
+				Status:             aliyunClient.ENIStatusInUse,
+				MacAddress:         "aa:bb:cc:dd:ee:01",
+				SecurityGroupIDs:   []string{"sg-1"},
+				PrivateIPAddress:   "10.149.35.182",
+				NetworkInterfaceTrafficMode: "Standard",
+				PrivateIPSets: []aliyunClient.IPSet{
+					{IPAddress: "10.149.35.182", Primary: true},
+					{IPAddress: "10.149.38.38", Primary: false},
+				},
+				IPv6Set: nil,
+			}
+
+			reconciler.eniTaskQueue.tasks["eni-trunk-1"] = &ENITaskRecord{
+				ENIID:              "eni-trunk-1",
+				Operation:          OpAttach,
+				InstanceID:         "i-test",
+				NodeName:           "test-node",
+				Status:             TaskStatusCompleted,
+				CreatedAt:          now.Add(-1 * time.Minute),
+				CompletedAt:        &now,
+				RequestedIPv4Count: 2,
+				RequestedIPv6Count: 0,
+				ENIInfo:            eniInfo,
+				Error:              nil,
+			}
+
+			By("Calling syncTaskQueueStatus to process completed task")
+			reconciler.syncTaskQueueStatus(ctx, node)
+
+			By("Verifying ENI status is updated")
+			Expect(node.Status.NetworkInterfaces).To(HaveKey("eni-trunk-1"))
+			nic := node.Status.NetworkInterfaces["eni-trunk-1"]
+			Expect(nic.Status).To(Equal(aliyunClient.ENIStatusInUse))
+
+			By("Verifying IPv4 addresses are present")
+			Expect(nic.IPv4).To(HaveLen(2))
+			Expect(nic.IPv4).To(HaveKey("10.149.35.182"))
+			Expect(nic.IPv4).To(HaveKey("10.149.38.38"))
+
+			By("Verifying PodID is preserved on the primary IP that was already assigned")
+			Expect(nic.IPv4["10.149.35.182"].PodID).To(Equal("kube-system/loongcollector"),
+				"syncTaskQueueStatus should preserve existing PodID bindings")
+			Expect(nic.IPv4["10.149.35.182"].PodUID).To(Equal("uid-loongcollector"),
+				"syncTaskQueueStatus should preserve existing PodUID bindings")
+
+			By("Verifying the free IP remains unassigned")
+			Expect(nic.IPv4["10.149.38.38"].PodID).To(Equal(""))
+		})
+	})
+
 	Context("Test assign err", func() {
 		It("Test assign err", func() {
 
