@@ -24,12 +24,16 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		panic("error get home path")
+	kubeConfigPath := os.Getenv("KUBECONFIG")
+	if kubeConfigPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			panic("error get home path")
+		}
+		kubeConfigPath = filepath.Join(home, ".kube", "config")
 	}
 
-	restConfig, err := clientcmd.BuildConfigFromFlags("", filepath.Join(home, ".kube", "config"))
+	restConfig, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
 	if err != nil {
 		panic(err)
 	}

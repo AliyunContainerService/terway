@@ -43,12 +43,16 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		panic("error get home path")
+	kubeConfigPath := os.Getenv("KUBECONFIG")
+	if kubeConfigPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			panic("error get home path")
+		}
+		kubeConfigPath = filepath.Join(home, ".kube", "config")
 	}
 
-	envCfg := envconf.NewWithKubeConfig(filepath.Join(home, ".kube", "config")).
+	envCfg := envconf.NewWithKubeConfig(kubeConfigPath).
 		WithRandomNamespace()
 
 	testenv = env.NewWithConfig(envCfg)

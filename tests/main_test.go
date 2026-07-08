@@ -99,12 +99,14 @@ func TestMain(m *testing.M) {
 	_ = clientgoscheme.AddToScheme(scheme.Scheme)
 	_ = networkv1beta1.AddToScheme(scheme.Scheme)
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		panic("error get home path")
+	kubeConfigPath := os.Getenv("KUBECONFIG")
+	if kubeConfigPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			panic("error get home path")
+		}
+		kubeConfigPath = filepath.Join(home, ".kube", "config")
 	}
-
-	kubeConfigPath := filepath.Join(home, ".kube", "config")
 	restConfig, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
 	if err != nil {
 		panic(fmt.Sprintf("error build rest config: %v", err))
