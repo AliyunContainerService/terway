@@ -460,7 +460,8 @@ data "alicloud_cs_cluster_credential" "auth" {
 # =============================================================================
 # Phase 2: Create Terway Dynamic ConfigMap (e2e-ip-prefix)
 # =============================================================================
-# 使用 Kubernetes Provider 创建 ConfigMap
+# max_pods 取所有机型 prefix 模式容量的最小值:
+#   min((IPv4PerAdapter-1) * 16 * (TotalAdapters-1)) = 672 (ecs.g7ne.xlarge / ecs.g9i.2xlarge)
 resource "kubernetes_config_map_v1" "e2e_ip_prefix" {
   metadata {
     name      = "e2e-ip-prefix"
@@ -474,7 +475,6 @@ resource "kubernetes_config_map_v1" "e2e_ip_prefix" {
     })
   }
 
-  # 确保集群凭证可用后再创建 ConfigMap
   depends_on = [data.alicloud_cs_cluster_credential.auth]
 }
 
@@ -496,6 +496,9 @@ resource "alicloud_cs_kubernetes_node_pool" "ip_prefix_azj" {
   data_disks {
     category = "cloud_essd"
     size     = 120
+  }
+  kubelet_configuration {
+    max_pods = 672
   }
   labels {
     key   = "terway-config"
@@ -519,6 +522,9 @@ resource "alicloud_cs_kubernetes_node_pool" "ip_prefix_azk" {
   data_disks {
     category = "cloud_essd"
     size     = 120
+  }
+  kubelet_configuration {
+    max_pods = 672
   }
   labels {
     key   = "terway-config"
