@@ -1097,6 +1097,24 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 		return value.RequireERDMA
 	})
 
+	// Filter out stale pods: pods that have a previously assigned IP (from pod status)
+	// but the IP is not found in the current pool (ipRef == nil). These pods can never
+	// be satisfied by creating new IPs — they need their specific old IP which no longer
+	// exists. Counting them toward podDemand causes unbounded ENI/IP creation.
+	stalePods := lo.PickBy(normalPods, func(key string, value *PodRequest) bool {
+		return isStaleAssigned(value)
+	})
+	if len(stalePods) > 0 {
+		logr.FromContextOrDiscard(ctx).Info("stale pods with unmatched IPs excluded from allocation demand",
+			"count", len(stalePods), "pods", lo.Keys(stalePods))
+	}
+	allocatableNormalPods := lo.PickBy(normalPods, func(key string, value *PodRequest) bool {
+		return !isStaleAssigned(value)
+	})
+	allocatableRDMAPods := lo.PickBy(rdmaPods, func(key string, value *PodRequest) bool {
+		return !isStaleAssigned(value)
+	})
+
 	// before create eni , we need to check the quota
 	options := getEniOptions(node)
 
@@ -1105,7 +1123,8 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	totalIdleIPs := countTotalIdleIPs(node)
 
 	// Step 2: Pod demand (IPs needed by pods that couldn't get from local pool)
-	podDemand := len(normalPods)
+	// Only count allocatable pods — stale pods with unmatched old IPs are excluded
+	podDemand := len(allocatableNormalPods)
 
 	// Step 3: Calculate MinPoolSize demand
 	// MinPoolSize = minimum idle IPs to maintain in pool AFTER serving pods
@@ -1134,6 +1153,7 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 
 	logr.FromContextOrDiscard(ctx).Info("addIP demand calculation",
 		"podDemand", podDemand,
+		"stalePods", len(stalePods),
 		"totalIdleIPs", totalIdleIPs,
 		"minPoolSize", node.Spec.Pool.MinPoolSize,
 		"minPoolDemand", minPoolDemand,
@@ -1144,7 +1164,7 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 	assignEniWithOptions(ctx, node, allocationDemand, options, n.eniTaskQueue, func(option *eniOptions) bool {
 		return n.validateENI(ctx, option, []eniTypeKey{secondaryKey, trunkKey})
 	})
-	assignEniWithOptions(ctx, node, len(rdmaPods), options, n.eniTaskQueue, func(option *eniOptions) bool {
+	assignEniWithOptions(ctx, node, len(allocatableRDMAPods), options, n.eniTaskQueue, func(option *eniOptions) bool {
 		return n.validateENI(ctx, option, []eniTypeKey{rdmaKey})
 	})
 
@@ -2230,6 +2250,19 @@ func buildIPMap(podsMapper map[string]*PodRequest, enis map[string]*networkv1bet
 		}
 	}
 	return ipv4Map, ipv6Map
+}
+
+// isStaleAssigned returns true if the pod has a previously assigned IP (from pod status)
+// but the corresponding pool ref is nil, meaning the IP no longer exists in the current pool.
+// These pods cannot be satisfied by creating new IPs.
+func isStaleAssigned(p *PodRequest) bool {
+	if p.RequireIPv4 && p.IPv4 != "" && p.ipv4Ref == nil {
+		return true
+	}
+	if p.RequireIPv6 && p.IPv6 != "" && p.ipv6Ref == nil {
+		return true
+	}
+	return false
 }
 
 func getAllocatable(in map[string]*networkv1beta1.IP) map[string]*networkv1beta1.IP {

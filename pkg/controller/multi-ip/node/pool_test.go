@@ -4753,7 +4753,10 @@ func TestAddIPDemandCalculation(t *testing.T) {
 			normalPods := lo.PickBy(tt.unSucceedPods, func(key string, value *PodRequest) bool {
 				return !value.RequireERDMA
 			})
-			podDemand := len(normalPods)
+			allocatableNormalPods := lo.PickBy(normalPods, func(key string, value *PodRequest) bool {
+				return !isStaleAssigned(value)
+			})
+			podDemand := len(allocatableNormalPods)
 
 			// MinPoolSize demand calculation
 			minPoolDemand := max(0, tt.node.Spec.Pool.MinPoolSize+podDemand-totalIdleIPs)
@@ -4772,6 +4775,110 @@ func TestAddIPDemandCalculation(t *testing.T) {
 			assert.Equal(t, tt.expectedAllocationDemand, allocationDemand, "allocationDemand mismatch: %s", tt.description)
 		})
 	}
+}
+
+func TestIsStaleAssigned(t *testing.T) {
+	tests := []struct {
+		name     string
+		pod      *PodRequest
+		expected bool
+	}{
+		{
+			name:     "normal pod without IP",
+			pod:      &PodRequest{RequireIPv4: true, IPv4: ""},
+			expected: false,
+		},
+		{
+			name:     "pod with IPv4 and matching ref",
+			pod:      &PodRequest{RequireIPv4: true, IPv4: "10.0.0.1", ipv4Ref: &EniIP{}},
+			expected: false,
+		},
+		{
+			name:     "stale pod with IPv4 but no ref",
+			pod:      &PodRequest{RequireIPv4: true, IPv4: "10.0.0.1"},
+			expected: true,
+		},
+		{
+			name:     "stale pod with IPv6 but no ref",
+			pod:      &PodRequest{RequireIPv6: true, IPv6: "fd00::1"},
+			expected: true,
+		},
+		{
+			name:     "pod not requiring IPv4, IPv4 set but no ref",
+			pod:      &PodRequest{RequireIPv4: false, IPv4: "10.0.0.1"},
+			expected: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isStaleAssigned(tt.pod))
+		})
+	}
+}
+
+func TestStalePodExcludedFromDemand(t *testing.T) {
+	node := &networkv1beta1.Node{
+		Spec: networkv1beta1.NodeSpec{
+			NodeCap: networkv1beta1.NodeCap{
+				Adapters:       3,
+				IPv4PerAdapter: 10,
+			},
+			ENISpec: &networkv1beta1.ENISpec{
+				EnableIPv4: true,
+			},
+			Pool: &networkv1beta1.PoolSpec{
+				MinPoolSize: 0,
+				MaxPoolSize: 10,
+			},
+			Flavor: []networkv1beta1.Flavor{
+				{NetworkInterfaceType: networkv1beta1.ENITypeSecondary, NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard, Count: 2},
+			},
+		},
+		Status: networkv1beta1.NodeStatus{
+			NetworkInterfaces: map[string]*networkv1beta1.Nic{
+				"eni-1": {
+					ID:     "eni-1",
+					Status: aliyunClient.ENIStatusInUse,
+					IPv4: map[string]*networkv1beta1.IP{
+						"10.0.0.1": {IP: "10.0.0.1", Primary: true, Status: networkv1beta1.IPStatusValid, PodID: "primary"},
+						"10.0.0.2": {IP: "10.0.0.2", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+						"10.0.0.3": {IP: "10.0.0.3", Primary: false, Status: networkv1beta1.IPStatusValid, PodID: ""},
+					},
+				},
+			},
+		},
+	}
+
+	// 3 stale pods with old IPs not in the pool, plus 1 normal pod
+	unSucceedPods := map[string]*PodRequest{
+		"stale-pod-1":  {RequireIPv4: true, IPv4: "172.16.0.153"},
+		"stale-pod-2":  {RequireIPv4: true, IPv4: "172.16.0.227"},
+		"stale-pod-3":  {RequireIPv4: true, IPv4: "172.16.0.224"},
+		"normal-pod-1": {RequireIPv4: true, IPv4: ""},
+	}
+
+	normalPods := lo.PickBy(unSucceedPods, func(key string, value *PodRequest) bool {
+		return !value.RequireERDMA
+	})
+	stalePods := lo.PickBy(normalPods, func(key string, value *PodRequest) bool {
+		return isStaleAssigned(value)
+	})
+	allocatableNormalPods := lo.PickBy(normalPods, func(key string, value *PodRequest) bool {
+		return !isStaleAssigned(value)
+	})
+
+	assert.Equal(t, 3, len(stalePods), "should have 3 stale pods")
+	assert.Equal(t, 1, len(allocatableNormalPods), "should have 1 allocatable pod")
+
+	totalIdleIPs := countTotalIdleIPs(node)
+	podDemand := len(allocatableNormalPods)
+	minPoolDemand := max(0, node.Spec.Pool.MinPoolSize+podDemand-totalIdleIPs)
+	allocationDemand := podDemand + max(minPoolDemand, 0)
+
+	// Only normal-pod-1 drives demand; stale pods are excluded
+	assert.Equal(t, 1, podDemand, "podDemand should only count allocatable pods")
+	assert.Equal(t, 0, minPoolDemand, "pool has 2 idle IPs >= podDemand(1)")
+	assert.Equal(t, 1, allocationDemand, "only 1 allocatable pod drives allocation")
 }
 
 // TestVSwitchExhaustedENIScenario tests the core fix:
