@@ -460,18 +460,13 @@ func clearIPPoolByQualifiedNodes(ctx context.Context, t *testing.T, config *envc
 
 		t.Logf("Clearing IP pool for node %s", node.Name)
 
-		// Update node CR to mark all secondary IPs as deleting
+		// Update node CR to mark idle (unbound) secondary IPs as deleting. IPs still
+		// bound to a running pod are skipped by markIdleIPsDeleting.
 		for _, nic := range node.Status.NetworkInterfaces {
 			if nic.NetworkInterfaceType != networkv1beta1.ENITypeSecondary {
 				continue
 			}
-			for ipAddr, ip := range nic.IPv4 {
-				if ip.Primary {
-					continue
-				}
-				ip.Status = networkv1beta1.IPStatusDeleting
-				nic.IPv4[ipAddr] = ip
-			}
+			markIdleIPsDeleting(t, nic.ID, nic.IPv4)
 		}
 
 		err = config.Client().Resources().Update(ctx, &node)
