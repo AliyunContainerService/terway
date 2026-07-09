@@ -203,63 +203,130 @@ func AddResourcesForCleanup(ctx context.Context, resources ...k8s.Object) contex
 // Node CR Prefix Cleanup Helpers
 // =============================================================================
 
-// cleanupNodePrefixes cleans up all prefixes and secondary IPs on a node's ENIs.
-//
-// Rules per ENI type:
-//   - Primary ENI: skipped entirely (must not be deleted).
-//   - Trunk ENI: marks all prefixes (IPv4/IPv6) AND all non-primary secondary IPs as Deleting.
-//   - Secondary / Member ENIs: marks the entire ENI as Deleting (cascades to all prefixes).
+// podIPsOnNode returns the set of PodIPs for all Running/Pending pods scheduled on nodeName.
+func podIPsOnNode(ctx context.Context, config *envconf.Config, nodeName string) (map[string]bool, error) {
+	podList := &corev1.PodList{}
+	if err := config.Client().Resources().List(ctx, podList); err != nil {
+		return nil, err
+	}
+	ips := make(map[string]bool)
+	for _, p := range podList.Items {
+		if p.Spec.NodeName != nodeName {
+			continue
+		}
+		if p.Status.Phase != corev1.PodRunning && p.Status.Phase != corev1.PodPending {
+			continue
+		}
+		for _, pip := range p.Status.PodIPs {
+			if pip.IP != "" {
+				ips[pip.IP] = true
+			}
+		}
+	}
+	return ips, nil
+}
+
+// prefixContainsPodIP returns true if the prefix CIDR contains any IP in podIPs.
+func prefixContainsPodIP(prefix string, podIPs map[string]bool) (string, bool) {
+	_, cidr, err := net.ParseCIDR(prefix)
+	if err != nil {
+		return "", false
+	}
+	for ip := range podIPs {
+		if cidr.Contains(net.ParseIP(ip)) {
+			return ip, true
+		}
+	}
+	return "", false
+}
+
+// markIdleIPsDeleting marks non-primary, unbound (PodID == "") IPs in ipMap as Deleting.
+// IPs still bound to a running pod are skipped and logged, so cleanup never tears down
+// a pod's network out from under it (e.g. a system pod like CoreDNS sharing the ENI).
+// Returns the count of IPs actually marked.
+func markIdleIPsDeleting(t *testing.T, eniID string, ipMap map[string]*networkv1beta1.IP) int {
+	marked := 0
+	for addr, ip := range ipMap {
+		if ip.Primary {
+			continue
+		}
+		if ip.PodID != "" {
+			t.Logf("[cleanup] SKIP %s on ENI %s: still bound to pod %s", addr, eniID, ip.PodID)
+			continue
+		}
+		ip.Status = networkv1beta1.IPStatusDeleting
+		ipMap[addr] = ip
+		marked++
+	}
+	return marked
+}
+
+// cleanupNodePrefixes cleans up prefixes and secondary IPs on a node's ENIs.
+// Prefixes whose CIDR contains a running pod's IP are skipped to avoid destroying
+// the datapath of system pods (e.g. CoreDNS) sharing the ENI.
 func cleanupNodePrefixes(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string) error {
 	node := &networkv1beta1.Node{}
 	if err := config.Client().Resources().Get(ctx, nodeName, "", node); err != nil {
 		return err
 	}
 
+	podIPs, err := podIPsOnNode(ctx, config, nodeName)
+	if err != nil {
+		t.Logf("[cleanup] Warning: failed to list pod IPs on node %s: %v (proceeding without pod-IP guard for prefixes)", nodeName, err)
+		podIPs = nil
+	}
+
 	cleanedCount := 0
 	for eniID, nic := range node.Status.NetworkInterfaces {
 		switch nic.NetworkInterfaceType {
 		case networkv1beta1.ENITypePrimary:
-			// Primary ENI must never be deleted.
 			continue
 
 		case networkv1beta1.ENITypeTrunk:
-			// Trunk ENI: mark prefixes as Deleting and non-primary secondary IPs as Deleting.
 			hasWork := false
+			prefixMarked, prefixSkipped := 0, 0
 
 			for i := range nic.IPv4Prefix {
+				if podIPs != nil {
+					if ip, ok := prefixContainsPodIP(nic.IPv4Prefix[i].Prefix, podIPs); ok {
+						t.Logf("[cleanup] SKIP IPv4Prefix %s on ENI %s: contains pod IP %s", nic.IPv4Prefix[i].Prefix, eniID, ip)
+						prefixSkipped++
+						continue
+					}
+				}
 				nic.IPv4Prefix[i].Status = networkv1beta1.IPPrefixStatusDeleting
+				prefixMarked++
 				hasWork = true
 			}
 			for i := range nic.IPv6Prefix {
+				if podIPs != nil {
+					if ip, ok := prefixContainsPodIP(nic.IPv6Prefix[i].Prefix, podIPs); ok {
+						t.Logf("[cleanup] SKIP IPv6Prefix %s on ENI %s: contains pod IP %s", nic.IPv6Prefix[i].Prefix, eniID, ip)
+						prefixSkipped++
+						continue
+					}
+				}
 				nic.IPv6Prefix[i].Status = networkv1beta1.IPPrefixStatusDeleting
+				prefixMarked++
 				hasWork = true
 			}
 
-			// Mark non-primary secondary IPv4 IPs as Deleting.
-			for ip, ipInfo := range nic.IPv4 {
-				if !ipInfo.Primary {
-					ipInfo.Status = networkv1beta1.IPStatusDeleting
-					nic.IPv4[ip] = ipInfo
-					hasWork = true
-				}
+			if n := markIdleIPsDeleting(t, eniID, nic.IPv4); n > 0 {
+				hasWork = true
 			}
-			// Mark non-primary secondary IPv6 IPs as Deleting.
-			for ip, ipInfo := range nic.IPv6 {
-				if !ipInfo.Primary {
-					ipInfo.Status = networkv1beta1.IPStatusDeleting
-					nic.IPv6[ip] = ipInfo
-					hasWork = true
-				}
+			if n := markIdleIPsDeleting(t, eniID, nic.IPv6); n > 0 {
+				hasWork = true
 			}
 
-			if hasWork {
-				t.Logf("[cleanup] Trunk ENI %s: marked %d IPv4 + %d IPv6 prefixes and non-primary IPs as Deleting",
-					eniID, len(nic.IPv4Prefix), len(nic.IPv6Prefix))
-				cleanedCount++
+			if hasWork || prefixSkipped > 0 {
+				t.Logf("[cleanup] Trunk ENI %s: marked %d prefixes Deleting, skipped %d (contain pod IPs)",
+					eniID, prefixMarked, prefixSkipped)
+				if hasWork {
+					cleanedCount++
+				}
 			}
 
 		default:
-			// Secondary / Member ENI: mark the entire ENI as Deleting (cascades to all prefixes).
 			nic.Status = aliyunClient.ENIStatusDeleting
 			t.Logf("[cleanup] ENI %s (type=%s): marked as Deleting (cascades to %d prefixes)",
 				eniID, nic.NetworkInterfaceType, len(nic.IPv4Prefix)+len(nic.IPv6Prefix))
@@ -277,8 +344,8 @@ func cleanupNodePrefixes(ctx context.Context, config *envconf.Config, t *testing
 	return config.Client().Resources().UpdateStatus(ctx, node)
 }
 
-// waitForPrefixCleanup waits until there are no prefixes on the node (including Deleting ones).
-// This ensures the controller has actually released them from the cloud.
+// waitForPrefixCleanup waits until prefixes marked as Deleting have been removed.
+// Prefixes still backing a running pod's IP are excluded from the count.
 func waitForPrefixCleanup(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string, timeout time.Duration) error {
 	return wait.For(func(ctx context.Context) (done bool, err error) {
 		node := &networkv1beta1.Node{}
@@ -287,12 +354,31 @@ func waitForPrefixCleanup(ctx context.Context, config *envconf.Config, t *testin
 			return false, err
 		}
 
+		podIPs, _ := podIPsOnNode(ctx, config, nodeName)
+
 		totalCount := 0
 		eniCount := 0
 		for _, nic := range node.Status.NetworkInterfaces {
-			if len(nic.IPv4Prefix) > 0 || len(nic.IPv6Prefix) > 0 {
+			prefixCount := 0
+			for _, p := range nic.IPv4Prefix {
+				if podIPs != nil {
+					if _, ok := prefixContainsPodIP(p.Prefix, podIPs); ok {
+						continue
+					}
+				}
+				prefixCount++
+			}
+			for _, p := range nic.IPv6Prefix {
+				if podIPs != nil {
+					if _, ok := prefixContainsPodIP(p.Prefix, podIPs); ok {
+						continue
+					}
+				}
+				prefixCount++
+			}
+			if prefixCount > 0 {
 				eniCount++
-				totalCount += len(nic.IPv4Prefix) + len(nic.IPv6Prefix)
+				totalCount += prefixCount
 			}
 		}
 
