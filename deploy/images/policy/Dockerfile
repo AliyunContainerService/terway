@@ -1,4 +1,4 @@
-FROM --platform=$TARGETPLATFORM golang:1.25.5 AS felix-builder
+FROM --platform=$TARGETPLATFORM golang:1.25.12 AS felix-builder
 ARG GOPROXY
 ARG GIT_VERSION
 ENV GOPROXY $GOPROXY
