@@ -48,6 +48,7 @@ func TestPrefix_Status_FrozenExpireRevert(t *testing.T) {
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			ctx = saveOriginalConfig(ctx, config, t)
 			ctx = context.WithValue(ctx, qualifiedNodeContextKey, nodeName)
+			setupResetPrefixState(ctx, config, t, nodeName)
 			return ctx
 		}).
 		Assess("expired Frozen prefix reverts to Valid", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -55,6 +56,7 @@ func TestPrefix_Status_FrozenExpireRevert(t *testing.T) {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			restoreOriginalConfig(ctx, config, t)
+			teardownResetPrefixState(ctx, config, t, ctx.Value(qualifiedNodeContextKey).(string))
 			return ctx
 		}).
 		Feature()
@@ -85,6 +87,7 @@ func TestPrefix_Status_PodAllocFromValidOnly(t *testing.T) {
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			ctx = saveOriginalConfig(ctx, config, t)
 			ctx = context.WithValue(ctx, qualifiedNodeContextKey, nodeName)
+			setupResetPrefixState(ctx, config, t, nodeName)
 			return ctx
 		}).
 		Assess("pods get IPs only from Valid prefixes", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -92,6 +95,7 @@ func TestPrefix_Status_PodAllocFromValidOnly(t *testing.T) {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			restoreOriginalConfig(ctx, config, t)
+			teardownResetPrefixState(ctx, config, t, ctx.Value(qualifiedNodeContextKey).(string))
 			return ctx
 		}).
 		Feature()
@@ -118,14 +122,14 @@ func assessFrozenExpireRevert(ctx context.Context, t *testing.T, config *envconf
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
-	if err = restartTerway(ctx, config); err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+	if err = triggerReconcileOnAllNodes(ctx, config); err != nil {
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 	if err = waitForPrefixAllocation(ctx, config, t, nodeName, 3, 3*time.Minute); err != nil {
 		t.Fatalf("failed waiting for prefix allocation: %v", err)
 	}
 
-	// Step 2: Set one prefix to Frozen with an already-expired FrozenExpireAt
+	// Step 2: Find a Valid prefix to mark as Frozen
 	t.Log("Step 2: Set one prefix to Frozen with expired FrozenExpireAt")
 	node := &networkv1beta1.Node{}
 	if err = config.Client().Resources().Get(ctx, nodeName, "", node); err != nil {
@@ -134,10 +138,8 @@ func assessFrozenExpireRevert(ctx context.Context, t *testing.T, config *envconf
 
 	var frozenPrefix string
 	for _, nic := range node.Status.NetworkInterfaces {
-		for i, prefix := range nic.IPv4Prefix {
+		for _, prefix := range nic.IPv4Prefix {
 			if prefix.Status == networkv1beta1.IPPrefixStatusValid {
-				nic.IPv4Prefix[i].Status = networkv1beta1.IPPrefixStatusFrozen
-				nic.IPv4Prefix[i].FrozenExpireAt = metav1.NewTime(time.Now().Add(-1 * time.Hour))
 				frozenPrefix = prefix.Prefix
 				break
 			}
@@ -152,7 +154,18 @@ func assessFrozenExpireRevert(ctx context.Context, t *testing.T, config *envconf
 	}
 
 	t.Logf("Set prefix %s to Frozen with expired FrozenExpireAt", frozenPrefix)
-	if err = config.Client().Resources().UpdateStatus(ctx, node); err != nil {
+	if err = updateNodeStatusWithRetry(ctx, config, t, nodeName, func(n *networkv1beta1.Node) (bool, error) {
+		for _, nic := range n.Status.NetworkInterfaces {
+			for i, prefix := range nic.IPv4Prefix {
+				if prefix.Prefix == frozenPrefix {
+					nic.IPv4Prefix[i].Status = networkv1beta1.IPPrefixStatusFrozen
+					nic.IPv4Prefix[i].FrozenExpireAt = metav1.NewTime(time.Now().Add(-1 * time.Hour))
+					return true, nil
+				}
+			}
+		}
+		return false, fmt.Errorf("prefix %s not found in Node CR", frozenPrefix)
+	}); err != nil {
 		t.Fatalf("failed to update node status: %v", err)
 	}
 
@@ -199,8 +212,8 @@ func assessPodAllocFromValidOnly(ctx context.Context, t *testing.T, config *envc
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
-	if err = restartTerway(ctx, config); err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+	if err = triggerReconcileOnAllNodes(ctx, config); err != nil {
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 	if err = waitForPrefixAllocation(ctx, config, t, nodeName, 5, 3*time.Minute); err != nil {
 		t.Fatalf("failed waiting for prefix allocation: %v", err)
@@ -215,14 +228,11 @@ func assessPodAllocFromValidOnly(ctx context.Context, t *testing.T, config *envc
 
 	var frozenPrefixes []string
 	var validPrefixes []string
-	frozenCount := 0
 	for _, nic := range node.Status.NetworkInterfaces {
-		for i, prefix := range nic.IPv4Prefix {
+		for _, prefix := range nic.IPv4Prefix {
 			if prefix.Status == networkv1beta1.IPPrefixStatusValid {
-				if frozenCount < 2 {
-					nic.IPv4Prefix[i].Status = networkv1beta1.IPPrefixStatusFrozen
+				if len(frozenPrefixes) < 2 {
 					frozenPrefixes = append(frozenPrefixes, prefix.Prefix)
-					frozenCount++
 				} else {
 					validPrefixes = append(validPrefixes, prefix.Prefix)
 				}
@@ -234,18 +244,39 @@ func assessPodAllocFromValidOnly(ctx context.Context, t *testing.T, config *envc
 		t.Fatalf("not enough Valid prefixes to freeze, got %d", len(frozenPrefixes))
 	}
 
-	t.Logf("Frozen prefixes: %v, Valid prefixes: %v", frozenPrefixes, validPrefixes)
-	if err = config.Client().Resources().UpdateStatus(ctx, node); err != nil {
+	t.Logf("Will freeze prefixes: %v, Valid prefixes: %v", frozenPrefixes, validPrefixes)
+	if err = updateNodeStatusWithRetry(ctx, config, t, nodeName, func(n *networkv1beta1.Node) (bool, error) {
+		frozenCount := 0
+		for _, nic := range n.Status.NetworkInterfaces {
+			for i, prefix := range nic.IPv4Prefix {
+				for _, fp := range frozenPrefixes {
+					if prefix.Prefix == fp {
+						nic.IPv4Prefix[i].Status = networkv1beta1.IPPrefixStatusFrozen
+						frozenCount++
+					}
+				}
+			}
+		}
+		if frozenCount < 2 {
+			return false, fmt.Errorf("only found %d of 2 prefixes to freeze", frozenCount)
+		}
+		return true, nil
+	}); err != nil {
 		t.Fatalf("failed to update node status: %v", err)
 	}
 
-	// Restart terway so Daemon picks up the new prefix states
-	if err = restartTerway(ctx, config); err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+	// trigger reconcile so daemon picks up new prefix states
+	if err = triggerReconcileOnAllNodes(ctx, config); err != nil {
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 
 	// Wait for terway to be ready
-	time.Sleep(15 * time.Second)
+	node = &networkv1beta1.Node{}
+	if getErr := config.Client().Resources().Get(ctx, nodeName, "", node); getErr == nil {
+		if twErr := waitForTerwayPodReady(ctx, t, config, nodeName, 2*time.Minute); twErr != nil {
+			t.Logf("Warning: waitForTerwayPodReady: %v", twErr)
+		}
+	}
 
 	// Step 3: Create pods and verify IPs are within Valid prefix ranges
 	t.Log("Step 3: Create pods and verify IPs are from Valid prefixes only")
@@ -255,7 +286,8 @@ func assessPodAllocFromValidOnly(ctx context.Context, t *testing.T, config *envc
 		podName := fmt.Sprintf("prefix-valid-test-%d", i)
 		pod := NewPod(podName, config.Namespace()).
 			WithContainer("nginx", nginxImage, nil).
-			WithNodeAffinity(map[string]string{"kubernetes.io/hostname": nodeName})
+			WithNodeAffinity(map[string]string{"kubernetes.io/hostname": nodeName}).
+			WithTolerations(IPPrefixTolerations())
 
 		if err = config.Client().Resources().Create(ctx, pod.Pod); err != nil {
 			t.Fatalf("failed to create pod %s: %v", podName, err)
@@ -308,14 +340,18 @@ func assessPodAllocFromValidOnly(ctx context.Context, t *testing.T, config *envc
 func waitForPrefixStatusChange(ctx context.Context, config *envconf.Config, t *testing.T,
 	nodeName, targetPrefix string, expectedStatus networkv1beta1.IPPrefixStatus, timeout time.Duration) error {
 
+	iteration := 0
 	return wait.For(func(ctx context.Context) (done bool, err error) {
+		iteration++
 		node := &networkv1beta1.Node{}
 		if err = config.Client().Resources().Get(ctx, nodeName, "", node); err != nil {
 			return false, err
 		}
 
-		// Trigger reconcile
-		triggerNodeCR(ctx, config, t, node)
+		// Trigger reconcile on 1st iteration and every 3rd thereafter
+		if iteration == 1 || iteration%3 == 0 {
+			triggerNodeCR(ctx, config, t, node)
+		}
 
 		for _, nic := range node.Status.NetworkInterfaces {
 			for _, prefix := range nic.IPv4Prefix {

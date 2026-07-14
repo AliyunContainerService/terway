@@ -584,6 +584,61 @@ func restartTerway(ctx context.Context, config *envconf.Config) error {
 	return err
 }
 
+// triggerReconcileOnAllNodes patches Node CR annotations on all nodes to trigger
+// daemon reconciliation. Use after updating any ConfigMap (eni-config or dynamic
+// config like e2e-ip-prefix) that the daemon reads.
+//
+// The daemon's nodeReconcile only watches networkv1beta1.Node{} (not ConfigMaps
+// directly), so ConfigMap changes alone don't trigger reconciliation. This function
+// patches a Node CR annotation to trigger the watch → daemon reads latest ConfigMap
+// from informer cache → updates Node CR Spec → controlplane controller reconciles.
+func triggerReconcileOnAllNodes(ctx context.Context, config *envconf.Config) error {
+	// Wait briefly for informer cache to sync the ConfigMap change
+	time.Sleep(2 * time.Second)
+
+	nodeList := &networkv1beta1.NodeList{}
+	if err := config.Client().Resources().List(ctx, nodeList); err != nil {
+		return fmt.Errorf("failed to list Node CRs: %w", err)
+	}
+	for i := range nodeList.Items {
+		_ = triggerNodeCRReconcile(ctx, config, &nodeList.Items[i])
+	}
+	return nil
+}
+
+// applyConfigAndTriggerReconcile updates eni-config ConfigMap and triggers daemon
+// reconciliation on all nodes. This is a fast alternative to restartTerway for
+// eni_conf field changes.
+func applyConfigAndTriggerReconcile(ctx context.Context, config *envconf.Config,
+	mutate func(eniJson *gabs.Container) error, nodeNames ...string) error {
+
+	// 1. Update ConfigMap
+	err := updateENIConfigWithRetry(ctx, config, mutate)
+	if err != nil {
+		return err
+	}
+
+	// 2. Trigger daemon reconciliation
+	if len(nodeNames) == 0 {
+		return triggerReconcileOnAllNodes(ctx, config)
+	}
+
+	// Wait briefly for informer cache to sync
+	time.Sleep(2 * time.Second)
+
+	for _, nodeName := range nodeNames {
+		nodeCR := &networkv1beta1.Node{}
+		if err := config.Client().Resources().Get(ctx, nodeName, "", nodeCR); err != nil {
+			return fmt.Errorf("failed to get Node CR %s: %w", nodeName, err)
+		}
+		if err := triggerNodeCRReconcile(ctx, config, nodeCR); err != nil {
+			return fmt.Errorf("failed to trigger reconcile for %s: %w", nodeName, err)
+		}
+	}
+
+	return nil
+}
+
 const schedulingTimeout = 15 * time.Second
 
 func podReadyOrFailFast(res *conditions.Condition, client klient.Client, pod *corev1.Pod, startTime time.Time) func(ctx context.Context) (bool, error) {
@@ -1695,6 +1750,24 @@ func (d *Deployment) WithNodeAffinityExclude(excludeLabels map[string]string) *D
 		)
 	}
 	return d
+}
+
+// WithTolerations adds tolerations to the deployment pod template
+func (d *Deployment) WithTolerations(tolerations []corev1.Toleration) *Deployment {
+	d.Spec.Template.Spec.Tolerations = append(d.Spec.Template.Spec.Tolerations, tolerations...)
+	return d
+}
+
+// IPPrefixTolerations returns tolerations for IP prefix nodes (tainted with k8s.aliyun.com/ip-prefix=true:NoSchedule)
+func IPPrefixTolerations() []corev1.Toleration {
+	return []corev1.Toleration{
+		{
+			Key:      "k8s.aliyun.com/ip-prefix",
+			Operator: corev1.TolerationOpEqual,
+			Value:    "true",
+			Effect:   corev1.TaintEffectNoSchedule,
+		},
+	}
 }
 
 // triggerNodeCRReconcile patches an annotation on a Node CR to force controller reconciliation

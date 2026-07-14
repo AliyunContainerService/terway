@@ -57,6 +57,7 @@ func TestPrefix_Basic_SingleENI(t *testing.T) {
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			ctx = saveOriginalConfig(ctx, config, t)
 			ctx = context.WithValue(ctx, qualifiedNodeContextKey, qualifiedNode)
+			setupResetPrefixState(ctx, config, t, qualifiedNode)
 			return ctx
 		}).
 		Assess("allocate prefixes on single ENI", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -65,6 +66,7 @@ func TestPrefix_Basic_SingleENI(t *testing.T) {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			restoreOriginalConfig(ctx, config, t)
+			teardownResetPrefixState(ctx, config, t, ctx.Value(qualifiedNodeContextKey).(string))
 			return ctx
 		}).
 		Feature()
@@ -80,12 +82,6 @@ func TestPrefix_Basic_SingleENI(t *testing.T) {
 func assessPrefixSingleENI(ctx context.Context, t *testing.T, config *envconf.Config, nodeName string) context.Context {
 	t.Logf("Testing single ENI prefix allocation on node: %s", nodeName)
 
-	// Step 0: Reset node prefix state to ensure clean starting point
-	t.Log("Step 0: Reset node prefix state")
-	if err := resetNodePrefixState(ctx, config, t, nodeName, 3*time.Minute); err != nil {
-		t.Logf("Warning: resetNodePrefixState failed (node may have no prefixes yet): %v", err)
-	}
-
 	// Configure ipv4_prefix_count=5 via Dynamic Config (node-specific ConfigMap)
 	t.Log("Configure ipv4_prefix_count=5 via Dynamic Config")
 	var err error
@@ -94,11 +90,11 @@ func assessPrefixSingleENI(ctx context.Context, t *testing.T, config *envconf.Co
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
 
-	// Restart terway
-	t.Log("Restart terway-eniip to apply config")
-	err = restartTerway(ctx, config)
+	// Trigger reconcile
+	t.Log("Trigger reconcile to apply config")
+	err = triggerReconcileOnAllNodes(ctx, config)
 	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 
 	// Wait for prefix allocation
@@ -164,7 +160,9 @@ func configureIPPrefixCount(ctx context.Context, t *testing.T, config *envconf.C
 
 // waitForPrefixAllocation waits for the specified number of prefixes to be allocated
 func waitForPrefixAllocation(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string, expectedCount int, timeout time.Duration) error {
+	iteration := 0
 	return wait.For(func(ctx context.Context) (done bool, err error) {
+		iteration++
 		prefixes, err := getAllocatedPrefixes(ctx, config, nodeName)
 		if err != nil {
 			return false, err
@@ -185,11 +183,13 @@ func waitForPrefixAllocation(ctx context.Context, config *envconf.Config, t *tes
 		t.Logf("Node %s: waiting for %d prefixes, currently have %d valid prefixes",
 			nodeName, expectedCount, validCount)
 
-		// Trigger node reconciliation
-		node := &networkv1beta1.Node{}
-		err = config.Client().Resources().Get(ctx, nodeName, "", node)
-		if err == nil {
-			triggerNodeCR(ctx, config, t, node)
+		// Trigger node reconciliation on 1st iteration and every 3rd thereafter
+		if iteration == 1 || iteration%3 == 0 {
+			node := &networkv1beta1.Node{}
+			err = config.Client().Resources().Get(ctx, nodeName, "", node)
+			if err == nil {
+				triggerNodeCR(ctx, config, t, node)
+			}
 		}
 
 		return false, nil

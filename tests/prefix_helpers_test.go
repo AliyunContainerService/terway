@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -116,6 +117,9 @@ func restoreOriginalConfig(ctx context.Context, config *envconf.Config, t *testi
 		t.Logf("Warning: failed to restore eni-config: %v", err)
 		return
 	}
+
+	// Trigger reconcile so the daemon picks up the restored eni-config
+	_ = triggerReconcileOnAllNodes(ctx, config)
 
 	t.Log("Restored original eni-config")
 }
@@ -265,89 +269,122 @@ func markIdleIPsDeleting(t *testing.T, eniID string, ipMap map[string]*networkv1
 // Prefixes whose CIDR contains a running pod's IP are skipped to avoid destroying
 // the datapath of system pods (e.g. CoreDNS) sharing the ENI.
 func cleanupNodePrefixes(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string) error {
-	node := &networkv1beta1.Node{}
-	if err := config.Client().Resources().Get(ctx, nodeName, "", node); err != nil {
-		return err
-	}
-
-	podIPs, err := podIPsOnNode(ctx, config, nodeName)
-	if err != nil {
-		t.Logf("[cleanup] Warning: failed to list pod IPs on node %s: %v (proceeding without pod-IP guard for prefixes)", nodeName, err)
-		podIPs = nil
-	}
-
-	cleanedCount := 0
-	for eniID, nic := range node.Status.NetworkInterfaces {
-		switch nic.NetworkInterfaceType {
-		case networkv1beta1.ENITypePrimary:
-			continue
-
-		case networkv1beta1.ENITypeTrunk:
-			hasWork := false
-			prefixMarked, prefixSkipped := 0, 0
-
-			for i := range nic.IPv4Prefix {
-				if podIPs != nil {
-					if ip, ok := prefixContainsPodIP(nic.IPv4Prefix[i].Prefix, podIPs); ok {
-						t.Logf("[cleanup] SKIP IPv4Prefix %s on ENI %s: contains pod IP %s", nic.IPv4Prefix[i].Prefix, eniID, ip)
-						prefixSkipped++
-						continue
-					}
-				}
-				nic.IPv4Prefix[i].Status = networkv1beta1.IPPrefixStatusDeleting
-				prefixMarked++
-				hasWork = true
-			}
-			for i := range nic.IPv6Prefix {
-				if podIPs != nil {
-					if ip, ok := prefixContainsPodIP(nic.IPv6Prefix[i].Prefix, podIPs); ok {
-						t.Logf("[cleanup] SKIP IPv6Prefix %s on ENI %s: contains pod IP %s", nic.IPv6Prefix[i].Prefix, eniID, ip)
-						prefixSkipped++
-						continue
-					}
-				}
-				nic.IPv6Prefix[i].Status = networkv1beta1.IPPrefixStatusDeleting
-				prefixMarked++
-				hasWork = true
-			}
-
-			if n := markIdleIPsDeleting(t, eniID, nic.IPv4); n > 0 {
-				hasWork = true
-			}
-			if n := markIdleIPsDeleting(t, eniID, nic.IPv6); n > 0 {
-				hasWork = true
-			}
-
-			if hasWork || prefixSkipped > 0 {
-				t.Logf("[cleanup] Trunk ENI %s: marked %d prefixes Deleting, skipped %d (contain pod IPs)",
-					eniID, prefixMarked, prefixSkipped)
-				if hasWork {
-					cleanedCount++
-				}
-			}
-
-		default:
-			nic.Status = aliyunClient.ENIStatusDeleting
-			t.Logf("[cleanup] ENI %s (type=%s): marked as Deleting (cascades to %d prefixes)",
-				eniID, nic.NetworkInterfaceType, len(nic.IPv4Prefix)+len(nic.IPv6Prefix))
-			cleanedCount++
+	return updateNodeStatusWithRetry(ctx, config, t, nodeName, func(node *networkv1beta1.Node) (bool, error) {
+		podIPs, err := podIPsOnNode(ctx, config, nodeName)
+		if err != nil {
+			t.Logf("[cleanup] Warning: failed to list pod IPs on node %s: %v (proceeding without pod-IP guard for prefixes)", nodeName, err)
+			podIPs = nil
 		}
 
-		node.Status.NetworkInterfaces[eniID] = nic
-	}
+		cleanedCount := 0
+		for eniID, nic := range node.Status.NetworkInterfaces {
+			switch nic.NetworkInterfaceType {
+			case networkv1beta1.ENITypePrimary:
+				continue
 
-	if cleanedCount == 0 {
-		t.Logf("[cleanup] No ENIs to clean up on node %s", nodeName)
+			case networkv1beta1.ENITypeTrunk:
+				hasWork := false
+				prefixMarked, prefixSkipped := 0, 0
+
+				for i := range nic.IPv4Prefix {
+					if podIPs != nil {
+						if ip, ok := prefixContainsPodIP(nic.IPv4Prefix[i].Prefix, podIPs); ok {
+							t.Logf("[cleanup] SKIP IPv4Prefix %s on ENI %s: contains pod IP %s", nic.IPv4Prefix[i].Prefix, eniID, ip)
+							prefixSkipped++
+							continue
+						}
+					}
+					nic.IPv4Prefix[i].Status = networkv1beta1.IPPrefixStatusDeleting
+					prefixMarked++
+					hasWork = true
+				}
+				for i := range nic.IPv6Prefix {
+					if podIPs != nil {
+						if ip, ok := prefixContainsPodIP(nic.IPv6Prefix[i].Prefix, podIPs); ok {
+							t.Logf("[cleanup] SKIP IPv6Prefix %s on ENI %s: contains pod IP %s", nic.IPv6Prefix[i].Prefix, eniID, ip)
+							prefixSkipped++
+							continue
+						}
+					}
+					nic.IPv6Prefix[i].Status = networkv1beta1.IPPrefixStatusDeleting
+					prefixMarked++
+					hasWork = true
+				}
+
+				if n := markIdleIPsDeleting(t, eniID, nic.IPv4); n > 0 {
+					hasWork = true
+				}
+				if n := markIdleIPsDeleting(t, eniID, nic.IPv6); n > 0 {
+					hasWork = true
+				}
+
+				if hasWork || prefixSkipped > 0 {
+					t.Logf("[cleanup] Trunk ENI %s: marked %d prefixes Deleting, skipped %d (contain pod IPs)",
+						eniID, prefixMarked, prefixSkipped)
+					if hasWork {
+						cleanedCount++
+					}
+				}
+
+			default:
+				nic.Status = aliyunClient.ENIStatusDeleting
+				t.Logf("[cleanup] ENI %s (type=%s): marked as Deleting (cascades to %d prefixes)",
+					eniID, nic.NetworkInterfaceType, len(nic.IPv4Prefix)+len(nic.IPv6Prefix))
+				cleanedCount++
+			}
+
+			node.Status.NetworkInterfaces[eniID] = nic
+		}
+
+		if cleanedCount == 0 {
+			t.Logf("[cleanup] No ENIs to clean up on node %s", nodeName)
+			return false, nil
+		}
+
+		return true, nil
+	})
+}
+
+// updateNodeStatusWithRetry wraps a Get→mutate→UpdateStatus cycle with conflict
+// retry. The mutate function receives the freshly-fetched Node CR; it should
+// modify node.Status in place and return (needsUpdate, error). If needsUpdate is
+// false the UpdateStatus call is skipped.
+func updateNodeStatusWithRetry(ctx context.Context, config *envconf.Config, t *testing.T,
+	nodeName string, mutate func(node *networkv1beta1.Node) (bool, error)) error {
+
+	const maxRetries = 5
+	for i := 0; i < maxRetries; i++ {
+		node := &networkv1beta1.Node{}
+		if err := config.Client().Resources().Get(ctx, nodeName, "", node); err != nil {
+			return err
+		}
+		needsUpdate, err := mutate(node)
+		if err != nil {
+			return err
+		}
+		if !needsUpdate {
+			return nil
+		}
+		if err := config.Client().Resources().UpdateStatus(ctx, node); err != nil {
+			if strings.Contains(err.Error(), "the object has been modified") ||
+				strings.Contains(err.Error(), "Conflict") {
+				t.Logf("[retry] UpdateStatus conflict for node %s, retry %d/%d", nodeName, i+1, maxRetries)
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+			return err
+		}
 		return nil
 	}
-
-	return config.Client().Resources().UpdateStatus(ctx, node)
+	return fmt.Errorf("UpdateStatus failed after %d retries for node %s", maxRetries, nodeName)
 }
 
 // waitForPrefixCleanup waits until prefixes marked as Deleting have been removed.
 // Prefixes still backing a running pod's IP are excluded from the count.
 func waitForPrefixCleanup(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string, timeout time.Duration) error {
+	iteration := 0
 	return wait.For(func(ctx context.Context) (done bool, err error) {
+		iteration++
 		node := &networkv1beta1.Node{}
 		err = config.Client().Resources().Get(ctx, nodeName, "", node)
 		if err != nil {
@@ -389,10 +426,17 @@ func waitForPrefixCleanup(ctx context.Context, config *envconf.Config, t *testin
 
 		t.Logf("[cleanup] Node %s: waiting for cleanup, %d prefixes on %d ENIs remaining",
 			nodeName, totalCount, eniCount)
+		// Prefix deletion can be processed in batches. Trigger another reconcile
+		// periodically so a final partial batch is not left until the controller's
+		// next scheduled resync.
+		if iteration%3 == 0 {
+			if err := triggerNodeCR(ctx, config, t, node); err != nil {
+				t.Logf("[cleanup] Warning: failed to retrigger Node CR reconcile: %v", err)
+			}
+		}
 		return false, nil
 	}, wait.WithTimeout(timeout), wait.WithInterval(10*time.Second))
 }
-
 
 // waitForNodeCRIPv4PrefixCount waits until the Node CR Spec.ENISpec.IPv4PrefixCount equals
 // expectedCount. This confirms Terway has read the Dynamic Config and propagated the new
@@ -442,10 +486,10 @@ func resetNodePrefixState(ctx context.Context, config *envconf.Config, t *testin
 		return fmt.Errorf("configureIPPrefixCount(0): %w", err)
 	}
 
-	// Step 2: Restart Terway to apply the config change.
-	t.Log("[reset] Step 2: Restarting Terway")
-	if err := restartTerway(ctx, config); err != nil {
-		return fmt.Errorf("restartTerway: %w", err)
+	// Step 2: Trigger reconcile to apply the config change.
+	t.Log("[reset] Step 2: Triggering reconcile")
+	if err := triggerReconcileOnAllNodes(ctx, config); err != nil {
+		return fmt.Errorf("triggerReconcileOnAllNodes: %w", err)
 	}
 
 	// Step 3: Wait for the Node CR to reflect IPv4PrefixCount=0 (controller has reconciled the config).
@@ -475,6 +519,31 @@ func resetNodePrefixState(ctx context.Context, config *envconf.Config, t *testin
 	// Step 6: Wait for all prefixes to be removed from the Node CR.
 	t.Logf("[reset] Step 6: Waiting for prefix cleanup on node %s (timeout: %v)", nodeName, timeout)
 	return waitForPrefixCleanup(ctx, config, t, nodeName, timeout)
+}
+
+const (
+	prefixResetPhaseTimeout = 5 * time.Minute
+	prefixResetTotalTimeout = 16 * time.Minute
+)
+
+// teardownResetPrefixState is a best-effort teardown helper that resets prefix
+// state using a fresh context so it is not cut short by the feature's deadline.
+func teardownResetPrefixState(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string) {
+	// resetNodePrefixState can spend up to 5 minutes in each of its three
+	// asynchronous phases: Terway rollout, Node CR sync, and prefix cleanup.
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), prefixResetTotalTimeout)
+	defer cancel()
+	if err := resetNodePrefixState(cleanupCtx, config, t, nodeName, prefixResetPhaseTimeout); err != nil {
+		t.Logf("Warning: teardown resetNodePrefixState failed: %v", err)
+	}
+}
+
+// setupResetPrefixState resets prefix state during test Setup to handle dirty
+// state from a previously crashed test run.
+func setupResetPrefixState(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string) {
+	if err := resetNodePrefixState(ctx, config, t, nodeName, prefixResetPhaseTimeout); err != nil {
+		t.Logf("Warning: setup resetNodePrefixState failed (node may be clean): %v", err)
+	}
 }
 
 // =============================================================================

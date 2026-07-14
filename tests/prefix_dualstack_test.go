@@ -61,6 +61,7 @@ func TestPrefix_DualStack_1to1Ratio(t *testing.T) {
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			ctx = saveOriginalConfig(ctx, config, t)
 			ctx = context.WithValue(ctx, qualifiedNodeContextKey, qualifiedNode)
+			setupResetPrefixState(ctx, config, t, qualifiedNode)
 			return ctx
 		}).
 		Assess("test IPv4/IPv6 prefix 1:1 ratio", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -68,6 +69,7 @@ func TestPrefix_DualStack_1to1Ratio(t *testing.T) {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			restoreOriginalConfig(ctx, config, t)
+			teardownResetPrefixState(ctx, config, t, ctx.Value(qualifiedNodeContextKey).(string))
 			return ctx
 		}).
 		Feature()
@@ -121,6 +123,7 @@ func TestPrefix_DualStack_CapacityConstraint(t *testing.T) {
 			ctx = context.WithValue(ctx, qualifiedNodeContextKey, qualifiedNode)
 			ctx = context.WithValue(ctx, ipv4PerAdapterContextKey, ipv4PerAdapter)
 			ctx = context.WithValue(ctx, ipv6PerAdapterContextKey, ipv6PerAdapter)
+			setupResetPrefixState(ctx, config, t, qualifiedNode)
 			return ctx
 		}).
 		Assess("test dual stack capacity constraints", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -131,6 +134,7 @@ func TestPrefix_DualStack_CapacityConstraint(t *testing.T) {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			restoreOriginalConfig(ctx, config, t)
+			teardownResetPrefixState(ctx, config, t, ctx.Value(qualifiedNodeContextKey).(string))
 			return ctx
 		}).
 		Feature()
@@ -151,12 +155,6 @@ func TestPrefix_DualStack_CapacityConstraint(t *testing.T) {
 func assessDualStack1to1Ratio(ctx context.Context, t *testing.T, config *envconf.Config, nodeName string) context.Context {
 	t.Logf("Testing dual stack 1:1 ratio on node: %s", nodeName)
 
-	// Reset prefix state before configuring new settings
-	t.Log("Reset node prefix state before configuring dual stack")
-	if resetErr := resetNodePrefixState(ctx, config, t, nodeName, 3*time.Minute); resetErr != nil {
-		t.Logf("Warning: resetNodePrefixState failed (node may have no prefixes yet): %v", resetErr)
-	}
-
 	// Setup Dynamic Config with enable_ip_prefix=true and an explicit ipv4_prefix_count.
 	// ipv4_prefix_count is required in dual-stack mode; only the per-ENI IPv6 prefix is auto-assigned.
 	t.Log("Configure enable_ip_prefix=true and ipv4_prefix_count=3 via Dynamic Config")
@@ -168,9 +166,9 @@ func assessDualStack1to1Ratio(ctx context.Context, t *testing.T, config *envconf
 
 	// Restart terway
 	t.Log("Restart terway-eniip to apply config")
-	err = restartTerway(ctx, config)
+	err = triggerReconcileOnAllNodes(ctx, config)
 	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 
 	// Wait for at least 1 prefix pair to be allocated (system decides the count)
@@ -225,21 +223,15 @@ func assessDualStackCapacityConstraint(ctx context.Context, t *testing.T, config
 		}
 	}
 
-	// Reset prefix state before configuring new settings
-	t.Log("Reset node prefix state before configuring dual stack capacity constraint")
-	if resetErr := resetNodePrefixState(ctx, config, t, nodeName, 3*time.Minute); resetErr != nil {
-		t.Logf("Warning: resetNodePrefixState failed (node may have no prefixes yet): %v", resetErr)
-	}
-
 	// Setup Dynamic Config with enable_ip_prefix=true and ipv4_prefix_count
 	ctx, err = setupNodeDynamicConfig(ctx, config, t, fmt.Sprintf(`{"enable_ip_prefix":true,"ipv4_prefix_count":%d}`, requestedCount))
 	if err != nil {
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
 
-	err = restartTerway(ctx, config)
+	err = triggerReconcileOnAllNodes(ctx, config)
 	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 
 	// Wait using the capacity-capped count so we don't time out

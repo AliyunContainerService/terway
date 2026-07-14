@@ -65,9 +65,9 @@ func TestPrefix_E2E_PodIPAllocation(t *testing.T) {
 				t.Fatalf("Failed to setup IP Prefix nodes: %v", setupErr)
 			}
 
-			// Restart terway to apply config
-			if err := restartTerway(ctx, config); err != nil {
-				t.Fatalf("Failed to restart terway: %v", err)
+			// Trigger reconcile to apply config
+			if err := triggerReconcileOnAllNodes(ctx, config); err != nil {
+				t.Fatalf("failed to trigger reconcile: %v", err)
 			}
 
 			// Wait for prefix allocation on all nodes
@@ -92,6 +92,9 @@ func TestPrefix_E2E_PodIPAllocation(t *testing.T) {
 			nodes, _ := ctx.Value(ipPrefixNodesContextKey).([]corev1.Node)
 			if len(nodes) > 0 {
 				teardownIPPrefixNodes(ctx, t, config, nodes)
+				for _, node := range nodes {
+					teardownResetPrefixState(ctx, config, t, node.Name)
+				}
 			}
 			return ctx
 		}).
@@ -128,8 +131,8 @@ func TestPrefix_E2E_NodeSetup(t *testing.T) {
 			if setupErr != nil {
 				t.Fatalf("Failed to setup IP Prefix nodes: %v", setupErr)
 			}
-			if err := restartTerway(ctx, config); err != nil {
-				t.Fatalf("Failed to restart terway: %v", err)
+			if err := triggerReconcileOnAllNodes(ctx, config); err != nil {
+				t.Fatalf("failed to trigger reconcile: %v", err)
 			}
 			return ctx
 		}).
@@ -140,6 +143,9 @@ func TestPrefix_E2E_NodeSetup(t *testing.T) {
 			nodes, _ := ctx.Value(ipPrefixNodesContextKey).([]corev1.Node)
 			if len(nodes) > 0 {
 				teardownIPPrefixNodes(ctx, t, config, nodes)
+				for _, node := range nodes {
+					teardownResetPrefixState(ctx, config, t, node.Name)
+				}
 			}
 			return ctx
 		}).
@@ -160,7 +166,8 @@ func assessSinglePodIPInPrefix(ctx context.Context, t *testing.T, config *envcon
 	affinityLabels := GetNodeAffinityForType(NodeTypeECSIPPrefix)
 	pod := NewPod("prefix-e2e-single", config.Namespace()).
 		WithContainer("nginx", nginxImage, nil).
-		WithNodeAffinity(affinityLabels)
+		WithNodeAffinity(affinityLabels).
+		WithTolerations(IPPrefixTolerations())
 
 	if err := config.Client().Resources().Create(ctx, pod.Pod); err != nil {
 		t.Fatalf("Failed to create pod: %v", err)
@@ -209,7 +216,8 @@ func assessMultiplePodsIPInPrefix(ctx context.Context, t *testing.T, config *env
 	for i := 0; i < podCount; i++ {
 		pod := NewPod(fmt.Sprintf("prefix-e2e-multi-%d", i), config.Namespace()).
 			WithContainer("nginx", nginxImage, nil).
-			WithNodeAffinity(affinityLabels)
+			WithNodeAffinity(affinityLabels).
+			WithTolerations(IPPrefixTolerations())
 
 		if err := config.Client().Resources().Create(ctx, pod.Pod); err != nil {
 			t.Fatalf("Failed to create pod %d: %v", i, err)
@@ -271,7 +279,8 @@ func assessPodRecreationPrefix(ctx context.Context, t *testing.T, config *envcon
 	// Create initial pod
 	pod := NewPod("prefix-e2e-recreate", config.Namespace()).
 		WithContainer("nginx", nginxImage, nil).
-		WithNodeAffinity(affinityLabels)
+		WithNodeAffinity(affinityLabels).
+		WithTolerations(IPPrefixTolerations())
 
 	if err := config.Client().Resources().Create(ctx, pod.Pod); err != nil {
 		t.Fatalf("Failed to create pod: %v", err)
@@ -311,7 +320,8 @@ func assessPodRecreationPrefix(ctx context.Context, t *testing.T, config *envcon
 	// Recreate the pod with a new name
 	newPod := NewPod("prefix-e2e-recreate-new", config.Namespace()).
 		WithContainer("nginx", nginxImage, nil).
-		WithNodeAffinity(affinityLabels)
+		WithNodeAffinity(affinityLabels).
+		WithTolerations(IPPrefixTolerations())
 
 	if err := config.Client().Resources().Create(ctx, newPod.Pod); err != nil {
 		t.Fatalf("Failed to create new pod: %v", err)

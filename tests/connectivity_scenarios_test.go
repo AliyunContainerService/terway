@@ -521,6 +521,18 @@ func applyNodeAffinityAndTolerations(pod *Pod, nodeType NodeType) *Pod {
 		})
 	}
 
+	// Add tolerations for IP Prefix nodes (tainted with NoSchedule)
+	if nodeType == NodeTypeECSIPPrefix {
+		pod = pod.WithTolerations([]corev1.Toleration{
+			{
+				Key:      "k8s.aliyun.com/ip-prefix",
+				Operator: corev1.TolerationOpEqual,
+				Value:    "true",
+				Effect:   corev1.TaintEffectNoSchedule,
+			},
+		})
+	}
+
 	return pod
 }
 

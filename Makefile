@@ -70,8 +70,25 @@ datapath-test: ## Run datapath tests using the Makefile in tests/kind directory.
 	make -C tests/kind datapath-test
 
 .PHONY: e2e-test
-e2e-test: ## Run e2e functional tests (excludes upgrade and migrate tests).
-	go test -v -count=1 -timeout 60m -tags e2e ./tests -run 'Test[^UM].*' $(TESTARGS)
+e2e-test: e2e-test-phased ## Run e2e functional tests in phases: connectivity → mutating → prefix (excludes upgrade and migrate).
+
+.PHONY: e2e-test-connectivity
+e2e-test-connectivity: ## Run read-only connectivity/networking e2e tests.
+	go test -v -count=1 -timeout 30m -parallel 2 -tags e2e ./tests \
+		-run 'Test(SharedENI_Connectivity|ExclusiveENI_Connectivity|SharedENI_NetworkPolicy|PodNetworking|SecurityGroup|Normal_Host|ConnectivityWithReport)' $(TESTARGS)
+
+.PHONY: e2e-test-mutating
+e2e-test-mutating: ## Run cluster-mutating e2e tests (IP pool, warm-up, reclaim, perf).
+	go test -v -count=1 -timeout 40m -parallel 2 -tags e2e ./tests \
+		-run 'Test(IPPool|SharedENI_HostPort|SharedENI_WarmUp|SharedENI_IdleIPReclaim|IPAllocationPerf)' $(TESTARGS)
+
+.PHONY: e2e-test-prefix
+e2e-test-prefix: ## Run IP prefix e2e tests.
+	go test -v -count=1 -timeout 60m -parallel 2 -tags e2e ./tests \
+		-run 'TestPrefix_' $(TESTARGS)
+
+.PHONY: e2e-test-phased
+e2e-test-phased: e2e-test-connectivity e2e-test-mutating e2e-test-prefix ## Run e2e tests in phases: connectivity → mutating → prefix.
 
 .PHONY: e2e-upgrade-test
 e2e-upgrade-test: ## Run e2e upgrade tests only.

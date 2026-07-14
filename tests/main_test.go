@@ -641,10 +641,10 @@ func resetNodeConfigToDefault(ctx context.Context, config *envconf.Config) (cont
 		}
 	}
 
-	// Step 3: Restart terway to apply configuration
-	fmt.Println("Restarting terway to apply default configuration...")
-	if err := restartTerway(ctx, config); err != nil {
-		return ctx, fmt.Errorf("failed to restart terway: %w", err)
+	// Step 3: Trigger reconcile to apply configuration
+	fmt.Println("Triggering reconcile to apply default configuration...")
+	if err := triggerReconcileOnAllNodes(ctx, config); err != nil {
+		return ctx, fmt.Errorf("failed to trigger reconcile: %w", err)
 	}
 
 	// Step 4: Verify shared ENI nodes have converged to pool=0.

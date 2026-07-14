@@ -178,11 +178,11 @@ func assessWarmUpBasic(ctx context.Context, t *testing.T, config *envconf.Config
 		t.Fatalf("failed to configure warm-up: %v", err)
 	}
 
-	// Step 4: Restart terway-eniip to apply new config
-	t.Log("Step 4: Restart terway-eniip to apply new config")
-	err = restartTerway(ctx, config)
+	// Step 4: Trigger reconcile to apply new config
+	t.Log("Step 4: Trigger reconcile to apply new config")
+	err = triggerReconcileOnAllNodes(ctx, config)
 	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 
 	// Step 4.1: Wait for node spec to be synchronized
@@ -267,11 +267,11 @@ func assessWarmUpLargerThanMaxPoolSize(ctx context.Context, t *testing.T, config
 		t.Fatalf("failed to configure warm-up: %v", err)
 	}
 
-	// Step 4: Restart terway-eniip to apply new config
-	t.Log("Step 4: Restart terway-eniip to apply new config")
-	err = restartTerway(ctx, config)
+	// Step 4: Trigger reconcile to apply new config
+	t.Log("Step 4: Trigger reconcile to apply new config")
+	err = triggerReconcileOnAllNodes(ctx, config)
 	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 
 	// Step 4.1: Wait for node spec to be synchronized

@@ -164,40 +164,24 @@ func assessIdleIPReclaimBasic(ctx context.Context, t *testing.T, config *envconf
 
 	// Step 1: First preheat the pool to 10 IPs
 	t.Log("Step 1: Preheat pool to 10 idle IPs (min=max=10)")
-	cm := &corev1.ConfigMap{}
-	err := config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
+	err := applyConfigAndTriggerReconcile(ctx, config, func(eniJson *gabs.Container) error {
+		// Set min=max=10 for preheating
+		_, err := eniJson.Set("30s", "ip_pool_sync_period")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set(10, "max_pool_size")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set(10, "min_pool_size")
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("failed to get eni-config: %v", err)
-	}
-
-	eniJson, err := gabs.ParseJSON([]byte(cm.Data["eni_conf"]))
-	if err != nil {
-		t.Fatalf("failed to parse eni_conf: %v", err)
-	}
-
-	// Set min=max=10 for preheating
-	_, err = eniJson.Set("30s", "ip_pool_sync_period")
-	if err != nil {
-		t.Fatalf("failed to set ip_pool_sync_period: %v", err)
-	}
-	_, err = eniJson.Set(10, "max_pool_size")
-	if err != nil {
-		t.Fatalf("failed to set max_pool_size: %v", err)
-	}
-	_, err = eniJson.Set(10, "min_pool_size")
-	if err != nil {
-		t.Fatalf("failed to set min_pool_size: %v", err)
-	}
-
-	cm.Data["eni_conf"] = eniJson.String()
-	err = config.Client().Resources().Update(ctx, cm)
-	if err != nil {
-		t.Fatalf("failed to update eni-config: %v", err)
-	}
-
-	err = restartTerway(ctx, config)
-	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to apply config and trigger reconcile: %v", err)
 	}
 
 	// Wait for preheating to 10 IPs on qualified nodes only
@@ -209,48 +193,32 @@ func assessIdleIPReclaimBasic(ctx context.Context, t *testing.T, config *envconf
 
 	// Step 2: Now configure reclaim policy and lower min_pool_size
 	t.Log("Step 3: Configure reclaim policy and lower min_pool_size to 3")
-	cm = &corev1.ConfigMap{}
-	err = config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
+	err = applyConfigAndTriggerReconcile(ctx, config, func(eniJson *gabs.Container) error {
+		// Lower min_pool_size and add reclaim policy
+		_, err := eniJson.Set(3, "min_pool_size")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set("2m", "idle_ip_reclaim_after")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set("30s", "idle_ip_reclaim_interval")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set(3, "idle_ip_reclaim_batch_size")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set("0.1", "idle_ip_reclaim_jitter_factor")
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("failed to get eni-config: %v", err)
-	}
-
-	eniJson, err = gabs.ParseJSON([]byte(cm.Data["eni_conf"]))
-	if err != nil {
-		t.Fatalf("failed to parse eni_conf: %v", err)
-	}
-
-	// Lower min_pool_size and add reclaim policy
-	_, err = eniJson.Set(3, "min_pool_size")
-	if err != nil {
-		t.Fatalf("failed to set min_pool_size: %v", err)
-	}
-	_, err = eniJson.Set("2m", "idle_ip_reclaim_after")
-	if err != nil {
-		t.Fatalf("failed to set idle_ip_reclaim_after: %v", err)
-	}
-	_, err = eniJson.Set("30s", "idle_ip_reclaim_interval")
-	if err != nil {
-		t.Fatalf("failed to set idle_ip_reclaim_interval: %v", err)
-	}
-	_, err = eniJson.Set(3, "idle_ip_reclaim_batch_size")
-	if err != nil {
-		t.Fatalf("failed to set idle_ip_reclaim_batch_size: %v", err)
-	}
-	_, err = eniJson.Set("0.1", "idle_ip_reclaim_jitter_factor")
-	if err != nil {
-		t.Fatalf("failed to set idle_ip_reclaim_jitter_factor: %v", err)
-	}
-
-	cm.Data["eni_conf"] = eniJson.String()
-	err = config.Client().Resources().Update(ctx, cm)
-	if err != nil {
-		t.Fatalf("failed to update eni-config: %v", err)
-	}
-
-	err = restartTerway(ctx, config)
-	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to apply config and trigger reconcile: %v", err)
 	}
 
 	// Step 3: Verify IPs have been reclaimed but min_pool_size is respected on qualified nodes
@@ -309,40 +277,24 @@ func assessIdleIPReclaimBatch(ctx context.Context, t *testing.T, config *envconf
 
 	// Step 1: Preheat the pool to 10 IPs
 	t.Log("Step 1: Preheat pool to 10 idle IPs")
-	cm := &corev1.ConfigMap{}
-	err := config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
+	err := applyConfigAndTriggerReconcile(ctx, config, func(eniJson *gabs.Container) error {
+		// Set min=max=10 for preheating
+		_, err := eniJson.Set("30s", "ip_pool_sync_period")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set(10, "max_pool_size")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set(10, "min_pool_size")
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("failed to get eni-config: %v", err)
-	}
-
-	eniJson, err := gabs.ParseJSON([]byte(cm.Data["eni_conf"]))
-	if err != nil {
-		t.Fatalf("failed to parse eni_conf: %v", err)
-	}
-
-	// Set min=max=10 for preheating
-	_, err = eniJson.Set("30s", "ip_pool_sync_period")
-	if err != nil {
-		t.Fatalf("failed to set ip_pool_sync_period: %v", err)
-	}
-	_, err = eniJson.Set(10, "max_pool_size")
-	if err != nil {
-		t.Fatalf("failed to set max_pool_size: %v", err)
-	}
-	_, err = eniJson.Set(10, "min_pool_size")
-	if err != nil {
-		t.Fatalf("failed to set min_pool_size: %v", err)
-	}
-
-	cm.Data["eni_conf"] = eniJson.String()
-	err = config.Client().Resources().Update(ctx, cm)
-	if err != nil {
-		t.Fatalf("failed to update eni-config: %v", err)
-	}
-
-	err = restartTerway(ctx, config)
-	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to apply config and trigger reconcile: %v", err)
 	}
 
 	// Wait for preheating to 10 IPs on qualified nodes
@@ -354,48 +306,32 @@ func assessIdleIPReclaimBatch(ctx context.Context, t *testing.T, config *envconf
 
 	// Step 2: Configure with small batch_size=2
 	t.Log("Step 3: Configure reclaim with batch_size=2")
-	cm = &corev1.ConfigMap{}
-	err = config.Client().Resources().Get(ctx, "eni-config", "kube-system", cm)
+	err = applyConfigAndTriggerReconcile(ctx, config, func(eniJson *gabs.Container) error {
+		// Configure with batch_size=2 and small min_pool_size
+		_, err := eniJson.Set(2, "min_pool_size")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set("1m", "idle_ip_reclaim_after")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set("1m", "idle_ip_reclaim_interval")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set(2, "idle_ip_reclaim_batch_size")
+		if err != nil {
+			return err
+		}
+		_, err = eniJson.Set("0.1", "idle_ip_reclaim_jitter_factor")
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("failed to get eni-config: %v", err)
-	}
-
-	eniJson, err = gabs.ParseJSON([]byte(cm.Data["eni_conf"]))
-	if err != nil {
-		t.Fatalf("failed to parse eni_conf: %v", err)
-	}
-
-	// Configure with batch_size=2 and small min_pool_size
-	_, err = eniJson.Set(2, "min_pool_size")
-	if err != nil {
-		t.Fatalf("failed to set min_pool_size: %v", err)
-	}
-	_, err = eniJson.Set("1m", "idle_ip_reclaim_after")
-	if err != nil {
-		t.Fatalf("failed to set idle_ip_reclaim_after: %v", err)
-	}
-	_, err = eniJson.Set("1m", "idle_ip_reclaim_interval")
-	if err != nil {
-		t.Fatalf("failed to set idle_ip_reclaim_interval: %v", err)
-	}
-	_, err = eniJson.Set(2, "idle_ip_reclaim_batch_size")
-	if err != nil {
-		t.Fatalf("failed to set idle_ip_reclaim_batch_size: %v", err)
-	}
-	_, err = eniJson.Set("0.1", "idle_ip_reclaim_jitter_factor")
-	if err != nil {
-		t.Fatalf("failed to set idle_ip_reclaim_jitter_factor: %v", err)
-	}
-
-	cm.Data["eni_conf"] = eniJson.String()
-	err = config.Client().Resources().Update(ctx, cm)
-	if err != nil {
-		t.Fatalf("failed to update eni-config: %v", err)
-	}
-
-	err = restartTerway(ctx, config)
-	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to apply config and trigger reconcile: %v", err)
 	}
 
 	// Step 3: Record initial idle count on qualified nodes
@@ -421,8 +357,32 @@ func assessIdleIPReclaimBatch(ctx context.Context, t *testing.T, config *envconf
 	}
 
 	// Step 4: Wait for first reclaim cycle
-	t.Log("Step 5: Wait for first reclaim cycle (2m)")
-	time.Sleep(2 * time.Minute)
+	t.Log("Step 5: Wait for first reclaim cycle")
+	err = wait.For(func(ctx context.Context) (done bool, err error) {
+		nodes := &networkv1beta1.NodeList{}
+		if err := config.Client().Resources().List(ctx, nodes); err != nil {
+			return false, err
+		}
+
+		currentIdleCount := 0
+		for _, node := range nodes.Items {
+			if !qualifiedSet[node.Name] {
+				continue
+			}
+			currentIdleCount += countIdleIPs(&node)
+		}
+
+		if currentIdleCount < initialIdleCount {
+			t.Logf("Idle IPs decreased from %d to %d, first reclaim cycle detected", initialIdleCount, currentIdleCount)
+			return true, nil
+		}
+
+		t.Logf("Waiting for first reclaim cycle: idle IPs still at %d (expected decrease from %d)", currentIdleCount, initialIdleCount)
+		return false, nil
+	}, wait.WithTimeout(3*time.Minute), wait.WithInterval(5*time.Second))
+	if err != nil {
+		t.Fatalf("failed to wait for first reclaim cycle: %v", err)
+	}
 
 	// Step 5: Check that only batch_size IPs were reclaimed on qualified nodes
 	t.Log("Step 6: Verify only batch_size IPs reclaimed in first cycle on qualified nodes")
@@ -507,14 +467,11 @@ func cleanupPoolConfig(ctx context.Context, t *testing.T, config *envconf.Config
 		return err
 	}
 
-	t.Log("Cleanup: Restarting terway to apply clean configuration")
-	err = restartTerway(ctx, config)
+	t.Log("Cleanup: Triggering reconcile on all nodes to apply clean configuration")
+	err = triggerReconcileOnAllNodes(ctx, config)
 	if err != nil {
 		return err
 	}
-
-	t.Log("Cleanup: Waiting 30s for configuration to stabilize")
-	time.Sleep(30 * time.Second)
 
 	return nil
 }

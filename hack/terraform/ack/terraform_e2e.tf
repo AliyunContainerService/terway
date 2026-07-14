@@ -504,6 +504,11 @@ resource "alicloud_cs_kubernetes_node_pool" "ip_prefix_azj" {
     key   = "terway-config"
     value = "e2e-ip-prefix"
   }
+  taints {
+    key    = "k8s.aliyun.com/ip-prefix"
+    value  = "true"
+    effect = "NoSchedule"
+  }
   depends_on = [kubernetes_config_map_v1.e2e_ip_prefix]
 }
 
@@ -529,6 +534,11 @@ resource "alicloud_cs_kubernetes_node_pool" "ip_prefix_azk" {
   labels {
     key   = "terway-config"
     value = "e2e-ip-prefix"
+  }
+  taints {
+    key    = "k8s.aliyun.com/ip-prefix"
+    value  = "true"
+    effect = "NoSchedule"
   }
   depends_on = [kubernetes_config_map_v1.e2e_ip_prefix]
 }

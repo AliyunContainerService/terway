@@ -63,6 +63,7 @@ func TestPrefix_Boundary_APILimit(t *testing.T) {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			restoreOriginalConfig(ctx, config, t)
+			teardownResetPrefixState(ctx, config, t, ctx.Value(qualifiedNodeContextKey).(string))
 			return ctx
 		}).
 		Feature()
@@ -110,6 +111,7 @@ func TestPrefix_Boundary_ENICapacity(t *testing.T) {
 			ctx = saveOriginalConfig(ctx, config, t)
 			ctx = context.WithValue(ctx, qualifiedNodeContextKey, qualifiedNode)
 			ctx = context.WithValue(ctx, maxPrefixPerENIContextKey, maxPrefixesPerENI)
+			setupResetPrefixState(ctx, config, t, qualifiedNode)
 			return ctx
 		}).
 		Assess("test ENI capacity boundary", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -119,6 +121,7 @@ func TestPrefix_Boundary_ENICapacity(t *testing.T) {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			restoreOriginalConfig(ctx, config, t)
+			teardownResetPrefixState(ctx, config, t, ctx.Value(qualifiedNodeContextKey).(string))
 			return ctx
 		}).
 		Feature()
@@ -150,6 +153,7 @@ func TestPrefix_Boundary_ZeroAndMin(t *testing.T) {
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			ctx = saveOriginalConfig(ctx, config, t)
 			ctx = context.WithValue(ctx, qualifiedNodeContextKey, nodeName)
+			setupResetPrefixState(ctx, config, t, nodeName)
 			return ctx
 		}).
 		Assess("test zero and minimum prefix count", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -157,6 +161,7 @@ func TestPrefix_Boundary_ZeroAndMin(t *testing.T) {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			restoreOriginalConfig(ctx, config, t)
+			teardownResetPrefixState(ctx, config, t, ctx.Value(qualifiedNodeContextKey).(string))
 			return ctx
 		}).
 		Feature()
@@ -207,6 +212,7 @@ func TestPrefix_Boundary_MaxValue(t *testing.T) {
 			ctx = context.WithValue(ctx, qualifiedNodeContextKey, qualifiedNode)
 			ctx = context.WithValue(ctx, maxCapacityContextKey, maxCapacity)
 			ctx = context.WithValue(ctx, requestedCountContextKey, requestedCount)
+			setupResetPrefixState(ctx, config, t, qualifiedNode)
 			return ctx
 		}).
 		Assess("test maximum prefix count boundary", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -217,6 +223,7 @@ func TestPrefix_Boundary_MaxValue(t *testing.T) {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			restoreOriginalConfig(ctx, config, t)
+			teardownResetPrefixState(ctx, config, t, ctx.Value(qualifiedNodeContextKey).(string))
 			return ctx
 		}).
 		Feature()
@@ -231,12 +238,6 @@ func TestPrefix_Boundary_MaxValue(t *testing.T) {
 // assessAPILimitBoundary tests the 10-prefix API limit
 func assessAPILimitBoundary(ctx context.Context, t *testing.T, config *envconf.Config, nodeName string) context.Context {
 	t.Logf("Testing API limit boundary on node: %s", nodeName)
-
-	// Reset prefix state to ensure clean starting point
-	t.Log("Reset node prefix state before API limit tests")
-	if err := resetNodePrefixState(ctx, config, t, nodeName, 3*time.Minute); err != nil {
-		t.Logf("Warning: resetNodePrefixState failed: %v", err)
-	}
 
 	// Setup Dynamic Config for this node (initial count, will be updated per test case)
 	var err error
@@ -259,20 +260,27 @@ func assessAPILimitBoundary(ctx context.Context, t *testing.T, config *envconf.C
 	for _, tc := range testCases {
 		t.Logf("Running: %s", tc.name)
 
+		// Each case must start from zero so it exercises the full allocation
+		// request (for example, 11 is split into API calls of 10+1).
+		if err = resetNodePrefixState(ctx, config, t, nodeName, prefixResetPhaseTimeout); err != nil {
+			t.Fatalf("failed to reset prefix state before %s: %v", tc.name, err)
+		}
+
 		// Configure prefix count via Dynamic Config
 		err = configureIPPrefixCount(ctx, t, config, nodeName, tc.prefixCount)
 		if err != nil {
 			t.Fatalf("failed to configure ipv4_prefix_count: %v", err)
 		}
 
-		// Restart terway
-		err = restartTerway(ctx, config)
+		// Trigger reconcile
+		err = triggerReconcileOnAllNodes(ctx, config)
 		if err != nil {
-			t.Fatalf("failed to restart terway: %v", err)
+			t.Fatalf("failed to trigger reconcile: %v", err)
 		}
 
-		// Wait for allocation
-		err = waitForPrefixAllocation(ctx, config, t, nodeName, tc.prefixCount, 3*time.Minute)
+		// Wait for the exact target to remain stable. A one-shot check can miss
+		// an in-flight request that over-allocates immediately afterwards.
+		err = waitForExactPrefixAllocation(ctx, config, t, nodeName, tc.prefixCount, 30*time.Second, 3*time.Minute)
 		if err != nil {
 			t.Fatalf("failed waiting for prefix allocation: %v", err)
 		}
@@ -288,11 +296,6 @@ func assessAPILimitBoundary(ctx context.Context, t *testing.T, config *envconf.C
 		}
 
 		t.Logf("%s: successfully allocated %d prefixes", tc.name, len(prefixes))
-
-		// Reset prefix state for next test case (clean up + wait for completion)
-		if err := resetNodePrefixState(ctx, config, t, nodeName, 3*time.Minute); err != nil {
-			t.Logf("Warning: resetNodePrefixState failed between cases: %v", err)
-		}
 	}
 
 	return MarkTestSuccess(ctx)
@@ -301,12 +304,6 @@ func assessAPILimitBoundary(ctx context.Context, t *testing.T, config *envconf.C
 // assessENICapacityBoundary tests ENI capacity limits
 func assessENICapacityBoundary(ctx context.Context, t *testing.T, config *envconf.Config, nodeName string, maxPerENI int) context.Context {
 	t.Logf("Testing ENI capacity boundary on node: %s (max per ENI: %d)", nodeName, maxPerENI)
-
-	// Reset state to ensure clean starting point
-	t.Log("Reset node prefix state")
-	if err := resetNodePrefixState(ctx, config, t, nodeName, 3*time.Minute); err != nil {
-		t.Logf("Warning: resetNodePrefixState failed: %v", err)
-	}
 
 	// Request more than single ENI capacity
 	requestedCount := maxPerENI + 3
@@ -319,14 +316,15 @@ func assessENICapacityBoundary(ctx context.Context, t *testing.T, config *envcon
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
 
-	// Restart terway
-	err = restartTerway(ctx, config)
+	// Trigger reconcile
+	err = triggerReconcileOnAllNodes(ctx, config)
 	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 
-	// Wait for allocation
-	err = waitForPrefixAllocation(ctx, config, t, nodeName, requestedCount, 4*time.Minute)
+	// Wait for the exact target to remain stable so in-flight allocation cannot
+	// turn an initially exact result into a false pass.
+	err = waitForExactPrefixAllocation(ctx, config, t, nodeName, requestedCount, 30*time.Second, 4*time.Minute)
 	if err != nil {
 		t.Fatalf("failed waiting for prefix allocation: %v", err)
 	}
@@ -361,12 +359,6 @@ func assessENICapacityBoundary(ctx context.Context, t *testing.T, config *envcon
 func assessZeroAndMinBoundary(ctx context.Context, t *testing.T, config *envconf.Config, nodeName string) context.Context {
 	t.Logf("Testing zero and minimum boundary on node: %s", nodeName)
 
-	// Reset state to ensure clean starting point
-	t.Log("Reset node prefix state")
-	if err := resetNodePrefixState(ctx, config, t, nodeName, 3*time.Minute); err != nil {
-		t.Logf("Warning: resetNodePrefixState failed: %v", err)
-	}
-
 	// Test Case 1: ipv4_prefix_count=0 via Dynamic Config
 	t.Log("Test Case 1: ipv4_prefix_count=0")
 	var err error
@@ -381,8 +373,21 @@ func assessZeroAndMinBoundary(ctx context.Context, t *testing.T, config *envconf
 		triggerNodeCR(ctx, config, t, nodeCR)
 	}
 
-	// Wait a bit and check - should have no prefixes
-	time.Sleep(20 * time.Second)
+	// Wait and verify no prefixes are allocated
+	err = wait.For(func(ctx context.Context) (done bool, err error) {
+		p, err := getAllocatedPrefixes(ctx, config, nodeName)
+		if err != nil {
+			return false, err
+		}
+		if len(p) == 0 {
+			return true, nil
+		}
+		t.Logf("Waiting for 0 prefixes, currently have %d", len(p))
+		return false, nil
+	}, wait.WithTimeout(30*time.Second), wait.WithInterval(5*time.Second))
+	if err != nil {
+		t.Logf("Warning: timed out waiting for 0 prefixes: %v", err)
+	}
 	prefixes, err := getAllocatedPrefixes(ctx, config, nodeName)
 	if err != nil {
 		t.Fatalf("failed to get prefixes: %v", err)
@@ -406,10 +411,10 @@ func assessZeroAndMinBoundary(ctx context.Context, t *testing.T, config *envconf
 		t.Fatalf("failed to configure ipv4_prefix_count=1: %v", err)
 	}
 
-	// Restart terway
-	err = restartTerway(ctx, config)
+	// Trigger reconcile
+	err = triggerReconcileOnAllNodes(ctx, config)
 	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 
 	// Wait for allocation
@@ -444,10 +449,10 @@ func assessMaxValueBoundary(ctx context.Context, t *testing.T, config *envconf.C
 		t.Fatalf("failed to setup node dynamic config: %v", err)
 	}
 
-	// Restart terway
-	err = restartTerway(ctx, config)
+	// Trigger reconcile
+	err = triggerReconcileOnAllNodes(ctx, config)
 	if err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 
 	// Wait for allocation (system should allocate exactly up to max capacity)
@@ -474,6 +479,50 @@ func assessMaxValueBoundary(ctx context.Context, t *testing.T, config *envconf.C
 // =============================================================================
 // Helper Functions for Boundary Tests
 // =============================================================================
+
+// waitForExactPrefixAllocation waits until the valid prefix count equals the
+// requested target continuously for stableFor. It fails immediately if the
+// controller allocates beyond the target.
+func waitForExactPrefixAllocation(ctx context.Context, config *envconf.Config, t *testing.T,
+	nodeName string, expectedCount int, stableFor, timeout time.Duration) error {
+	iteration := 0
+	stableSince := time.Time{}
+
+	return wait.For(func(ctx context.Context) (done bool, err error) {
+		iteration++
+		prefixes, err := getAllocatedPrefixes(ctx, config, nodeName)
+		if err != nil {
+			return false, err
+		}
+
+		actualCount := len(prefixes)
+		if actualCount > expectedCount {
+			return false, fmt.Errorf("prefix allocation exceeded target: expected %d, got %d", expectedCount, actualCount)
+		}
+		if actualCount == expectedCount {
+			if stableSince.IsZero() {
+				stableSince = time.Now()
+			}
+			if time.Since(stableSince) >= stableFor {
+				return true, nil
+			}
+		} else {
+			stableSince = time.Time{}
+		}
+
+		t.Logf("Node %s: waiting for exactly %d stable prefixes, currently have %d",
+			nodeName, expectedCount, actualCount)
+		if iteration == 1 || iteration%3 == 0 {
+			node := &networkv1beta1.Node{}
+			if err := config.Client().Resources().Get(ctx, nodeName, "", node); err == nil {
+				if err := triggerNodeCR(ctx, config, t, node); err != nil {
+					t.Logf("Warning: failed to trigger Node CR reconcile: %v", err)
+				}
+			}
+		}
+		return false, nil
+	}, wait.WithTimeout(timeout), wait.WithInterval(5*time.Second))
+}
 
 // waitForPrefixAllocationWithMax waits for prefix allocation up to a maximum
 func waitForPrefixAllocationWithMax(ctx context.Context, config *envconf.Config, t *testing.T, nodeName string, maxCount int, timeout time.Duration) error {

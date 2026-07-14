@@ -48,8 +48,8 @@ func TestIPPool(t *testing.T) {
 			return ctx
 		}).
 		Assess("step 1: test release all idles", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			t.Log("Step 1: Modified eni_config with ip_pool_sync_period=30s, max_pool_size=0, min_pool_size=0 and restarted Terwayd")
-			err := updateENIConfigWithRetry(ctx, config, func(eniJson *gabs.Container) error {
+			t.Log("Step 1: Modified eni_config with ip_pool_sync_period=30s, max_pool_size=0, min_pool_size=0, triggered reconcile")
+			err := applyConfigAndTriggerReconcile(ctx, config, func(eniJson *gabs.Container) error {
 				if _, err := eniJson.Set("30s", "ip_pool_sync_period"); err != nil {
 					return err
 				}
@@ -60,12 +60,7 @@ func TestIPPool(t *testing.T) {
 				return err
 			})
 			if err != nil {
-				t.Fatalf("failed to update eni_config: %v", err)
-			}
-
-			err = restartTerway(ctx, config)
-			if err != nil {
-				t.Fatalf("failed to restart terwayd: %v", err)
+				t.Fatalf("failed to update eni_config and trigger reconcile: %v", err)
 			}
 
 			t.Log("Step 2: Verified node CR config update and IP preheating completion")
@@ -114,8 +109,8 @@ func TestIPPool(t *testing.T) {
 			return ctx
 		}).
 		Assess("step 2: test preheating", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			t.Log("Step 1: Modified eni_config with ip_pool_sync_period=30s, max_pool_size=5, min_pool_size=5 and restarted Terwayd")
-			err := updateENIConfigWithRetry(ctx, config, func(eniJson *gabs.Container) error {
+			t.Log("Step 1: Modified eni_config with ip_pool_sync_period=30s, max_pool_size=5, min_pool_size=5, triggered reconcile")
+			err := applyConfigAndTriggerReconcile(ctx, config, func(eniJson *gabs.Container) error {
 				if _, err := eniJson.Set("30s", "ip_pool_sync_period"); err != nil {
 					return err
 				}
@@ -126,12 +121,7 @@ func TestIPPool(t *testing.T) {
 				return err
 			})
 			if err != nil {
-				t.Fatalf("failed to update eni_config: %v", err)
-			}
-
-			err = restartTerway(ctx, config)
-			if err != nil {
-				t.Fatalf("failed to restart terwayd: %v", err)
+				t.Fatalf("failed to update eni_config and trigger reconcile: %v", err)
 			}
 
 			t.Log("Step 2: verify idle ip added")
@@ -177,8 +167,8 @@ func TestIPPool(t *testing.T) {
 			return ctx
 		}).
 		Assess("step 3: test ip_pool_sync_period", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			t.Log("Step 1: Modified eni_config with ip_pool_sync_period=5m, max_pool_size=0, min_pool_size=0 and restarted Terwayd")
-			err := updateENIConfigWithRetry(ctx, config, func(eniJson *gabs.Container) error {
+			t.Log("Step 1: Modified eni_config with ip_pool_sync_period=5m, max_pool_size=0, min_pool_size=0, triggered reconcile")
+			err := applyConfigAndTriggerReconcile(ctx, config, func(eniJson *gabs.Container) error {
 				if _, err := eniJson.Set("5m", "ip_pool_sync_period"); err != nil {
 					return err
 				}
@@ -189,12 +179,7 @@ func TestIPPool(t *testing.T) {
 				return err
 			})
 			if err != nil {
-				t.Fatalf("failed to update eni_config: %v", err)
-			}
-
-			err = restartTerway(ctx, config)
-			if err != nil {
-				t.Fatalf("failed to restart terwayd: %v", err)
+				t.Fatalf("failed to update eni_config and trigger reconcile: %v", err)
 			}
 
 			t.Log("Step 2: verify ip should not be release in 4min")
