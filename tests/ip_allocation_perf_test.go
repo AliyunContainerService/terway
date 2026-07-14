@@ -98,8 +98,8 @@ func (m *poolConfigManager) apply(ctx context.Context, t *testing.T, envCfg *env
 		t.Fatalf("failed to update eni-config: %v", err)
 	}
 
-	if err := restartTerway(ctx, envCfg); err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+	if err := triggerReconcileOnAllNodes(ctx, envCfg); err != nil {
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 
 	time.Sleep(10 * time.Second)
@@ -219,8 +219,8 @@ func (s *IPAllocationPerfTestSuite) setupPrefix(ctx context.Context, t *testing.
 		t.Fatalf("failed to configure ipv4_prefix_count: %v", err)
 	}
 
-	if err := restartTerway(ctx, config); err != nil {
-		t.Fatalf("failed to restart terway: %v", err)
+	if err := triggerReconcileOnAllNodes(ctx, config); err != nil {
+		t.Fatalf("failed to trigger reconcile: %v", err)
 	}
 
 	t.Logf("Waiting for %d prefixes to be allocated on node %s", s.Config.PrefixCount, s.prefixNodeName)
@@ -354,6 +354,9 @@ func (s *IPAllocationPerfTestSuite) RunIteration(ctx context.Context, t *testing
 
 		if s.Config.IsPrefix() {
 			deploy = deploy.WithNodeAffinity(map[string]string{"kubernetes.io/hostname": s.prefixNodeName})
+			deploy = deploy.WithTolerations([]corev1.Toleration{
+				{Key: "k8s.aliyun.com/ip-prefix", Operator: corev1.TolerationOpEqual, Value: "true", Effect: corev1.TaintEffectNoSchedule},
+			})
 		} else {
 			deploy = deploy.
 				WithNodeAffinity(GetNodeAffinityForType(s.NodeType)).

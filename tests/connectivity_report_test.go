@@ -140,14 +140,18 @@ func createReportableTestScenario(cfg TestScenarioConfig, report *ConnectivityTe
 				t.Fatalf("Failed to discover nodes: %v", err)
 			}
 
-			if len(nodeInfo.AllNodes) < 2 && !cfg.BackendOnSameNode {
-				t.Skip("Need at least 2 nodes for remote backend test")
+			// Select non-tainted nodes to avoid prefix nodes (tainted with NoSchedule)
+			var selectableNodes []corev1.Node
+			selectableNodes = append(selectableNodes, nodeInfo.ECSSharedENINodes...)
+			selectableNodes = append(selectableNodes, nodeInfo.ECSExclusiveENINodes...)
+			if len(selectableNodes) < 2 && !cfg.BackendOnSameNode {
+				t.Skip("Need at least 2 non-tainted nodes for remote backend test")
 			}
 
-			serverNode := nodeInfo.AllNodes[0].Name
+			serverNode := selectableNodes[0].Name
 			var clientNode string
-			if len(nodeInfo.AllNodes) > 1 {
-				clientNode = nodeInfo.AllNodes[1].Name
+			if len(selectableNodes) > 1 {
+				clientNode = selectableNodes[1].Name
 			} else {
 				clientNode = serverNode
 			}

@@ -805,15 +805,12 @@ func TestMigrate(t *testing.T) {
 			if !nodeInfo.HasLingjunNodes() {
 				t.Skip("no LingJun nodes available")
 			}
-			if err := updateENIConfigWithRetry(ctx, config, func(eniJson *gabs.Container) error {
+			if err := applyConfigAndTriggerReconcile(ctx, config, func(eniJson *gabs.Container) error {
 				_, _ = eniJson.Set(0, "max_pool_size")
 				_, _ = eniJson.Set(0, "min_pool_size")
 				return nil
 			}); err != nil {
-				t.Fatalf("failed to set pool config: %v", err)
-			}
-			if err := restartTerway(ctx, config); err != nil {
-				t.Fatalf("failed to restart Terway: %v", err)
+				t.Fatalf("failed to set pool config and trigger reconcile: %v", err)
 			}
 			return ctx
 		}).
@@ -861,12 +858,11 @@ func TestMigrate(t *testing.T) {
 				setNodeENOApi(ctx, t, config, nodeName, apiCfg.efloAPI)
 				waitForNodeStable(ctx, t, config, nodeName)
 			}
-			_ = updateENIConfigWithRetry(ctx, config, func(eniJson *gabs.Container) error {
+			_ = applyConfigAndTriggerReconcile(ctx, config, func(eniJson *gabs.Container) error {
 				_, _ = eniJson.Set(5, "max_pool_size")
 				_, _ = eniJson.Set(0, "min_pool_size")
 				return nil
 			})
-			_ = restartTerway(ctx, config)
 			return ctx
 		}).
 		Feature()
