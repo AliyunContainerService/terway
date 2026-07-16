@@ -117,6 +117,10 @@ ACK_CLUSTER_DIR := hack/terraform/ack
 ack-cluster-byo-ipv4: ## Create ACK cluster: ipv4, BYO CNI (helm-installed terway).
 	$(ACK_CLUSTER_DIR)/e2e-cluster.sh create byo-ipv4
 
+.PHONY: ack-cluster-byo-dual
+ack-cluster-byo-dual: ## Create ACK cluster: dual stack, BYO CNI (helm-installed terway).
+	$(ACK_CLUSTER_DIR)/e2e-cluster.sh create byo-dual
+
 .PHONY: ack-cluster-ack-ipv4
 ack-cluster-ack-ipv4: ## Create ACK cluster: ipv4, terway-eniip installed by ACK addon.
 	$(ACK_CLUSTER_DIR)/e2e-cluster.sh create ack-ipv4

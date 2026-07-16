@@ -34,7 +34,7 @@ k8s_name_prefix = "tf-ack-hangzhou"
 # ============================================
 
 # Kubernetes 版本
-kubernetes_version = "1.34.3-aliyun.1"
+kubernetes_version = "1.34.10-aliyun.1"
 
 # 服务网络 CIDR (dual stack 时需逗号分隔: "ipv4-cidr,ipv6-cidr")
 # e2e-cluster.sh 会按 profile 通过 -var 注入对应值。

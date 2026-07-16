@@ -43,6 +43,7 @@ show_help() {
 
 Examples:
   ./e2e-cluster.sh create byo-ipv4 --tag mytag --registry my.registry/me
+  ./e2e-cluster.sh create byo-dual --tag mytag --registry my.registry/me
   ./e2e-cluster.sh create ack-ipv4
   ./e2e-cluster.sh create ack-dual --workdir runs/ack-dual-pr1234
   ./e2e-cluster.sh list
@@ -51,7 +52,7 @@ Examples:
 EOF
 }
 
-# Map profile -> (ip_stack, cluster_mode, service_cidr). Rejects byo-dual explicitly.
+# Map profile -> (ip_stack, cluster_mode, service_cidr).
 profile_to_vars() {
     local profile="$1"
     case "$profile" in
