@@ -24,9 +24,9 @@ const (
 	APIDetachNetworkInterface     = "DetachNetworkInterface"
 	APIDeleteNetworkInterface     = "DeleteNetworkInterface"
 	APIAssignPrivateIPAddress     = "AssignPrivateIpAddresses"
-	APIUnAssignPrivateIPAddresses = "UnAssignPrivateIpAddresses"
+	APIUnAssignPrivateIPAddresses = "UnassignPrivateIpAddresses"
 	APIAssignIPv6Addresses        = "AssignIpv6Addresses"
-	APIUnAssignIpv6Addresses      = "UnAssignIpv6Addresses"
+	APIUnAssignIpv6Addresses      = "UnassignIpv6Addresses"
 	APIDescribeInstanceTypes      = "DescribeInstanceTypes"
 )
 
