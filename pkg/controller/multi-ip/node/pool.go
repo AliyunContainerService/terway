@@ -422,6 +422,36 @@ func (n *ReconcileNode) Reconcile(ctx context.Context, request reconcile.Request
 	return reconcile.Result{RequeueAfter: requeueAfter}, utilerrors.NewAggregate(errorList)
 }
 
+// filterBlockedForAdoption drops ENIs blocked by the tag block list, EXCEPT any
+// ENI terway already manages (present in `managed`, i.e. node.Status.NetworkInterfaces).
+//
+// Adoption is one-way: once terway manages an ENI it has already configured the
+// datapath (routes, ip rules) for it, so evicting it neither cleans up that
+// state nor makes the ENI usable by another owner (e.g. erdma-controller). The
+// block list therefore only gates *not-yet-managed* ENIs. Already-managed ENIs
+// keep being managed and drain naturally as their pods exit (改动二 keeps new
+// pods off HighPerformance ENIs). To stop managing one, re-create the node — a
+// fresh Node CR has an empty status, so the ENI is treated as new and blocked
+// from adoption.
+func filterBlockedForAdoption(enis []*aliyunClient.NetworkInterface, blockList []aliyunClient.ENITagBlockListItem, managed map[string]*networkv1beta1.Nic) []*aliyunClient.NetworkInterface {
+	out := make([]*aliyunClient.NetworkInterface, 0, len(enis))
+	for _, eni := range enis {
+		if eni == nil {
+			continue
+		}
+		if _, ok := managed[eni.NetworkInterfaceID]; ok {
+			// already managed: never evict
+			out = append(out, eni)
+			continue
+		}
+		if aliyunClient.IsENIBlocked(eni.Tags, blockList) {
+			continue
+		}
+		out = append(out, eni)
+	}
+	return out
+}
+
 // syncWithAPI will sync all eni from openAPI. Need to re-sync with local pods.
 func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.Node) error {
 	if !MetaCtx(ctx).NeedSyncOpenAPI.Load() {
@@ -462,13 +492,37 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 		return err
 	}
 
-	// ignore primary eni (including migration-tagged LENI primary on lingjun nodes)
+	// ignore primary eni (including migration-tagged LENI primary on lingjun nodes).
+	// Do this BEFORE the block-list filtering below: the flavor capacity is already
+	// Adapters-1 (primary excluded), so a primary that happens to match the block
+	// list must not be counted in ExcludedENICount — otherwise getEniOptions would
+	// deduct the primary slot twice and lose a usable secondary slot.
 	enis = lo.Filter(enis, func(item *aliyunClient.NetworkInterface, index int) bool {
 		if item.Type == aliyunClient.ENITypePrimary {
 			return false
 		}
 		return !aliyunClient.IsLENIPrimary(item)
 	})
+
+	// ENIs explicitly marked as out-of-scope for terway
+	// (e.g. ERDMA NICs managed by alibabacloud-erdma-controller).
+	// Use the Node CR's TagBlockList if present; otherwise fall back to the
+	// built-in default so the erdma-controller contract is always enforced.
+	blockList := aliyunClient.DefaultENITagBlockList
+	if node.Spec.ENISpec != nil && len(node.Spec.ENISpec.TagBlockList) > 0 {
+		blockList = node.Spec.ENISpec.TagBlockList
+	}
+	before := len(enis)
+	enis = filterBlockedForAdoption(enis, blockList, node.Status.NetworkInterfaces)
+	// Blocked-but-not-adopted ENIs are still attached to the instance and occupy
+	// a physical network-card slot. Record the count so getEniOptions does not
+	// over-provision ENIs the instance has no free slot to attach. Primary ENIs
+	// were already removed above, so they are never counted here.
+	dropped := before - len(enis)
+	node.Status.ExcludedENICount = dropped
+	if dropped > 0 {
+		l.Info("ENIs filtered by tag block list", "dropped", dropped, "blockListSize", len(blockList))
+	}
 
 	eniIDMap := map[string]struct{}{}
 	// add ip
@@ -533,6 +587,19 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 				crENI.Status = remote.Status
 			}
 		}
+	}
+
+	// Mark managed ENIs that match the tag block list as unschedulable: keep
+	// their existing pod IPs but assign no new ones, so they drain as pods exit
+	// (assignIPFromLocalPool skips them). This covers a user-defined rule that
+	// matches a Standard ENI terway already adopted — 改动二's skip only covers
+	// HighPerformance. Recomputed every sync, so removing the rule re-enables it.
+	for _, item := range enis {
+		nic, ok := node.Status.NetworkInterfaces[item.NetworkInterfaceID]
+		if !ok {
+			continue
+		}
+		nic.Unschedulable = aliyunClient.IsENIBlocked(item.Tags, blockList)
 	}
 
 	// del eni (those eni is not attached on ecs)
@@ -694,7 +761,7 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	releasePodNotFound(ctx, n.client, node.Name, podsMapper, ipv4Map, ipv6Map)
 
 	// 2. assign ip from local pool
-	unSucceedPods := assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA, node)
+	unSucceedPods := assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node)
 
 	// 3. if there is no enough ip, try to allocate from api
 	err := n.addIP(ctx, unSucceedPods, node)
@@ -703,7 +770,7 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	}
 	// 4. after all is assigned , we can re-allocate ip
 	ipv4Map, ipv6Map = buildIPMap(podsMapper, node.Status.NetworkInterfaces)
-	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA, node)
+	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node)
 
 	// 5. clean up deleting status eni and ip
 	err = n.handleStatus(ctx, node)
@@ -781,7 +848,7 @@ func releasePodNotFound(ctx context.Context, c client.Client, nodeName string, p
 }
 
 // DO NOT assign pod ip if pod already has one
-func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, ipv4Map, ipv6Map map[string]*EniIP, enableEDRMA bool, node *networkv1beta1.Node) map[string]*PodRequest {
+func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, ipv4Map, ipv6Map map[string]*EniIP, node *networkv1beta1.Node) map[string]*PodRequest {
 	pendingPods := lo.PickBy(podsMapper, func(key string, value *PodRequest) bool {
 		if value.RequireIPv4 && value.ipv4Ref == nil {
 			return true
@@ -848,10 +915,22 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 						continue
 					}
 
-					// do not schedule to erdma if node has erdma enable
+					// Never schedule non-RDMA pods to HighPerformance ENIs.
+					// HP ENIs are reserved for RDMA traffic and may be owned by
+					// another controller (e.g. alibabacloud-erdma-controller). If
+					// the standard ENI pool is exhausted, addIP() will create a new
+					// standard ENI rather than dipping into HP IPs. This holds
+					// regardless of the terway erdma config: HP IPs are simply never
+					// handed to plain pods.
 					if !info.RequireERDMA &&
-						enableEDRMA &&
 						v.NetworkInterface.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance {
+						continue
+					}
+
+					// ENI marked unschedulable (matched the tag block list while
+					// already managed): keep existing pods, assign no new IPs so
+					// it drains.
+					if v.NetworkInterface.Unschedulable {
 						continue
 					}
 
@@ -889,9 +968,13 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 						continue
 					}
 
+					// See ipv4 branch above for rationale.
 					if !info.RequireERDMA &&
-						enableEDRMA &&
 						v.NetworkInterface.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance {
+						continue
+					}
+
+					if v.NetworkInterface.Unschedulable {
 						continue
 					}
 
@@ -1329,6 +1412,14 @@ func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eni
 	}
 
 	if option.eniRef != nil {
+		// Never add new IPs to an ENI marked unschedulable (matched the tag block
+		// list while already managed). Existing pods keep their IPs, but the pool
+		// must not fill it — otherwise pods stay Pending while the blocked ENI is
+		// topped up, causing repeated grow/reclaim churn. It drains as pods exit.
+		if option.eniRef.Unschedulable {
+			return false
+		}
+
 		switch option.eniRef.Status {
 		case aliyunClient.ENIStatusInUse, aliyunClient.ENIStatusAttaching:
 		default:
@@ -2314,7 +2405,13 @@ func getEniOptions(node *networkv1beta1.Node) []*eniOptions {
 
 	result := make([]*eniOptions, 0, total)
 
-	newENILimit := max(total-len(sorted), 0)
+	// Externally-owned ENIs (blocked by the tag block list, not adopted) still
+	// occupy physical network-card slots on the instance. Subtract them from the
+	// creation budget so we never try to attach more ENIs than the instance can
+	// hold. The instance-static flavor total does not account for them.
+	budget := max(total-node.Status.ExcludedENICount, 0)
+
+	newENILimit := max(budget-len(sorted), 0)
 	// range all eni
 	// 1. if we require trunk/erdma, create it
 	if node.Spec.ENISpec.EnableTrunk {
@@ -2349,7 +2446,7 @@ func getEniOptions(node *networkv1beta1.Node) []*eniOptions {
 		})
 	})
 
-	toAdd := min(total-len(result), flavor[secondaryKey])
+	toAdd := min(budget-len(result), flavor[secondaryKey])
 
 	// 3. put the rest empty slot for secondary eni
 	for i := 0; i < toAdd; i++ {

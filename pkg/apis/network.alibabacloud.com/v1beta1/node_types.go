@@ -60,6 +60,16 @@ const (
 	IPPrefixStatusDeleting IPPrefixStatus = "Deleting"
 )
 
+// ENITagBlockListItem describes a single (key, value) pair that, when present
+// on an ENI, signals that another controller owns the ENI and terway must not
+// allocate Pod IPs from it.
+type ENITagBlockListItem struct {
+	// +kubebuilder:validation:Required
+	Key string `json:"key"`
+	// +kubebuilder:validation:Required
+	Value string `json:"value"`
+}
+
 type NodeMetadata struct {
 	// +kubebuilder:validation:Required
 	RegionID string `json:"regionID,omitempty"`
@@ -92,6 +102,10 @@ type NetworkCard struct {
 type ENISpec struct {
 	Tag       map[string]string `json:"tag,omitempty"`
 	TagFilter map[string]string `json:"tagFilter,omitempty"`
+	// TagBlockList augments the built-in default block list with user-supplied
+	// (key,value) pairs. Any ENI carrying a matching tag is excluded from
+	// terway's pod IP pool.
+	TagBlockList []ENITagBlockListItem `json:"tagBlockList,omitempty"`
 	// +kubebuilder:validation:Required
 	VSwitchOptions []string `json:"vSwitchOptions,omitempty"`
 	// +kubebuilder:validation:Required
@@ -211,6 +225,13 @@ type Nic struct {
 
 	NetworkInterfaceType ENIType `json:"networkInterfaceType,omitempty"`
 
+	// Unschedulable marks a managed ENI that matches the tag block list: terway
+	// keeps its existing pod IPs (datapath stays configured) but assigns no NEW
+	// IPs on it, so it drains as pods exit. Used to release an already-adopted
+	// ENI to another owner without orphaning live pods. 改动二 covers only
+	// HighPerformance ENIs; this covers any traffic mode matched by a rule.
+	Unschedulable bool `json:"unschedulable,omitempty"`
+
 	IPv4 map[string]*IP `json:"ipv4,omitempty"`
 	IPv6 map[string]*IP `json:"ipv6,omitempty"`
 
@@ -250,6 +271,13 @@ type NodeStatus struct {
 	LastModifiedTime      metav1.Time     `json:"lastModifiedTime,omitempty"`
 	NextIdleIPReclaimTime metav1.Time     `json:"nextIdleIPReclaimTime,omitempty"`
 	NetworkInterfaces     map[string]*Nic `json:"networkInterfaces,omitempty"`
+
+	// ExcludedENICount is the number of ENIs attached to the instance that
+	// terway does NOT manage (matched the tag block list and were not already
+	// adopted) but still occupy a physical network-card slot. Capacity math
+	// must subtract these so terway does not try to create more ENIs than the
+	// instance can actually attach.
+	ExcludedENICount int `json:"excludedENICount,omitempty"`
 
 	WarmUpTarget         int  `json:"warmUpTarget,omitempty"`
 	WarmUpAllocatedCount int  `json:"warmUpAllocatedCount,omitempty"`

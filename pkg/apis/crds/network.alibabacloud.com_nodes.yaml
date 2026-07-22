@@ -85,6 +85,26 @@ spec:
                     additionalProperties:
                       type: string
                     type: object
+                  tagBlockList:
+                    description: |-
+                      TagBlockList augments the built-in default block list with user-supplied
+                      (key,value) pairs. Any ENI carrying a matching tag is excluded from
+                      terway's pod IP pool.
+                    items:
+                      description: |-
+                        ENITagBlockListItem describes a single (key, value) pair that, when present
+                        on an ENI, signals that another controller owns the ENI and terway must not
+                        allocate Pod IPs from it.
+                      properties:
+                        key:
+                          type: string
+                        value:
+                          type: string
+                      required:
+                      - key
+                      - value
+                      type: object
+                    type: array
                   tagFilter:
                     additionalProperties:
                       type: string
@@ -215,6 +235,14 @@ spec:
           status:
             description: NodeStatus defines the observed state of Node
             properties:
+              excludedENICount:
+                description: |-
+                  ExcludedENICount is the number of ENIs attached to the instance that
+                  terway does NOT manage (matched the tag block list and were not already
+                  adopted) but still occupy a physical network-card slot. Capacity math
+                  must subtract these so terway does not try to create more ENIs than the
+                  instance can actually attach.
+                type: integer
               lastModifiedTime:
                 format: date-time
                 type: string
@@ -368,6 +396,14 @@ spec:
                       type: array
                     status:
                       type: string
+                    unschedulable:
+                      description: |-
+                        Unschedulable marks a managed ENI that matches the tag block list: terway
+                        keeps its existing pod IPs (datapath stays configured) but assigns no NEW
+                        IPs on it, so it drains as pods exit. Used to release an already-adopted
+                        ENI to another owner without orphaning live pods. 改动二 covers only
+                        HighPerformance ENIs; this covers any traffic mode matched by a rule.
+                      type: boolean
                     vSwitchID:
                       type: string
                   required:

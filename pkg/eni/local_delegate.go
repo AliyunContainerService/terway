@@ -193,6 +193,12 @@ func (l *LocalDelegate) tryAllocateLocal(ctx context.Context, podID string) (*Lo
 
 	if l.enableIPv4 && l.enableIPv6 {
 		for _, ipam := range l.eniIPAMs {
+			// Never hand a new IP out from an ENI marked unschedulable (block-listed
+			// while already managed). Existing pods were restored on init and keep
+			// their IPs; this ENI drains as they exit.
+			if ipam.IsUnschedulable() {
+				continue
+			}
 			v4, err := ipam.AllocateIPv4(podID)
 			if err != nil {
 				continue
@@ -208,6 +214,9 @@ func (l *LocalDelegate) tryAllocateLocal(ctx context.Context, podID string) (*Lo
 		}
 	} else if l.enableIPv4 {
 		for _, ipam := range l.eniIPAMs {
+			if ipam.IsUnschedulable() {
+				continue
+			}
 			v4, err := ipam.AllocateIPv4(podID)
 			if err == nil {
 				ipv4 = v4
@@ -217,6 +226,9 @@ func (l *LocalDelegate) tryAllocateLocal(ctx context.Context, podID string) (*Lo
 		}
 	} else if l.enableIPv6 {
 		for _, ipam := range l.eniIPAMs {
+			if ipam.IsUnschedulable() {
+				continue
+			}
 			v6, err := ipam.AllocateIPv6(podID)
 			if err == nil {
 				ipv6 = v6
@@ -384,6 +396,9 @@ func (l *LocalDelegate) syncNodeCR(ctx context.Context) {
 			continue
 		}
 
+		// Reflect a block-list change: an ENI already tracked here may have just
+		// been marked unschedulable (or un-marked) by the controller.
+		ipam.SetUnschedulable(eni.Unschedulable)
 		ipam.UpdatePrefixes(eni.IPv4Prefix, false)
 		ipam.UpdatePrefixes(eni.IPv6Prefix, true)
 	}

@@ -35,6 +35,10 @@ type ENILocalIPAM struct {
 
 	trafficMode networkv1beta1.NetworkInterfaceTrafficMode
 	enableERDMA bool
+	// unschedulable mirrors Nic.Unschedulable: the ENI matched the tag block list
+	// while already managed. Existing pods keep their IPs (restored on init), but
+	// no NEW IP is handed out from it so it drains as pods exit.
+	unschedulable bool
 
 	ipv4PrefixMap map[string]*PrefixInfo
 	ipv6PrefixMap map[string]*PrefixInfo
@@ -50,6 +54,7 @@ func NewENILocalIPAMFromPrefix(eniID, mac string, eni *networkv1beta1.Nic, enabl
 		vSwitchID:     eni.VSwitchID,
 		trafficMode:   eni.NetworkInterfaceTrafficMode,
 		enableERDMA:   enableERDMA,
+		unschedulable: eni.Unschedulable,
 		ipv4PrefixMap: make(map[string]*PrefixInfo),
 		ipv6PrefixMap: make(map[string]*PrefixInfo),
 		podToPrefixV4: make(map[string]string),
@@ -102,6 +107,23 @@ func NewENILocalIPAMFromPrefix(eniID, mac string, eni *networkv1beta1.Nic, enabl
 // IsERDMA returns true when both the node has ERDMA enabled and the NIC is in high-performance traffic mode.
 func (e *ENILocalIPAM) IsERDMA() bool {
 	return e.enableERDMA && e.trafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance
+}
+
+// IsUnschedulable reports whether this ENI must not serve new pod IPs (it matched
+// the tag block list while already managed). Existing pods are unaffected.
+func (e *ENILocalIPAM) IsUnschedulable() bool {
+	e.lock.RLock()
+	defer e.lock.RUnlock()
+	return e.unschedulable
+}
+
+// SetUnschedulable updates the unschedulable flag, so an ENI that becomes
+// block-listed after it was already tracked stops receiving new pods on the next
+// Node CR sync.
+func (e *ENILocalIPAM) SetUnschedulable(v bool) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	e.unschedulable = v
 }
 
 // HasAllocations returns true if any pod is currently using an IP from this IPAM.

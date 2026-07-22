@@ -164,6 +164,7 @@ func (r *nodeReconcile) Reconcile(ctx context.Context, request reconcile.Request
 	node.Spec.ENISpec.Tag = eniConfig.ENITags
 	node.Spec.ENISpec.TagFilter = eniConfig.ENITagFilter
 	node.Spec.ENISpec.ResourceGroupID = eniConfig.ResourceGroupID
+	node.Spec.ENISpec.TagBlockList = daemon.MergeENITagBlockList(eniConfig.ENITagBlockList)
 	node.Spec.ENISpec.IPv4PrefixCount = eniConfig.IPv4PrefixCount
 	if !ipv4 && ipv6 {
 		// IPv6 single-stack: propagate IPv6PrefixCount (validated to be 0 or 1).
@@ -324,6 +325,7 @@ func (r *nodeReconcile) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 	node.Spec.ENISpec.Tag = eniConfig.ENITags
 	node.Spec.ENISpec.TagFilter = eniConfig.ENITagFilter
 	node.Spec.ENISpec.ResourceGroupID = eniConfig.ResourceGroupID
+	node.Spec.ENISpec.TagBlockList = daemon.MergeENITagBlockList(eniConfig.ENITagBlockList)
 
 	// EFLO nodes do not support prefix mode; always set EnableIPPrefix to false.
 	// Preserve the existing value if Node CR already exists.

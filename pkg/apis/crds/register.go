@@ -58,7 +58,10 @@ func getCRD(name string) apiextensionsv1.CustomResourceDefinition {
 		version = "v0.1.0"
 	case CRDNode:
 		crdBytes = crdsNode
-		version = "v0.9.0"
+		// v0.10.0: add Nic.Unschedulable and NodeStatus.ExcludedENICount for
+		// erdma-controller coexistence. Bump so existing clusters get the schema
+		// update (CreateOrUpdateCRD only patches when this version increases).
+		version = "v0.10.0"
 	case CRDNodeRuntime:
 		crdBytes = crdsNodeRuntime
 		version = "v0.1.0"
