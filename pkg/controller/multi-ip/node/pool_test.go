@@ -211,6 +211,38 @@ func Test_getEniOptions(t *testing.T) {
 			},
 		},
 		{
+			name: "erdma enabled: create rdma eni from flavor plus secondary",
+			args: args{
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{EnableERDMA: true},
+						Flavor: []networkv1beta1.Flavor{
+							{
+								NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+								NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+								Count:                       1,
+							},
+							{
+								NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+								NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeHighPerformance,
+								Count:                       1,
+							},
+						},
+					},
+				},
+			},
+			want: []*eniOptions{
+				{
+					eniTypeKey: rdmaKey,
+					eniRef:     nil,
+				},
+				{
+					eniTypeKey: secondaryKey,
+					eniRef:     nil,
+				},
+			},
+		},
+		{
 			name: "empty node require trunk eni, do not add trunk if flavor tell not",
 			args: args{
 				node: &networkv1beta1.Node{
@@ -621,13 +653,266 @@ func Test_assignIPFromLocalPool(t *testing.T) {
 			},
 		},
 	}
+	// New scenario: a HighPerformance (RDMA) ENI must NOT be used to satisfy a
+	// non-RDMA Pod, even when enableEDRMA is false. This guards the fix that
+	// removed the `enableEDRMA &&` guard around the HP-skip rule — previously,
+	// a plain Pod could land on an ERDMA NIC managed by another controller
+	// whenever the daemon was launched without enable_erdma.
+	tests = append(tests, struct {
+		name             string
+		args             args
+		checkResultFunc  func(t *testing.T, got map[string]*PodRequest)
+		checkPodsMapFunc func(t *testing.T, got map[string]*PodRequest)
+	}{
+		name: "non-RDMA pod must skip HighPerformance ENI even when enableEDRMA=false",
+		args: args{
+			log: logr.Discard(),
+			podsMapper: map[string]*PodRequest{
+				"pod-plain": {
+					RequireIPv4:  true,
+					RequireERDMA: false,
+				},
+			},
+			ipv4Map: map[string]*EniIP{
+				"192.168.0.1": {
+					IP: &networkv1beta1.IP{IP: "192.168.0.1", Status: networkv1beta1.IPStatusValid},
+					NetworkInterface: &networkv1beta1.Nic{
+						ID:                          "eni-rdma",
+						Status:                      "InUse",
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeHighPerformance,
+					},
+				},
+				"192.168.0.2": {
+					IP: &networkv1beta1.IP{IP: "192.168.0.2", Status: networkv1beta1.IPStatusValid},
+					NetworkInterface: &networkv1beta1.Nic{
+						ID:                          "eni-std",
+						Status:                      "InUse",
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+					},
+				},
+			},
+		},
+		checkResultFunc: func(t *testing.T, got map[string]*PodRequest) {
+			assert.Len(t, got, 0, "pod should have been assigned, just not to the HP ENI")
+		},
+		checkPodsMapFunc: func(t *testing.T, got map[string]*PodRequest) {
+			ref := got["pod-plain"].ipv4Ref
+			if assert.NotNil(t, ref) {
+				assert.Equal(t, "eni-std", ref.NetworkInterface.ID, "non-RDMA pod must land on the standard ENI, never on the HP ENI")
+			}
+		},
+	})
+
+	// P2 scenario: a managed ENI marked Unschedulable (matched the tag block
+	// list while already adopted) must not receive new IPs, even though it is a
+	// plain Standard ENI. The pod must land on another schedulable ENI so the
+	// blocked one drains.
+	tests = append(tests, struct {
+		name             string
+		args             args
+		checkResultFunc  func(t *testing.T, got map[string]*PodRequest)
+		checkPodsMapFunc func(t *testing.T, got map[string]*PodRequest)
+	}{
+		name: "non-RDMA pod must skip an Unschedulable (block-listed) standard ENI (v4+v6)",
+		args: args{
+			log: logr.Discard(),
+			podsMapper: map[string]*PodRequest{
+				"pod-plain": {
+					RequireIPv4:  true,
+					RequireIPv6:  true,
+					RequireERDMA: false,
+				},
+			},
+			ipv4Map: map[string]*EniIP{
+				"192.168.0.1": {
+					IP: &networkv1beta1.IP{IP: "192.168.0.1", Status: networkv1beta1.IPStatusValid},
+					NetworkInterface: &networkv1beta1.Nic{
+						ID:                          "eni-blocked",
+						Status:                      "InUse",
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+						Unschedulable:               true,
+					},
+				},
+				"192.168.0.2": {
+					IP: &networkv1beta1.IP{IP: "192.168.0.2", Status: networkv1beta1.IPStatusValid},
+					NetworkInterface: &networkv1beta1.Nic{
+						ID:                          "eni-std",
+						Status:                      "InUse",
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+					},
+				},
+			},
+			ipv6Map: map[string]*EniIP{
+				"fd00::1": {
+					IP: &networkv1beta1.IP{IP: "fd00::1", Status: networkv1beta1.IPStatusValid},
+					NetworkInterface: &networkv1beta1.Nic{
+						ID:                          "eni-blocked",
+						Status:                      "InUse",
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+						Unschedulable:               true,
+					},
+				},
+				"fd00::2": {
+					IP: &networkv1beta1.IP{IP: "fd00::2", Status: networkv1beta1.IPStatusValid},
+					NetworkInterface: &networkv1beta1.Nic{
+						ID:                          "eni-std",
+						Status:                      "InUse",
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+					},
+				},
+			},
+		},
+		checkResultFunc: func(t *testing.T, got map[string]*PodRequest) {
+			assert.Len(t, got, 0, "pod should have been assigned, just not to the unschedulable ENI")
+		},
+		checkPodsMapFunc: func(t *testing.T, got map[string]*PodRequest) {
+			v4 := got["pod-plain"].ipv4Ref
+			if assert.NotNil(t, v4) {
+				assert.Equal(t, "eni-std", v4.NetworkInterface.ID, "ipv4 must skip the unschedulable ENI")
+			}
+			v6 := got["pod-plain"].ipv6Ref
+			if assert.NotNil(t, v6) {
+				assert.Equal(t, "eni-std", v6.NetworkInterface.ID, "ipv6 must skip the unschedulable ENI")
+			}
+		},
+	})
+
+	// RDMA pod: must land on the HighPerformance ENI, skip the Standard ENI, and
+	// skip ENIs that are not InUse.
+	tests = append(tests, struct {
+		name             string
+		args             args
+		checkResultFunc  func(t *testing.T, got map[string]*PodRequest)
+		checkPodsMapFunc func(t *testing.T, got map[string]*PodRequest)
+	}{
+		name: "RDMA pod lands on HighPerformance ENI and skips standard / non-InUse ENIs",
+		args: args{
+			log: logr.Discard(),
+			podsMapper: map[string]*PodRequest{
+				"pod-rdma": {
+					RequireIPv4:  true,
+					RequireERDMA: true,
+				},
+			},
+			ipv4Map: map[string]*EniIP{
+				"192.168.0.1": {
+					IP: &networkv1beta1.IP{IP: "192.168.0.1", Status: networkv1beta1.IPStatusValid},
+					NetworkInterface: &networkv1beta1.Nic{
+						ID:                          "eni-std",
+						Status:                      "InUse",
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+					},
+				},
+				"192.168.0.2": {
+					IP: &networkv1beta1.IP{IP: "192.168.0.2", Status: networkv1beta1.IPStatusValid},
+					NetworkInterface: &networkv1beta1.Nic{
+						ID:                          "eni-hp-notready",
+						Status:                      "Available", // not InUse → skipped
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeHighPerformance,
+					},
+				},
+				"192.168.0.3": {
+					IP: &networkv1beta1.IP{IP: "192.168.0.3", Status: networkv1beta1.IPStatusValid},
+					NetworkInterface: &networkv1beta1.Nic{
+						ID:                          "eni-hp",
+						Status:                      "InUse",
+						NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeHighPerformance,
+					},
+				},
+			},
+		},
+		checkResultFunc: func(t *testing.T, got map[string]*PodRequest) {
+			assert.Len(t, got, 0, "RDMA pod should have been assigned to the HP ENI")
+		},
+		checkPodsMapFunc: func(t *testing.T, got map[string]*PodRequest) {
+			ref := got["pod-rdma"].ipv4Ref
+			if assert.NotNil(t, ref) {
+				assert.Equal(t, "eni-hp", ref.NetworkInterface.ID, "RDMA pod must land on the InUse HighPerformance ENI")
+			}
+		},
+	})
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resul := assignIPFromLocalPool(tt.args.log, tt.args.podsMapper, tt.args.ipv4Map, tt.args.ipv6Map, false, &networkv1beta1.Node{})
+			resul := assignIPFromLocalPool(tt.args.log, tt.args.podsMapper, tt.args.ipv4Map, tt.args.ipv6Map, &networkv1beta1.Node{})
 			tt.checkResultFunc(t, resul)
 			tt.checkPodsMapFunc(t, tt.args.podsMapper)
 		})
 	}
+}
+
+func Test_releaseUnUsedIP_SkipsUnschedulable(t *testing.T) {
+	// A block-listed (Unschedulable) Standard secondary ENI with idle IPs must be
+	// left entirely alone: terway must not mark its IPs Deleting nor mark the ENI
+	// for deletion — those IPs/ENI belong to another owner.
+	eni := &networkv1beta1.Nic{
+		ID:                          "eni-blocked",
+		Status:                      aliyunClient.ENIStatusInUse,
+		NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+		NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+		Unschedulable:               true,
+		IPv4: map[string]*networkv1beta1.IP{
+			"10.0.0.1": {IP: "10.0.0.1", Status: networkv1beta1.IPStatusValid, Primary: true},
+			"10.0.0.2": {IP: "10.0.0.2", Status: networkv1beta1.IPStatusValid},
+		},
+	}
+	got := releaseUnUsedIP(logr.Discard(), eni, 10)
+	assert.Equal(t, 0, got, "nothing should be released from a blocked ENI")
+	assert.Equal(t, aliyunClient.ENIStatusInUse, eni.Status, "blocked ENI must not be marked Deleting")
+	assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv4["10.0.0.2"].Status, "blocked ENI IPs must stay Valid")
+
+	// Sanity: the same ENI without the flag WOULD be acted on.
+	eni.Unschedulable = false
+	assert.Greater(t, releaseUnUsedIP(logr.Discard(), eni, 10), 0)
+}
+
+func Test_clearPendingDelete(t *testing.T) {
+	eni := &networkv1beta1.Nic{
+		Status: aliyunClient.ENIStatusDeleting,
+		IPv4: map[string]*networkv1beta1.IP{
+			"10.0.0.1": {IP: "10.0.0.1", Status: networkv1beta1.IPStatusDeleting},
+			"10.0.0.2": {IP: "10.0.0.2", Status: networkv1beta1.IPStatusValid},
+		},
+		IPv6: map[string]*networkv1beta1.IP{
+			"fd00::1": {IP: "fd00::1", Status: networkv1beta1.IPStatusDeleting},
+		},
+		IPv4Prefix: []networkv1beta1.IPPrefix{
+			{Prefix: "10.0.1.0/28", Status: networkv1beta1.IPPrefixStatusDeleting},
+		},
+	}
+	clearPendingDelete(eni)
+	assert.Equal(t, aliyunClient.ENIStatusInUse, eni.Status, "ENI Deleting must be reset to InUse")
+	assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv4["10.0.0.1"].Status)
+	assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv4["10.0.0.2"].Status)
+	assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv6["fd00::1"].Status)
+	assert.Equal(t, networkv1beta1.IPPrefixStatusValid, eni.IPv4Prefix[0].Status)
+}
+
+func Test_countTotalIdleIPs_SkipsUnschedulable(t *testing.T) {
+	node := &networkv1beta1.Node{
+		Spec: networkv1beta1.NodeSpec{ENISpec: &networkv1beta1.ENISpec{EnableIPv4: true}},
+		Status: networkv1beta1.NodeStatus{
+			NetworkInterfaces: map[string]*networkv1beta1.Nic{
+				"eni-ok": {
+					ID: "eni-ok", Status: aliyunClient.ENIStatusInUse,
+					IPv4: map[string]*networkv1beta1.IP{
+						"10.0.0.1": {Status: networkv1beta1.IPStatusValid},
+						"10.0.0.2": {Status: networkv1beta1.IPStatusValid},
+					},
+				},
+				"eni-blocked": {
+					ID: "eni-blocked", Status: aliyunClient.ENIStatusInUse, Unschedulable: true,
+					IPv4: map[string]*networkv1beta1.IP{
+						"10.1.0.1": {Status: networkv1beta1.IPStatusValid},
+						"10.1.0.2": {Status: networkv1beta1.IPStatusValid},
+						"10.1.0.3": {Status: networkv1beta1.IPStatusValid},
+					},
+				},
+			},
+		},
+	}
+	// Only eni-ok's 2 idle IPs count; the Unschedulable ENI's 3 are excluded.
+	assert.Equal(t, 2, countTotalIdleIPs(node))
 }
 
 func TestReconcileNode_assignIP(t *testing.T) {
@@ -1917,6 +2202,51 @@ func Test_calculateToDel(t *testing.T) {
 			want: -1, // idles(4) - maxPoolSize(5) = -1, no reclaim policy returns raw toDel
 		},
 		{
+			name: "unschedulable ENI idle IPs are excluded from toDel",
+			args: args{
+				ctx: MetaIntoCtx(context.TODO()),
+				node: &networkv1beta1.Node{
+					Spec: networkv1beta1.NodeSpec{
+						ENISpec: &networkv1beta1.ENISpec{EnableIPv4: true},
+						Pool:    &networkv1beta1.PoolSpec{MaxPoolSize: 5, MinPoolSize: 1},
+					},
+					Status: networkv1beta1.NodeStatus{
+						NetworkInterfaces: map[string]*networkv1beta1.Nic{
+							"eni-ok": {
+								Status: "InUse",
+								IPv4: map[string]*networkv1beta1.IP{
+									"192.168.0.1": {Status: networkv1beta1.IPStatusValid},
+									"192.168.0.2": {Status: networkv1beta1.IPStatusValid},
+									"192.168.0.3": {Status: networkv1beta1.IPStatusValid},
+									"192.168.0.4": {Status: networkv1beta1.IPStatusValid},
+									"192.168.0.5": {Status: networkv1beta1.IPStatusValid},
+								},
+							},
+							"eni-blocked": {
+								Status:        "InUse",
+								Unschedulable: true,
+								IPv4: map[string]*networkv1beta1.IP{
+									"192.168.1.1":  {Status: networkv1beta1.IPStatusValid},
+									"192.168.1.2":  {Status: networkv1beta1.IPStatusValid},
+									"192.168.1.3":  {Status: networkv1beta1.IPStatusValid},
+									"192.168.1.4":  {Status: networkv1beta1.IPStatusValid},
+									"192.168.1.5":  {Status: networkv1beta1.IPStatusValid},
+									"192.168.1.6":  {Status: networkv1beta1.IPStatusValid},
+									"192.168.1.7":  {Status: networkv1beta1.IPStatusValid},
+									"192.168.1.8":  {Status: networkv1beta1.IPStatusValid},
+									"192.168.1.9":  {Status: networkv1beta1.IPStatusValid},
+									"192.168.1.10": {Status: networkv1beta1.IPStatusValid},
+								},
+							},
+						},
+					},
+				},
+			},
+			// Only eni-ok's 5 idle count; the blocked ENI's 10 are ignored.
+			// idles(5) - maxPoolSize(5) = 0. Without the fix it would be 10.
+			want: 0,
+		},
+		{
 			name: "with reclaim policy but not yet time",
 			args: args{
 				ctx: MetaIntoCtx(context.TODO()),
@@ -2679,12 +3009,12 @@ var _ = Describe("Test ReconcileNode", func() {
 			By("Creating completed task with same IPs but without PodID (simulating OpenAPI response)")
 			now := time.Now()
 			eniInfo := &aliyunClient.NetworkInterface{
-				NetworkInterfaceID: "eni-trunk-1",
-				Type:               string(networkv1beta1.ENITypeTrunk),
-				Status:             aliyunClient.ENIStatusInUse,
-				MacAddress:         "aa:bb:cc:dd:ee:01",
-				SecurityGroupIDs:   []string{"sg-1"},
-				PrivateIPAddress:   "10.149.35.182",
+				NetworkInterfaceID:          "eni-trunk-1",
+				Type:                        string(networkv1beta1.ENITypeTrunk),
+				Status:                      aliyunClient.ENIStatusInUse,
+				MacAddress:                  "aa:bb:cc:dd:ee:01",
+				SecurityGroupIDs:            []string{"sg-1"},
+				PrivateIPAddress:            "10.149.35.182",
 				NetworkInterfaceTrafficMode: "Standard",
 				PrivateIPSets: []aliyunClient.IPSet{
 					{IPAddress: "10.149.35.182", Primary: true},
@@ -2938,6 +3268,34 @@ var _ = Describe("Test ReconcileNode", func() {
 			})
 			Expect(result).To(BeTrue())
 		})
+
+		It("Unschedulable ENI must not make the node report SufficientIP", func() {
+			// The node's only "capacity" is an Unschedulable (block-listed) ENI with
+			// an idle IP. Since validateENI would reject it, the node must report
+			// InsufficientIP rather than being fooled into SufficientIP=True.
+			updateNodeCondition(ctx, k8sClient, "foo", []*eniOptions{
+				{
+					eniTypeKey: secondaryKey,
+					eniRef: &networkv1beta1.Nic{
+						ID:            "eni-blocked",
+						Unschedulable: true,
+						IPv4: map[string]*networkv1beta1.IP{
+							"10.0.0.1": {IP: "10.0.0.1", Status: networkv1beta1.IPStatusValid},
+						},
+					},
+					isFull: false,
+				},
+			})
+
+			node := &corev1.Node{}
+			err := k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "foo"}, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, result := lo.Find(node.Status.Conditions, func(item corev1.NodeCondition) bool {
+				return item.Type == "SufficientIP" && item.Status == "False" && item.Reason == "InsufficientIP"
+			})
+			Expect(result).To(BeTrue(), "a node whose only spare capacity is an Unschedulable ENI must report insufficient IP")
+		})
 	})
 
 	Context("Test syncWithAPI", func() {
@@ -3133,6 +3491,95 @@ var _ = Describe("Test ReconcileNode", func() {
 			Expect(node.Status.NetworkInterfaces).To(HaveLen(1))
 			Expect(node.Status.NetworkInterfaces).To(HaveKey("eni-normal"))
 			Expect(node.Status.NetworkInterfaces).NotTo(HaveKey("eni-leni"))
+		})
+
+		It("Should keep block-listed ENIs in the CR marked Unschedulable, drop only primary", func() {
+			ctx := context.TODO()
+			ctx = MetaIntoCtx(ctx)
+			MetaCtx(ctx).NeedSyncOpenAPI.Store(true)
+
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+			mockHelper.SetupVSwitch("vsw-1", &vpc.VSwitch{
+				VSwitchId:               "vsw-1",
+				ZoneId:                  "zone-1",
+				AvailableIpAddressCount: 10,
+				CidrBlock:               "192.168.0.0/16",
+				Ipv6CidrBlock:           "fd00::/64",
+			})
+
+			blocked := aliyunClient.DefaultENITagBlockList[0]
+
+			// Already-managed Standard ENI that now carries a block-list tag: kept,
+			// marked Unschedulable.
+			managedBlocked := BuildMockENI("eni-managed-blocked", "Secondary", "InUse", "vsw-1", "zone-1",
+				[]string{"192.168.0.1"}, nil)
+			managedBlocked.Tags = []ecs.Tag{{TagKey: blocked.Key, TagValue: blocked.Value}}
+			// A NEW block-listed ENI (not yet managed): kept in the CR for visibility
+			// (with its IPs), marked Unschedulable — NOT dropped.
+			newBlocked := BuildMockENI("eni-new-blocked", "Secondary", "InUse", "vsw-1", "zone-1",
+				[]string{"192.168.0.5"}, nil)
+			newBlocked.Tags = []ecs.Tag{{TagKey: blocked.Key, TagValue: blocked.Value}}
+			// A normal secondary ENI: kept, schedulable.
+			normal := BuildMockENI("eni-normal", "Secondary", "InUse", "vsw-1", "zone-1",
+				[]string{"192.168.0.10"}, nil)
+			// The primary ENI happens to match the block list (e.g. a user-defined
+			// generic tag rule). Primary is always excluded from the pool regardless.
+			primaryBlocked := BuildMockENI("eni-primary", "Primary", "InUse", "vsw-1", "zone-1",
+				[]string{"192.168.0.100"}, nil)
+			primaryBlocked.Tags = []ecs.Tag{{TagKey: blocked.Key, TagValue: blocked.Value}}
+			// An UNTAGGED HighPerformance (ERDMA) ENI: no block-list tag, but the node
+			// does not manage erdma (EnableERDMA=false), so it must also be marked
+			// Unschedulable — terway neither uses nor reclaims it.
+			hpUntagged := BuildMockENI("eni-hp-untagged", "Secondary", "InUse", "vsw-1", "zone-1",
+				[]string{"192.168.0.20"}, nil)
+			hpUntagged.NetworkInterfaceTrafficMode = aliyunClient.ENITrafficModeRDMA
+
+			openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+				managedBlocked, newBlocked, normal, primaryBlocked, hpUntagged,
+			}, nil).Maybe()
+
+			existing := BuildENIWithCustomIPs("eni-managed-blocked", aliyunClient.ENIStatusInUse,
+				map[string]*networkv1beta1.IP{"192.168.0.1": {IP: "192.168.0.1", Primary: true}}, nil)
+
+			node := NewNodeFactory("blk-node").
+				WithECS().
+				WithInstanceID("test-instance").
+				WithExistingENIs(existing).
+				Build()
+			// Node CR carries an explicit block list: exercise the branch that
+			// prefers Spec.ENISpec.TagBlockList over the built-in default.
+			node.Spec.ENISpec.TagBlockList = aliyunClient.DefaultENITagBlockList
+
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				WithSyncPeriod(time.Hour).
+				WithDefaults().
+				Build()
+
+			By("Syncing network interfaces with API")
+			err := reconciler.syncWithAPI(ctx, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Keeping the already-managed block-listed ENI, marked Unschedulable")
+			Expect(node.Status.NetworkInterfaces).To(HaveKey("eni-managed-blocked"))
+			Expect(node.Status.NetworkInterfaces["eni-managed-blocked"].Unschedulable).To(BeTrue())
+
+			By("Keeping the NEW block-listed ENI in the CR too, marked Unschedulable")
+			Expect(node.Status.NetworkInterfaces).To(HaveKey("eni-new-blocked"))
+			Expect(node.Status.NetworkInterfaces["eni-new-blocked"].Unschedulable).To(BeTrue())
+
+			By("Never adopting the primary ENI (always excluded)")
+			Expect(node.Status.NetworkInterfaces).NotTo(HaveKey("eni-primary"))
+
+			By("Keeping the normal ENI schedulable")
+			Expect(node.Status.NetworkInterfaces).To(HaveKey("eni-normal"))
+			Expect(node.Status.NetworkInterfaces["eni-normal"].Unschedulable).To(BeFalse())
+
+			By("Marking the untagged HighPerformance ENI Unschedulable too (erdma not managed)")
+			Expect(node.Status.NetworkInterfaces).To(HaveKey("eni-hp-untagged"))
+			Expect(node.Status.NetworkInterfaces["eni-hp-untagged"].Unschedulable).To(BeTrue())
 		})
 	})
 
@@ -3826,6 +4273,34 @@ var _ = Describe("Test ReconcileNode", func() {
 
 			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
 			Expect(result).To(BeTrue())
+		})
+
+		It("Should not validate an Unschedulable (block-listed) ENI", func() {
+			ctx := context.TODO()
+
+			mockHelper := NewMockAPIHelperWithT(GinkgoT())
+			openAPI, vpcClient, ecsClient = mockHelper.GetMocks()
+
+			eni := BuildENIWithCustomIPs("eni-blocked", aliyunClient.ENIStatusInUse, nil, nil)
+			eni.VSwitchID = "vsw-1"
+			eni.NetworkInterfaceType = networkv1beta1.ENITypeSecondary
+			eni.NetworkInterfaceTrafficMode = networkv1beta1.NetworkInterfaceTrafficModeStandard
+			eni.Unschedulable = true
+
+			option := &eniOptions{
+				eniRef:     eni,
+				eniTypeKey: secondaryKey,
+			}
+
+			reconciler := NewReconcilerBuilder().
+				WithAliyun(openAPI).
+				WithVSwitchPool(switchPool).
+				Build()
+
+			// Unschedulable is rejected before any vSwitch lookup, so no new IPs
+			// are ever added to a block-listed ENI.
+			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
+			Expect(result).To(BeFalse())
 		})
 
 		It("Should not validate an ENI with mismatched type", func() {
