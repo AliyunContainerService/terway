@@ -9,9 +9,29 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/types"
 	"github.com/AliyunContainerService/terway/types/secret"
 )
+
+func TestMergeENITagBlockList_AlwaysIncludesDefaults(t *testing.T) {
+	got := MergeENITagBlockList(nil)
+	assert.Equal(t, client.DefaultENITagBlockList, got, "nil user list must yield exactly the defaults")
+}
+
+func TestMergeENITagBlockList_AppendsUserRulesAndDedups(t *testing.T) {
+	user := []networkv1beta1.ENITagBlockListItem{
+		{Key: "creator", Value: "alibabacloud-erdma-controller"}, // dup of default
+		{Key: "managed-by", Value: "other-controller"},           // new
+		{Key: "managed-by", Value: "other-controller"},           // dup of self
+		{Key: "", Value: "anything"},                             // empty key — dropped
+	}
+	got := MergeENITagBlockList(user)
+	want := append([]networkv1beta1.ENITagBlockListItem{}, client.DefaultENITagBlockList...)
+	want = append(want, networkv1beta1.ENITagBlockListItem{Key: "managed-by", Value: "other-controller"})
+	assert.Equal(t, want, got)
+}
 
 func Test_MergeConfigAndUnmarshal(t *testing.T) {
 	baseCfg := `{

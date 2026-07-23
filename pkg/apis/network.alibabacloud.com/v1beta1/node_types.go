@@ -60,6 +60,16 @@ const (
 	IPPrefixStatusDeleting IPPrefixStatus = "Deleting"
 )
 
+// ENITagBlockListItem describes a single (key, value) pair that, when present
+// on an ENI, signals that another controller owns the ENI and terway must not
+// allocate Pod IPs from it.
+type ENITagBlockListItem struct {
+	// +kubebuilder:validation:Required
+	Key string `json:"key"`
+	// +kubebuilder:validation:Required
+	Value string `json:"value"`
+}
+
 type NodeMetadata struct {
 	// +kubebuilder:validation:Required
 	RegionID string `json:"regionID,omitempty"`
@@ -92,6 +102,10 @@ type NetworkCard struct {
 type ENISpec struct {
 	Tag       map[string]string `json:"tag,omitempty"`
 	TagFilter map[string]string `json:"tagFilter,omitempty"`
+	// TagBlockList augments the built-in default block list with user-supplied
+	// (key,value) pairs. Any ENI carrying a matching tag is excluded from
+	// terway's pod IP pool.
+	TagBlockList []ENITagBlockListItem `json:"tagBlockList,omitempty"`
 	// +kubebuilder:validation:Required
 	VSwitchOptions []string `json:"vSwitchOptions,omitempty"`
 	// +kubebuilder:validation:Required
@@ -210,6 +224,13 @@ type Nic struct {
 	NetworkInterfaceTrafficMode NetworkInterfaceTrafficMode `json:"networkInterfaceTrafficMode,omitempty"`
 
 	NetworkInterfaceType ENIType `json:"networkInterfaceType,omitempty"`
+
+	// Unschedulable marks an ENI that terway keeps in the CR for visibility but
+	// must not use: it either matches the tag block list, or is a HighPerformance
+	// (ERDMA) NIC on a node that does not manage erdma. terway keeps any existing
+	// pod IPs (datapath stays configured) but assigns no NEW IPs on it and never
+	// reclaims it, so it drains as pods exit — without orphaning live pods.
+	Unschedulable bool `json:"unschedulable,omitempty"`
 
 	IPv4 map[string]*IP `json:"ipv4,omitempty"`
 	IPv6 map[string]*IP `json:"ipv6,omitempty"`

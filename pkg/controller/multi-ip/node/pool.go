@@ -462,13 +462,24 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 		return err
 	}
 
-	// ignore primary eni (including migration-tagged LENI primary on lingjun nodes)
+	// ignore primary eni (including migration-tagged LENI primary on lingjun nodes).
 	enis = lo.Filter(enis, func(item *aliyunClient.NetworkInterface, index int) bool {
 		if item.Type == aliyunClient.ENITypePrimary {
 			return false
 		}
 		return !aliyunClient.IsLENIPrimary(item)
 	})
+
+	// Block list for the marking step below (used further down, after ENIs are
+	// synced into node.Status). ENIs matching it are NOT dropped — they stay in
+	// the CR for visibility and are marked Unschedulable so no new pod IP is ever
+	// assigned to them (see the marking loop after the sync loop). Use the Node
+	// CR's TagBlockList if present, otherwise the built-in default so the
+	// erdma-controller contract is always enforced.
+	blockList := aliyunClient.DefaultENITagBlockList
+	if node.Spec.ENISpec != nil && len(node.Spec.ENISpec.TagBlockList) > 0 {
+		blockList = node.Spec.ENISpec.TagBlockList
+	}
 
 	eniIDMap := map[string]struct{}{}
 	// add ip
@@ -532,6 +543,36 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 				crENI.Status != aliyunClient.ENIStatusAttaching {
 				crENI.Status = remote.Status
 			}
+		}
+	}
+
+	// Mark every synced ENI that matches the tag block list as Unschedulable. We
+	// keep such ENIs in the CR (visible, with their IPs) rather than dropping them,
+	// so operators can see which ENIs terway deliberately leaves alone and why.
+	// Unschedulable ENIs never receive a new pod IP (assignIPFromLocalPool /
+	// validateENI / LocalDelegate skip them) and are never grown or reclaimed
+	// (releaseUnUsedIP skips them); existing pods keep their IPs and drain
+	// naturally. Recomputed every sync, so removing the rule re-enables the ENI.
+	manageERDMA := node.Spec.ENISpec != nil && node.Spec.ENISpec.EnableERDMA
+	for _, item := range enis {
+		nic, ok := node.Status.NetworkInterfaces[item.NetworkInterfaceID]
+		if !ok {
+			continue
+		}
+		// An ENI is unschedulable when either:
+		//   - it matches the tag block list (owned by another controller), or
+		//   - it is a HighPerformance (ERDMA) NIC and terway does not itself
+		//     manage erdma (EnableERDMA=false): such a NIC is reserved for RDMA /
+		//     an external owner, so terway must not assign, grow, or reclaim it.
+		//     When EnableERDMA=true these NICs are terway's own RDMA cards and stay
+		//     schedulable (RDMA pods land on them).
+		hpNotManaged := nic.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance && !manageERDMA
+		nic.Unschedulable = aliyunClient.IsENIBlocked(item.Tags, blockList) || hpNotManaged
+		if nic.Unschedulable {
+			// Abort anything terway had queued to delete on this ENI: once it is
+			// unschedulable it belongs to another owner, so pending Deleting markers
+			// (from before the mark) must not be acted on by handleStatus.
+			clearPendingDelete(nic)
 		}
 	}
 
@@ -694,7 +735,7 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	releasePodNotFound(ctx, n.client, node.Name, podsMapper, ipv4Map, ipv6Map)
 
 	// 2. assign ip from local pool
-	unSucceedPods := assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA, node)
+	unSucceedPods := assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node)
 
 	// 3. if there is no enough ip, try to allocate from api
 	err := n.addIP(ctx, unSucceedPods, node)
@@ -703,7 +744,7 @@ func (n *ReconcileNode) syncPods(ctx context.Context, podsMapper map[string]*Pod
 	}
 	// 4. after all is assigned , we can re-allocate ip
 	ipv4Map, ipv6Map = buildIPMap(podsMapper, node.Status.NetworkInterfaces)
-	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node.Spec.ENISpec.EnableERDMA, node)
+	_ = assignIPFromLocalPool(l, podsMapper, ipv4Map, ipv6Map, node)
 
 	// 5. clean up deleting status eni and ip
 	err = n.handleStatus(ctx, node)
@@ -781,7 +822,7 @@ func releasePodNotFound(ctx context.Context, c client.Client, nodeName string, p
 }
 
 // DO NOT assign pod ip if pod already has one
-func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, ipv4Map, ipv6Map map[string]*EniIP, enableEDRMA bool, node *networkv1beta1.Node) map[string]*PodRequest {
+func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, ipv4Map, ipv6Map map[string]*EniIP, node *networkv1beta1.Node) map[string]*PodRequest {
 	pendingPods := lo.PickBy(podsMapper, func(key string, value *PodRequest) bool {
 		if value.RequireIPv4 && value.ipv4Ref == nil {
 			return true
@@ -848,10 +889,22 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 						continue
 					}
 
-					// do not schedule to erdma if node has erdma enable
+					// Never schedule non-RDMA pods to HighPerformance ENIs.
+					// HP ENIs are reserved for RDMA traffic and may be owned by
+					// another controller (e.g. alibabacloud-erdma-controller). If
+					// the standard ENI pool is exhausted, addIP() will create a new
+					// standard ENI rather than dipping into HP IPs. This holds
+					// regardless of the terway erdma config: HP IPs are simply never
+					// handed to plain pods.
 					if !info.RequireERDMA &&
-						enableEDRMA &&
 						v.NetworkInterface.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance {
+						continue
+					}
+
+					// ENI marked unschedulable (matched the tag block list while
+					// already managed): keep existing pods, assign no new IPs so
+					// it drains.
+					if v.NetworkInterface.Unschedulable {
 						continue
 					}
 
@@ -889,9 +942,13 @@ func assignIPFromLocalPool(log logr.Logger, podsMapper map[string]*PodRequest, i
 						continue
 					}
 
+					// See ipv4 branch above for rationale.
 					if !info.RequireERDMA &&
-						enableEDRMA &&
 						v.NetworkInterface.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeHighPerformance {
+						continue
+					}
+
+					if v.NetworkInterface.Unschedulable {
 						continue
 					}
 
@@ -1255,6 +1312,13 @@ func updateNodeCondition(ctx context.Context, c client.Client, nodeName string, 
 			return
 		}
 
+		// An Unschedulable ENI never serves pods (validateENI rejects it), so it
+		// must not make the node report SufficientIP=True — otherwise a node whose
+		// only spare capacity is a block-listed/HP ENI would look healthy.
+		if item.eniRef != nil && item.eniRef.Unschedulable {
+			return
+		}
+
 		if item.eniRef != nil {
 			for _, v := range item.eniRef.IPv4 {
 				if v != nil {
@@ -1329,6 +1393,14 @@ func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eni
 	}
 
 	if option.eniRef != nil {
+		// Never add new IPs to an ENI marked unschedulable (matched the tag block
+		// list while already managed). Existing pods keep their IPs, but the pool
+		// must not fill it — otherwise pods stay Pending while the blocked ENI is
+		// topped up, causing repeated grow/reclaim churn. It drains as pods exit.
+		if option.eniRef.Unschedulable {
+			return false
+		}
+
 		switch option.eniRef.Status {
 		case aliyunClient.ENIStatusInUse, aliyunClient.ENIStatusAttaching:
 		default:
@@ -1494,7 +1566,7 @@ func assignEniPrefixWithOptions(ctx context.Context, node *networkv1beta1.Node, 
 	// Count existing ENIs and their state
 	existingENICount := 0
 	for _, option := range options {
-		if option.eniRef != nil && option.eniRef.Status == aliyunClient.ENIStatusInUse {
+		if option.eniRef != nil && option.eniRef.Status == aliyunClient.ENIStatusInUse && !option.eniRef.Unschedulable {
 			existingENICount++
 		}
 	}
@@ -1506,7 +1578,9 @@ func assignEniPrefixWithOptions(ctx context.Context, node *networkv1beta1.Node, 
 	// Count how many InUse ENIs already have at least one IPv6 prefix
 	inUseENIsWithV6Prefix := 0
 	for _, option := range options {
-		if option.eniRef == nil {
+		// Skip Unschedulable (block-listed) ENIs: their slots/prefixes are not
+		// usable by terway, so they must not count as available capacity.
+		if option.eniRef == nil || option.eniRef.Unschedulable {
 			continue
 		}
 		if option.eniRef.Status == aliyunClient.ENIStatusInUse {
@@ -1531,7 +1605,7 @@ func assignEniPrefixWithOptions(ctx context.Context, node *networkv1beta1.Node, 
 	pendingV6Prefixes := 0
 	attachingENIsWithV6Prefix := 0
 	for _, option := range options {
-		if option.eniRef == nil {
+		if option.eniRef == nil || option.eniRef.Unschedulable {
 			continue
 		}
 		if option.eniRef.Status == aliyunClient.ENIStatusAttaching {
@@ -1753,6 +1827,14 @@ func (n *ReconcileNode) handleStatus(ctx context.Context, node *networkv1beta1.N
 	l := logf.FromContext(ctx).WithName("handleStatus")
 	// 1. clean up deleting status eni and ip
 	for _, eni := range node.Status.NetworkInterfaces {
+		// Final safety net: never detach/delete an ENI or unassign IPs/prefixes on
+		// an Unschedulable ENI — it belongs to another owner (erdma-controller /
+		// RDMA). syncWithAPI also clears any stale Deleting state when marking an
+		// ENI Unschedulable, but guard here too in case a Deleting record slips
+		// through (e.g. queued by a previous reconcile before the mark).
+		if eni.Unschedulable {
+			continue
+		}
 		// we use ENIStatusDeleting as the eni is not needed, so we always need to detach it and then delete it
 		log := l.WithValues("eni", eni.ID, "status", eni.Status)
 
@@ -2276,7 +2358,10 @@ func getAllocatable(in map[string]*networkv1beta1.IP) map[string]*networkv1beta1
 func countTotalIdleIPs(node *networkv1beta1.Node) int {
 	count := 0
 	for _, eni := range node.Status.NetworkInterfaces {
-		if eni.Status != aliyunClient.ENIStatusInUse {
+		// Unschedulable ENIs are not terway's to allocate; their idle IPs must not
+		// count toward the pool watermark, or MinPoolSize would wrongly look
+		// satisfied and terway would never top up the usable pool.
+		if eni.Status != aliyunClient.ENIStatusInUse || eni.Unschedulable {
 			continue
 		}
 		if node.Spec.ENISpec.EnableIPv4 {
@@ -2314,6 +2399,10 @@ func getEniOptions(node *networkv1beta1.Node) []*eniOptions {
 
 	result := make([]*eniOptions, 0, total)
 
+	// Blocked ENIs are kept in node.Status (marked Unschedulable), so they are
+	// already part of `sorted` and counted below — the instance-slot accounting
+	// is therefore correct with no extra bookkeeping. They enter `result` as
+	// eniRef but validateENI rejects them, so no new IP is ever added to them.
 	newENILimit := max(total-len(sorted), 0)
 	// range all eni
 	// 1. if we require trunk/erdma, create it
@@ -2478,7 +2567,10 @@ func calculateToDel(ctx context.Context, node *networkv1beta1.Node) int {
 
 	idles := 0
 	for _, eni := range node.Status.NetworkInterfaces {
-		if eni.Status != aliyunClient.ENIStatusInUse {
+		// Skip Unschedulable ENIs: their idle IPs are not reclaimable by terway
+		// (releaseUnUsedIP skips them), so counting them here would inflate toDel
+		// and cause the deletion quota to fall on healthy ENIs instead.
+		if eni.Status != aliyunClient.ENIStatusInUse || eni.Unschedulable {
 			continue
 		}
 		if node.Spec.ENISpec.EnableIPv4 {
@@ -2790,6 +2882,11 @@ func (n *ReconcileNode) syncPrefixAllocation(ctx context.Context, node *networkv
 	totalV4Prefixes := 0
 	totalV6Prefixes := 0
 	for _, eni := range node.Status.NetworkInterfaces {
+		// Unschedulable (block-listed) ENIs are not terway's to use; their prefixes
+		// must not count toward satisfying pod-IP demand.
+		if eni.Unschedulable {
+			continue
+		}
 		switch eni.Status {
 		case aliyunClient.ENIStatusInUse:
 			totalV4Prefixes += countOccupiedPrefixes(eni.IPv4Prefix)
@@ -2807,6 +2904,10 @@ func (n *ReconcileNode) syncPrefixAllocation(ctx context.Context, node *networkv
 	var errList []error
 	for _, eni := range node.Status.NetworkInterfaces {
 		if eni.Status != aliyunClient.ENIStatusInUse {
+			continue
+		}
+		// Never add prefixes to a block-listed ENI.
+		if eni.Unschedulable {
 			continue
 		}
 
