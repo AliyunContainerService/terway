@@ -78,11 +78,20 @@ var EniOptions = map[eniTypeKey]*aliyunClient.CreateNetworkInterfaceOptions{
 
 // releaseUnUsedIP toDel is the number of idle ip need to del
 // clearPendingDelete aborts any deletion terway had queued for an ENI that has
-// just become Unschedulable. Once an ENI is unschedulable it belongs to another
-// owner (erdma-controller / RDMA), so terway must not detach/delete it or
-// unassign its IPs/prefixes. Any Deleting markers left by a previous reconcile
-// are reset to their live state so handleStatus never acts on them.
-func clearPendingDelete(eni *networkv1beta1.Nic) {
+// just become Unschedulable. Only clear local Deleting markers when OpenAPI
+// still reports the ENI as InUse. If the remote ENI is already in a transitional
+// state, preserve that observed state instead of incorrectly resurrecting it in
+// the CR. handleStatus independently skips all Unschedulable ENIs.
+func clearPendingDelete(eni *networkv1beta1.Nic, remoteStatus string) {
+	if remoteStatus != aliyunClient.ENIStatusInUse {
+		switch remoteStatus {
+		case aliyunClient.ENIStatusDeleting,
+			aliyunClient.ENIStatusDetaching,
+			aliyunClient.ENIStatusAttaching:
+			eni.Status = remoteStatus
+		}
+		return
+	}
 	if eni.Status == aliyunClient.ENIStatusDeleting {
 		eni.Status = aliyunClient.ENIStatusInUse
 	}

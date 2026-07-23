@@ -867,25 +867,106 @@ func Test_releaseUnUsedIP_SkipsUnschedulable(t *testing.T) {
 }
 
 func Test_clearPendingDelete(t *testing.T) {
-	eni := &networkv1beta1.Nic{
-		Status: aliyunClient.ENIStatusDeleting,
-		IPv4: map[string]*networkv1beta1.IP{
-			"10.0.0.1": {IP: "10.0.0.1", Status: networkv1beta1.IPStatusDeleting},
-			"10.0.0.2": {IP: "10.0.0.2", Status: networkv1beta1.IPStatusValid},
-		},
-		IPv6: map[string]*networkv1beta1.IP{
-			"fd00::1": {IP: "fd00::1", Status: networkv1beta1.IPStatusDeleting},
-		},
-		IPv4Prefix: []networkv1beta1.IPPrefix{
-			{Prefix: "10.0.1.0/28", Status: networkv1beta1.IPPrefixStatusDeleting},
-		},
+	newDeletingENI := func() *networkv1beta1.Nic {
+		return &networkv1beta1.Nic{
+			Status: aliyunClient.ENIStatusDeleting,
+			IPv4: map[string]*networkv1beta1.IP{
+				"10.0.0.1": {IP: "10.0.0.1", Status: networkv1beta1.IPStatusDeleting},
+				"10.0.0.2": {IP: "10.0.0.2", Status: networkv1beta1.IPStatusValid},
+			},
+			IPv6: map[string]*networkv1beta1.IP{
+				"fd00::1": {IP: "fd00::1", Status: networkv1beta1.IPStatusDeleting},
+			},
+			IPv4Prefix: []networkv1beta1.IPPrefix{
+				{Prefix: "10.0.1.0/28", Status: networkv1beta1.IPPrefixStatusDeleting},
+			},
+		}
 	}
-	clearPendingDelete(eni)
-	assert.Equal(t, aliyunClient.ENIStatusInUse, eni.Status, "ENI Deleting must be reset to InUse")
-	assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv4["10.0.0.1"].Status)
-	assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv4["10.0.0.2"].Status)
-	assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv6["fd00::1"].Status)
-	assert.Equal(t, networkv1beta1.IPPrefixStatusValid, eni.IPv4Prefix[0].Status)
+
+	t.Run("clear local deletion when remote ENI is still in use", func(t *testing.T) {
+		eni := newDeletingENI()
+		clearPendingDelete(eni, aliyunClient.ENIStatusInUse)
+
+		assert.Equal(t, aliyunClient.ENIStatusInUse, eni.Status, "local ENI Deleting must be reset to InUse")
+		assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv4["10.0.0.1"].Status)
+		assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv4["10.0.0.2"].Status)
+		assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv6["fd00::1"].Status)
+		assert.Equal(t, networkv1beta1.IPPrefixStatusValid, eni.IPv4Prefix[0].Status)
+	})
+
+	for _, remoteStatus := range []string{
+		aliyunClient.ENIStatusDeleting,
+		aliyunClient.ENIStatusDetaching,
+		aliyunClient.ENIStatusAttaching,
+	} {
+		t.Run("preserve remote state when ENI is "+remoteStatus, func(t *testing.T) {
+			eni := newDeletingENI()
+			clearPendingDelete(eni, remoteStatus)
+
+			assert.Equal(t, remoteStatus, eni.Status)
+			assert.Equal(t, networkv1beta1.IPStatusDeleting, eni.IPv4["10.0.0.1"].Status)
+			assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv4["10.0.0.2"].Status)
+			assert.Equal(t, networkv1beta1.IPStatusDeleting, eni.IPv6["fd00::1"].Status)
+			assert.Equal(t, networkv1beta1.IPPrefixStatusDeleting, eni.IPv4Prefix[0].Status)
+		})
+	}
+}
+
+func TestHandleStatusSkipsUnschedulableENIs(t *testing.T) {
+	ctx := MetaIntoCtx(context.Background())
+
+	deletingENI := BuildENIWithCustomIPs("eni-unschedulable-deleting", aliyunClient.ENIStatusDeleting, nil, nil)
+	deletingENI.Unschedulable = true
+
+	inUseENI := BuildENIWithCustomIPs("eni-unschedulable-inuse", aliyunClient.ENIStatusInUse,
+		map[string]*networkv1beta1.IP{
+			"192.168.0.1": {
+				IP:     "192.168.0.1",
+				Status: networkv1beta1.IPStatusDeleting,
+			},
+		},
+		map[string]*networkv1beta1.IP{
+			"fd00::1": {
+				IP:     "fd00::1",
+				Status: networkv1beta1.IPStatusDeleting,
+			},
+		},
+	)
+	inUseENI.Unschedulable = true
+	inUseENI.IPv4Prefix = []networkv1beta1.IPPrefix{
+		{Prefix: "192.168.1.0/28", Status: networkv1beta1.IPPrefixStatusDeleting},
+	}
+	inUseENI.IPv6Prefix = []networkv1beta1.IPPrefix{
+		{Prefix: "fd00:1::/80", Status: networkv1beta1.IPPrefixStatusDeleting},
+	}
+
+	node := NewNodeFactory("test-node").
+		WithECS().
+		WithExistingENIs(deletingENI, inUseENI).
+		Build()
+
+	mockHelper := NewMockAPIHelperWithT(t)
+	openAPI, _, ecsClient := mockHelper.GetMocks()
+	reconciler := NewReconcilerBuilder().
+		WithAliyun(openAPI).
+		WithDefaults().
+		Build()
+
+	err := reconciler.handleStatus(ctx, node)
+	assert.NoError(t, err)
+
+	assert.Contains(t, node.Status.NetworkInterfaces, "eni-unschedulable-deleting")
+	assert.Contains(t, node.Status.NetworkInterfaces, "eni-unschedulable-inuse")
+	assert.Equal(t, aliyunClient.ENIStatusDeleting, deletingENI.Status)
+	assert.Equal(t, networkv1beta1.IPStatusDeleting, inUseENI.IPv4["192.168.0.1"].Status)
+	assert.Equal(t, networkv1beta1.IPStatusDeleting, inUseENI.IPv6["fd00::1"].Status)
+	assert.Equal(t, networkv1beta1.IPPrefixStatusDeleting, inUseENI.IPv4Prefix[0].Status)
+	assert.Equal(t, networkv1beta1.IPPrefixStatusDeleting, inUseENI.IPv6Prefix[0].Status)
+
+	ecsClient.AssertNotCalled(t, "DetachNetworkInterface", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	openAPI.AssertNotCalled(t, "DeleteNetworkInterfaceV2", mock.Anything, mock.Anything)
+	openAPI.AssertNotCalled(t, "UnAssignPrivateIPAddressesV2", mock.Anything, mock.Anything, mock.Anything)
+	openAPI.AssertNotCalled(t, "UnAssignIpv6AddressesV2", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func Test_countTotalIdleIPs_SkipsUnschedulable(t *testing.T) {
