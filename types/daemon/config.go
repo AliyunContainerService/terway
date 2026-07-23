@@ -7,6 +7,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/AliyunContainerService/terway/pkg/aliyun/client"
+	networkv1beta1 "github.com/AliyunContainerService/terway/pkg/apis/network.alibabacloud.com/v1beta1"
 	"github.com/AliyunContainerService/terway/pkg/backoff"
 	"github.com/AliyunContainerService/terway/pkg/vswitch"
 	"github.com/AliyunContainerService/terway/types"
@@ -64,13 +66,18 @@ type Config struct {
 	ExtraRoutes                 []route.Route                      `json:"extra_routes,omitempty"`
 	DisableDevicePlugin         bool                               `json:"disable_device_plugin"`
 	ENITagFilter                map[string]string                  `json:"eni_tag_filter"` // if set , only enis match filter, will be managed
-	KubeClientQPS               float32                            `json:"kube_client_qps"`
-	KubeClientBurst             int                                `json:"kube_client_burst"`
-	ResourceGroupID             string                             `json:"resource_group_id"`
-	RateLimit                   map[string]int                     `json:"rate_limit"`
-	EnablePatchPodIPs           *bool                              `json:"enable_patch_pod_ips,omitempty"  mod:"default=true"`
-	IPPoolSyncPeriod            string                             `json:"ip_pool_sync_period"`
-	EnableIPPrefix              bool                               `json:"enable_ip_prefix,omitempty"`
+	// ENITagBlockList augments the built-in DefaultENITagBlockList. Any ENI
+	// carrying a (key, value) pair listed here (or in the default list) is
+	// ignored by terway: not added to the pool, not used for Pod IP
+	// allocation. Use this to coexist with other ENI managers.
+	ENITagBlockList   []networkv1beta1.ENITagBlockListItem `json:"eni_tag_block_list,omitempty"`
+	KubeClientQPS     float32                              `json:"kube_client_qps"`
+	KubeClientBurst   int                                  `json:"kube_client_burst"`
+	ResourceGroupID   string                               `json:"resource_group_id"`
+	RateLimit         map[string]int                       `json:"rate_limit"`
+	EnablePatchPodIPs *bool                                `json:"enable_patch_pod_ips,omitempty"  mod:"default=true"`
+	IPPoolSyncPeriod  string                               `json:"ip_pool_sync_period"`
+	EnableIPPrefix    bool                                 `json:"enable_ip_prefix,omitempty"`
 	// IPv4PrefixCount specifies the total number of IPv4 prefixes to allocate across all ENIs.
 	// Effective in IPv4 single-stack and dual-stack modes.
 	// In dual-stack mode, each ENI automatically gets exactly one IPv6 prefix alongside IPv4 prefixes.
@@ -205,6 +212,33 @@ func MergeConfigAndUnmarshal(topCfg, baseCfg []byte) (*Config, error) {
 	err = json.Unmarshal(jsonBytes, config)
 
 	return config, err
+}
+
+// MergeENITagBlockList combines the user-supplied list with the built-in
+// DefaultENITagBlockList, dedup by (key, value). Always returns the defaults
+// even when userList is empty, so the built-in block rules are always in
+// effect.
+func MergeENITagBlockList(userList []networkv1beta1.ENITagBlockListItem) []networkv1beta1.ENITagBlockListItem {
+	seen := make(map[networkv1beta1.ENITagBlockListItem]struct{}, len(client.DefaultENITagBlockList)+len(userList))
+	out := make([]networkv1beta1.ENITagBlockListItem, 0, len(client.DefaultENITagBlockList)+len(userList))
+	for _, it := range client.DefaultENITagBlockList {
+		if _, ok := seen[it]; ok {
+			continue
+		}
+		seen[it] = struct{}{}
+		out = append(out, it)
+	}
+	for _, it := range userList {
+		if it.Key == "" {
+			continue
+		}
+		if _, ok := seen[it]; ok {
+			continue
+		}
+		seen[it] = struct{}{}
+		out = append(out, it)
+	}
+	return out
 }
 
 // GetAddonSecret return ak/sk from file, return nil if not present.

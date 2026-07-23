@@ -77,7 +77,45 @@ var EniOptions = map[eniTypeKey]*aliyunClient.CreateNetworkInterfaceOptions{
 }
 
 // releaseUnUsedIP toDel is the number of idle ip need to del
+// clearPendingDelete aborts any deletion terway had queued for an ENI that has
+// just become Unschedulable. Once an ENI is unschedulable it belongs to another
+// owner (erdma-controller / RDMA), so terway must not detach/delete it or
+// unassign its IPs/prefixes. Any Deleting markers left by a previous reconcile
+// are reset to their live state so handleStatus never acts on them.
+func clearPendingDelete(eni *networkv1beta1.Nic) {
+	if eni.Status == aliyunClient.ENIStatusDeleting {
+		eni.Status = aliyunClient.ENIStatusInUse
+	}
+	for _, ip := range eni.IPv4 {
+		if ip != nil && ip.Status == networkv1beta1.IPStatusDeleting {
+			ip.Status = networkv1beta1.IPStatusValid
+		}
+	}
+	for _, ip := range eni.IPv6 {
+		if ip != nil && ip.Status == networkv1beta1.IPStatusDeleting {
+			ip.Status = networkv1beta1.IPStatusValid
+		}
+	}
+	for i := range eni.IPv4Prefix {
+		if eni.IPv4Prefix[i].Status == networkv1beta1.IPPrefixStatusDeleting {
+			eni.IPv4Prefix[i].Status = networkv1beta1.IPPrefixStatusValid
+		}
+	}
+	for i := range eni.IPv6Prefix {
+		if eni.IPv6Prefix[i].Status == networkv1beta1.IPPrefixStatusDeleting {
+			eni.IPv6Prefix[i].Status = networkv1beta1.IPPrefixStatusValid
+		}
+	}
+}
+
 func releaseUnUsedIP(log logr.Logger, eni *networkv1beta1.Nic, toDel int) int {
+	// Never touch an ENI marked unschedulable (matched the tag block list). Its
+	// IPs are shown in the CR for visibility but belong to another owner (e.g.
+	// alibabacloud-erdma-controller); terway must not release them nor delete the
+	// ENI. Returning 0 leaves it entirely alone.
+	if eni.Unschedulable {
+		return 0
+	}
 	_, inUse := IPUsage(eni.IPv4)
 	_, inUseV6 := IPUsage(eni.IPv6)
 	// try delete eni, only if no one use it
