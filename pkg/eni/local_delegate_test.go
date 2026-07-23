@@ -78,6 +78,56 @@ func TestLocalDelegate_Allocate_Active_IPv4(t *testing.T) {
 	assert.True(t, resource.IP.IPv4.IsValid())
 }
 
+// TestLocalDelegate_Allocate_SkipsUnschedulable verifies that a new pod is not
+// handed an IP from an Unschedulable (block-listed) ENI even though that ENI has
+// free prefix capacity; the schedulable ENI is used instead.
+func TestLocalDelegate_Allocate_SkipsUnschedulable(t *testing.T) {
+	blockedNic := &networkv1beta1.Nic{
+		ID:            "eni-blocked",
+		MacAddress:    "00:11:22:33:44:01",
+		VSwitchID:     "vsw-1",
+		IPv4CIDR:      "192.168.1.0/24",
+		Unschedulable: true,
+		IPv4Prefix: []networkv1beta1.IPPrefix{
+			{Prefix: "192.168.1.0/28", Status: networkv1beta1.IPPrefixStatusValid},
+		},
+	}
+	okNic := &networkv1beta1.Nic{
+		ID:         "eni-ok",
+		MacAddress: "00:11:22:33:44:02",
+		VSwitchID:  "vsw-1",
+		IPv4CIDR:   "192.168.2.0/24",
+		IPv4Prefix: []networkv1beta1.IPPrefix{
+			{Prefix: "192.168.2.0/28", Status: networkv1beta1.IPPrefixStatusValid},
+		},
+	}
+	blockedIPAM := NewENILocalIPAMFromPrefix("eni-blocked", blockedNic.MacAddress, blockedNic, false)
+	okIPAM := NewENILocalIPAMFromPrefix("eni-ok", okNic.MacAddress, okNic, false)
+	assert.True(t, blockedIPAM.IsUnschedulable())
+	assert.False(t, okIPAM.IsUnschedulable())
+
+	delegate := &LocalDelegate{
+		eniIPAMs:   map[ENIID]*ENILocalIPAM{"eni-blocked": blockedIPAM, "eni-ok": okIPAM},
+		notifier:   NewNotifier(),
+		enableIPv4: true,
+	}
+
+	ctx := context.Background()
+	cni := &daemon.CNI{PodID: "default/test-pod"}
+	respCh, traces := delegate.Allocate(ctx, cni, NewLocalIPRequest())
+	assert.NotNil(t, respCh)
+	assert.Nil(t, traces)
+
+	resp := <-respCh
+	assert.NotNil(t, resp)
+	assert.Nil(t, resp.Err)
+	assert.Len(t, resp.NetworkConfigs, 1)
+	resource := resp.NetworkConfigs[0].(*LocalIPResource)
+	assert.Equal(t, "eni-ok", resource.ENI.ID, "new pod must skip the unschedulable ENI")
+	// the block-listed ENI handed out nothing
+	assert.False(t, blockedIPAM.HasAllocations())
+}
+
 // TestLocalDelegate_Release_Inactive tests Release when delegate is inactive
 func TestLocalDelegate_Release_Inactive(t *testing.T) {
 	delegate := &LocalDelegate{}
