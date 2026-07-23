@@ -572,7 +572,7 @@ func (n *ReconcileNode) syncWithAPI(ctx context.Context, node *networkv1beta1.No
 			// Abort anything terway had queued to delete on this ENI: once it is
 			// unschedulable it belongs to another owner, so pending Deleting markers
 			// (from before the mark) must not be acted on by handleStatus.
-			clearPendingDelete(nic)
+			clearPendingDelete(nic, item.Status)
 		}
 	}
 
