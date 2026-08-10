@@ -1,7 +1,7 @@
-From 4cb08a7d0fde447af895d5344688c63398839be6 Mon Sep 17 00:00:00 2001
+From 34373c4750eeaad258019ff92ff633b5297cef57 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Mon, 9 Mar 2026 16:27:19 +0800
-Subject: [PATCH] feat(node): implement NodeMapGarbageCollect for garbage
+Subject: [PATCH 6/9] feat(node): implement NodeMapGarbageCollect for garbage
  collection of stale BPF node map entries
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>

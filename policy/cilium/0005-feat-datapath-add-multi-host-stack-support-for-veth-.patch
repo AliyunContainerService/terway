@@ -1,7 +1,7 @@
-From 27b4dae4fd8dcc6fd2878fffd94160d944f76ce6 Mon Sep 17 00:00:00 2001
+From f11fe6c3141ebe950f6cd029f0299c6cd0645bb6 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Mon, 9 Mar 2026 16:11:17 +0800
-Subject: [PATCH] feat(datapath): add multi-host stack support for veth
+Subject: [PATCH 5/9] feat(datapath): add multi-host stack support for veth
  datapath- Implement host stack CIDR map and related functions - Add support
  for multiple host stack CIDRs in veth datapath mode - Update bpf_lxc to
  handle multiple host stack CIDRs - Modify daemon initialization to set up

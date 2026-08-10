@@ -1,7 +1,7 @@
-From 8b12242b89082a5777e25218cf54e7b843e44cfc Mon Sep 17 00:00:00 2001
+From bb073efb92f0a9b6621fd80c1269ad274b8e699c Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Thu, 13 Nov 2025 15:08:54 +0800
-Subject: [PATCH] feat(daemon): add disable per-packet LB policy flag
+Subject: [PATCH 3/9] feat(daemon): add disable per-packet LB policy flag
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
