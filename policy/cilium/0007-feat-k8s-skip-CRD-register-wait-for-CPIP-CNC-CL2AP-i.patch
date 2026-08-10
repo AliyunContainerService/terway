@@ -1,7 +1,7 @@
-From 9b52716691ca2b62ca9c6316d644fca3f5e15160 Mon Sep 17 00:00:00 2001
+From 9c0faeeb213564b4877c9da713e4c4cc691143d6 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Wed, 13 May 2026 14:10:16 +0800
-Subject: [PATCH] feat(k8s): skip CRD register/wait for CPIP, CNC, CL2AP in
+Subject: [PATCH 7/9] feat(k8s): skip CRD register/wait for CPIP, CNC, CL2AP in
  Terway integration
 
 Remove unconditional registration and agent-side wait for three CRDs that
@@ -26,7 +26,7 @@ Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
  2 files changed, 9 insertions(+), 17 deletions(-)
 
 diff --git a/pkg/k8s/apis/cilium.io/client/register.go b/pkg/k8s/apis/cilium.io/client/register.go
-index 216ed4b5b4..149a9c749a 100644
+index 0ec1f49f0f..d7d4385127 100644
 --- a/pkg/k8s/apis/cilium.io/client/register.go
 +++ b/pkg/k8s/apis/cilium.io/client/register.go
 @@ -131,10 +131,8 @@ func CustomResourceDefinitionList() map[string]*CRDList {

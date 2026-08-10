@@ -1,7 +1,7 @@
-From 81cd99b3b46dc04700a9439eaae07af416095763 Mon Sep 17 00:00:00 2001
+From 9ca80bee99abcdbded524153c50f698aec6f067c Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Thu, 13 Nov 2025 15:02:38 +0800
-Subject: [PATCH] lb: enable in cluster load balancer
+Subject: [PATCH 2/9] lb: enable in cluster load balancer
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
@@ -109,7 +109,7 @@ index 4ade0dddf0..2b57f45b18 100644
  		EnableSocketLB:                         kprCfg.EnableSocketLB,
  		EnableSocketLBPodConnectionTermination: cfg.EnableSocketLBPodConnectionTermination,
 diff --git a/pkg/loadbalancer/reflectors/conversions.go b/pkg/loadbalancer/reflectors/conversions.go
-index 62734ea932..f4be4696b1 100644
+index 65e3e71c28..03cc2cea3c 100644
 --- a/pkg/loadbalancer/reflectors/conversions.go
 +++ b/pkg/loadbalancer/reflectors/conversions.go
 @@ -277,7 +277,9 @@ func convertService(cfg loadbalancer.Config, extCfg loadbalancer.ExternalConfig,

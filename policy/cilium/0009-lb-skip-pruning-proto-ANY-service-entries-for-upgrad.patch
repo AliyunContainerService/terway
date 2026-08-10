@@ -1,7 +1,7 @@
-From c750c7837375892a804b71c56376f7744b8f5964 Mon Sep 17 00:00:00 2001
+From 44b4c3d75bced8f68ec775cf366559aad02bceff Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Tue, 2 Jun 2026 17:35:02 +0800
-Subject: [PATCH] lb: skip pruning proto=ANY service entries for upgrade
+Subject: [PATCH 9/9] lb: skip pruning proto=ANY service entries for upgrade
  compatibility
 
 During upgrade from cilium 1.16 (proto=ANY) to 1.18 (proto=TCP/UDP),

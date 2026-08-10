@@ -1,7 +1,7 @@
-From 58b71ad433c8b5d5245c86a8d0eef67d4a5337f9 Mon Sep 17 00:00:00 2001
+From d588cc389e8585e80d9eb3645abfeae38d0a4175 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Tue, 21 Oct 2025 15:26:32 +0800
-Subject: [PATCH] terway: cni
+Subject: [PATCH 1/9] terway: cni
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
@@ -558,7 +558,7 @@ index 0000000000..e140cb821f
 +	chainingapi.Register(name, &genericveth.GenericVethChainer{})
 +}
 diff --git a/plugins/cilium-cni/cmd/cmd.go b/plugins/cilium-cni/cmd/cmd.go
-index 885e10017f..933c7472d7 100644
+index 38642d042d..10c96f7bbf 100644
 --- a/plugins/cilium-cni/cmd/cmd.go
 +++ b/plugins/cilium-cni/cmd/cmd.go
 @@ -48,6 +48,7 @@ import (
