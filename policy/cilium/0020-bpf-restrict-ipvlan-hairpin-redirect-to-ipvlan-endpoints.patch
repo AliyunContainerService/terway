@@ -1,0 +1,114 @@
+From 366e0ba50427eb6a1eba59afbf8031e43e0b0cad Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Tue, 11 Aug 2026 11:00:54 +0800
+Subject: [PATCH] bpf: restrict ipvlan hairpin redirect to ipvlan endpoints
+
+---
+ bpf/bpf_lxc.c                       | 4 ++--
+ pkg/datapath/linux/config/config.go | 3 +++
+ pkg/datapath/types/config.go        | 3 +++
+ pkg/endpoint/cache.go               | 4 ++--
+ pkg/endpoint/terway.go              | 6 +++++-
+ pkg/testutils/endpoint.go           | 1 +
+ 6 files changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/bpf/bpf_lxc.c b/bpf/bpf_lxc.c
+index ec27e9e27f..da955bed1f 100644
+--- a/bpf/bpf_lxc.c
++++ b/bpf/bpf_lxc.c
+@@ -1159,7 +1159,7 @@ ct_recreate4:
+ #endif /* ENABLE_HOST_ROUTING || ENABLE_ROUTING */
+ 			policy_clear_mark(ctx);
+ 
+-#ifdef DATAPATH_IPVLAN
++#if defined(DATAPATH_IPVLAN) && defined(ENDPOINT_DATAPATH_IPVLAN)
+ 		if (hairpin_flow) {
+ 			/* In ipvlan mode, the hairpin packet must be redirected back to
+ 			 * the ingress of the interface, otherwise it will leak out to
+@@ -1173,7 +1173,7 @@ ct_recreate4:
+ 				return ret;
+ 			return ctx_redirect(ctx, ep->ifindex, BPF_F_INGRESS);
+ 		}
+-#endif
++#endif /* DATAPATH_IPVLAN && ENDPOINT_DATAPATH_IPVLAN */
+ 
+ 			/* If the packet is from L7 LB it is coming from the host */
+ 			return ipv4_local_delivery(ctx, ETH_HLEN, SECLABEL_IPV4,
+diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
+index 0901a7e695..25148b5dc8 100644
+--- a/pkg/datapath/linux/config/config.go
++++ b/pkg/datapath/linux/config/config.go
+@@ -1093,6 +1093,9 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, devices []strin
+ 	switch option.Config.DatapathMode {
+ 	case datapathOption.DatapathModeIPvlan:
+ 		fmt.Fprintf(fw, "#define DATAPATH_IPVLAN 1\n")
++		if e.HasIPVlanDataPath() {
++			fmt.Fprintf(fw, "#define ENDPOINT_DATAPATH_IPVLAN 1\n")
++		}
+ 	case datapathOption.DatapathModeVeth:
+ 		fmt.Fprintf(fw, "#define DATAPATH_VETH 1\n")
+ 
+diff --git a/pkg/datapath/types/config.go b/pkg/datapath/types/config.go
+index 659a26742a..eac2277855 100644
+--- a/pkg/datapath/types/config.go
++++ b/pkg/datapath/types/config.go
+@@ -79,6 +79,9 @@ type CompileTimeConfiguration interface {
+ 	// the endpoint's interface
+ 	RequireEndpointRoute() bool
+ 
++	// HasIPVlanDataPath returns true if this endpoint uses the IPvlan datapath.
++	HasIPVlanDataPath() bool
++
+ 	// GetPolicyVerdictLogFilter returns the PolicyVerdictLogFilter for the endpoint
+ 	GetPolicyVerdictLogFilter() uint32
+ 
+diff --git a/pkg/endpoint/cache.go b/pkg/endpoint/cache.go
+index fd69aab5e6..c2ddc38008 100644
+--- a/pkg/endpoint/cache.go
++++ b/pkg/endpoint/cache.go
+@@ -94,8 +94,8 @@ func (e *Endpoint) createEpInfoCache(epdir string) *epInfoCache {
+ 		ifIndex:                e.ifIndex,
+ 		netNsCookie:            e.NetNsCookie,
+ 
+-		ipvlan:                 e.datapathMapID > 0,
+-		eniIndex:               e.eniInterfaceIndex,
++		ipvlan:   e.HasIPVlanDataPath(),
++		eniIndex: e.eniInterfaceIndex,
+ 
+ 		endpoint: e,
+ 	}
+diff --git a/pkg/endpoint/terway.go b/pkg/endpoint/terway.go
+index 16d42d2e7b..37081f28a7 100644
+--- a/pkg/endpoint/terway.go
++++ b/pkg/endpoint/terway.go
+@@ -37,10 +37,14 @@ func (e *Endpoint) pinDatapathMap() error {
+ 	return mapFd.Pin(e.BPFIpvlanMapPath())
+ }
+ 
+-func (e *Endpoint) GetENIIndex() int64{
++func (e *Endpoint) GetENIIndex() int64 {
+ 	return e.eniInterfaceIndex
+ }
+ 
++func (e *Endpoint) HasIPVlanDataPath() bool {
++	return e.datapathMapID > 0
++}
++
+ func (ep *epInfoCache) HasIPVlanDataPath() bool {
+ 	return ep.ipvlan
+ }
+diff --git a/pkg/testutils/endpoint.go b/pkg/testutils/endpoint.go
+index 8af77254b9..91d35a93fb 100644
+--- a/pkg/testutils/endpoint.go
++++ b/pkg/testutils/endpoint.go
+@@ -62,6 +62,7 @@ func (e *TestEndpoint) RequireARPPassthrough() bool                 { return fal
+ func (e *TestEndpoint) RequireEgressProg() bool                     { return false }
+ func (e *TestEndpoint) RequireRouting() bool                        { return false }
+ func (e *TestEndpoint) RequireEndpointRoute() bool                  { return false }
++func (e *TestEndpoint) HasIPVlanDataPath() bool                     { return false }
+ func (e *TestEndpoint) GetPolicyVerdictLogFilter() uint32           { return 0xffff }
+ func (e *TestEndpoint) GetCIDRPrefixLengths() ([]int, []int)        { return nil, nil }
+ func (e *TestEndpoint) GetID() uint64                               { return e.Id }
+-- 
+2.50.1 (Apple Git-155)
+
