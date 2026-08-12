@@ -294,6 +294,8 @@ ${VSWITCH_YAML}
 terwayControlplane:
   replicaCount: 1
 
+  ipStack: ${TERWAY_IP_STACK}
+
   image:
     repository: ${TERWAY_REGISTRY}/terway-controlplane
     pullPolicy: ${TERWAY_PULL_POLICY}

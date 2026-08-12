@@ -7,9 +7,9 @@ Terraform module for spinning up ACK managed clusters used by Terway's end-to-en
 | profile      | ip stack | CNI install path                                                                                                  | use case                  |
 |--------------|----------|-------------------------------------------------------------------------------------------------------------------|---------------------------|
 | `byo-ipv4`   | ipv4     | `cluster_addons` does **not** include terway. After cluster creation, `deploy-terway.sh` helm-installs the chart. | dev / open-source install |
+| `byo-dual`   | dual     | Same as `byo-ipv4`, with dual-stack settings passed to both terway and terway-controlplane.                       | dual-stack BYO tests      |
 | `ack-ipv4`   | ipv4     | `cluster_addons` includes `terway-eniip`. ACK installs terway-eniip daemonset automatically.                      | E2E feature tests         |
-| `ack-dual`   | dual     | Same as `ack-ipv4` (only ACK mode is allowed for dual stack).                                                     | dual-stack E2E tests      |
-| `byo-dual`   | -        | Rejected. ACK API requires a CNI plugin for dual-stack clusters (`IPv6DependencyNotSatisfied.NetworkPlugin`).     | -                         |
+| `ack-dual`   | dual     | Same as `ack-ipv4`, with a dual-stack service CIDR.                                                               | dual-stack E2E tests      |
 
 ### BYO vs ACK
 
@@ -24,7 +24,7 @@ Each `create` invocation materializes a workdir under `runs/<profile>-<timestamp
 - `terraform.tfvars` copied (so per-run tweaks don't bleed back)
 - `.terraform/`, `terraform.tfstate`, `kubeconfig-*`, `terway-values.yaml` are local to the workdir
 
-This means you can run `byo-ipv4` and `ack-ipv4` simultaneously without state collision. `runs/` is git-ignored.
+This means you can run profiles such as `byo-dual` and `ack-dual` simultaneously without state collision. `runs/` is git-ignored.
 
 ## Quick start
 
@@ -33,6 +33,9 @@ This means you can run `byo-ipv4` and `ack-ipv4` simultaneously without state co
 make ack-cluster-ack-ipv4
 # or:
 ./e2e-cluster.sh create ack-dual
+
+# Create a dual-stack cluster and helm-install Terway after cluster creation
+make ack-cluster-byo-dual TERWAY_IMAGE_REGISTRY=registry.example.com/terway
 
 # List active workdirs
 make ack-list
@@ -65,10 +68,9 @@ terraform apply ...
 - `service_cidr`: comma-separated `<ipv4-cidr>,<ipv6-cidr>` for dual stack; single CIDR for ipv4.
 - `cluster_addons` is not a variable any more — it is computed in `locals.all_addons` from `cluster_mode` (see `terraform_e2e.tf`).
 
-Two lifecycle preconditions enforce ACK API constraints before apply:
+One lifecycle precondition enforces the dual-stack service CIDR constraint before apply:
 
-1. `byo + dual` is rejected (ACK requires CNI for dual stack).
-2. `dual` requires `service_cidr` to contain both IPv4 and IPv6 CIDRs.
+- `dual` requires `service_cidr` to contain both IPv4 and IPv6 CIDRs.
 
 ## Files
 

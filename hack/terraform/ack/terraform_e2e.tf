@@ -64,7 +64,7 @@ variable "password" {
 variable "kubernetes_version" {
   description = "The Kubernetes version of the cluster."
   type        = string
-  default     = "1.34.3-aliyun.1"
+  default     = "1.34.10-aliyun.1"
 }
 
 variable "service_cidr" {
