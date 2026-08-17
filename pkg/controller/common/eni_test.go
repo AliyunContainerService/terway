@@ -111,7 +111,7 @@ var _ = Describe("Common ENI Operations", func() {
 				NodeName:           "node-1",
 			})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("eni cr phase"))
+			Expect(err.Error()).To(ContainSubstring("networkinterface eni-detaching phase Detaching can not be attached"))
 		})
 
 		It("should return nil if ENI is already in Bind phase", func() {
@@ -203,7 +203,7 @@ var _ = Describe("Common ENI Operations", func() {
 				NetworkInterfaceID: "eni-binding",
 			})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("eni cr phase"))
+			Expect(err.Error()).To(ContainSubstring("networkinterface eni-binding phase Binding can not be detached"))
 		})
 
 		It("should do nothing if ENI is UnManaged", func() {
@@ -430,7 +430,7 @@ var _ = Describe("Common ENI Operations", func() {
 				},
 			})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("eni cr phase"))
+			Expect(err.Error()).To(Equal("networkinterface eni-mismatch phase Unbind did not reach expected phase Bind; inspect with: kubectl describe networkinterface eni-mismatch"))
 		})
 
 		It("should default BackOff.Steps to 1 when zero", func() {
