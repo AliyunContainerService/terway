@@ -3,16 +3,32 @@
 masq_eni_only() {
   if ! "$1" -t nat -L terway-masq; then
     # Create a new chain in nat table.
-    "$1" -t nat -N terway-masq
+    "$1" -t nat -N terway-masq || return 1
   fi
 
   if ! "$1" -t nat -L POSTROUTING | grep -q terway-masq; then
     # Append that chain to POSTROUTING table.
-    "$1" -t nat -A POSTROUTING -m comment --comment "terway:masq-outgoing" ! -o lo -j terway-masq
+    "$1" -t nat -A POSTROUTING -m comment --comment "terway:masq-outgoing" ! -o lo -j terway-masq || return 1
+  fi
+
+  # The host-side peer for an exclusive ENI Pod is a cali* veth with no IP
+  # address.  Do not let node-to-Pod traffic reach MASQUERADE: its address
+  # selection may otherwise fall back to an unrelated host interface.
+  # Normalize duplicate or misplaced bypass rules. Leave a correct
+  # steady-state chain untouched so there is no transient MASQUERADE window.
+  managed_rule='-A terway-masq -o cali+ -m comment --comment "terway:masq-pod-bypass" -j RETURN'
+  rules=$("$1" -t nat -S terway-masq 2>/dev/null) || return 1
+  first_rule=$(printf '%s\n' "$rules" | sed -n '2p')
+  managed_count=$(printf '%s\n' "$rules" | grep -Fxc -- "$managed_rule")
+  if [ "$first_rule" != "$managed_rule" ] || [ "$managed_count" -ne 1 ]; then
+    while "$1" -t nat -C terway-masq -o 'cali+' -m comment --comment "terway:masq-pod-bypass" -j RETURN >/dev/null 2>&1; do
+      "$1" -t nat -D terway-masq -o 'cali+' -m comment --comment "terway:masq-pod-bypass" -j RETURN || return 1
+    done
+    "$1" -t nat -I terway-masq 1 -o 'cali+' -m comment --comment "terway:masq-pod-bypass" -j RETURN || return 1
   fi
 
   if ! "$1" -t nat -L terway-masq | grep -q MASQUERADE; then
-    "$1" -t nat -A terway-masq -j MASQUERADE
+    "$1" -t nat -A terway-masq -j MASQUERADE || return 1
   fi
 }
 

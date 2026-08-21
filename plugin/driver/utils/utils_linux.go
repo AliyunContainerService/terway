@@ -144,6 +144,11 @@ func FoundRoutes(expected *netlink.Route) ([]netlink.Route, error) {
 	if find.Gw != nil {
 		routeFilter = routeFilter | netlink.RT_FILTER_GW
 	}
+	// A nil expected source intentionally does not filter routes that already
+	// have a preferred source, preserving compatibility across upgrades.
+	if find.Src != nil {
+		routeFilter = routeFilter | netlink.RT_FILTER_SRC
+	}
 	if find.Table > 0 {
 		routeFilter = routeFilter | netlink.RT_FILTER_TABLE
 	}
