@@ -552,6 +552,149 @@ func Test_runCalico_EnvironmentVariables(t *testing.T) {
 	assert.Equal(t, "false", envMap["FELIX_USAGEREPORTINGENABLED"])
 }
 
+func TestMasqENIOnlyRules(t *testing.T) {
+	script := "../../policy/uninstall_policy.sh"
+	managedRule := `-A terway-masq -o cali+ -m comment --comment "terway:masq-pod-bypass" -j RETURN`
+	masqueradeRule := `-A terway-masq -j MASQUERADE`
+
+	runModel := func(chainExists bool, initialRules []string, runs int, failDelete, failInsert bool) ([]string, []string, error) {
+		flag := func(value bool) string {
+			if value {
+				return "1"
+			}
+			return "0"
+		}
+		model := `
+script=$1
+runs=$2
+chain_exists=$3
+fail_delete=$4
+fail_insert=$5
+shift 5
+chain=("$@")
+writes=()
+postrouting=1
+managed_rule='-A terway-masq -o cali+ -m comment --comment "terway:masq-pod-bypass" -j RETURN'
+masquerade_rule='-A terway-masq -j MASQUERADE'
+
+has_rule() {
+  local want=$1 rule
+  for rule in "${chain[@]}"; do
+    [ "$rule" = "$want" ] && return 0
+  done
+  return 1
+}
+
+delete_rule() {
+  local want=$1 rule removed=0
+  local next=()
+  for rule in "${chain[@]}"; do
+    if [ "$removed" -eq 0 ] && [ "$rule" = "$want" ]; then
+      removed=1
+      continue
+    fi
+    next+=("$rule")
+  done
+  chain=("${next[@]}")
+}
+
+iptables() {
+  case "$*" in
+    "-t nat -L terway-masq")
+      [ "$chain_exists" -eq 1 ] || return 1
+      printf '%s\n' "${chain[@]}"
+      ;;
+    "-t nat -N terway-masq")
+      chain_exists=1
+      writes+=("$*")
+      ;;
+    "-t nat -L POSTROUTING")
+      [ "$postrouting" -eq 1 ] && printf '%s\n' terway-masq
+      ;;
+    "-t nat -A POSTROUTING "*)
+      postrouting=1
+      writes+=("$*")
+      ;;
+    "-t nat -S terway-masq")
+      [ "$chain_exists" -eq 1 ] || return 1
+      printf '%s\n' '-N terway-masq'
+      printf '%s\n' "${chain[@]}"
+      ;;
+    "-t nat -C terway-masq -o cali+ -m comment --comment terway:masq-pod-bypass -j RETURN") has_rule "$managed_rule" ;;
+    "-t nat -D terway-masq -o cali+ -m comment --comment terway:masq-pod-bypass -j RETURN")
+      [ "$fail_delete" -eq 0 ] || return 4
+      delete_rule "$managed_rule"
+      writes+=("$*")
+      ;;
+    "-t nat -I terway-masq 1 -o cali+ -m comment --comment terway:masq-pod-bypass -j RETURN")
+      [ "$fail_insert" -eq 0 ] || return 4
+      chain=("$managed_rule" "${chain[@]}")
+      writes+=("$*")
+      ;;
+    "-t nat -A terway-masq -j MASQUERADE")
+      chain+=("$masquerade_rule")
+      writes+=("$*")
+      ;;
+    *) return 2 ;;
+  esac
+}
+
+source "$script"
+status=0
+for ((i = 0; i < runs; i++)); do
+  masq_eni_only iptables || { status=$?; break; }
+done
+for rule in "${chain[@]}"; do printf '__RULE__%s\n' "$rule"; done
+for write in "${writes[@]}"; do printf '__WRITE__%s\n' "$write"; done
+exit "$status"
+`
+		args := []string{"-c", model, "bash", script, fmt.Sprint(runs), flag(chainExists), flag(failDelete), flag(failInsert)}
+		args = append(args, initialRules...)
+		out, err := exec.Command("bash", args...).CombinedOutput()
+		var rules, writes []string
+		for _, line := range strings.Split(string(out), "\n") {
+			switch {
+			case strings.HasPrefix(line, "__RULE__"):
+				rules = append(rules, strings.TrimPrefix(line, "__RULE__"))
+			case strings.HasPrefix(line, "__WRITE__"):
+				writes = append(writes, strings.TrimPrefix(line, "__WRITE__"))
+			}
+		}
+		return rules, writes, err
+	}
+
+	t.Run("fresh install", func(t *testing.T) {
+		rules, _, err := runModel(false, nil, 1, false, false)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{managedRule, masqueradeRule}, rules)
+	})
+
+	t.Run("correct chain is unchanged across runs", func(t *testing.T) {
+		rules, writes, err := runModel(true, []string{managedRule, masqueradeRule}, 3, false, false)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{managedRule, masqueradeRule}, rules)
+		assert.Empty(t, writes)
+	})
+
+	t.Run("misordered and duplicate rules converge", func(t *testing.T) {
+		rules, _, err := runModel(true, []string{masqueradeRule, managedRule, managedRule}, 2, false, false)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{managedRule, masqueradeRule}, rules)
+	})
+
+	t.Run("delete failure is returned", func(t *testing.T) {
+		rules, _, err := runModel(true, []string{masqueradeRule, managedRule}, 1, true, false)
+		assert.Error(t, err)
+		assert.Equal(t, []string{masqueradeRule, managedRule}, rules)
+	})
+
+	t.Run("insert failure is returned", func(t *testing.T) {
+		rules, _, err := runModel(true, []string{masqueradeRule}, 1, false, true)
+		assert.Error(t, err)
+		assert.Equal(t, []string{masqueradeRule}, rules)
+	})
+}
+
 func Test_runCilium(t *testing.T) {
 	tests := []struct {
 		name        string

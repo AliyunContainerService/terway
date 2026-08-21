@@ -19,9 +19,23 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
+
+func setupExclusiveENITestHostIPs(t *testing.T) {
+	t.Helper()
+
+	hostLink := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "host"}}
+	require.NoError(t, netlink.LinkAdd(hostLink))
+	require.NoError(t, netlink.LinkSetUp(hostLink))
+	require.NoError(t, netlink.AddrAdd(hostLink, &netlink.Addr{IPNet: eth0IPNet}))
+	require.NoError(t, netlink.AddrAdd(hostLink, &netlink.Addr{
+		IPNet: eth0IPNetIPv6,
+		Flags: unix.IFA_F_NODAD,
+	}))
+}
 
 func TestDataPathExclusiveENI(t *testing.T) {
 	runtime.LockOSThread()
@@ -50,6 +64,7 @@ func TestDataPathExclusiveENI(t *testing.T) {
 		err = testutils.UnmountNS(hostNS)
 		assert.NoError(t, err)
 	}()
+	setupExclusiveENITestHostIPs(t)
 
 	err = netlink.LinkAdd(&netlink.Dummy{
 		LinkAttrs: netlink.LinkAttrs{Name: "eni"},
@@ -145,7 +160,7 @@ func TestDataPathExclusiveENI(t *testing.T) {
 	assert.Equal(t, cfg.MTU, hostVETHLink.Attrs().MTU)
 	assert.True(t, hostVETHLink.Attrs().Flags&net.FlagUp != 0)
 
-	// no explicit IP assignment - should auto borrow IP
+	// The host veth must remain unnumbered; HostIPSet is used only as route prefsrc.
 	addrs, err := netlink.AddrList(hostVETHLink, netlink.FAMILY_ALL)
 	assert.NoError(t, err)
 	// Only link-local or auto-assigned addresses, no explicit IPv4/IPv6 from cfg.HostIPSet
@@ -172,6 +187,7 @@ func TestDataPathExclusiveENI(t *testing.T) {
 	}, netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(routes))
+	assert.True(t, cfg.HostIPSet.IPv4.IP.Equal(routes[0].Src))
 
 	// add some ip rule make sure we don't delete it
 	dummyRule := netlink.NewRule()
@@ -213,6 +229,7 @@ func TestDataPathExclusiveENI_PreSetUP(t *testing.T) {
 		err = testutils.UnmountNS(hostNS)
 		assert.NoError(t, err)
 	}()
+	setupExclusiveENITestHostIPs(t)
 	err = netlink.LinkAdd(&netlink.Dummy{
 		LinkAttrs: netlink.LinkAttrs{Name: "eni"},
 	})
@@ -306,7 +323,7 @@ func TestDataPathExclusiveENI_PreSetUP(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, cfg.MTU, hostVETHLink.Attrs().MTU)
 	assert.True(t, hostVETHLink.Attrs().Flags&net.FlagUp != 0)
-	// no explicit IP assignment - should auto borrow IP
+	// The host veth must remain unnumbered; HostIPSet is used only as route prefsrc.
 	addrs, err := netlink.AddrList(hostVETHLink, netlink.FAMILY_ALL)
 	assert.NoError(t, err)
 	// Only link-local or auto-assigned addresses, no explicit IPv4/IPv6 from cfg.HostIPSet
@@ -332,6 +349,7 @@ func TestDataPathExclusiveENI_PreSetUP(t *testing.T) {
 	}, netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(routes))
+	assert.True(t, cfg.HostIPSet.IPv4.IP.Equal(routes[0].Src))
 	// add some ip rule make sure we don't delete it
 	dummyRule := netlink.NewRule()
 	dummyRule.Priority = toContainerPriority
@@ -378,6 +396,7 @@ func TestDataPathExclusiveENIMultiNetwork(t *testing.T) {
 		err = testutils.UnmountNS(hostNS)
 		assert.NoError(t, err)
 	}()
+	setupExclusiveENITestHostIPs(t)
 
 	err = netlink.LinkAdd(&netlink.Dummy{
 		LinkAttrs: netlink.LinkAttrs{Name: "eni"},
@@ -526,7 +545,7 @@ func TestDataPathExclusiveENIMultiNetwork(t *testing.T) {
 	assert.Equal(t, cfg.MTU, hostVETHLink.Attrs().MTU)
 	assert.True(t, hostVETHLink.Attrs().Flags&net.FlagUp != 0)
 
-	// no explicit IP assignment - should auto borrow IP
+	// The host veth must remain unnumbered; HostIPSet is used only as route prefsrc.
 	addrs, err := netlink.AddrList(hostVETHLink, netlink.FAMILY_ALL)
 	assert.NoError(t, err)
 	// Only link-local or auto-assigned addresses, no explicit IPv4/IPv6 from cfg.HostIPSet
@@ -553,6 +572,7 @@ func TestDataPathExclusiveENIMultiNetwork(t *testing.T) {
 	}, netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(routes))
+	assert.True(t, cfg.HostIPSet.IPv4.IP.Equal(routes[0].Src))
 
 	// add some ip rule make sure we don't delete it
 	dummyRule := netlink.NewRule()

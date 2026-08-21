@@ -96,6 +96,16 @@ func TestGenerateHostPeerCfgForPolicy(t *testing.T) {
 			IPv4: net.ParseIP("169.254.169.254"),
 			IPv6: net.ParseIP("fd0::1"),
 		},
+		HostIPSet: &terwayTypes.IPNetSet{
+			IPv4: &net.IPNet{
+				IP:   net.ParseIP("10.0.0.1"),
+				Mask: net.CIDRMask(32, 32),
+			},
+			IPv6: &net.IPNet{
+				IP:   net.ParseIP("fd0::10"),
+				Mask: net.CIDRMask(128, 128),
+			},
+		},
 		ENIIndex: 1,
 	}
 	veth := &netlink.GenericLink{
@@ -107,6 +117,77 @@ func TestGenerateHostPeerCfgForPolicy(t *testing.T) {
 	vethConf := datapath.GenerateHostPeerCfgForPolicy(setUp, veth, 1)
 	assert.Equal(t, 2, len(vethConf.Routes))
 	assert.Equal(t, 4, len(vethConf.Rules))
+	assert.Equal(t, setUp.HostIPSet.IPv4.IP, vethConf.Routes[0].Src)
+	assert.Equal(t, setUp.HostIPSet.IPv6.IP, vethConf.Routes[1].Src)
+}
+
+func TestRuleSyncExclusiveENIPreferredSource(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	patches.ApplyFunc(link.VethNameForPod, func(name, namespace, ifName, prefix string) (string, error) {
+		return "cali12345678901", nil
+	})
+	patches.ApplyFunc(netlink.LinkList, func() ([]netlink.Link, error) {
+		return []netlink.Link{&netlink.Veth{LinkAttrs: netlink.LinkAttrs{
+			Index: 10,
+			Name:  "cali12345678901",
+		}}}, nil
+	})
+	patches.ApplyFunc(utils.GetHostIP, func(ipv4, ipv6 bool) (*terwayTypes.IPNetSet, error) {
+		assert.True(t, ipv4)
+		assert.True(t, ipv6)
+		return &terwayTypes.IPNetSet{
+			IPv4: &net.IPNet{IP: net.ParseIP("10.0.0.1"), Mask: net.CIDRMask(32, 32)},
+			IPv6: &net.IPNet{IP: net.ParseIP("fd00::1"), Mask: net.CIDRMask(128, 128)},
+		}, nil
+	})
+
+	var ensuredRoutes []*netlink.Route
+	patches.ApplyFunc(utils.EnsureRoute, func(ctx context.Context, route *netlink.Route) (bool, error) {
+		ensuredRoutes = append(ensuredRoutes, route)
+		return true, nil
+	})
+
+	err := ruleSync(context.Background(), daemon.PodResources{
+		PodInfo: &daemon.PodInfo{
+			Name:           "test-pod",
+			Namespace:      "default",
+			PodNetworkType: daemon.PodNetworkTypeVPCENI,
+		},
+		NetConf: `[{"BasicInfo":{"PodIP":{"IPv4":"10.0.0.2","IPv6":"fd00::2"}}}]`,
+	})
+	require.NoError(t, err)
+	require.Len(t, ensuredRoutes, 2)
+	assert.Equal(t, net.ParseIP("10.0.0.1"), ensuredRoutes[0].Src)
+	assert.Equal(t, "10.0.0.2/32", ensuredRoutes[0].Dst.String())
+	assert.Equal(t, netlink.SCOPE_LINK, ensuredRoutes[0].Scope)
+	assert.Equal(t, net.ParseIP("fd00::1"), ensuredRoutes[1].Src)
+	assert.Equal(t, "fd00::2/128", ensuredRoutes[1].Dst.String())
+	assert.Equal(t, netlink.SCOPE_UNIVERSE, ensuredRoutes[1].Scope)
+}
+
+func TestSyncExclusiveENIRoutesRejectsInvalidNetConf(t *testing.T) {
+	err := syncExclusiveENIRoutes(context.Background(), daemon.PodResources{
+		PodInfo: &daemon.PodInfo{Name: "test-pod", Namespace: "default"},
+		NetConf: `{`,
+	})
+	require.ErrorContains(t, err, "parse network config for pod default/test-pod")
+}
+
+func TestSyncExclusiveENIRoutesSkipsEmptyNetConf(t *testing.T) {
+	err := syncExclusiveENIRoutes(context.Background(), daemon.PodResources{
+		PodInfo: &daemon.PodInfo{Name: "test-pod", Namespace: "default"},
+	})
+	require.NoError(t, err)
+}
+
+func TestSyncExclusiveENIRoutesSkipsIncompleteNetConf(t *testing.T) {
+	err := syncExclusiveENIRoutes(context.Background(), daemon.PodResources{
+		PodInfo: &daemon.PodInfo{Name: "test-pod", Namespace: "default"},
+		NetConf: `[{}, {"BasicInfo":{}}]`,
+	})
+	require.NoError(t, err)
 }
 
 // setupTestNetNS creates a test network namespace for testing
@@ -315,7 +396,7 @@ func TestRuleSync_WrongNetworkType(t *testing.T) {
 		PodInfo: &daemon.PodInfo{
 			Name:           "test-pod",
 			Namespace:      "default",
-			PodNetworkType: daemon.PodNetworkTypeVPCENI, // Wrong type
+			PodNetworkType: "unsupported",
 		},
 	}
 
