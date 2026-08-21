@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/samber/lo"
 	"github.com/vishvananda/netlink"
@@ -20,6 +21,10 @@ import (
 func ruleSync(ctx context.Context, res daemon.PodResources) error {
 	if res.PodInfo == nil {
 		return nil
+	}
+
+	if res.PodInfo.PodNetworkType == daemon.PodNetworkTypeVPCENI {
+		return syncExclusiveENIRoutes(ctx, res)
 	}
 
 	if res.PodInfo.PodNetworkType != daemon.PodNetworkTypeENIMultiIP {
@@ -121,6 +126,85 @@ func ruleSync(ctx context.Context, res daemon.PodResources) error {
 
 		for _, rule := range hostVethConf.Rules {
 			_, err = utils.EnsureIPRule(ctx, rule)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func syncExclusiveENIRoutes(ctx context.Context, res daemon.PodResources) error {
+	if res.NetConf == "" {
+		return nil
+	}
+
+	netConf := make([]*rpc.NetConf, 0)
+	err := json.Unmarshal([]byte(res.NetConf), &netConf)
+	if err != nil {
+		return fmt.Errorf("parse network config for pod %s/%s: %w", res.PodInfo.Namespace, res.PodInfo.Name, err)
+	}
+
+	links, err := netlink.LinkList()
+	if err != nil {
+		return err
+	}
+
+	for _, conf := range netConf {
+		if conf.BasicInfo == nil || conf.BasicInfo.PodIP == nil {
+			continue
+		}
+
+		ifName := "eth0"
+		if conf.IfName != "" {
+			ifName = conf.IfName
+		}
+		hostVethName, _ := link.VethNameForPod(res.PodInfo.Name, res.PodInfo.Namespace, ifName, "cali")
+		hostVeth, ok := lo.Find(links, func(item netlink.Link) bool {
+			return hostVethName == item.Attrs().Name
+		})
+		if !ok {
+			continue
+		}
+
+		setup := &types.SetupConfig{
+			HostVETHName:   hostVethName,
+			ContainerIPNet: &terwayTypes.IPNetSet{},
+		}
+		if conf.BasicInfo.PodIP.IPv4 != "" {
+			setup.ContainerIPNet.SetIPNet(conf.BasicInfo.PodIP.IPv4 + "/32")
+		}
+		if conf.BasicInfo.PodIP.IPv6 != "" {
+			setup.ContainerIPNet.SetIPNet(conf.BasicInfo.PodIP.IPv6 + "/128")
+		}
+
+		setup.HostIPSet, err = utils.GetHostIP(
+			setup.ContainerIPNet.IPv4 != nil,
+			setup.ContainerIPNet.IPv6 != nil,
+		)
+		if err != nil {
+			return err
+		}
+
+		var routes []*netlink.Route
+		if setup.ContainerIPNet.IPv4 != nil {
+			routes = append(routes, &netlink.Route{
+				LinkIndex: hostVeth.Attrs().Index,
+				Scope:     netlink.SCOPE_LINK,
+				Dst:       utils.NewIPNetWithMaxMask(setup.ContainerIPNet.IPv4),
+				Src:       setup.HostIPSet.IPv4.IP,
+			})
+		}
+		if setup.ContainerIPNet.IPv6 != nil {
+			routes = append(routes, &netlink.Route{
+				LinkIndex: hostVeth.Attrs().Index,
+				Dst:       utils.NewIPNetWithMaxMask(setup.ContainerIPNet.IPv6),
+				Src:       setup.HostIPSet.IPv6.IP,
+			})
+		}
+		for _, route := range routes {
+			_, err = utils.EnsureRoute(ctx, route)
 			if err != nil {
 				return err
 			}
