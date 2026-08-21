@@ -278,18 +278,27 @@ func generateHostSlaveCfg(cfg *types.SetupConfig, link netlink.Link) *nic.Conf {
 	var sysctl map[string][]string
 
 	if cfg.ContainerIPNet.IPv4 != nil {
+		var src net.IP
+		if cfg.HostIPSet != nil && cfg.HostIPSet.IPv4 != nil {
+			src = cfg.HostIPSet.IPv4.IP
+		}
 		// add route to container
 		routes = append(routes, &netlink.Route{
 			LinkIndex: link.Attrs().Index,
 			Scope:     netlink.SCOPE_LINK,
 			Dst:       utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv4),
+			Src:       src,
 		})
 	}
 	if cfg.ContainerIPNet.IPv6 != nil {
+		var src net.IP
+		if cfg.HostIPSet != nil && cfg.HostIPSet.IPv6 != nil {
+			src = cfg.HostIPSet.IPv6.IP
+		}
 		routes = append(routes, &netlink.Route{
 			LinkIndex: link.Attrs().Index,
-			Scope:     netlink.SCOPE_LINK,
 			Dst:       utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv6),
+			Src:       src,
 		})
 
 		sysctl = utils.GenerateIPv6Sysctl(cfg.HostVETHName, true, false)
