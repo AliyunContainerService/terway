@@ -63,4 +63,4 @@ fi
 set +o errexit
 
 chroot /host systemctl disable eni.service
-chroot /host rm -f /etc/udev/rules.d/75-persistent-net-generator.rules /lib/udev/rules.d/60-net.rules /lib/udev/rules.d/61-eni.rules /lib/udev/write_net_rules
+chroot /host rm -f /etc/udev/rules.d/75-persistent-net-generator.rules /lib/udev/rules.d/60-net.rules /lib/udev/rules.d/61-eni.rules /lib/udev/rules.d/62-ecs-mq.rules /lib/udev/write_net_rules
