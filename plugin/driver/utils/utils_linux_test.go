@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	"github.com/AliyunContainerService/terway/pkg/tc"
 	terwayTypes "github.com/AliyunContainerService/terway/types"
@@ -1474,6 +1475,76 @@ var _ = Describe("Utils", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(changed).To(BeFalse())
 
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should replace a route when preferred source differs", func() {
+			var err error
+
+			err = hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+
+				link, err := netlink.LinkByName(nicName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(netlink.LinkSetUp(link)).To(Succeed())
+
+				src := net.ParseIP("192.168.30.2")
+				Expect(netlink.AddrAdd(link, &netlink.Addr{IPNet: &net.IPNet{
+					IP: src, Mask: net.CIDRMask(24, 32),
+				}})).To(Succeed())
+
+				dst := &net.IPNet{IP: net.ParseIP("10.0.3.0"), Mask: net.CIDRMask(24, 32)}
+				withoutSource := &netlink.Route{
+					Dst: dst, LinkIndex: link.Attrs().Index, Scope: netlink.SCOPE_LINK,
+				}
+				Expect(netlink.RouteAdd(withoutSource)).To(Succeed())
+
+				withSource := &netlink.Route{
+					Dst: dst, LinkIndex: link.Attrs().Index, Scope: netlink.SCOPE_LINK, Src: src,
+				}
+				changed, err := EnsureRoute(context.Background(), withSource)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(changed).To(BeTrue())
+
+				routes, err := FoundRoutes(withSource)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(routes).To(HaveLen(1))
+				Expect(routes[0].Src.Equal(src)).To(BeTrue())
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should converge an IPv6 route with preferred source", func() {
+			var err error
+
+			err = hostNS.Do(func(netNS ns.NetNS) error {
+				defer GinkgoRecover()
+
+				link, err := netlink.LinkByName(nicName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(netlink.LinkSetUp(link)).To(Succeed())
+
+				src := net.ParseIP("fd00:30::2")
+				Expect(netlink.AddrAdd(link, &netlink.Addr{
+					IPNet: &net.IPNet{IP: src, Mask: net.CIDRMask(64, 128)},
+					Flags: unix.IFA_F_NODAD,
+				})).To(Succeed())
+
+				route := &netlink.Route{
+					Dst:       &net.IPNet{IP: net.ParseIP("fd00:40::"), Mask: net.CIDRMask(64, 128)},
+					LinkIndex: link.Attrs().Index,
+					Src:       src,
+				}
+				changed, err := EnsureRoute(context.Background(), route)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(changed).To(BeTrue())
+
+				changed, err = EnsureRoute(context.Background(), route)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(changed).To(BeFalse())
 				return nil
 			})
 			Expect(err).NotTo(HaveOccurred())
