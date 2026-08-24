@@ -94,6 +94,10 @@ e2e-test-phased: e2e-test-connectivity e2e-test-mutating e2e-test-prefix ## Run 
 e2e-upgrade-test: ## Run e2e upgrade tests only.
 	go test -v -count=1 -timeout 60m -tags e2e ./tests -run 'TestUpgrade' $(TESTARGS)
 
+.PHONY: e2e-upgrade-compat-test
+e2e-upgrade-compat-test: ## Run terway upgrade compatibility tests (requires cluster + templates).
+	./tests/upgrade/run-upgrade-test.sh $(UPGRADE_ARGS)
+
 .PHONY: e2e-migrate-test
 e2e-migrate-test: ## Run e2e migration tests only.
 	go test -v -count=1 -timeout 120m -tags e2e ./tests -run 'TestMigrate' $(TESTARGS)

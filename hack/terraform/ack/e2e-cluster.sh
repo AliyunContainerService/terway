@@ -178,7 +178,11 @@ cmd_create() {
 
     if [[ "${CLUSTER_MODE}" == "byo" ]]; then
         log_info "BYO profile; invoking deploy-terway.sh --ip-stack ${IP_STACK} ${extra_args[*]:-}"
-        ./deploy-terway.sh --ip-stack "${IP_STACK}" "${extra_args[@]}"
+        if [[ ${#extra_args[@]} -gt 0 ]]; then
+            ./deploy-terway.sh --ip-stack "${IP_STACK}" "${extra_args[@]}"
+        else
+            ./deploy-terway.sh --ip-stack "${IP_STACK}"
+        fi
     else
         log_info "ACK profile; terway-eniip is installed by ACK addon. Skipping helm deployment."
         if [[ ${#extra_args[@]} -gt 0 ]]; then

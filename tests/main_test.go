@@ -119,21 +119,33 @@ func TestMain(m *testing.M) {
 		panic(fmt.Sprintf("error create klient: %v", err))
 	}
 
-	envCfg := envconf.New().WithClient(client).
-		WithRandomNamespace().WithParallelTestEnabled()
+	envCfg := envconf.New().WithClient(client)
 
-	testenv = env.NewWithConfig(envCfg)
-	testenv.Setup(
-		cleanupNamespaces,
-		envfuncs.CreateNamespace(envCfg.Namespace()),
-		patchNamespace,
-		checkENIConfig,
-		configureKubeClientQPS,
-		printClusterEnvironment,
-		labelExternalIPNodes,
-		labelIPPrefixNodes,
-		resetNodeConfigToDefault,
-	)
+	if upgradePhase != "" {
+		// Upgrade test mode: fixed namespace, sequential, minimal setup
+		envCfg = envCfg.WithNamespace(upgradeTestNamespace)
+		testenv = env.NewWithConfig(envCfg)
+		testenv.Setup(
+			ensureUpgradeNamespace,
+			checkENIConfig,
+			printClusterEnvironment,
+		)
+	} else {
+		// Normal test mode: random namespace, parallel, full setup
+		envCfg = envCfg.WithRandomNamespace().WithParallelTestEnabled()
+		testenv = env.NewWithConfig(envCfg)
+		testenv.Setup(
+			cleanupNamespaces,
+			envfuncs.CreateNamespace(envCfg.Namespace()),
+			patchNamespace,
+			checkENIConfig,
+			configureKubeClientQPS,
+			printClusterEnvironment,
+			labelExternalIPNodes,
+			labelIPPrefixNodes,
+			resetNodeConfigToDefault,
+		)
+	}
 	testenv.AfterEachFeature(func(ctx context.Context, config *envconf.Config, t *testing.T, feature features.Feature) (context.Context, error) {
 		if t.Skipped() {
 			return ctx, nil
@@ -298,6 +310,11 @@ func cleanupNamespaces(ctx context.Context, config *envconf.Config) (context.Con
 			continue
 		}
 
+		// Skip upgrade test namespace — it persists across PreUpgrade/PostUpgrade runs
+		if ns.Name == upgradeTestNamespace {
+			continue
+		}
+
 		// Use fmt.Printf for logging during setup (before test starts)
 		fmt.Printf("Cleaning up namespace: %s\n", ns.Name)
 		err = config.Client().Resources().Delete(ctx, &ns)
@@ -335,6 +352,34 @@ func patchNamespace(ctx context.Context, config *envconf.Config) (context.Contex
 	})
 	err = config.Client().Resources().Patch(ctx, ns, k8s.Patch{PatchType: types.StrategicMergePatchType, Data: mergePatch})
 	return ctx, err
+}
+
+// ensureUpgradeNamespace creates the fixed upgrade test namespace if it doesn't exist.
+// Unlike the normal namespace setup, it does NOT add the k8s.aliyun.com/terway-e2e
+// label (which would cause cleanupNamespaces to delete it between PreUpgrade/PostUpgrade runs).
+func ensureUpgradeNamespace(ctx context.Context, config *envconf.Config) (context.Context, error) {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: upgradeTestNamespace,
+		},
+	}
+	err := config.Client().Resources().Create(ctx, ns)
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return ctx, fmt.Errorf("failed to create namespace %s: %w", upgradeTestNamespace, err)
+	}
+
+	// Add node-local-dns-injection label only (NOT terway-e2e label, to prevent cleanup)
+	mergePatch, _ := json.Marshal(map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"labels": map[string]interface{}{
+				"node-local-dns-injection": "enabled",
+			},
+		},
+	})
+	_ = config.Client().Resources().Patch(ctx, ns, k8s.Patch{PatchType: types.StrategicMergePatchType, Data: mergePatch})
+
+	fmt.Printf("Upgrade test namespace ready: %s\n", upgradeTestNamespace)
+	return ctx, nil
 }
 
 type Config struct {
