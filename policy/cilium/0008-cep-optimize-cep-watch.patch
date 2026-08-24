@@ -1,7 +1,7 @@
-From b955c3885f7128348d2718aa9e217cfd3e89aec6 Mon Sep 17 00:00:00 2001
+From 7799c2faedcbc6f96b1cd2c74fab33d9f0770188 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Tue, 26 May 2026 19:47:27 +0800
-Subject: [PATCH 8/9] cep: optimize cep watch
+Subject: [PATCH 08/10] cep: optimize cep watch
 
 Reduce agent CEP list/watch load in large clusters by filtering CEPs to
 the local node:
@@ -134,6 +134,3 @@ index fcbd6bcbfd..d89b42cd08 100644
  		}
  
  		if annotationsChanged {
--- 
-2.50.1 (Apple Git-155)
-

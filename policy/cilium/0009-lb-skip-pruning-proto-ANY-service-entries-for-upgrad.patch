@@ -1,7 +1,7 @@
-From 44b4c3d75bced8f68ec775cf366559aad02bceff Mon Sep 17 00:00:00 2001
+From 8036bd570ac3568ed4cd74c356afa833a6c600cf Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Tue, 2 Jun 2026 17:35:02 +0800
-Subject: [PATCH 9/9] lb: skip pruning proto=ANY service entries for upgrade
+Subject: [PATCH 09/10] lb: skip pruning proto=ANY service entries for upgrade
  compatibility
 
 During upgrade from cilium 1.16 (proto=ANY) to 1.18 (proto=TCP/UDP),
@@ -38,6 +38,3 @@ index bfcbde80ad..c2da435fca 100644
  		ac, ok := cmtypes.AddrClusterFromIP(svcKey.GetAddress())
  		if !ok {
  			ops.log.Warn("Prune: bad address in service key", logfields.Key, svcKey)
--- 
-2.50.1 (Apple Git-155)
-

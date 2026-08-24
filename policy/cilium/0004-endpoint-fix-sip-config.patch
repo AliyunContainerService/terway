@@ -1,7 +1,7 @@
-From cf45ff6060cad012caed5bbb511dc3d7870c7e2c Mon Sep 17 00:00:00 2001
+From 0923b9c097c078dab22377534ff3a9a62c241bff Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Thu, 18 Dec 2025 11:00:11 +0800
-Subject: [PATCH 4/9] endpoint: fix sip config
+Subject: [PATCH 04/10] endpoint: fix sip config
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
@@ -23,6 +23,3 @@ index 291777e2b8..db9c78d8eb 100644
  }
  
  func (e *Endpoint) setDefaultPolicyConfig() {
--- 
-2.50.1 (Apple Git-155)
-
