@@ -1,7 +1,7 @@
-From f11fe6c3141ebe950f6cd029f0299c6cd0645bb6 Mon Sep 17 00:00:00 2001
+From 5a363badf34ce4f420ac3ca1e0839d54074be485 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Mon, 9 Mar 2026 16:11:17 +0800
-Subject: [PATCH 5/9] feat(datapath): add multi-host stack support for veth
+Subject: [PATCH 05/10] feat(datapath): add multi-host stack support for veth
  datapath- Implement host stack CIDR map and related functions - Add support
  for multiple host stack CIDRs in veth datapath mode - Update bpf_lxc to
  handle multiple host stack CIDRs - Modify daemon initialization to set up
@@ -434,6 +434,3 @@ index 63e1f8995a..ebea1a56f2 100644
  
  	c.ServiceNoBackendResponse = vp.GetString(ServiceNoBackendResponse)
  	switch c.ServiceNoBackendResponse {
--- 
-2.50.1 (Apple Git-155)
-

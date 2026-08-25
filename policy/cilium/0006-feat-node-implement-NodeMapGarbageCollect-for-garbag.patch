@@ -1,7 +1,7 @@
-From 34373c4750eeaad258019ff92ff633b5297cef57 Mon Sep 17 00:00:00 2001
+From cad77895e200517f401f3e7977cf4a862b2c2f46 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Mon, 9 Mar 2026 16:27:19 +0800
-Subject: [PATCH 6/9] feat(node): implement NodeMapGarbageCollect for garbage
+Subject: [PATCH 06/10] feat(node): implement NodeMapGarbageCollect for garbage
  collection of stale BPF node map entries
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
@@ -308,6 +308,3 @@ index 2edcb1b401..6d16b27958 100644
  func (a *Agent) nodeUpsert(node nodeTypes.Node) error {
  	if node.IsLocal() || node.WireguardPubKey == "" {
  		return nil
--- 
-2.50.1 (Apple Git-155)
-

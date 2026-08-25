@@ -1,7 +1,7 @@
-From f6fec4b71ecb9987049e7295aaee8d8889ee314f Mon Sep 17 00:00:00 2001
+From 3143dd9f191d4ff42b858f6c3d21df580988adb1 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Mon, 10 Aug 2026 14:01:10 +0800
-Subject: [PATCH] chore(deps): update golang.org/x dependencies to latest
+Subject: [PATCH 10/10] chore(deps): update golang.org/x dependencies to latest
  versions
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
@@ -11,7 +11,7 @@ Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
  2 files changed, 27 insertions(+), 27 deletions(-)
 
 diff --git a/go.mod b/go.mod
-index 121bbef30b..010a78d85b 100644
+index 1913bbb90d..e36ded5873 100644
 --- a/go.mod
 +++ b/go.mod
 @@ -104,15 +104,15 @@ require (
@@ -36,19 +36,19 @@ index 121bbef30b..010a78d85b 100644
 -	golang.org/x/tools v0.44.0
 +	golang.org/x/tools v0.47.0
  	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
- 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217
- 	google.golang.org/grpc v1.79.3
+ 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478
+ 	google.golang.org/grpc v1.82.1
 @@ -256,7 +256,7 @@ require (
  	go.yaml.in/yaml/v2 v2.4.2 // indirect
  	golang.org/x/exp v0.0.0-20240808152545-0cdaa3abc0fa // indirect
- 	golang.org/x/oauth2 v0.34.0 // indirect
+ 	golang.org/x/oauth2 v0.36.0 // indirect
 -	golang.org/x/telemetry v0.0.0-20260409153401-be6f6cb8b1fa // indirect
 +	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
  	golang.org/x/tools/go/packages/packagestest v0.1.1-deprecated // indirect
  	golang.zx2c4.com/wireguard v0.0.0-20231211153847-12269c276173 // indirect
  	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 diff --git a/go.sum b/go.sum
-index c7e209ce8f..0a3a5d619c 100644
+index 5a48a232f6..5f48e9247f 100644
 --- a/go.sum
 +++ b/go.sum
 @@ -644,8 +644,8 @@ golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACk
@@ -83,7 +83,7 @@ index c7e209ce8f..0a3a5d619c 100644
 +golang.org/x/net v0.56.0/go.mod h1:D3Ku6r+V6JROoZK144D2XfMHFcMq/0zSfLelVTCFKec=
  golang.org/x/oauth2 v0.0.0-20180821212333-d2e6202438be/go.mod h1:N/0e6XlmueqKjAGxoOufVs8QHGRruUQn6yWY3a++T0U=
  golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d/go.mod h1:gOpvHmFTYa4IltrdGE7lF6nIHvwfUNPOp7c8zoXwtLw=
- golang.org/x/oauth2 v0.34.0 h1:hqK/t4AKgbqWkdkcAeI8XLmbK+4m4G5YeQRrmiotGlw=
+ golang.org/x/oauth2 v0.36.0 h1:peZ/1z27fi9hUOFCAZaHyrpWG5lwe0RJEEEeH0ThlIs=
 @@ -694,8 +694,8 @@ golang.org/x/sync v0.0.0-20190423024810-112230192c58/go.mod h1:RxMgew5VJxzue5/jJ
  golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
  golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
@@ -131,6 +131,3 @@ index c7e209ce8f..0a3a5d619c 100644
  golang.org/x/tools/go/expect v0.1.0-deprecated h1:jY2C5HGYR5lqex3gEniOQL0r7Dq5+VGVgY1nudX5lXY=
  golang.org/x/tools/go/expect v0.1.0-deprecated/go.mod h1:eihoPOH+FgIqa3FpoTwguz/bVUSGBlGQU67vpBeOrBY=
  golang.org/x/tools/go/packages/packagestest v0.1.1-deprecated h1:1h2MnaIAIXISqTFKdENegdpAgUXz6NrPEsbIeWaBRvM=
--- 
-2.50.1 (Apple Git-155)
-
