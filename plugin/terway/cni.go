@@ -42,7 +42,7 @@ const (
 	"ipam": {
 		"type": "host-local",
 		"subnet": "%s",
-		"dataDir": "/var/lib/cni/",
+		"dataDir": "/var/run/cni/",
 		"routes": [
 			{ "dst": "0.0.0.0/0" }
 		]

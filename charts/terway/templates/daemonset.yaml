@@ -124,6 +124,8 @@ spec:
               name: var-run-eni
             - mountPath: /etc-cni-net.d
               name: cni-config
+            - mountPath: /var/lib/cni/networks
+              name: cni-networks
       containers:
         - name: terway
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"

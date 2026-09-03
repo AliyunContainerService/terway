@@ -116,7 +116,7 @@ spec:
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
-        command: ['sh', '-c', 'cp /usr/bin/terway /opt/cni/bin/; chmod +x /opt/cni/bin/terway; cp /etc/eni/10-terway.conf /etc/cni/net.d/; modprobe sch_htb || true']
+        command: ['sh', '-c', 'cp /usr/bin/terway /opt/cni/bin/; chmod +x /opt/cni/bin/terway; cp /etc/eni/10-terway.conf /etc/cni/net.d/; modprobe sch_htb || true; if [ -d /var/lib/cni/networks ] && [ "$(ls -A /var/lib/cni/networks 2>/dev/null)" ]; then mkdir -p /var/run/cni/networks; mv /var/lib/cni/networks/* /var/run/cni/networks/ 2>/dev/null || true; fi']
         volumeMounts:
         - name: configvolume
           mountPath: /etc/eni
@@ -126,6 +126,10 @@ spec:
           mountPath: /etc/cni/net.d/
         - mountPath: /lib/modules
           name: lib-modules
+        - mountPath: /var/run/
+          name: eni-run
+        - mountPath: /var/lib/cni/networks
+          name: cni-networks
       containers:
       - name: terway
         image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun

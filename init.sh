@@ -9,6 +9,15 @@ cp -f /usr/bin/cilium-cni /opt/cni/bin/
 chmod +x /opt/cni/bin/terway
 chmod +x /opt/cni/bin/cilium-cni
 
+# migrate host-local IPAM data from persistent path to tmpfs
+OLD_IPAM_DIR="/var/lib/cni/networks"
+NEW_IPAM_DIR="/var/run/cni/networks"
+if [ -d "$OLD_IPAM_DIR" ] && [ "$(ls -A "$OLD_IPAM_DIR" 2>/dev/null)" ]; then
+  mkdir -p "$NEW_IPAM_DIR"
+  mv "$OLD_IPAM_DIR"/* "$NEW_IPAM_DIR/" 2>/dev/null || true
+  echo "Migrated host-local IPAM data from $OLD_IPAM_DIR to $NEW_IPAM_DIR"
+fi
+
 # init cni config
 cp /tmp/eni/eni_conf /etc/eni/eni.json
 
