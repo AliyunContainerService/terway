@@ -158,6 +158,27 @@ func (c *ClientMgr) EFLOController() *eflocontroller20221215.Client {
 type ClientScheme string
 type NetworkType string
 
+// schemeFromEnv returns the scheme from the given environment variable when
+// it is set to a valid value, otherwise it keeps the fallback (the shared
+// ALICLOUD_CLIENT_SCHEME carried in ClientConfig).
+func schemeFromEnv(key, fallback string) string {
+	if scheme := normalizeScheme(os.Getenv(key)); scheme != "" {
+		return scheme
+	}
+	return fallback
+}
+
+func normalizeScheme(scheme string) string {
+	switch strings.ToUpper(strings.TrimSpace(scheme)) {
+	case "HTTP":
+		return "HTTP"
+	case "HTTPS":
+		return "HTTPS"
+	default:
+		return ""
+	}
+}
+
 func parseURL(str string) (string, error) {
 	if str == "" {
 		return "", nil
