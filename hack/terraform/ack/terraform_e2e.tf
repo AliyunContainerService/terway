@@ -382,7 +382,7 @@ resource "alicloud_cs_kubernetes_node_pool" "default_azj" {
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
-  image_type            = "AliyunLinux3"
+  image_type            = "AliyunLinux3ContainerOptimized"
   data_disks {
     category = "cloud_essd"
     size     = 120
@@ -400,7 +400,7 @@ resource "alicloud_cs_kubernetes_node_pool" "default_azk" {
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
-  image_type            = "AliyunLinux3"
+  image_type            = "AliyunLinux3ContainerOptimized"
   data_disks {
     category = "cloud_essd"
     size     = 120
@@ -418,7 +418,7 @@ resource "alicloud_cs_kubernetes_node_pool" "exclusive_eni_azj" {
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
-  image_type            = "AliyunLinux3"
+  image_type            = "AliyunLinux3ContainerOptimized"
   data_disks {
     category = "cloud_essd"
     size     = 120
@@ -440,7 +440,7 @@ resource "alicloud_cs_kubernetes_node_pool" "exclusive_eni_azk" {
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
-  image_type            = "AliyunLinux3"
+  image_type            = "AliyunLinux3ContainerOptimized"
   data_disks {
     category = "cloud_essd"
     size     = 120
@@ -492,7 +492,7 @@ resource "alicloud_cs_kubernetes_node_pool" "ip_prefix_azj" {
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
-  image_type            = "AliyunLinux3"
+  image_type            = "AliyunLinux3ContainerOptimized"
   data_disks {
     category = "cloud_essd"
     size     = 120
@@ -523,7 +523,7 @@ resource "alicloud_cs_kubernetes_node_pool" "ip_prefix_azk" {
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
-  image_type            = "AliyunLinux3"
+  image_type            = "AliyunLinux3ContainerOptimized"
   data_disks {
     category = "cloud_essd"
     size     = 120

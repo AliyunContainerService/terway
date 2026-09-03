@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"testing"
@@ -10,7 +11,76 @@ import (
 	"github.com/agiledragon/gomonkey/v2"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/AliyunContainerService/terway/types"
 )
+
+func TestParseCNIChain(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantLen int
+		wantErr string
+	}{
+		{name: "yaml", value: "- type: portmap\n  capabilities:\n    portMappings: true\n", wantLen: 1},
+		{name: "empty list disables chain", value: "[]", wantLen: 0},
+		{name: "terway is managed", value: "- type: terway", wantErr: "must not use type"},
+		{name: "missing type", value: "- capabilities: {}", wantErr: "has no non-empty type"},
+		{name: "top level object", value: "type: portmap", wantErr: "must be a list"},
+		{name: "nested conflist", value: "- type: portmap\n  plugins: []", wantErr: `must not set "plugins"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseCNIChain([]byte(tt.value))
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Len(t, got, tt.wantLen)
+		})
+	}
+}
+
+func TestBuildInputConfigsPriority(t *testing.T) {
+	cm := &TerwayConfig{
+		cniConfig:     []byte(`{"type":"terway"}`),
+		cniConfigList: []byte(`{"plugins":[{"type":"terway"},{"type":"legacy"}]}`),
+	}
+
+	configs, err := buildInputConfigs(cm, []byte("- type: portmap"), true)
+	require.NoError(t, err)
+	require.Len(t, configs, 2)
+	assert.JSONEq(t, `{"type":"terway"}`, string(configs[0]))
+	assert.JSONEq(t, `{"type":"portmap"}`, string(configs[1]))
+
+	configs, err = buildInputConfigs(cm, nil, false)
+	require.NoError(t, err)
+	require.Len(t, configs, 2)
+	assert.JSONEq(t, `{"type":"legacy"}`, string(configs[1]))
+}
+
+func TestGetNodeCNIChainWithClient(t *testing.T) {
+	client := fake.NewClientBuilder().WithScheme(types.Scheme).WithObjects(
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:   "node-a",
+			Labels: map[string]string{"terway-config": "eni-config-node-a"},
+		}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Namespace: "kube-system",
+			Name:      "eni-config-node-a",
+		}, Data: map[string]string{"cni_chain": "[]"}},
+	).Build()
+
+	chain, set, err := getNodeCNIChainWithClient(context.Background(), client, "node-a")
+	require.NoError(t, err)
+	assert.True(t, set)
+	assert.Equal(t, "[]", string(chain))
+}
 
 func Test_mergeConfigList(t *testing.T) {
 	_switchDataPathV2 = func() bool {

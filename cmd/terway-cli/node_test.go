@@ -95,6 +95,37 @@ func TestExclusiveModeWritesCNIConfigWhenSet(t *testing.T) {
 	assert.Contains(t, string(content), `"type": "terway"`)
 }
 
+func TestExclusiveModePreservesUserCNIChain(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test_node_capabilities")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	cniPath := tempFile.Name() + "_cni_config"
+	defer os.Remove(cniPath)
+	require.NoError(t, os.WriteFile(cniPath, []byte(`{
+  "cniVersion":"0.4.0",
+  "name":"terway-chainer",
+  "plugins":[
+    {"type":"terway","eniip_virtual_type":"veth"},
+    {"type":"portmap","capabilities":{"portMappings":true}}
+  ]
+}`), 0644))
+
+	store := nodecap.NewFileNodeCapabilities(tempFile.Name())
+	err = setExclusiveMode(store, map[string]string{"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly"}, cniPath)
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(cniPath)
+	require.NoError(t, err)
+	config, err := gabs.ParseJSON(content)
+	require.NoError(t, err)
+	plugins := config.Path("plugins").Children()
+	require.Len(t, plugins, 2)
+	assert.Equal(t, "terway", plugins[0].Path("type").Data())
+	assert.Equal(t, "portmap", plugins[1].Path("type").Data())
+	assert.Equal(t, "169.254.20.10/32", plugins[0].Path("host_stack_cidrs").Index(0).Data())
+}
+
 func TestExclusiveModeWritesCNIConfigWithAutoMTU(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "test_node_capabilities")
 	assert.NoError(t, err)

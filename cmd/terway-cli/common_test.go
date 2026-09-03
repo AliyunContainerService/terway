@@ -72,6 +72,21 @@ func TestReadyENIConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "with cni chain",
+			files: map[string]string{
+				"10-terway.conf": "cni_config",
+				"eni_conf":       "eni_config",
+				"cni_chain":      "- type: portmap",
+			},
+			expectedConfig: &TerwayConfig{
+				enableNetworkPolicy: true,
+				eniConfig:           []byte("eni_config"),
+				cniConfig:           []byte("cni_config"),
+				cniChain:            []byte("- type: portmap"),
+				cniChainSet:         true,
+			},
+		},
+		{
 			name: "missing 10-terway.conf",
 			files: map[string]string{
 				"eni_conf": "eni_config",
