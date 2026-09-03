@@ -98,7 +98,7 @@ func podWebhook(ctx context.Context, req *webhook.AdmissionRequest, client clien
 	if err != nil {
 		msg := fmt.Sprintf("error get previous podENI conf, %s", err)
 		l.Error(err, msg)
-		return webhook.Errored(1, fmt.Errorf(msg))
+		return webhook.Errored(1, fmt.Errorf("%s", msg))
 	}
 
 	// 1. check pod annotation config first

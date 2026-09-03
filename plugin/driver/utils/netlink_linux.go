@@ -33,7 +33,7 @@ func NetlinkFamily(ip net.IP) int {
 
 func LinkSetName(link netlink.Link, name string) error {
 	cmd := fmt.Sprintf("ip link set %s name %s", link.Attrs().Name, name)
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.LinkSetName(link, name)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -43,7 +43,7 @@ func LinkSetName(link netlink.Link, name string) error {
 
 func LinkAdd(link netlink.Link) error {
 	cmd := fmt.Sprintf("ip link add %s type %s", link.Attrs().Name, link.Type())
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.LinkAdd(link)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
@@ -53,7 +53,7 @@ func LinkAdd(link netlink.Link) error {
 
 func LinkSetUp(link netlink.Link) error {
 	cmd := fmt.Sprintf("ip link set %s up", link.Attrs().Name)
-	Log.Infof(cmd)
+	Log.Info(cmd)
 	err := netlink.LinkSetUp(link)
 	if err != nil {
 		return fmt.Errorf("error %s, %w", cmd, err)
