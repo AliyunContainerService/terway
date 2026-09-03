@@ -84,6 +84,7 @@ func NewECSClient(config ClientConfig, credential auth.Credential) (ECSClient, e
 	if domain != "" {
 		config.Domain = domain
 	}
+	config.Scheme = schemeFromEnv("ECS_SCHEME", config.Scheme)
 
 	sdkConfig := provideSDKConfig(config)
 
@@ -110,6 +111,7 @@ func NewECSV2Client(config ClientConfig, credential credential.Credential) (ECSV
 	if domain != "" {
 		config.Domain = domain
 	}
+	config.Scheme = schemeFromEnv("ECS_SCHEME", config.Scheme)
 
 	regionID := os.Getenv("ECS_ENDPOINT")
 	if regionID != "" {
@@ -147,6 +149,7 @@ func NewVPCClient(config ClientConfig, credential auth.Credential) (VPCClient, e
 	if domain != "" {
 		config.Domain = domain
 	}
+	config.Scheme = schemeFromEnv("VPC_SCHEME", config.Scheme)
 
 	sdkConfig := provideSDKConfig(config)
 
@@ -173,6 +176,7 @@ func NewEFLOClient(config ClientConfig, credential auth.Credential) (EFLOClient,
 	if domain != "" {
 		config.Domain = domain
 	}
+	config.Scheme = schemeFromEnv("EFLO_SCHEME", config.Scheme)
 
 	regionID := os.Getenv("EFLO_REGION_ID")
 	if regionID != "" {
@@ -199,10 +203,10 @@ func NewEFLOV2Client(config ClientConfig, credential credential.Credential) (EFL
 	if err != nil {
 		return nil, err
 	}
-
 	if domain != "" {
 		config.Domain = domain
 	}
+	config.Scheme = schemeFromEnv("EFLO_SCHEME", config.Scheme)
 
 	regionID := os.Getenv("EFLO_REGION_ID")
 	if regionID != "" {
@@ -237,10 +241,10 @@ func NewEFLOControllerClient(config ClientConfig, credential credential.Credenti
 	if err != nil {
 		return nil, err
 	}
-
 	if domain != "" {
 		config.Domain = domain
 	}
+	config.Scheme = schemeFromEnv("EFLO_CONTROLLER_SCHEME", config.Scheme)
 
 	regionID := os.Getenv("EFLO_CONTROLLER_REGION_ID")
 	if regionID != "" {

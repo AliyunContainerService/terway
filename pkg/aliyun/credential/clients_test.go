@@ -71,6 +71,90 @@ func TestNewVPCClient(t *testing.T) {
 	}
 }
 
+func TestSchemeFromEnv(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		fallback string
+		expected string
+	}{
+		{
+			name:     "unset keeps fallback",
+			fallback: "HTTPS",
+			expected: "HTTPS",
+		},
+		{
+			name:     "valid override wins",
+			value:    "HTTP",
+			fallback: "HTTPS",
+			expected: "HTTP",
+		},
+		{
+			name:     "value is normalized",
+			value:    "https",
+			fallback: "HTTP",
+			expected: "HTTPS",
+		},
+		{
+			name:     "invalid value keeps fallback",
+			value:    "grpc",
+			fallback: "HTTPS",
+			expected: "HTTPS",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("TEST_SCHEME", tt.value)
+			require.Equal(t, tt.expected, schemeFromEnv("TEST_SCHEME", tt.fallback))
+		})
+	}
+}
+
+func TestParseURL(t *testing.T) {
+	domain, err := parseURL("endpoint.example.com")
+	require.NoError(t, err)
+	require.Equal(t, "endpoint.example.com", domain)
+
+	domain, err = parseURL("http://endpoint.example.com")
+	require.NoError(t, err)
+	require.Equal(t, "endpoint.example.com", domain)
+
+	domain, err = parseURL("")
+	require.NoError(t, err)
+	require.Equal(t, "", domain)
+}
+
+// TestEndpointClientsUseIndependentSchemes covers the mixed-protocol scenario
+// from production: EFLO Controller endpoints only support HTTP while VPC
+// endpoints only support HTTPS, so the shared scheme carried in ClientConfig
+// cannot serve both. Each client must honor its own <SERVICE>_SCHEME override
+// instead of the shared scheme.
+func TestEndpointClientsUseIndependentSchemes(t *testing.T) {
+	t.Setenv("VPC_ENDPOINT", "vpc.example.com")
+	t.Setenv("VPC_SCHEME", "HTTPS")
+	t.Setenv("EFLO_CONTROLLER_ENDPOINT", "eflo-controller.example.com")
+	t.Setenv("EFLO_CONTROLLER_SCHEME", "HTTP")
+	t.Setenv("EFLO_CONTROLLER_REGION_ID", "")
+
+	// v1 SDK client: override must win over the opposite shared scheme.
+	vpcClient, err := NewVPCClient(
+		ClientConfig{RegionID: "cn-test", Scheme: "HTTP"},
+		ProviderV1(&fakeProvider{}),
+	)
+	require.NoError(t, err)
+	require.Equal(t, "HTTPS", vpcClient.GetClient().GetConfig().Scheme)
+
+	// v2 SDK client: override must win over the opposite shared scheme.
+	efloControllerClient, err := NewEFLOControllerClient(
+		ClientConfig{RegionID: "cn-test", Scheme: "HTTPS"},
+		ProviderV2(&fakeProvider{}),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, efloControllerClient.GetClient().Protocol)
+	require.Equal(t, "HTTP", *efloControllerClient.GetClient().Protocol)
+}
+
 func TestNewEFLOClient(t *testing.T) {
 	os.Setenv("EFLO_ENDPOINT", "test")
 	os.Setenv("EFLO_REGION_ID", "test")
