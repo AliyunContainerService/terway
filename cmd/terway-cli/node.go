@@ -164,7 +164,22 @@ func setExclusiveMode(store nodecap.NodeCapabilitiesStore, labels map[string]str
 
 	// write cni config
 	if now == types.ExclusiveENIOnly {
-		cniConfig := eniOnlyCNI
+		cniConfig, err := os.ReadFile(cniPath)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return err
+			}
+			cniConfig = []byte(eniOnlyCNI)
+		}
+		generated, err := gabs.ParseJSON(cniConfig)
+		if err != nil {
+			return err
+		}
+		exclusive, err := gabs.ParseJSON([]byte(eniOnlyCNI))
+		if err != nil {
+			return err
+		}
+		exclusivePlugin := exclusive.Path("plugins").Index(0)
 
 		// nodeconfig path never runs processCNIConfig, so _detectMTU may be
 		// unset here; fall back to the real detector so auto_mtu also works
@@ -175,22 +190,20 @@ func setExclusiveMode(store nodecap.NodeCapabilitiesStore, labels map[string]str
 		}
 
 		if autoMTU := readAutoMTUFromConfig(eniConfBasePath); autoMTU {
-			g, err := gabs.ParseJSON([]byte(eniOnlyCNI))
-			if err != nil {
+			mtu := detect()
+			if err := applyMTU(exclusivePlugin, mtu); err != nil {
 				return err
 			}
-			mtu := detect()
-			for _, plugin := range g.Path("plugins").Children() {
-				if pluginType, ok := plugin.Path("type").Data().(string); ok && pluginType == pluginTypeTerway {
-					if err := applyMTU(plugin, mtu); err != nil {
-						return err
-					}
-				}
-			}
-			cniConfig = g.StringIndent("", "  ")
+		}
+		plugins := generated.Path("plugins").Children()
+		if len(plugins) == 0 {
+			return fmt.Errorf("cni config has no plugins")
+		}
+		if _, err = generated.Set(exclusivePlugin.Data(), "plugins", "0"); err != nil {
+			return err
 		}
 
-		err = os.WriteFile(cniPath, []byte(cniConfig), 0644)
+		err = os.WriteFile(cniPath, []byte(generated.StringIndent("", "  ")), 0644)
 		if err != nil {
 			return err
 		}

@@ -23,6 +23,8 @@ type TerwayConfig struct {
 	eniConfig     []byte
 	cniConfig     []byte
 	cniConfigList []byte
+	cniChain      []byte
+	cniChainSet   bool
 }
 
 // getAllConfig ready terway configmap mounted on path
@@ -46,6 +48,16 @@ func getAllConfig(base string) (*TerwayConfig, error) {
 		}
 	} else {
 		cfg.cniConfigList = r
+	}
+
+	r, err = os.ReadFile(filepath.Join(base, "cni_chain"))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+	} else {
+		cfg.cniChain = r
+		cfg.cniChainSet = true
 	}
 
 	r, err = os.ReadFile(filepath.Join(base, "disable_network_policy"))

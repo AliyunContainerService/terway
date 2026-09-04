@@ -2,15 +2,26 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/AliyunContainerService/terway/pkg/utils/nodecap"
 	"github.com/Jeffail/gabs/v2"
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
+	k8sClient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
+
+	"github.com/AliyunContainerService/terway/pkg/version"
+	"github.com/AliyunContainerService/terway/types"
 )
 
 type checkKernelVersionFunc func(int, int, int) bool
@@ -101,22 +112,13 @@ func processInput() error {
 		return err
 	}
 
-	input := cm.cniConfig
-	if cm.cniConfigList != nil {
-		input = cm.cniConfigList
-	}
-
-	var configs [][]byte
-	c, err := gabs.ParseJSON(input)
+	chain, chainSet, err := resolveCNIChain(cm)
 	if err != nil {
 		return err
 	}
-	if c.Exists("plugins") {
-		for _, cc := range c.Path("plugins").Children() {
-			configs = append(configs, cc.Bytes())
-		}
-	} else {
-		configs = append(configs, input)
+	configs, err := buildInputConfigs(cm, chain, chainSet)
+	if err != nil {
+		return err
 	}
 
 	if !_checkKernelVersion(5, 10, 0) {
@@ -141,6 +143,124 @@ func processInput() error {
 	}
 
 	return os.WriteFile(outPutPath, []byte(out), 0644)
+}
+
+func resolveCNIChain(cm *TerwayConfig) ([]byte, bool, error) {
+	chain, set := cm.cniChain, cm.cniChainSet
+	nodeName := os.Getenv("K8S_NODE_NAME")
+	if nodeName == "" {
+		return chain, set, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	dynamicChain, dynamicSet, err := getNodeCNIChain(ctx, nodeName)
+	if err != nil {
+		return nil, false, err
+	}
+	if dynamicSet {
+		return dynamicChain, true, nil
+	}
+	return chain, set, nil
+}
+
+func getNodeCNIChain(ctx context.Context, nodeName string) ([]byte, bool, error) {
+	restConfig, err := ctrl.GetConfig()
+	if err != nil {
+		return nil, false, fmt.Errorf("get kubernetes config: %w", err)
+	}
+	restConfig.UserAgent = version.UA
+	c, err := k8sClient.New(restConfig, k8sClient.Options{Scheme: types.Scheme, Mapper: types.NewRESTMapper()})
+	if err != nil {
+		return nil, false, fmt.Errorf("create kubernetes client: %w", err)
+	}
+	return getNodeCNIChainWithClient(ctx, c, nodeName)
+}
+
+func getNodeCNIChainWithClient(ctx context.Context, c k8sClient.Client, nodeName string) ([]byte, bool, error) {
+	node := &corev1.Node{}
+	if err := c.Get(ctx, k8sClient.ObjectKey{Name: nodeName}, node, &k8sClient.GetOptions{Raw: &metav1.GetOptions{ResourceVersion: "0"}}); err != nil {
+		return nil, false, fmt.Errorf("get node %s: %w", nodeName, err)
+	}
+	configName := node.Labels["terway-config"]
+	if configName == "" {
+		return nil, false, nil
+	}
+
+	configMap := &corev1.ConfigMap{}
+	if err := c.Get(ctx, k8sClient.ObjectKey{Namespace: "kube-system", Name: configName}, configMap); err != nil {
+		return nil, false, fmt.Errorf("get node cni config kube-system/%s: %w", configName, err)
+	}
+	value, ok := configMap.Data["cni_chain"]
+	return []byte(value), ok, nil
+}
+
+func buildInputConfigs(cm *TerwayConfig, chain []byte, chainSet bool) ([][]byte, error) {
+	if chainSet {
+		plugins, err := parseCNIChain(chain)
+		if err != nil {
+			return nil, fmt.Errorf("parse cni_chain: %w", err)
+		}
+		return append([][]byte{cm.cniConfig}, plugins...), nil
+	}
+
+	input := cm.cniConfig
+	if cm.cniConfigList != nil {
+		input = cm.cniConfigList
+	}
+	c, err := gabs.ParseJSON(input)
+	if err != nil {
+		return nil, err
+	}
+	if !c.Exists("plugins") {
+		return [][]byte{input}, nil
+	}
+	var configs [][]byte
+	for _, plugin := range c.Path("plugins").Children() {
+		configs = append(configs, plugin.Bytes())
+	}
+	return configs, nil
+}
+
+func parseCNIChain(value []byte) ([][]byte, error) {
+	if len(value) > 64*1024 {
+		return nil, fmt.Errorf("is larger than 64 KiB")
+	}
+	jsonValue, err := yaml.YAMLToJSON(value)
+	if err != nil {
+		return nil, err
+	}
+	if len(jsonValue) == 0 || jsonValue[0] != '[' {
+		return nil, fmt.Errorf("must be a list of CNI plugin objects")
+	}
+	var plugins []json.RawMessage
+	if err = json.Unmarshal(jsonValue, &plugins); err != nil {
+		return nil, fmt.Errorf("must be a list of CNI plugin objects: %w", err)
+	}
+	if len(plugins) > 16 {
+		return nil, fmt.Errorf("contains %d plugins, maximum is 16", len(plugins))
+	}
+	result := make([][]byte, 0, len(plugins))
+	for i, raw := range plugins {
+		var plugin map[string]any
+		if err = json.Unmarshal(raw, &plugin); err != nil {
+			return nil, fmt.Errorf("plugin %d must be an object: %w", i, err)
+		}
+		pluginType, ok := plugin["type"].(string)
+		if !ok || pluginType == "" {
+			return nil, fmt.Errorf("plugin %d has no non-empty type", i)
+		}
+		if pluginType == pluginTypeTerway {
+			return nil, fmt.Errorf("plugin %d must not use type %q", i, pluginTypeTerway)
+		}
+		for _, field := range []string{"name", "cniVersion", "plugins"} {
+			if _, exists := plugin[field]; exists {
+				return nil, fmt.Errorf("plugin %d must not set %q", i, field)
+			}
+		}
+		result = append(result, raw)
+	}
+	return result, nil
 }
 
 func checkBpfFeature(key string) (bool, error) {
