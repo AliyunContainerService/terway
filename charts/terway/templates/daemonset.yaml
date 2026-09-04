@@ -299,6 +299,7 @@ spec:
         - name: cni-networks
           hostPath:
             path: /var/lib/cni/networks
+            type: DirectoryOrCreate
         - name: cni-terway
           hostPath:
             path: /var/lib/cni/terway
