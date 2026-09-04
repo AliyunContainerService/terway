@@ -15,6 +15,15 @@ NEW_IPAM_DIR="/var/run/cni/networks"
 if [ -d "$OLD_IPAM_DIR" ] && [ "$(ls -A "$OLD_IPAM_DIR" 2>/dev/null)" ]; then
   mkdir -p "$NEW_IPAM_DIR"
   mv "$OLD_IPAM_DIR"/* "$NEW_IPAM_DIR/" 2>/dev/null || true
+  if [ -n "$(ls -A "$OLD_IPAM_DIR" 2>/dev/null)" ]; then
+    # first attempt left files behind, retry once
+    mv "$OLD_IPAM_DIR"/* "$NEW_IPAM_DIR/" 2>/dev/null || true
+  fi
+  if [ -n "$(ls -A "$OLD_IPAM_DIR" 2>/dev/null)" ]; then
+    echo "ERROR: host-local IPAM migration incomplete, leftover files in $OLD_IPAM_DIR:" >&2
+    ls -la "$OLD_IPAM_DIR" >&2
+    exit 1
+  fi
   echo "Migrated host-local IPAM data from $OLD_IPAM_DIR to $NEW_IPAM_DIR"
 fi
 
