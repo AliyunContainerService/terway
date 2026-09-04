@@ -12,36 +12,108 @@ metadata:
   name: terway-pod-reader
   namespace: kube-system
 rules:
-- apiGroups: [""]
-  resources: ["pods", "nodes", "namespaces", "configmaps", "serviceaccounts"]
-  verbs: ["get", "watch", "list", "update"]
-- apiGroups: [""]
-  resources:
-    - events
-  verbs:
-    - create
-- apiGroups: ["networking.k8s.io"]
-  resources:
-  - networkpolicies
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups: ["extensions"]
-  resources:
-  - networkpolicies
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups: [""]
-  resources:
-  - pods/status
-  verbs:
-  - update
-- apiGroups: ["crd.projectcalico.org"]
-  resources: ["*"]
-  verbs: ["*"]
+  - apiGroups:
+      - ''
+    resources:
+      - pods
+      - nodes
+      - namespaces
+      - configmaps
+      - serviceaccounts
+      - endpoints
+      - services
+    verbs:
+      - get
+      - watch
+      - list
+  - apiGroups:
+      - ''
+    resources:
+      - pods
+      - nodes
+      - nodes/status
+    verbs:
+      - patch
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - watch
+      - update
+      - create
+  - apiGroups:
+      - ''
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - networkpolicies
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - extensions
+    resources:
+      - networkpolicies
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ''
+    resources:
+      - pods/status
+    verbs:
+      - update
+  - apiGroups:
+      - crd.projectcalico.org
+    resources:
+      - '*'
+    verbs:
+      - '*'
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+      - update
+  - apiGroups:
+      - cilium.io
+    resources:
+      - '*'
+    verbs:
+      - '*'
+  - apiGroups:
+      - network.alibabacloud.com
+    resources:
+      - '*'
+    verbs:
+      - '*'
+  - apiGroups:
+      - alibabacloud.com
+    resources:
+      - '*'
+    verbs:
+      - '*'
 
 ---
 
@@ -95,137 +167,187 @@ spec:
   selector:
     matchLabels:
       app: terway
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 100%
+    type: RollingUpdate
   template:
     metadata:
       labels:
         app: terway
-      annotations:
-        priorityClassName: ''
     spec:
       hostPID: true
+      priorityClassName: system-node-critical
       nodeSelector:
         kubernetes.io/arch: amd64
+        kubernetes.io/os: linux
       tolerations:
-      - operator: "Exists"
+        - operator: "Exists"
       terminationGracePeriodSeconds: 0
       serviceAccountName: terway
       hostNetwork: true
       initContainers:
-      - name: terway-init
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun
-        imagePullPolicy: IfNotPresent
-        securityContext:
-          privileged: true
-        command: ['sh', '-c', 'cp /usr/bin/terway /opt/cni/bin/; chmod +x /opt/cni/bin/terway; cp /etc/eni/10-terway.conf /etc/cni/net.d/; modprobe sch_htb || true; if [ -d /var/lib/cni/networks ] && [ "$(ls -A /var/lib/cni/networks 2>/dev/null)" ]; then mkdir -p /var/run/cni/networks; mv /var/lib/cni/networks/* /var/run/cni/networks/ 2>/dev/null || true; fi']
-        volumeMounts:
-        - name: configvolume
-          mountPath: /etc/eni
-        - name: cni-bin
-          mountPath: /opt/cni/bin/
-        - name: cni
-          mountPath: /etc/cni/net.d/
-        - mountPath: /lib/modules
-          name: lib-modules
-        - mountPath: /var/run/
-          name: eni-run
-        - mountPath: /var/lib/cni/networks
-          name: cni-networks
+        - name: terway-init
+          image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          command:
+            - /bin/init.sh
+          volumeMounts:
+            - name: config
+              mountPath: /etc/eni
+            - name: configvolume
+              mountPath: /tmp/eni
+            - name: cni-config
+              mountPath: /etc/cni/net.d
+            - name: cni-bin
+              mountPath: /opt/cni/bin/
+            - mountPath: /lib/modules
+              name: lib-modules
+            - mountPath: /host
+              name: host-root
+            - mountPath: /var/run/
+              name: eni-run
+            - mountPath: /var-run-eni
+              name: var-run-eni
+            - mountPath: /var/lib/cni/networks
+              name: cni-networks
       containers:
-      - name: terway
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun
-        imagePullPolicy: IfNotPresent
-        securityContext:
-          privileged: true
-        env:
-          - name: NODE_NAME
-            valueFrom:
-              fieldRef:
-                fieldPath: spec.nodeName
-          - name: POD_NAMESPACE
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.namespace
-        volumeMounts:
-        - name: configvolume
-          mountPath: /etc/eni
-        - mountPath: /var/run/
-          name: eni-run
-        - mountPath: /opt/cni/bin/
-          name: cni-bin
-        - mountPath: /lib/modules
-          name: lib-modules
-        - mountPath: /var/lib/cni/networks
-          name: cni-networks
-        - mountPath: /var/lib/cni/terway
-          name: cni-terway
-        - mountPath: /var/lib/kubelet/device-plugins
-          name: device-plugin-path
-      - name: policy
-        image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun
-        command: ["/bin/policyinit.sh"]
-        imagePullPolicy: IfNotPresent
-        env:
-          - name: NODENAME
-            valueFrom:
-              fieldRef:
-                fieldPath: spec.nodeName
-          - name: Network
-            value: 172.16.0.0/16
-          - name: DISABLE_POLICY
-            valueFrom:
-              configMapKeyRef:
-                name: eni-config
-                key: disable_network_policy
-                optional: true
-        securityContext:
-          privileged: true
-        resources:
-          requests:
-            cpu: 250m
-        livenessProbe:
-          tcpSocket:
-            port: 9099
-            host: 127.0.0.1
-          periodSeconds: 10
-          initialDelaySeconds: 10
-          failureThreshold: 6
-        volumeMounts:
-        - mountPath: /lib/modules
-          name: lib-modules
-
+        - name: terway
+          image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/bin/terwayd", "-log-level", "info", "-daemon-mode", "VPC"]
+          securityContext:
+            privileged: true
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          volumeMounts:
+            - name: cni-config
+              mountPath: /etc/cni/net.d
+              readOnly: true
+            - name: cni
+              mountPath: /host-etc-net.d
+            - name: config
+              mountPath: /etc/eni
+              readOnly: true
+            - mountPath: /var/run/
+              name: eni-run
+            - mountPath: /lib/modules
+              name: lib-modules
+            - mountPath: /var/lib/cni/networks
+              name: cni-networks
+            - mountPath: /var/lib/cni/terway
+              name: cni-terway
+            - mountPath: /var/lib/kubelet/device-plugins
+              name: device-plugin-path
+        - name: policy
+          image: registry.aliyuncs.com/acs/terway:v1.0.10.333-gfd2b7b8-aliyun
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/policyinit.sh"]
+          env:
+            - name: NODENAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: Network
+              value: 172.16.0.0/16
+            - name: DISABLE_POLICY
+              valueFrom:
+                configMapKeyRef:
+                  name: eni-config
+                  key: disable_network_policy
+                  optional: true
+          securityContext:
+            privileged: true
+          resources:
+            requests:
+              cpu: 250m
+          livenessProbe:
+            tcpSocket:
+              port: 9099
+              host: 127.0.0.1
+            periodSeconds: 10
+            initialDelaySeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            tcpSocket:
+              port: 9099
+              host: 127.0.0.1
+            periodSeconds: 10
+          volumeMounts:
+            - mountPath: /var-run-eni
+              name: var-run-eni
+            - mountPath: /lib/modules
+              name: lib-modules
+            - mountPath: /etc/cni/net.d
+              name: cni
+              readOnly: true
+            - mountPath: /sys/fs
+              name: sys-fs
+            - mountPath: /var/run/cilium
+              name: cilium-run
+            - mountPath: /run/xtables.lock
+              name: xtables-lock
       volumes:
-      - name: configvolume
-        configMap:
-          name: eni-config
-          items:
-            - key: eni_conf
-              path: eni.json
-            - key: 10-terway.conf
-              path: 10-terway.conf
-      - name: cni-bin
-        hostPath:
-          path: /opt/cni/bin
-          type: "Directory"
-      - name: cni
-        hostPath:
-          path: /etc/cni/net.d
-      - name: eni-run
-        hostPath:
-          path: /var/run/
-          type: "Directory"
-      - name: lib-modules
-        hostPath:
-          path: /lib/modules
-      - name: cni-networks
-        hostPath:
-          path: /var/lib/cni/networks
-      - name: cni-terway
-        hostPath:
-          path: /var/lib/cni/terway
-      - name: device-plugin-path
-        hostPath:
-          path: /var/lib/kubelet/device-plugins
-          type: "Directory"
+        - name: cni-config
+          emptyDir: {}
+        - name: config
+          emptyDir: {}
+        - name: var-run-eni
+          emptyDir: {}
+        - name: configvolume
+          configMap:
+            name: eni-config
+            items: null
+        - name: cni-bin
+          hostPath:
+            path: /opt/cni/bin
+            type: "Directory"
+        - name: cni
+          hostPath:
+            path: /etc/cni/net.d
+        - name: eni-run
+          hostPath:
+            path: /var/run/
+            type: "Directory"
+        - name: lib-modules
+          hostPath:
+            path: /lib/modules
+        - name: cni-networks
+          hostPath:
+            path: /var/lib/cni/networks
+            type: DirectoryOrCreate
+        - name: cni-terway
+          hostPath:
+            path: /var/lib/cni/terway
+        - name: device-plugin-path
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+            type: "Directory"
+        - name: host-root
+          hostPath:
+            path: /
+            type: "Directory"
+        - hostPath:
+            path: /var/run/cilium
+            type: DirectoryOrCreate
+          name: cilium-run
+        - hostPath:
+            path: /sys/fs/
+            type: DirectoryOrCreate
+          name: sys-fs
+        - hostPath:
+            path: /run/xtables.lock
+            type: FileOrCreate
+          name: xtables-lock
 
 ---
 
