@@ -2956,6 +2956,7 @@ var _ = Describe("Test ReconcileNode", func() {
 				WithInstanceID("i-test").
 				WithExistingENIs(eniAttaching).
 				Build()
+			node.Spec.ENISpec.EnableIPv6 = true
 			node.Status.WarmUpCompleted = false
 			node.Status.WarmUpTarget = 10
 			node.Status.WarmUpAllocatedCount = 3
@@ -3324,6 +3325,21 @@ var _ = Describe("Test ReconcileNode", func() {
 				}
 			})
 			Expect(count).To(Equal(1))
+		})
+
+		It("IPv4 and dual preserve the IPv4-based sufficient-IP condition", func() {
+			for _, dual := range []bool{false, true} {
+				spec := &networkv1beta1.ENISpec{EnableIPv4: true, EnableIPv6: dual}
+				nic := &networkv1beta1.Nic{IPv4: map[string]*networkv1beta1.IP{
+					"10.0.0.1": {IP: "10.0.0.1", Status: networkv1beta1.IPStatusValid},
+				}}
+				updateNodeCondition(ctx, k8sClient, "foo", []*eniOptions{{eniTypeKey: secondaryKey, eniRef: nic, isFull: true}}, spec)
+				node := &corev1.Node{}
+				Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "foo"}, node)).To(Succeed())
+				condition, found := lo.Find(node.Status.Conditions, func(c corev1.NodeCondition) bool { return c.Type == types.SufficientIPCondition })
+				Expect(found).To(BeTrue())
+				Expect(condition.Status).To(Equal(corev1.ConditionTrue))
+			}
 		})
 
 		It("IPv6-only ignores primary IPv4 when reporting exhausted capacity", func() {
@@ -6429,7 +6445,7 @@ func TestIPv6OnlyAllocationWithPrimaryIPv4(t *testing.T) {
 		NodeCap: networkv1beta1.NodeCap{IPv4PerAdapter: 1, IPv6PerAdapter: 10},
 	}, Status: networkv1beta1.NodeStatus{NetworkInterfaces: map[string]*networkv1beta1.Nic{nic.ID: nic}}}
 	assert.Zero(t, countTotalIdleIPs(node), "primary IPv4 does not satisfy IPv6 demand")
-	assert.Zero(t, enabledIPCount(node.Spec.ENISpec, 1, 0), "primary IPv4 does not count toward warm-up")
+	assert.Zero(t, warmUpIPCount(node.Spec.ENISpec, 1, 0), "primary IPv4 does not count toward warm-up")
 	option := &eniOptions{eniTypeKey: secondaryKey, eniRef: nic}
 	// No VPC client is needed: existing ENIs can add IPv6 even with no IPv4 left.
 	r := &ReconcileNode{}

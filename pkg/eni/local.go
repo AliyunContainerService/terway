@@ -722,8 +722,13 @@ func (l *Local) factoryAllocWorker(ctx context.Context) {
 
 			l.eni = eni
 
-			l.popNIPv4Jobs(len(ipv4Set))
-			l.popNIPv6Jobs(len(ipv6Set))
+			l.popNIPv4Jobs(v4Count)
+			if !l.enableIPv4 && l.enableIPv6 {
+				// Keep partial IPv6-only requests pending for the next assignment.
+				l.popNIPv6Jobs(len(ipv6Set))
+			} else {
+				l.popNIPv6Jobs(v6Count)
+			}
 
 			primary, err := netip.ParseAddr(eni.PrimaryIP.IPv4.String())
 			if err == nil {

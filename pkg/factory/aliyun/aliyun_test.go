@@ -48,14 +48,18 @@ func (m *mockENIInfoGetter) GetENIPrivateIPv6AddressesByMACv2(mac string) ([]net
 }
 
 func TestAliyun_CreateNetworkInterface(t *testing.T) {
-	testCreateNetworkInterface(t, false)
+	testCreateNetworkInterface(t, false, false)
 }
 
 func TestAliyun_CreateNetworkInterfaceIPv6Only(t *testing.T) {
-	testCreateNetworkInterface(t, true)
+	testCreateNetworkInterface(t, true, false)
 }
 
-func testCreateNetworkInterface(t *testing.T, ipv6Only bool) {
+func TestAliyun_CreateNetworkInterfaceDualMissingIPv6(t *testing.T) {
+	testCreateNetworkInterface(t, false, true)
+}
+
+func testCreateNetworkInterface(t *testing.T, ipv6Only, missingIPv6 bool) {
 	t.Helper()
 	openAPI := mockclient.NewOpenAPI(t)
 	ecsClient := mockclient.NewECS(t)
@@ -151,6 +155,9 @@ func testCreateNetworkInterface(t *testing.T, ipv6Only bool) {
 		v4Count = 0
 		createResp.PrivateIPSets = []client.IPSet{{IPAddress: primaryIP, Primary: true}}
 	}
+	if missingIPv6 {
+		createResp.IPv6Set = nil
+	}
 	eni, v4, v6, err := a.CreateNetworkInterface(v4Count, 2, "Secondary")
 	assert.NoError(t, err)
 	assert.NotNil(t, eni)
@@ -162,7 +169,11 @@ func testCreateNetworkInterface(t *testing.T, ipv6Only bool) {
 	} else {
 		assert.Len(t, v4, 2)
 	}
-	assert.Len(t, v6, 2)
+	if missingIPv6 {
+		assert.Empty(t, v6, "dual-stack creation preserves the existing partial-response behavior")
+	} else {
+		assert.Len(t, v6, 2)
+	}
 }
 
 func TestAliyun_AssignNIPv4(t *testing.T) {

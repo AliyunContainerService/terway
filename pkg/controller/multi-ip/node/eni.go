@@ -379,16 +379,11 @@ func IdlesWithAvailable(eniIP map[string]*networkv1beta1.IP) (count int) {
 	return
 }
 
-// enabledIPCount counts Pod resources, excluding cloud-only address families.
-func enabledIPCount(spec *networkv1beta1.ENISpec, ipv4, ipv6 int) int {
-	if spec.EnableIPv4 && spec.EnableIPv6 {
-		return min(ipv4, ipv6)
-	}
-	if spec.EnableIPv4 {
-		return ipv4
-	}
-	if spec.EnableIPv6 {
+// warmUpIPCount preserves IPv4/dual warm-up accounting and excludes the
+// mandatory Primary IPv4 only for IPv6-only nodes.
+func warmUpIPCount(spec *networkv1beta1.ENISpec, ipv4, ipv6 int) int {
+	if !spec.EnableIPv4 && spec.EnableIPv6 {
 		return ipv6
 	}
-	return 0
+	return max(ipv4, ipv6)
 }

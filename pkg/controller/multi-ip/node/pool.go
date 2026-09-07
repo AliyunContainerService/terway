@@ -1056,7 +1056,7 @@ func (n *ReconcileNode) syncTaskQueueStatus(ctx context.Context, node *networkv1
 
 				// Track OpenAPI allocations for warm-up
 				if !node.Status.WarmUpCompleted && node.Status.WarmUpTarget > 0 {
-					node.Status.WarmUpAllocatedCount += enabledIPCount(node.Spec.ENISpec, len(nic.IPv4), len(nic.IPv6))
+					node.Status.WarmUpAllocatedCount += warmUpIPCount(node.Spec.ENISpec, len(nic.IPv4), len(nic.IPv6))
 				}
 
 				l.Info("ENI attach completed", "eni", task.ENIID,
@@ -1320,7 +1320,11 @@ func updateNodeCondition(ctx context.Context, c client.Client, nodeName string, 
 		}
 
 		if item.eniRef != nil {
-			hasIPLeft = enabledIPCount(spec, len(getAllocatable(item.eniRef.IPv4)), len(getAllocatable(item.eniRef.IPv6))) > 0
+			addresses := item.eniRef.IPv4
+			if !spec.EnableIPv4 && spec.EnableIPv6 {
+				addresses = item.eniRef.IPv6
+			}
+			hasIPLeft = len(getAllocatable(addresses)) > 0
 		}
 		// 1. eni is full
 		if item.isFull {
