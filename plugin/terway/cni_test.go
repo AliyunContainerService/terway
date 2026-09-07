@@ -533,10 +533,10 @@ func TestCmdAdd(t *testing.T) {
 				patches.ApplyFunc(doCmdAdd, func(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) (*terwayTypes.IPNetSet, *terwayTypes.IPSet, error) {
 					_, ipNet, _ := net.ParseCIDR("192.168.1.10/24")
 					return &terwayTypes.IPNetSet{
-							IPv4: ipNet,
-						}, &terwayTypes.IPSet{
-							IPv4: net.ParseIP("192.168.1.1"),
-						}, nil
+						IPv4: ipNet,
+					}, &terwayTypes.IPSet{
+						IPv4: net.ParseIP("192.168.1.1"),
+					}, nil
 				})
 
 				// Mock cniTypes.PrintResult
@@ -1045,4 +1045,21 @@ func TestCmdCheck(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseSetupConfIPv6Only(t *testing.T) {
+	alloc := &rpc.NetConf{BasicInfo: &rpc.BasicInfo{
+		PodIP:       &rpc.IPSet{IPv6: "fd00:1::10"},
+		PodCIDR:     &rpc.IPSet{IPv4: "10.0.0.0/24", IPv6: "fd00:1::/64"},
+		GatewayIP:   &rpc.IPSet{IPv4: "10.0.0.1", IPv6: "fd00:1::1"},
+		ServiceCIDR: &rpc.IPSet{IPv4: "192.168.0.0/16", IPv6: "fd00:2::/112"},
+	}, DefaultRoute: true}
+	cfg, err := parseSetupConf(context.Background(), &skel.CmdArgs{IfName: "eth0"}, alloc,
+		&types.CNIConf{MTU: 1500}, rpc.IPType_TypeENIMultiIP)
+	require.NoError(t, err)
+	require.Nil(t, cfg.ContainerIPNet.IPv4)
+	require.Equal(t, "fd00:1::10", cfg.ContainerIPNet.IPv6.IP.String())
+	require.Equal(t, "fd00:1::1", cfg.GatewayIP.IPv6.String())
+	require.NotNil(t, cfg.ServiceCIDR.IPv4)
+	require.NotNil(t, cfg.ServiceCIDR.IPv6)
 }

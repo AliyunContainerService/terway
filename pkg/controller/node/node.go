@@ -254,6 +254,10 @@ func (r *ReconcileNode) k8sAnno(ctx context.Context, k8sNode *corev1.Node, node 
 	base := k8sNode.DeepCopy()
 
 	secondaryIP := 0
+	ipPerAdapter := node.Spec.NodeCap.IPv4PerAdapter
+	if !node.Spec.ENISpec.EnableIPv4 && node.Spec.ENISpec.EnableIPv6 {
+		ipPerAdapter = node.Spec.NodeCap.IPv6PerAdapter
+	}
 
 	switch types.NodeExclusiveENIMode(node.Labels) {
 	case types.ExclusiveENIOnly:
@@ -277,10 +281,10 @@ func (r *ReconcileNode) k8sAnno(ctx context.Context, k8sNode *corev1.Node, node 
 			lo.ForEach(node.Spec.Flavor, func(item networkv1beta1.Flavor, index int) {
 				if item.NetworkInterfaceType == networkv1beta1.ENITypeSecondary &&
 					item.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeStandard {
-					secondaryIP += item.Count * node.Spec.NodeCap.IPv4PerAdapter
+					secondaryIP += item.Count * ipPerAdapter
 				}
 				if item.NetworkInterfaceType == networkv1beta1.ENITypeTrunk {
-					secondaryIP += item.Count * node.Spec.NodeCap.IPv4PerAdapter
+					secondaryIP += item.Count * ipPerAdapter
 				}
 			})
 		}

@@ -856,14 +856,14 @@ func Test_releaseUnUsedIP_SkipsUnschedulable(t *testing.T) {
 			"10.0.0.2": {IP: "10.0.0.2", Status: networkv1beta1.IPStatusValid},
 		},
 	}
-	got := releaseUnUsedIP(logr.Discard(), eni, 10)
+	got := releaseUnUsedIP(logr.Discard(), eni, 10, &networkv1beta1.ENISpec{EnableIPv4: true, EnableIPv6: true})
 	assert.Equal(t, 0, got, "nothing should be released from a blocked ENI")
 	assert.Equal(t, aliyunClient.ENIStatusInUse, eni.Status, "blocked ENI must not be marked Deleting")
 	assert.Equal(t, networkv1beta1.IPStatusValid, eni.IPv4["10.0.0.2"].Status, "blocked ENI IPs must stay Valid")
 
 	// Sanity: the same ENI without the flag WOULD be acted on.
 	eni.Unschedulable = false
-	assert.Greater(t, releaseUnUsedIP(logr.Discard(), eni, 10), 0)
+	assert.Greater(t, releaseUnUsedIP(logr.Discard(), eni, 10, &networkv1beta1.ENISpec{EnableIPv4: true, EnableIPv6: true}), 0)
 }
 
 func Test_clearPendingDelete(t *testing.T) {
@@ -3280,7 +3280,7 @@ var _ = Describe("Test ReconcileNode", func() {
 
 	Context("Check update node status", func() {
 		It("Empty eni, should report InsufficientIP", func() {
-			updateNodeCondition(ctx, k8sClient, "foo", nil)
+			updateNodeCondition(ctx, k8sClient, "foo", nil, &networkv1beta1.ENISpec{EnableIPv4: true})
 
 			node := &corev1.Node{}
 			err := k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "foo"}, node)
@@ -3311,7 +3311,7 @@ var _ = Describe("Test ReconcileNode", func() {
 			err = k8sClient.Status().Update(ctx, node)
 			Expect(err).NotTo(HaveOccurred())
 
-			updateNodeCondition(ctx, k8sClient, "foo", nil)
+			updateNodeCondition(ctx, k8sClient, "foo", nil, &networkv1beta1.ENISpec{EnableIPv4: true})
 
 			node = &corev1.Node{}
 			err = k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "foo"}, node)
@@ -3326,6 +3326,26 @@ var _ = Describe("Test ReconcileNode", func() {
 			Expect(count).To(Equal(1))
 		})
 
+		It("IPv6-only ignores primary IPv4 when reporting exhausted capacity", func() {
+			nic := &networkv1beta1.Nic{IPv4: map[string]*networkv1beta1.IP{
+				"10.0.0.1": {IP: "10.0.0.1", Primary: true, Status: networkv1beta1.IPStatusValid},
+			}}
+			options := []*eniOptions{{eniTypeKey: secondaryKey, eniRef: nic, isFull: true}}
+			spec := &networkv1beta1.ENISpec{EnableIPv6: true}
+			updateNodeCondition(ctx, k8sClient, "foo", options, spec)
+			node := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "foo"}, node)).To(Succeed())
+			condition, found := lo.Find(node.Status.Conditions, func(c corev1.NodeCondition) bool { return c.Type == types.SufficientIPCondition })
+			Expect(found).To(BeTrue())
+			Expect(condition.Status).To(Equal(corev1.ConditionFalse))
+			nic.IPv6 = map[string]*networkv1beta1.IP{"fd00::1": {IP: "fd00::1", Status: networkv1beta1.IPStatusValid}}
+			updateNodeCondition(ctx, k8sClient, "foo", options, spec)
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "foo"}, node)).To(Succeed())
+			condition, found = lo.Find(node.Status.Conditions, func(c corev1.NodeCondition) bool { return c.Type == types.SufficientIPCondition })
+			Expect(found).To(BeTrue())
+			Expect(condition.Status).To(Equal(corev1.ConditionTrue))
+		})
+
 		It("Empty eni should be SufficientIP", func() {
 			updateNodeCondition(ctx, k8sClient, "foo", []*eniOptions{
 				{
@@ -3335,7 +3355,7 @@ var _ = Describe("Test ReconcileNode", func() {
 					addIPv6N:   0,
 					errors:     nil,
 				},
-			})
+			}, &networkv1beta1.ENISpec{EnableIPv4: true})
 
 			node := &corev1.Node{}
 			err := k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "foo"}, node)
@@ -3366,7 +3386,7 @@ var _ = Describe("Test ReconcileNode", func() {
 					},
 					isFull: false,
 				},
-			})
+			}, &networkv1beta1.ENISpec{EnableIPv4: true})
 
 			node := &corev1.Node{}
 			err := k8sClient.Get(ctx, k8stypes.NamespacedName{Name: "foo"}, node)
@@ -4317,7 +4337,7 @@ var _ = Describe("Test ReconcileNode", func() {
 
 			reconciler := &ReconcileNode{}
 
-			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
+			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey}, true)
 			Expect(result).To(BeFalse())
 		})
 
@@ -4352,7 +4372,7 @@ var _ = Describe("Test ReconcileNode", func() {
 				WithVSwitchPool(switchPool).
 				Build()
 
-			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
+			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey}, true)
 			Expect(result).To(BeTrue())
 		})
 
@@ -4380,7 +4400,7 @@ var _ = Describe("Test ReconcileNode", func() {
 
 			// Unschedulable is rejected before any vSwitch lookup, so no new IPs
 			// are ever added to a block-listed ENI.
-			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
+			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey}, true)
 			Expect(result).To(BeFalse())
 		})
 
@@ -4398,7 +4418,7 @@ var _ = Describe("Test ReconcileNode", func() {
 			reconciler := &ReconcileNode{}
 
 			// Try to validate with trunk type filter (should fail)
-			result := reconciler.validateENI(ctx, option, []eniTypeKey{trunkKey})
+			result := reconciler.validateENI(ctx, option, []eniTypeKey{trunkKey}, true)
 			Expect(result).To(BeFalse())
 		})
 
@@ -4413,7 +4433,7 @@ var _ = Describe("Test ReconcileNode", func() {
 
 			reconciler := &ReconcileNode{}
 
-			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
+			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey}, true)
 			Expect(result).To(BeTrue())
 		})
 
@@ -4448,7 +4468,7 @@ var _ = Describe("Test ReconcileNode", func() {
 				WithVSwitchPool(switchPool).
 				Build()
 
-			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
+			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey}, true)
 			Expect(result).To(BeFalse())
 		})
 
@@ -4481,7 +4501,7 @@ var _ = Describe("Test ReconcileNode", func() {
 				WithVSwitchPool(vsw).
 				Build()
 
-			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey})
+			result := reconciler.validateENI(ctx, option, []eniTypeKey{secondaryKey}, true)
 			Expect(result).To(BeFalse())
 		})
 	})
@@ -6397,4 +6417,27 @@ func TestMetaCtxExtended(t *testing.T) {
 		meta := MetaCtx(ctx)
 		assert.Nil(t, meta)
 	})
+}
+
+func TestIPv6OnlyAllocationWithPrimaryIPv4(t *testing.T) {
+	nic := &networkv1beta1.Nic{ID: "eni-v6", Status: aliyunClient.ENIStatusInUse,
+		IPv4: map[string]*networkv1beta1.IP{"10.0.0.1": {IP: "10.0.0.1", Primary: true, Status: networkv1beta1.IPStatusValid}},
+		IPv6: map[string]*networkv1beta1.IP{},
+	}
+	node := &networkv1beta1.Node{Spec: networkv1beta1.NodeSpec{
+		ENISpec: &networkv1beta1.ENISpec{EnableIPv6: true},
+		NodeCap: networkv1beta1.NodeCap{IPv4PerAdapter: 1, IPv6PerAdapter: 10},
+	}, Status: networkv1beta1.NodeStatus{NetworkInterfaces: map[string]*networkv1beta1.Nic{nic.ID: nic}}}
+	assert.Zero(t, countTotalIdleIPs(node), "primary IPv4 does not satisfy IPv6 demand")
+	assert.Zero(t, enabledIPCount(node.Spec.ENISpec, 1, 0), "primary IPv4 does not count toward warm-up")
+	option := &eniOptions{eniTypeKey: secondaryKey, eniRef: nic}
+	// No VPC client is needed: existing ENIs can add IPv6 even with no IPv4 left.
+	r := &ReconcileNode{}
+	assert.True(t, r.validateENI(context.Background(), option, []eniTypeKey{secondaryKey}, false))
+	assignEniWithOptions(context.Background(), node, 3, []*eniOptions{option}, nil, func(*eniOptions) bool { return true })
+	assert.Zero(t, option.addIPv4N)
+	assert.Equal(t, 3, option.addIPv6N)
+	assert.False(t, option.isFull)
+	nic.Unschedulable = true
+	assert.False(t, r.validateENI(context.Background(), option, []eniTypeKey{secondaryKey}, false))
 }

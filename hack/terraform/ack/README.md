@@ -11,6 +11,14 @@ Terraform module for spinning up ACK managed clusters used by Terway's end-to-en
 | `ack-ipv4`   | ipv4     | `cluster_addons` includes `terway-eniip`. ACK installs terway-eniip daemonset automatically.                      | E2E feature tests         |
 | `ack-dual`   | dual     | Same as `ack-ipv4`, with a dual-stack service CIDR.                                                               | dual-stack E2E tests      |
 
+### IPv6-only CNI on dual-stack ACK
+
+The `byo-dual-cni-ipv6-default` and `byo-dual-cni-ipv6-crd` profiles keep ACK
+`ip_stack=dual` and install Terway with `ipStack=ipv6`, using the selected IPAM.
+They are for fresh clusters and do not change an existing cluster's protocol stack.
+See [IPv6-only setup and acceptance](../../../docs/ipv6-only.md) for prerequisites
+and the dedicated test runner.
+
 ### BYO vs ACK
 
 - **BYO** (Bring Your Own CNI): cluster boots with no CNI; flannel is disabled in `cluster_addons`. Operator runs `deploy-terway.sh` afterwards (or installs any other CNI).

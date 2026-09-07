@@ -97,7 +97,7 @@ func (b *NetworkServiceBuilder) LoadGlobalConfig() *NetworkServiceBuilder {
 	case "dual":
 		b.service.enableIPv4 = true
 		b.service.enableIPv6 = true
-	case "ipv6":
+	case string(types.IPStackIPv6):
 		b.service.enableIPv6 = true
 	}
 	b.config = globalConfig
@@ -223,6 +223,9 @@ func (b *NetworkServiceBuilder) initInstanceLimit() error {
 	b.limit = limit
 
 	b.service.enableIPv4, b.service.enableIPv6 = checkInstance(b.limit, b.daemonMode, b.config)
+	if b.config.IPStack == string(types.IPStackIPv6) && !b.service.enableIPv6 {
+		return fmt.Errorf("instance %s does not support IPv6-only networking", b.limit.InstanceTypeID)
+	}
 	return nil
 }
 

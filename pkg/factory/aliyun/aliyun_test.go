@@ -48,6 +48,15 @@ func (m *mockENIInfoGetter) GetENIPrivateIPv6AddressesByMACv2(mac string) ([]net
 }
 
 func TestAliyun_CreateNetworkInterface(t *testing.T) {
+	testCreateNetworkInterface(t, false)
+}
+
+func TestAliyun_CreateNetworkInterfaceIPv6Only(t *testing.T) {
+	testCreateNetworkInterface(t, true)
+}
+
+func testCreateNetworkInterface(t *testing.T, ipv6Only bool) {
+	t.Helper()
 	openAPI := mockclient.NewOpenAPI(t)
 	ecsClient := mockclient.NewECS(t)
 	vpcClient := mockclient.NewVPC(t)
@@ -87,7 +96,12 @@ func TestAliyun_CreateNetworkInterface(t *testing.T) {
 		},
 		VSwitchID: vswID,
 	}
-	ecsClient.On("CreateNetworkInterface", mock.Anything, mock.Anything).Return(createResp, nil)
+	ecsClient.On("CreateNetworkInterface", mock.Anything, mock.MatchedBy(func(opts *client.CreateNetworkInterfaceOptions) bool {
+		if ipv6Only {
+			return opts.NetworkInterfaceOptions.IPCount == 0 && opts.NetworkInterfaceOptions.IPv6Count == 2
+		}
+		return opts.NetworkInterfaceOptions.IPCount == 2 && opts.NetworkInterfaceOptions.IPv6Count == 2
+	})).Return(createResp, nil)
 	ecsClient.On("AttachNetworkInterface", mock.Anything, mock.Anything).Return(nil)
 
 	describeResp := []*client.NetworkInterface{
@@ -131,12 +145,23 @@ func TestAliyun_CreateNetworkInterface(t *testing.T) {
 
 	a := NewAliyun(context.Background(), openAPI, nil, vswPool, cfg)
 
-	eni, v4, v6, err := a.CreateNetworkInterface(2, 2, "Secondary")
+	v4Count := 2
+	if ipv6Only {
+		a.enableIPv4 = false
+		v4Count = 0
+		createResp.PrivateIPSets = []client.IPSet{{IPAddress: primaryIP, Primary: true}}
+	}
+	eni, v4, v6, err := a.CreateNetworkInterface(v4Count, 2, "Secondary")
 	assert.NoError(t, err)
 	assert.NotNil(t, eni)
 	assert.Equal(t, eniID, eni.ID)
 	assert.Equal(t, mac, eni.MAC)
-	assert.Len(t, v4, 2)
+	if ipv6Only {
+		assert.Empty(t, v4)
+		assert.Equal(t, primaryIP, eni.PrimaryIP.IPv4.String())
+	} else {
+		assert.Len(t, v4, 2)
+	}
 	assert.Len(t, v6, 2)
 }
 
@@ -1020,4 +1045,31 @@ func TestAliyun_LoadNetworkInterface_BothDisabled(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, ipv4)
 	assert.Nil(t, ipv6)
+}
+
+func TestAliyun_CreateNetworkInterfaceIPv6OnlyMissingAddresses(t *testing.T) {
+	api := mockclient.NewOpenAPI(t)
+	ecs := mockclient.NewECS(t)
+	vpcAPI := mockclient.NewVPC(t)
+	api.On("GetVPC").Return(vpcAPI)
+	api.On("GetECS").Return(ecs)
+	vpcAPI.On("DescribeVSwitchByID", mock.Anything, "vsw-test").Return(&vpc.VSwitch{
+		VSwitchId: "vsw-test", ZoneId: "zone-test", AvailableIpAddressCount: 1,
+	}, nil)
+	ecs.On("CreateNetworkInterface", mock.Anything, mock.Anything).Return(&client.NetworkInterface{
+		NetworkInterfaceID: "eni-test", PrivateIPAddress: "10.0.0.1",
+		PrivateIPSets: []client.IPSet{{IPAddress: "10.0.0.1", Primary: true}},
+	}, nil).Once()
+	pool, err := vswpool.NewSwitchPool(10, "10m")
+	if !assert.NoError(t, err) {
+		return
+	}
+	a := NewAliyun(context.Background(), api, nil, pool, &daemon.ENIConfig{
+		EnableIPv6: true, ZoneID: "zone-test", VSwitchOptions: []string{"vsw-test"},
+	})
+	eni, v4, v6, err := a.CreateNetworkInterface(0, 2, "Secondary")
+	assert.ErrorContains(t, err, "without requested IPv6")
+	assert.NotNil(t, eni, "return the created ENI so the caller can clean it up")
+	assert.Empty(t, v4)
+	assert.Empty(t, v6)
 }

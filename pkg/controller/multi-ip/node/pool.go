@@ -1056,7 +1056,7 @@ func (n *ReconcileNode) syncTaskQueueStatus(ctx context.Context, node *networkv1
 
 				// Track OpenAPI allocations for warm-up
 				if !node.Status.WarmUpCompleted && node.Status.WarmUpTarget > 0 {
-					node.Status.WarmUpAllocatedCount += max(len(nic.IPv4), len(nic.IPv6))
+					node.Status.WarmUpAllocatedCount += enabledIPCount(node.Spec.ENISpec, len(nic.IPv4), len(nic.IPv6))
 				}
 
 				l.Info("ENI attach completed", "eni", task.ENIID,
@@ -1219,16 +1219,16 @@ func (n *ReconcileNode) addIP(ctx context.Context, unSucceedPods map[string]*Pod
 
 	// handle trunk/secondary eni
 	assignEniWithOptions(ctx, node, allocationDemand, options, n.eniTaskQueue, func(option *eniOptions) bool {
-		return n.validateENI(ctx, option, []eniTypeKey{secondaryKey, trunkKey})
+		return n.validateENI(ctx, option, []eniTypeKey{secondaryKey, trunkKey}, node.Spec.ENISpec.EnableIPv4)
 	})
 	assignEniWithOptions(ctx, node, len(allocatableRDMAPods), options, n.eniTaskQueue, func(option *eniOptions) bool {
-		return n.validateENI(ctx, option, []eniTypeKey{rdmaKey})
+		return n.validateENI(ctx, option, []eniTypeKey{rdmaKey}, node.Spec.ENISpec.EnableIPv4)
 	})
 
 	err := n.allocateFromOptions(ctx, node, options)
 
 	// update node condition based on eni status
-	updateNodeCondition(ctx, n.client, node.Name, options)
+	updateNodeCondition(ctx, n.client, node.Name, options, node.Spec.ENISpec)
 
 	updateCrCondition(options)
 
@@ -1291,7 +1291,7 @@ func updateCrCondition(options []*eniOptions) {
 	})
 }
 
-func updateNodeCondition(ctx context.Context, c client.Client, nodeName string, options []*eniOptions) {
+func updateNodeCondition(ctx context.Context, c client.Client, nodeName string, options []*eniOptions, spec *networkv1beta1.ENISpec) {
 	l := logf.FromContext(ctx)
 	k8sNode := &corev1.Node{}
 	err := c.Get(ctx, client.ObjectKey{Name: nodeName}, k8sNode)
@@ -1320,14 +1320,7 @@ func updateNodeCondition(ctx context.Context, c client.Client, nodeName string, 
 		}
 
 		if item.eniRef != nil {
-			for _, v := range item.eniRef.IPv4 {
-				if v != nil {
-					if v.Status == networkv1beta1.IPStatusValid && v.PodID == "" {
-						hasIPLeft = true
-						break
-					}
-				}
-			}
+			hasIPLeft = enabledIPCount(spec, len(getAllocatable(item.eniRef.IPv4)), len(getAllocatable(item.eniRef.IPv6))) > 0
 		}
 		// 1. eni is full
 		if item.isFull {
@@ -1387,7 +1380,7 @@ func updateNodeCondition(ctx context.Context, c client.Client, nodeName string, 
 	}
 }
 
-func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eniTypes []eniTypeKey) bool {
+func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eniTypes []eniTypeKey, enableIPv4 bool) bool {
 	if !lo.Contains(eniTypes, option.eniTypeKey) {
 		return false
 	}
@@ -1405,6 +1398,11 @@ func (n *ReconcileNode) validateENI(ctx context.Context, option *eniOptions, eni
 		case aliyunClient.ENIStatusInUse, aliyunClient.ENIStatusAttaching:
 		default:
 			return false
+		}
+
+		// Existing ENIs already own a primary IPv4; adding IPv6 consumes no IPv4.
+		if !enableIPv4 {
+			return true
 		}
 
 		vsw, err := n.vswpool.GetByID(ctx, n.aliyun.GetVPC(), option.eniRef.VSwitchID)
@@ -2036,7 +2034,7 @@ func (n *ReconcileNode) adjustPool(ctx context.Context, node *networkv1beta1.Nod
 
 		for i := len(sorted) - 1; i >= 0; i-- {
 			// we unAssigned the ip
-			count := releaseUnUsedIP(l, sorted[i], toDel)
+			count := releaseUnUsedIP(l, sorted[i], toDel, node.Spec.ENISpec)
 			toDel -= count
 			if toDel <= 0 {
 				break
@@ -2349,7 +2347,7 @@ func isStaleAssigned(p *PodRequest) bool {
 
 func getAllocatable(in map[string]*networkv1beta1.IP) map[string]*networkv1beta1.IP {
 	return lo.PickBy(in, func(key string, value *networkv1beta1.IP) bool {
-		return value.Status == networkv1beta1.IPStatusValid && value.PodID == ""
+		return value != nil && value.Status == networkv1beta1.IPStatusValid && value.PodID == ""
 	})
 }
 

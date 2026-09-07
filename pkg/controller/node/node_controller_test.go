@@ -53,6 +53,25 @@ var _ = Describe("Node Controller", func() {
 		efloClient *mocks.EFLO
 	)
 
+	It("publishes IPv6-only capacity using the IPv6 quota", func() {
+		k8sNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "ipv6-capacity"}}
+		Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, k8sNode)).To(Succeed()) })
+		node := &networkv1beta1.Node{Spec: networkv1beta1.NodeSpec{
+			ENISpec: &networkv1beta1.ENISpec{EnableIPv6: true},
+			NodeCap: networkv1beta1.NodeCap{IPv4PerAdapter: 2, IPv6PerAdapter: 10},
+			Flavor: []networkv1beta1.Flavor{{
+				NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+				NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+				Count:                       2,
+			}},
+		}}
+		r := &ReconcileNode{client: k8sClient}
+		Expect(r.k8sAnno(ctx, k8sNode, node)).To(Succeed())
+		Expect(k8sClient.Get(ctx, cc.ObjectKeyFromObject(k8sNode), k8sNode)).To(Succeed())
+		Expect(k8sNode.Annotations[string(terwayTypes.NormalIPTypeIPs)]).To(Equal("20"))
+	})
+
 	BeforeEach(func() {
 		ctx = context.Background()
 		openAPI = mocks.NewOpenAPI(GinkgoT())

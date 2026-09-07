@@ -173,6 +173,10 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		return r, nil, nil, err
 	}
 
+	if ipv6 > 0 && len(v6Set) == 0 {
+		return r, nil, nil, fmt.Errorf("created ENI %s without requested IPv6 addresses", r.ID)
+	}
+
 	// 2. attach eni
 	err = a.openAPI.GetECS().AttachNetworkInterface(ctx, &client.AttachNetworkInterfaceOptions{
 		NetworkInterfaceID:     &eni.NetworkInterfaceID,
@@ -277,6 +281,15 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		return r, v4Set, v6Set, err
 	}
 
+	// ECS always returns a primary IPv4 address. Keep it on the ENI, but
+	// expose only enabled address families to the Pod resource pool, matching
+	// LoadNetworkInterface's behavior during recovery.
+	if !a.enableIPv4 {
+		v4Set = nil
+	}
+	if !a.enableIPv6 {
+		v6Set = nil
+	}
 	return r, v4Set, v6Set, nil
 }
 

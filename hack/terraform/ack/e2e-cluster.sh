@@ -16,6 +16,8 @@
 # Profiles:
 #   byo-ipv4      single stack ipv4, no terway addon; deploy terway via helm chart afterwards (BYO CNI)
 #   byo-dual      dual stack, no terway addon; deploy terway via helm chart afterwards (BYO CNI)
+#   byo-dual-cni-ipv6-default  ACK dual stack, Terway IPv6-only, default IPAM
+#   byo-dual-cni-ipv6-crd      ACK dual stack, Terway IPv6-only, CRD IPAM
 #   ack-ipv4      single stack ipv4 + terway-eniip addon installed by ACK
 #   ack-dual      dual stack + terway-eniip addon installed by ACK
 #                 (terway-controlplane is hosted by Aliyun in managed clusters; only a placeholder
@@ -55,6 +57,9 @@ EOF
 # Map profile -> (ip_stack, cluster_mode, service_cidr).
 profile_to_vars() {
     local profile="$1"
+    CNI_IP_STACK=""
+    CNI_IPAM="crd"
+    EXTENDED_NODE_POOL_SIZE=1
     case "$profile" in
         byo-ipv4)
             IP_STACK="ipv4"
@@ -71,6 +76,14 @@ profile_to_vars() {
             CLUSTER_MODE="ack"
             SERVICE_CIDR="192.168.0.0/16,fd00:1234::/112"
             ;;
+        byo-dual-cni-ipv6-default|byo-dual-cni-ipv6-crd)
+            IP_STACK="dual"
+            CNI_IP_STACK="ipv6"
+            EXTENDED_NODE_POOL_SIZE=0
+            CNI_IPAM="${profile##*-}"
+            CLUSTER_MODE="byo"
+            SERVICE_CIDR="192.168.0.0/16,fd00:1234::/112"
+            ;;
         byo-dual)
             IP_STACK="dual"
             CLUSTER_MODE="byo"
@@ -78,10 +91,11 @@ profile_to_vars() {
             ;;
         *)
             log_error "Unknown profile: '$profile'"
-            log_error "Valid profiles: byo-ipv4, byo-dual, ack-ipv4, ack-dual"
+            log_error "Valid profiles: byo-ipv4, byo-dual, byo-dual-cni-ipv6-default, byo-dual-cni-ipv6-crd, ack-ipv4, ack-dual"
             exit 2
             ;;
     esac
+    CNI_IP_STACK="${CNI_IP_STACK:-${IP_STACK}}"
 }
 
 # Materialize a workdir: symlink .tf and helper scripts; copy tfvars (so
@@ -116,7 +130,7 @@ EOF
 cmd_create() {
     if [[ $# -lt 1 ]]; then
         log_error "create requires a profile argument"
-        log_error "Valid profiles: byo-ipv4, byo-dual, ack-ipv4, ack-dual"
+        log_error "Valid profiles: byo-ipv4, byo-dual, byo-dual-cni-ipv6-default, byo-dual-cni-ipv6-crd, ack-ipv4, ack-dual"
         exit 2
     fi
     local profile="$1"; shift
@@ -170,6 +184,7 @@ cmd_create() {
     terraform plan -out=tfplan \
         -var="ip_stack=${IP_STACK}" \
         -var="cluster_mode=${CLUSTER_MODE}" \
+        -var="extended_node_pool_size=${EXTENDED_NODE_POOL_SIZE}" \
         -var="service_cidr=${SERVICE_CIDR}"
 
     log_info "Running 'terraform apply' on saved plan..."
@@ -177,11 +192,11 @@ cmd_create() {
     rm -f tfplan
 
     if [[ "${CLUSTER_MODE}" == "byo" ]]; then
-        log_info "BYO profile; invoking deploy-terway.sh --ip-stack ${IP_STACK} ${extra_args[*]:-}"
+        log_info "BYO profile; invoking deploy-terway.sh --ip-stack ${CNI_IP_STACK} --ipam ${CNI_IPAM} ${extra_args[*]:-}"
         if [[ ${#extra_args[@]} -gt 0 ]]; then
-            ./deploy-terway.sh --ip-stack "${IP_STACK}" "${extra_args[@]}"
+            ./deploy-terway.sh --ip-stack "${CNI_IP_STACK}" --ipam "${CNI_IPAM}" "${extra_args[@]}"
         else
-            ./deploy-terway.sh --ip-stack "${IP_STACK}"
+            ./deploy-terway.sh --ip-stack "${CNI_IP_STACK}" --ipam "${CNI_IPAM}"
         fi
     else
         log_info "ACK profile; terway-eniip is installed by ACK addon. Skipping helm deployment."

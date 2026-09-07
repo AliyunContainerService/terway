@@ -14,6 +14,7 @@
 #   --enable-dp-v2               启用 Datapath V2
 #   --enable-network-policy      启用网络策略
 #   --ip-stack <stack>           IP 栈: ipv4|ipv6|dual (默认: ipv4)
+#   --ipam <mode>                IPAM: default|crd (默认: crd)
 #   -f, --values <file>          指定 values 文件路径 (默认: 自动生成)
 #   --dry-run                    仅生成 values 文件，不执行部署
 #   -h, --help                   显示帮助信息
@@ -25,7 +26,8 @@
 #   TERWAY_DAEMON_MODE          Daemon 模式
 #   TERWAY_ENABLE_DP_V2         是否启用 Datapath V2 (true/false)
 #   TERWAY_ENABLE_NETWORK_POLICY 是否启用网络策略 (true/false)
-#   TERWAY_IP_STACK             IP 栈类型
+#   TERWAY_IP_STACK             CNI IP 栈类型（独立于 ACK 集群协议栈）
+#   TERWAY_IPAM                 default 或 crd
 #
 
 set -e
@@ -52,6 +54,7 @@ TERWAY_DAEMON_MODE="${TERWAY_DAEMON_MODE:-$DEFAULT_DAEMON_MODE}"
 TERWAY_ENABLE_DP_V2="${TERWAY_ENABLE_DP_V2:-false}"
 TERWAY_ENABLE_NETWORK_POLICY="${TERWAY_ENABLE_NETWORK_POLICY:-false}"
 TERWAY_IP_STACK="${TERWAY_IP_STACK:-$DEFAULT_IP_STACK}"
+TERWAY_IPAM="${TERWAY_IPAM:-crd}"
 
 # 颜色输出
 RED='\033[0;31m'
@@ -113,6 +116,10 @@ parse_args() {
                 TERWAY_IP_STACK="$2"
                 shift 2
                 ;;
+            --ipam)
+                TERWAY_IPAM="$2"
+                shift 2
+                ;;
             -f|--values)
                 VALUES_OUTPUT_FILE="$2"
                 shift 2
@@ -132,6 +139,15 @@ parse_args() {
                 ;;
         esac
     done
+    case "${TERWAY_IP_STACK}" in
+        ipv4|ipv6|dual) ;;
+        *) log_error "Invalid CNI IP stack: ${TERWAY_IP_STACK}"; exit 2 ;;
+    esac
+    case "${TERWAY_IPAM}" in
+        default) CENTRALIZED_IPAM=false ;;
+        crd) CENTRALIZED_IPAM=true ;;
+        *) log_error "Invalid IPAM mode: ${TERWAY_IPAM}"; exit 2 ;;
+    esac
 }
 
 # 获取默认 tag（从 git commit）
@@ -265,7 +281,7 @@ generate_values_file() {
 #   Network Policy: ${TERWAY_ENABLE_NETWORK_POLICY}
 #   IP Stack: ${TERWAY_IP_STACK}
 
-centralizedIPAM: true
+centralizedIPAM: ${CENTRALIZED_IPAM}
 
 terway:
   image:

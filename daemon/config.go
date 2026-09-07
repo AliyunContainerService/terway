@@ -129,6 +129,9 @@ func getPoolConfig(cfg *daemon.Config, daemonMode string, limit *client.Limits) 
 		}
 
 		ipPerENI := limit.IPv4PerAdapter
+		if cfg.IPStack == "ipv6" {
+			ipPerENI = limit.IPv6PerAdapter
+		}
 		if utils.IsWindowsOS() {
 			// NB(thxCode): don't assign the primary IP of one assistant eni.
 			ipPerENI--

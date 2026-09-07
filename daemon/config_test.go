@@ -987,3 +987,25 @@ func TestGetPoolConfig_ENIMultiIP_ERDMA(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 10, poolConfig.ERdmaCapacity)
 }
+
+func TestGetPoolConfigIPv6Only(t *testing.T) {
+	for _, ipam := range []types.IPAMType{types.IPAMTypeDefault, types.IPAMTypeCRD} {
+		t.Run(string(ipam), func(t *testing.T) {
+			cfg := &daemon.Config{IPStack: "ipv6", IPAMType: ipam, EniCapRatio: 1, MaxPoolSize: 100, MinENI: 1}
+			limit := &client.Limits{Adapters: 3, IPv4PerAdapter: 2, IPv6PerAdapter: 10}
+			pool, err := getPoolConfig(cfg, daemon.ModeENIMultiIP, limit)
+			if !assert.NoError(t, err) {
+				return
+			}
+			assert.Equal(t, 10, pool.MaxIPPerENI)
+			assert.Equal(t, 20, pool.Capacity)
+			if ipam == types.IPAMTypeDefault {
+				assert.Equal(t, 10, pool.MinPoolSize)
+				assert.Equal(t, 20, pool.MaxPoolSize)
+			}
+			v4, v6 := checkInstance(limit, daemon.ModeENIMultiIP, cfg)
+			assert.False(t, v4)
+			assert.True(t, v6, "IPv6-only does not require equal IPv4 and IPv6 quotas")
+		})
+	}
+}

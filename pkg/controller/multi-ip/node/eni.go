@@ -117,7 +117,7 @@ func clearPendingDelete(eni *networkv1beta1.Nic, remoteStatus string) {
 	}
 }
 
-func releaseUnUsedIP(log logr.Logger, eni *networkv1beta1.Nic, toDel int) int {
+func releaseUnUsedIP(log logr.Logger, eni *networkv1beta1.Nic, toDel int, spec *networkv1beta1.ENISpec) int {
 	// Never touch an ENI marked unschedulable (matched the tag block list). Its
 	// IPs are shown in the CR for visibility but belong to another owner (e.g.
 	// alibabacloud-erdma-controller); terway must not release them nor delete the
@@ -125,11 +125,16 @@ func releaseUnUsedIP(log logr.Logger, eni *networkv1beta1.Nic, toDel int) int {
 	if eni.Unschedulable {
 		return 0
 	}
+	ipv6Only := !spec.EnableIPv4 && spec.EnableIPv6
 	_, inUse := IPUsage(eni.IPv4)
 	_, inUseV6 := IPUsage(eni.IPv6)
+	canDeleteENI := len(eni.IPv4) < toDel && len(eni.IPv6) < toDel
+	if ipv6Only {
+		canDeleteENI = len(eni.IPv6) <= toDel
+	}
 	// try delete eni, only if no one use it
 	if inUse == 0 && inUseV6 == 0 &&
-		len(eni.IPv4) < toDel && len(eni.IPv6) < toDel &&
+		canDeleteENI &&
 		eni.NetworkInterfaceType == networkv1beta1.ENITypeSecondary &&
 		eni.NetworkInterfaceTrafficMode == networkv1beta1.NetworkInterfaceTrafficModeStandard {
 
@@ -137,12 +142,18 @@ func releaseUnUsedIP(log logr.Logger, eni *networkv1beta1.Nic, toDel int) int {
 
 		log.Info("release eni", "eni", eni.ID)
 
+		if ipv6Only {
+			return len(eni.IPv6)
+		}
 		return max(len(eni.IPv4), len(eni.IPv6))
 	}
 
 	// balance ip , in case of unnecessary ip release
 	idleV4 := IdlesWithAvailable(eni.IPv4)
 	idleV6 := IdlesWithAvailable(eni.IPv6)
+	if ipv6Only {
+		idleV4 = 0
+	}
 
 	leftover := max(idleV4, idleV6) - toDel
 
@@ -366,4 +377,18 @@ func IdlesWithAvailable(eniIP map[string]*networkv1beta1.IP) (count int) {
 		}
 	}
 	return
+}
+
+// enabledIPCount counts Pod resources, excluding cloud-only address families.
+func enabledIPCount(spec *networkv1beta1.ENISpec, ipv4, ipv6 int) int {
+	if spec.EnableIPv4 && spec.EnableIPv6 {
+		return min(ipv4, ipv6)
+	}
+	if spec.EnableIPv4 {
+		return ipv4
+	}
+	if spec.EnableIPv6 {
+		return ipv6
+	}
+	return 0
 }

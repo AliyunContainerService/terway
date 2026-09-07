@@ -600,3 +600,37 @@ func TestConfig_EnableIPPrefix(t *testing.T) {
 		assert.True(t, cfg.EnableIPPrefix, "Base config value should be preserved when not in dynamic config")
 	})
 }
+
+func TestIPv6OnlyConfig(t *testing.T) {
+	for _, ipam := range []types.IPAMType{types.IPAMTypeDefault, types.IPAMTypeCRD} {
+		t.Run(string(ipam), func(t *testing.T) {
+			cfg := &Config{IPStack: "ipv6", IPAMType: ipam}
+			assert.NoError(t, cfg.Validate())
+			v4, v6 := cfg.GetIPStack()
+			assert.False(t, v4)
+			assert.True(t, v6)
+		})
+	}
+	for _, tc := range []struct {
+		name, base, override string
+		wantErr              bool
+	}{
+		{"inherit", `{"ip_stack":"ipv6"}`, `{"max_pool_size":10}`, false},
+		{"same", `{"ip_stack":"ipv6"}`, `{"ip_stack":"ipv6"}`, false},
+		{"dual override", `{"ip_stack":"ipv6"}`, `{"ip_stack":"dual"}`, true},
+		{"ipv4 override", `{"ip_stack":"ipv6"}`, `{"ip_stack":"ipv4"}`, true},
+		{"null override", `{"ip_stack":"ipv6"}`, `{"ip_stack":null}`, true},
+		{"node only", `{"ip_stack":"dual"}`, `{"ip_stack":"ipv6"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := MergeConfigAndUnmarshal([]byte(tc.override), []byte(tc.base))
+			if tc.wantErr {
+				assert.ErrorContains(t, err, "cluster-wide")
+				return
+			}
+			if assert.NoError(t, err) {
+				assert.Equal(t, "ipv6", cfg.IPStack)
+			}
+		})
+	}
+}

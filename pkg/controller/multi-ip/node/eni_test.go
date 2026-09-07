@@ -813,3 +813,37 @@ func Test_processFrozenExpireAt(t *testing.T) {
 		})
 	}
 }
+
+func TestReleaseUnusedIPv6Only(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		count, remove int
+		deleting      bool
+	}{
+		{"all IPv6 including last", 1, 1, true},
+		{"partial", 3, 2, false},
+		{"all", 3, 3, true},
+		{"only primary IPv4", 0, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			primary := &networkv1beta1.IP{IP: "10.0.0.1", Primary: true, Status: networkv1beta1.IPStatusValid}
+			nic := &networkv1beta1.Nic{
+				Status:                      aliyunClient.ENIStatusInUse,
+				NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+				NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+				IPv4:                        map[string]*networkv1beta1.IP{primary.IP: primary},
+				IPv6:                        map[string]*networkv1beta1.IP{},
+			}
+			for _, ip := range []string{"fd00::1", "fd00::2", "fd00::3"}[:tc.count] {
+				nic.IPv6[ip] = &networkv1beta1.IP{IP: ip, Status: networkv1beta1.IPStatusValid}
+			}
+			got := releaseUnUsedIP(logr.Discard(), nic, tc.remove, &networkv1beta1.ENISpec{EnableIPv6: true})
+			assert.Equal(t, min(tc.count, tc.remove), got)
+			assert.Equal(t, tc.deleting, nic.Status == aliyunClient.ENIStatusDeleting)
+			assert.Equal(t, networkv1beta1.IPStatusValid, primary.Status)
+			if !tc.deleting {
+				assert.Equal(t, tc.count-tc.remove, IdlesWithAvailable(nic.IPv6))
+			}
+		})
+	}
+}
