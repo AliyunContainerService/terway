@@ -64,7 +64,7 @@ API IPv6 frontends are not required by this CNI-only test. To additionally run
   for neighbor discovery and path MTU discovery.
 
 The acceptance scope is Linux ENIMultiIP with default and CRD IPAM. It does not
-qualify Windows, ERDMA, trunk/fixed IP/multiple interfaces, Prefix Delegation,
+qualify exclusive ENI, Windows, ERDMA, trunk/fixed IP/multiple interfaces, Prefix Delegation,
 NetworkPolicy, public IPv6 bandwidth, load balancers or NAT64/DNS64. Use ordinary
 shared ENI nodes and leave those features disabled in these test environments.
 
@@ -105,12 +105,23 @@ namespace and deletes it afterward. It restarts the Terway daemonset and, in CRD
 mode, the controlplane deployment. It does not change the cluster configuration
 or use the broad E2E suite's configuration-reset hooks.
 
-Assertions include one IPv6 in `status.podIPs`, no IPv4 on non-loopback Pod
-interfaces or in Pod routes, unique addresses, TCP/UDP in both directions on the
-same and different nodes, IPv6 Service/EndpointSlice,
-scale-up, existing Pod connectivity after restart, and allocation after deletion
-and recreation. DNS over IPv6 and API access are checked only with
+The runner checks one IPv6 in `status.podIPs`, no IPv4 on non-loopback Pod
+interfaces or in Pod routes, unique addresses, IPv6 Service/EndpointSlice,
+scale-up, address retention after restart, and allocation after deletion and
+recreation. DNS over IPv6 and API access are checked only with
 `--check-cluster-services`. Pod, event and node snapshots are collected for diagnosis.
+
+### Current coverage gap
+
+TCP/UDP checks currently use only the initial Pods. Readiness and Service checks
+do not prove outbound connectivity from every Pod added during expansion.
+Before claiming multi-ENI connectivity and recovery coverage, each added Pod
+must exchange TCP/UDP traffic in both directions with a Pod on another node,
+including after daemon/controlplane restarts. A runner `PASS` alone does not
+establish this coverage.
+
+Exclusive ENI, Trunk and IP Prefix are not exercised by these profiles. Passing
+repository regression tests does not establish IPv6-only cloud coverage for them.
 
 Complete the following cloud-side acceptance checks as well; a connectivity
 runner alone does not prove ENI lifecycle correctness:
