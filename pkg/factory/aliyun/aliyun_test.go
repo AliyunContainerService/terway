@@ -1071,16 +1071,26 @@ func TestAliyun_CreateNetworkInterfaceIPv6OnlyMissingAddresses(t *testing.T) {
 		NetworkInterfaceID: "eni-test", PrivateIPAddress: "10.0.0.1",
 		PrivateIPSets: []client.IPSet{{IPAddress: "10.0.0.1", Primary: true}},
 	}, nil).Once()
+	attached := false
+	ecs.On("AttachNetworkInterface", mock.Anything, mock.Anything).Run(func(mock.Arguments) {
+		attached = true
+	}).Return(nil).Once()
+	ecs.On("DetachNetworkInterface", mock.Anything, "eni-test", "instance-test", "").Run(func(mock.Arguments) {
+		assert.True(t, attached, "cleanup must not detach an ENI that was never attached")
+	}).Return(nil).Once()
+	ecs.On("DeleteNetworkInterface", mock.Anything, "eni-test").Return(nil).Once()
 	pool, err := vswpool.NewSwitchPool(10, "10m")
 	if !assert.NoError(t, err) {
 		return
 	}
 	a := NewAliyun(context.Background(), api, nil, pool, &daemon.ENIConfig{
-		EnableIPv6: true, ZoneID: "zone-test", VSwitchOptions: []string{"vsw-test"},
+		EnableIPv6: true, InstanceID: "instance-test", ZoneID: "zone-test", VSwitchOptions: []string{"vsw-test"},
 	})
 	eni, v4, v6, err := a.CreateNetworkInterface(0, 2, "Secondary")
 	assert.ErrorContains(t, err, "without requested IPv6")
 	assert.NotNil(t, eni, "return the created ENI so the caller can clean it up")
 	assert.Empty(t, v4)
 	assert.Empty(t, v6)
+	assert.True(t, attached)
+	assert.NoError(t, a.DeleteNetworkInterface(eni.ID))
 }

@@ -533,10 +533,10 @@ func TestCmdAdd(t *testing.T) {
 				patches.ApplyFunc(doCmdAdd, func(ctx context.Context, client rpc.TerwayBackendClient, cmdArgs *cniCmdArgs) (*terwayTypes.IPNetSet, *terwayTypes.IPSet, error) {
 					_, ipNet, _ := net.ParseCIDR("192.168.1.10/24")
 					return &terwayTypes.IPNetSet{
-						IPv4: ipNet,
-					}, &terwayTypes.IPSet{
-						IPv4: net.ParseIP("192.168.1.1"),
-					}, nil
+							IPv4: ipNet,
+						}, &terwayTypes.IPSet{
+							IPv4: net.ParseIP("192.168.1.1"),
+						}, nil
 				})
 
 				// Mock cniTypes.PrintResult

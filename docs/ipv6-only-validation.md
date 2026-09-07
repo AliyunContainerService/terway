@@ -4,7 +4,7 @@
 
 ## 环境与构建
 
-- 基线：`aad92ade`，叠加本次工作区修改；未提交 commit。
+- 基线：`aad92ade`，首次实云验收时叠加工作区修改；实现随后提交为 `f5d6e0c7`，review 修正为 `d394aef4`。
 - ACK：`1.35.7-aliyun.1`，杭州 J/K 两个可用区，每集群两个 `ecs.g7nex.2xlarge` 普通 Linux 工作节点。
 - ACK、节点和 Service CIDR 保持双栈；Terway 从首次安装即配置 `ipv6`。
 - 每 ENI IPv6 配额 15；验收扩容到每节点 16 个测试 Pod，共 32 个。
@@ -52,4 +52,4 @@
 
 每个 Terraform 工作目录的 `artifacts/` 保存 `e2e.log`、Pod/节点/事件快照、`cloud-expanded.json`、`cloud-reclaimed.json` 和组件日志。Linux 完整日志位于 `hack/terraform/ack/runs/ipv6-only-linux-20260907/make-test-final.log`；dev 原始记录位于 `/root/terway-ipv6-only-20260907/artifacts/`。
 
-创建过程中发现原模板 Kubernetes 版本已不可用，已更新为实测版本。CRD 集群的一个零节点扩展池首次并发创建失败，已仅重建该空池恢复 Terraform apply；普通工作节点未受影响。
+创建过程中发现原模板 Kubernetes 版本已不可用，仅新 IPv6 Only 工作目录使用实测版本，共享默认值和已有工作目录保持原值。CRD 集群的一个零节点扩展池首次并发创建失败，已仅重建该空池恢复 Terraform apply；普通工作节点未受影响。

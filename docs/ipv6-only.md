@@ -19,6 +19,8 @@ make ack-cluster-byo-dual-cni-ipv6-crd
 
 The IPv6-only profiles set the exclusive-ENI and prefix node pools to zero
 workers; only the two ordinary shared-ENI workers run the test workload.
+New IPv6-only workdirs use the verified ACK version `1.35.7-aliyun.1`; existing
+workdirs and the shared Terraform version default are preserved.
 Each invocation uses an isolated Terraform workdir under
 `hack/terraform/ack/runs/`. Configure region, credentials, worker instance types
 and counts through the existing Terraform configuration. Use at least two Linux

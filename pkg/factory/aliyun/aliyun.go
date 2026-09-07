@@ -173,10 +173,6 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		return r, nil, nil, err
 	}
 
-	if !a.enableIPv4 && a.enableIPv6 && ipv6 > 0 && len(v6Set) == 0 {
-		return r, nil, nil, fmt.Errorf("created ENI %s without requested IPv6 addresses", r.ID)
-	}
-
 	// 2. attach eni
 	err = a.openAPI.GetECS().AttachNetworkInterface(ctx, &client.AttachNetworkInterfaceOptions{
 		NetworkInterfaceID:     &eni.NetworkInterfaceID,
@@ -187,6 +183,13 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 	})
 	if err != nil {
 		return r, nil, nil, err
+	}
+
+	// The caller cleans failed creations with detach followed by delete. Attach
+	// first so an empty IPv6 response does not leave an unattached ENI whose
+	// cleanup would repeatedly fail at detach.
+	if !a.enableIPv4 && a.enableIPv6 && ipv6 > 0 && len(v6Set) == 0 {
+		return r, nil, nil, fmt.Errorf("created ENI %s without requested IPv6 addresses", r.ID)
 	}
 
 	timeout := time.After(2 * time.Second)

@@ -113,7 +113,15 @@ materialize_workdir() {
     ln -sf "${SCRIPT_DIR}/deploy-terway.sh" "${workdir}/deploy-terway.sh"
 
     if [[ ! -f "${workdir}/terraform.tfvars" ]]; then
-        cp "${SCRIPT_DIR}/terraform.tfvars" "${workdir}/terraform.tfvars"
+        case "${profile}" in
+            byo-dual-cni-ipv6-default|byo-dual-cni-ipv6-crd)
+                # Use the verified ACK version only for fresh IPv6-only runs.
+                # Preserve shared defaults and any existing workdir configuration.
+                sed 's/^kubernetes_version *= .*/kubernetes_version = "1.35.7-aliyun.1"/' \
+                    "${SCRIPT_DIR}/terraform.tfvars" > "${workdir}/terraform.tfvars"
+                ;;
+            *) cp "${SCRIPT_DIR}/terraform.tfvars" "${workdir}/terraform.tfvars" ;;
+        esac
     fi
     # Pin provider versions across workdirs (avoids drift; reuses cache).
     if [[ -f "${SCRIPT_DIR}/.terraform.lock.hcl" && ! -e "${workdir}/.terraform.lock.hcl" ]]; then
