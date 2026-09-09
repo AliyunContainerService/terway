@@ -57,7 +57,7 @@ type Config struct {
 	EniCapShift                 int                                `yaml:"eni_cap_shift" json:"eni_cap_shift"`
 	VSwitchSelectionPolicy      string                             `yaml:"vswitch_selection_policy" json:"vswitch_selection_policy" mod:"default=random"`
 	EniSelectionPolicy          string                             `yaml:"eni_selection_policy" json:"eni_selection_policy" mod:"default=most_ips"`
-	IPStack                     string                             `yaml:"ip_stack" json:"ip_stack" validate:"oneof=ipv4 ipv6 dual" mod:"default=ipv4"` // default ipv4 , support ipv4 dual
+	IPStack                     string                             `yaml:"ip_stack" json:"ip_stack" validate:"oneof=ipv4 ipv6 dual" mod:"default=ipv4"` // default ipv4, supports ipv4, ipv6 and dual
 	EnableENITrunking           bool                               `yaml:"enable_eni_trunking" json:"enable_eni_trunking"`
 	EnableERDMA                 bool                               `yaml:"enable_erdma" json:"enable_erdma"`
 	CustomStatefulWorkloadKinds []string                           `yaml:"custom_stateful_workload_kinds" json:"custom_stateful_workload_kinds"`
@@ -145,7 +145,7 @@ func (c *Config) Populate() {
 
 func (c *Config) Validate() error {
 	switch c.IPStack {
-	case "", string(types.IPStackIPv4), string(types.IPStackDual):
+	case "", string(types.IPStackIPv4), string(types.IPStackIPv6), string(types.IPStackDual):
 	default:
 		return fmt.Errorf("unsupported ipStack %s in configMap", c.IPStack)
 	}
@@ -165,7 +165,7 @@ func (c *Config) GetIPStack() (bool, bool) {
 		ipv6 = true
 	case "ipv4", "":
 		ipv4 = true
-	case "ipv6":
+	case string(types.IPStackIPv6):
 		ipv6 = true
 	}
 	return ipv4, ipv6
@@ -210,8 +210,20 @@ func MergeConfigAndUnmarshal(topCfg, baseCfg []byte) (*Config, error) {
 
 	config := &Config{}
 	err = json.Unmarshal(jsonBytes, config)
-
-	return config, err
+	if err != nil {
+		return nil, err
+	}
+	base := &struct {
+		IPStack string `json:"ip_stack"`
+	}{}
+	if err := json.Unmarshal(baseCfg, base); err != nil {
+		return nil, err
+	}
+	// IPv6-only is a cluster-wide setting, never a per-node override.
+	if (base.IPStack == string(types.IPStackIPv6) || config.IPStack == string(types.IPStackIPv6)) && base.IPStack != config.IPStack {
+		return nil, fmt.Errorf("ip_stack is cluster-wide: node configuration must match %q", base.IPStack)
+	}
+	return config, nil
 }
 
 // MergeENITagBlockList combines the user-supplied list with the built-in

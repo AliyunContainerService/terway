@@ -35,6 +35,9 @@ func TestDataPathPolicyRoute(t *testing.T) {
 	err = hostNS.Set()
 	assert.NoError(t, err)
 
+	// Route preferred sources must already exist on the dual-stack host.
+	setupTestHostIPs(t)
+
 	defer func() {
 		err := containerNS.Close()
 		assert.NoError(t, err)
@@ -232,6 +235,9 @@ func TestDataPathPolicyRouteMultiNetwork(t *testing.T) {
 	err = hostNS.Set()
 	assert.NoError(t, err)
 
+	// Route preferred sources must already exist on the dual-stack host.
+	setupTestHostIPs(t)
+
 	defer func() {
 		err := containerNS.Close()
 		assert.NoError(t, err)
@@ -295,8 +301,8 @@ func TestDataPathPolicyRouteMultiNetwork(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, ok)
 
-		// Check routing rules - MultiNetwork mode should have specific routing rules
-		table := utils.GetRouteTableID(eni.Attrs().Index)
+		// Container routing tables use the container interface index.
+		table := utils.GetRouteTableID(containerLink.Attrs().Index)
 
 		// Check IPv4 routing rules
 		if cfg.ContainerIPNet.IPv4 != nil {

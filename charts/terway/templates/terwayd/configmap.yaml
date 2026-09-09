@@ -1,3 +1,6 @@
+{{- if and (or (eq .Values.terway.ipStack "ipv6") (eq .Values.terwayControlplane.ipStack "ipv6")) (ne .Values.terway.ipStack .Values.terwayControlplane.ipStack) }}
+{{- fail "IPv6-only requires matching terway.ipStack and terwayControlplane.ipStack" }}
+{{- end }}
 kind: ConfigMap
 apiVersion: v1
 metadata:

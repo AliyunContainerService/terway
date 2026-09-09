@@ -185,6 +185,13 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		return r, nil, nil, err
 	}
 
+	// The caller cleans failed creations with detach followed by delete. Attach
+	// first so an empty IPv6 response does not leave an unattached ENI whose
+	// cleanup would repeatedly fail at detach.
+	if !a.enableIPv4 && a.enableIPv6 && ipv6 > 0 && len(v6Set) == 0 {
+		return r, nil, nil, fmt.Errorf("created ENI %s without requested IPv6 addresses", r.ID)
+	}
+
 	timeout := time.After(2 * time.Second)
 
 	// 3. wait metadata ready & update cidr
@@ -277,6 +284,12 @@ func (a *Aliyun) CreateNetworkInterface(ipv4, ipv6 int, eniType string) (*daemon
 		return r, v4Set, v6Set, err
 	}
 
+	// ECS always returns a primary IPv4 address. Keep it on the ENI, but
+	// exclude it from the IPv6-only Pod resource pool, matching recovery.
+	// Preserve the existing IPv4/dual creation response.
+	if !a.enableIPv4 && a.enableIPv6 {
+		v4Set = nil
+	}
 	return r, v4Set, v6Set, nil
 }
 

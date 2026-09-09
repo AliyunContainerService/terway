@@ -24,7 +24,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func setupExclusiveENITestHostIPs(t *testing.T) {
+func setupTestHostIPs(t *testing.T) {
 	t.Helper()
 
 	hostLink := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "host"}}
@@ -64,7 +64,7 @@ func TestDataPathExclusiveENI(t *testing.T) {
 		err = testutils.UnmountNS(hostNS)
 		assert.NoError(t, err)
 	}()
-	setupExclusiveENITestHostIPs(t)
+	setupTestHostIPs(t)
 
 	err = netlink.LinkAdd(&netlink.Dummy{
 		LinkAttrs: netlink.LinkAttrs{Name: "eni"},
@@ -229,7 +229,7 @@ func TestDataPathExclusiveENI_PreSetUP(t *testing.T) {
 		err = testutils.UnmountNS(hostNS)
 		assert.NoError(t, err)
 	}()
-	setupExclusiveENITestHostIPs(t)
+	setupTestHostIPs(t)
 	err = netlink.LinkAdd(&netlink.Dummy{
 		LinkAttrs: netlink.LinkAttrs{Name: "eni"},
 	})
@@ -396,7 +396,7 @@ func TestDataPathExclusiveENIMultiNetwork(t *testing.T) {
 		err = testutils.UnmountNS(hostNS)
 		assert.NoError(t, err)
 	}()
-	setupExclusiveENITestHostIPs(t)
+	setupTestHostIPs(t)
 
 	err = netlink.LinkAdd(&netlink.Dummy{
 		LinkAttrs: netlink.LinkAttrs{Name: "eni"},

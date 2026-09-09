@@ -836,3 +836,17 @@ func TestAssignIPv6AddressesOptions_ApplyAssignIPv6Addresses(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateNetworkInterfaceOptionsIPv6Only(t *testing.T) {
+	options := &CreateNetworkInterfaceOptions{NetworkInterfaceOptions: &NetworkInterfaceOptions{
+		VSwitchID: "vsw-test", SecurityGroupIDs: []string{"sg-test"}, IPv6Count: 10,
+	}}
+	req, cleanup, err := options.Finish(&MockIdempotentKeyGen{generatedKeys: map[string]string{}})
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer cleanup()
+	assert.Empty(t, req.SecondaryPrivateIpAddressCount)
+	assert.Empty(t, req.PrivateIpAddress)
+	assert.Equal(t, requests.NewInteger(10), req.Ipv6AddressCount)
+}

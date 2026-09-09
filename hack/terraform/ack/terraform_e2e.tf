@@ -97,6 +97,16 @@ variable "timezone" {
   default     = "Asia/Shanghai"
 }
 
+variable "extended_node_pool_size" {
+  description = "Nodes per exclusive-ENI/prefix pool; use 0 for ordinary CNI-only tests."
+  type        = number
+  default     = 1
+  validation {
+    condition     = var.extended_node_pool_size >= 0 && floor(var.extended_node_pool_size) == var.extended_node_pool_size
+    error_message = "extended_node_pool_size must be a non-negative integer."
+  }
+}
+
 variable "ip_stack" {
   description = "The IP stack of the cluster."
   type        = string
@@ -414,7 +424,7 @@ resource "alicloud_cs_kubernetes_node_pool" "exclusive_eni_azj" {
   vswitch_ids           = [alicloud_vswitch.vswitches[0].id]
   instance_types        = var.worker_instance_types
   instance_charge_type  = "PostPaid"
-  desired_size          = 1
+  desired_size          = var.extended_node_pool_size
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
@@ -436,7 +446,7 @@ resource "alicloud_cs_kubernetes_node_pool" "exclusive_eni_azk" {
   vswitch_ids           = [alicloud_vswitch.vswitches[1].id]
   instance_types        = var.worker_instance_types
   instance_charge_type  = "PostPaid"
-  desired_size          = 1
+  desired_size          = var.extended_node_pool_size
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
@@ -488,7 +498,7 @@ resource "alicloud_cs_kubernetes_node_pool" "ip_prefix_azj" {
   vswitch_ids           = [alicloud_vswitch.vswitches[0].id]
   instance_types        = var.worker_instance_types
   instance_charge_type  = "PostPaid"
-  desired_size          = 1
+  desired_size          = var.extended_node_pool_size
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100
@@ -519,7 +529,7 @@ resource "alicloud_cs_kubernetes_node_pool" "ip_prefix_azk" {
   vswitch_ids           = [alicloud_vswitch.vswitches[1].id]
   instance_types        = var.worker_instance_types
   instance_charge_type  = "PostPaid"
-  desired_size          = 1
+  desired_size          = var.extended_node_pool_size
   install_cloud_monitor = true
   system_disk_category  = "cloud_essd"
   system_disk_size      = 100

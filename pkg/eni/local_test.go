@@ -2000,3 +2000,62 @@ func Test_parseResourceID_EdgeCases(t *testing.T) {
 	assert.Equal(t, "eni-123", eniID)
 	assert.Equal(t, "10.0.0.1", ip)
 }
+
+func TestLocalIPv6OnlyRestoreAndRelease(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	ip := netip.MustParseAddr("fd00::10")
+	eni := &daemon.ENI{ID: "eni-v6", MAC: "00:11:22:33:44:55", PrimaryIP: types.IPSet{IPv4: net.ParseIP("10.0.0.1")}}
+	f.On("LoadNetworkInterface", eni.MAC).Return([]netip.Addr(nil), []netip.Addr{ip}, nil).Once()
+	l := NewLocalTest(eni, f, &daemon.PoolConfig{EnableIPv6: true, MaxIPPerENI: 10}, "")
+	err := l.load([]daemon.PodResources{{
+		PodInfo:   &daemon.PodInfo{Name: "pod", Namespace: "ns"},
+		Resources: []daemon.ResourceItem{{Type: daemon.ResourceTypeENIIP, ENIID: eni.ID, ENIMAC: eni.MAC, IPv6: ip.String()}},
+	}})
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.Empty(t, l.ipv4)
+	idle, used, err := l.Usage()
+	assert.NoError(t, err)
+	assert.Zero(t, idle)
+	assert.Equal(t, 1, used)
+	assert.Equal(t, "ns/pod", l.ipv6[ip].podID)
+	resource := &LocalIPResource{ENI: *eni, IP: types.IPSet2{IPv6: ip}}
+	assert.Empty(t, resource.ToRPC()[0].BasicInfo.PodIP.IPv4)
+	assert.Equal(t, ip.String(), resource.ToRPC()[0].BasicInfo.PodIP.IPv6)
+	released, err := l.Release(context.Background(), &daemon.CNI{PodID: "ns/pod"}, resource)
+	assert.NoError(t, err)
+	assert.True(t, released)
+	idle, used, err = l.Usage()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, idle)
+	assert.Zero(t, used)
+}
+
+func TestLocalIPv6OnlyPartialCreate(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	eni := &daemon.ENI{ID: "eni-v6", MAC: "00:11:22:33:44:55", PrimaryIP: types.IPSet{IPv4: net.ParseIP("10.0.0.1")}}
+	f.On("CreateNetworkInterface", 0, 2, "").Return(eni, []netip.Addr(nil), []netip.Addr{netip.MustParseAddr("fd00::1")}, nil).Once()
+	f.On("AssignNIPv6", eni.ID, 1, eni.MAC).Return([]netip.Addr{netip.MustParseAddr("fd00::2")}, nil).Once()
+	l := NewLocalTest(nil, f, &daemon.PoolConfig{EnableIPv6: true, MaxIPPerENI: 10, BatchSize: 10}, "")
+	l.allocatingV6 = AllocatingRequests{NewLocalIPRequest(), NewLocalIPRequest()}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); l.factoryAllocWorker(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		l.cond.L.Lock()
+		l.cond.Broadcast()
+		l.cond.L.Unlock()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("allocation worker did not stop")
+		}
+	})
+	assert.Eventually(t, func() bool {
+		l.cond.L.Lock()
+		defer l.cond.L.Unlock()
+		return len(l.ipv6) == 2 && l.allocatingV6.Len() == 0 && len(l.ipv4) == 0
+	}, 5*time.Second, 20*time.Millisecond, "partial IPv6 response must leave the remaining request pending")
+}
