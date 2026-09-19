@@ -1,0 +1,42 @@
+From 17161d0eacb9d13dd212c542ee4eca7ac54bc414 Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Sat, 19 Sep 2026 15:01:07 +0800
+Subject: [PATCH 11/11] bpf: avoid forced inlining in IPv6 socket LB
+
+With IPv4 and IPv6 enabled, cil_sock6_sendmsg can fail to load on
+Linux 5.10 when host-only socket LB is enabled. Failure to load the
+socket collection also breaks IPv4 hostNetwork access to ClusterIP
+services.
+
+Remove forced inlining from __sock6_xlate_fwd to work around the load
+failure. Keep the change scoped to the runtime code, matching the final
+state of the internal terway/1.18.13 branch after commits 691c63b11f0b
+and ba0280ddb52e.
+
+Validated on two ACK nodes running ALinux 5.10.134-19.8: all 12 Pod and
+hostNetwork API/TCP/UDP checks passed, including after a policy restart.
+The precise rejection path in the target kernel remains unconfirmed.
+
+Related: https://github.com/cilium/cilium/issues/38789#issuecomment-3696123974
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ bpf/bpf_sock.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/bpf/bpf_sock.c b/bpf/bpf_sock.c
+index 63568ef897..5d16ea0296 100644
+--- a/bpf/bpf_sock.c
++++ b/bpf/bpf_sock.c
+@@ -986,8 +986,10 @@ int cil_sock6_pre_bind(struct bpf_sock_addr *ctx)
+ }
+ #endif /* ENABLE_HEALTH_CHECK */
+ 
+-static __always_inline int __sock6_xlate_fwd(struct bpf_sock_addr *ctx,
+-					     const bool udp_only)
++/* Do not force inline: host-only dual-stack socket LB can fail to load
++ * cil_sock6_sendmsg on Linux 5.10. See cilium/cilium#38789.
++ */
++static int __sock6_xlate_fwd(struct bpf_sock_addr *ctx, const bool udp_only)
+ {
+ #ifdef ENABLE_IPV6
+ 	union lb6_affinity_client_id id;
