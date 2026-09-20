@@ -58,7 +58,24 @@
 - **Trigger**: When adding/removing imports.
 - **Action**: Run `go mod tidy && go mod vendor`. CI requires vendor files to be in sync.
 
+## Policy Image Workflow
+
+- **Trigger**: Changes to `deploy/images/policy/Dockerfile`, `policy/cilium/`, `policy/felix/`, or other policy image build inputs.
+- **First commit — build inputs**: Commit the policy Dockerfile, patches, and any required build changes together. Keep unrelated changes out and preserve the existing patch format and ordering. Append a separately maintained fix as a new numbered patch instead of folding it into an earlier patch.
+- **Build and publish**: Build from a clean checkout of that exact commit on a Linux build host. Use `make build-push-policy REGISTRY=<registry/namespace> BUILD_PLATFORMS=linux/amd64,linux/arm64` with the intended registry explicitly set. The image tag is `policy-<first-commit-short-sha>`; do not amend or rebase that commit after publishing without rebuilding and publishing under the new SHA.
+- **Verify**: Confirm the published manifest includes both architectures and check the binaries' versions for each architecture. Run the required Linux tests and relevant datapath regression for runtime changes; distinguish emulated binary checks from tests on actual target nodes.
+- **Second commit — consume the image**: After publishing and any required registry synchronization, update `TERWAY_POLICY_IMAGE` in both `deploy/images/terway/Dockerfile` and `deploy/images/terway-controlplane/Dockerfile`. Keep the tag and pin the multi-platform index digest read from the destination registry. Synchronization can change the index digest; verify the architecture-specific manifests still match the built image. Keep this commit limited to the image references and separate from the first commit.
+- **Public repository hygiene**: Keep credentials, kubeconfigs, account/cluster/node identifiers, private repository URLs, personal registry addresses, SSH details, local paths, and raw diagnostic output out of tracked files, patch descriptions, and commit messages. Use placeholders in workflow examples and only public, project-approved image references in committed Dockerfiles. Review staged content before committing; retain private build and diagnostic artifacts outside the repository.
+
+## Commit Message Standards
+
+- Follow recent history for the affected component. For new commits, use `<type>(<scope>): <summary>` when a scope helps, or `<type>: <summary>` otherwise. Common types are `fix`, `feat`, `chore`, `docs`, `test`, and `build`; use concise scopes such as `policy` or `datapath`.
+- Write a concise English imperative summary describing the actual change. Use `fix` for a behavior correction, `feat` for a new capability, and `chore` for an image reference update. Avoid vague subjects such as "update code" or explanations of the conversation.
+- Policy examples: `fix(policy): avoid forced inlining in IPv6 socket LB` for the first commit and `chore: update Terway policy image to policy-<sha>` for the second. Documentation-only changes use `docs: ...`.
+- Add a body when needed to explain the problem, resulting behavior, and relevant validation or limitations. Apply the public repository hygiene rules above to the entire message.
+- The bracketed component prefix below is a PR title convention, not a required commit prefix. Do not rewrite existing commits solely to normalize style, especially commits already referenced by published image tags.
+
 ## Pull Request Standards
 
-- **Naming**: `[terway] <Title>` or `[component] <Title>`.
+- **PR title**: `[terway] <Title>` or `[component] <Title>`.
 - **Checklist**: Format (`make fmt`) -> Lint (`make lint`) -> Test (`make test` or explicitly scoped `make test-quick`).
