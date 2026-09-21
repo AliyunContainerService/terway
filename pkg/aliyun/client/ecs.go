@@ -90,14 +90,6 @@ func (a *ECSService) DescribeNetworkInterface(ctx context.Context, vpcID string,
 	var result []*NetworkInterface
 	nextToken := ""
 
-	var ecsTags []ecs.DescribeNetworkInterfacesTag
-	for k, v := range tags {
-		ecsTags = append(ecsTags, ecs.DescribeNetworkInterfacesTag{
-			Key:   k,
-			Value: v,
-		})
-	}
-
 	for {
 		err := a.RateLimiter.Wait(ctx, APIDescribeNetworkInterfaces)
 		if err != nil {
@@ -107,9 +99,6 @@ func (a *ECSService) DescribeNetworkInterface(ctx context.Context, vpcID string,
 		req := ecs.CreateDescribeNetworkInterfacesRequest()
 		req.NextToken = nextToken
 		req.VpcId = vpcID
-		if len(ecsTags) > 0 {
-			req.Tag = &ecsTags
-		}
 		req.NetworkInterfaceId = &eniID
 		req.InstanceId = instanceID
 		req.Type = instanceType
@@ -141,7 +130,7 @@ func (a *ECSService) DescribeNetworkInterface(ctx context.Context, vpcID string,
 		}
 		nextToken = resp.NextToken
 	}
-	return result, nil
+	return filterNetworkInterfacesByTags(result, tags), nil
 }
 
 // AttachNetworkInterface attach eni

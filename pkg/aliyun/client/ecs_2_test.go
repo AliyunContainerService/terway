@@ -497,3 +497,68 @@ func TestECSService_DetachNetworkInterface2_NotFound(t *testing.T) {
 func ptrTo[T any](v T) *T {
 	return &v
 }
+
+func TestECSService_DescribeNetworkInterface_LocalTagsPagination(t *testing.T) {
+	for _, v2 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v2=%t", v2), func(t *testing.T) {
+			service := createTestECSServiceForAPI()
+			calls := 0
+			patches := gomonkey.ApplyFunc((*ecs.Client).DescribeNetworkInterfaces,
+				func(_ *ecs.Client, req *ecs.DescribeNetworkInterfacesRequest) (*ecs.DescribeNetworkInterfacesResponse, error) {
+					assert.Nil(t, req.Tag)
+					assert.Equal(t, "vpc-test", req.VpcId)
+					assert.Equal(t, []string{"eni-test"}, *req.NetworkInterfaceId)
+					assert.Equal(t, "i-test", req.InstanceId)
+					assert.Equal(t, "Secondary", req.Type)
+					assert.Equal(t, "InUse", req.Status)
+					maxResults, err := req.MaxResults.GetValue()
+					assert.NoError(t, err)
+					assert.Equal(t, maxSinglePageSize, maxResults)
+					calls++
+					resp := &ecs.DescribeNetworkInterfacesResponse{}
+					switch calls {
+					case 1, 2:
+						if calls == 1 {
+							assert.Empty(t, req.NextToken)
+						} else {
+							assert.Equal(t, "page-2", req.NextToken)
+						}
+						resp.NetworkInterfaceSets.NetworkInterfaceSet = make([]ecs.NetworkInterfaceSet, maxSinglePageSize)
+						resp.NextToken = fmt.Sprintf("page-%d", calls+1)
+					case 3:
+						assert.Equal(t, "page-3", req.NextToken)
+						// A short final page can still carry a token; do not query it.
+						resp.NextToken = "unused-token"
+						resp.NetworkInterfaceSets.NetworkInterfaceSet = []ecs.NetworkInterfaceSet{
+							{NetworkInterfaceId: "eni-first", Tags: ecs.TagsInDescribeNetworkInterfaces{Tag: []ecs.Tag{{Key: "app", Value: "terway"}, {TagKey: "cluster", TagValue: "test"}}}},
+							{NetworkInterfaceId: "eni-partial", Tags: ecs.TagsInDescribeNetworkInterfaces{Tag: []ecs.Tag{{Key: "app", Value: "terway"}}}},
+							{NetworkInterfaceId: "eni-second", Tags: ecs.TagsInDescribeNetworkInterfaces{Tag: []ecs.Tag{{TagKey: "app", TagValue: "terway"}, {Key: "cluster", Value: "test"}}}},
+						}
+					default:
+						t.Fatal("unexpected additional page")
+					}
+					return resp, nil
+				})
+			defer patches.Reset()
+			tags := map[string]string{"app": "terway", "cluster": "test"}
+			var result []*NetworkInterface
+			var err error
+			if v2 {
+				result, err = service.DescribeNetworkInterface2(context.Background(), &DescribeNetworkInterfaceOptions{
+					VPCID: ptrTo("vpc-test"), NetworkInterfaceIDs: ptrTo([]string{"eni-test"}),
+					InstanceID: ptrTo("i-test"), InstanceType: ptrTo("Secondary"), Status: ptrTo("InUse"), Tags: &tags,
+				})
+			} else {
+				result, err = service.DescribeNetworkInterface(context.Background(), "vpc-test", []string{"eni-test"}, "i-test", "Secondary", "InUse", tags)
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, 3, calls)
+			if assert.Len(t, result, 2) {
+				assert.Equal(t, "eni-first", result[0].NetworkInterfaceID)
+				assert.Equal(t, "eni-second", result[1].NetworkInterfaceID)
+				assert.Equal(t, "app", result[0].Tags[0].Key)
+				assert.Equal(t, "app", result[1].Tags[0].TagKey)
+			}
+		})
+	}
+}

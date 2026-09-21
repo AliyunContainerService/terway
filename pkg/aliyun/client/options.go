@@ -412,16 +412,7 @@ func (o *DescribeNetworkInterfaceOptions) ECS() *ecs.DescribeNetworkInterfacesRe
 	if o.Status != nil {
 		req.Status = *o.Status
 	}
-	if o.Tags != nil {
-		tags := make([]ecs.DescribeNetworkInterfacesTag, 0)
-		for k, v := range *o.Tags {
-			tags = append(tags, ecs.DescribeNetworkInterfacesTag{
-				Key:   k,
-				Value: v,
-			})
-		}
-		req.Tag = &tags
-	}
+	// Tags are filtered locally to avoid the ECS tag query resource limit.
 
 	if o.Backoff == nil {
 		o.Backoff = &wait.Backoff{
