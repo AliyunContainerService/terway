@@ -126,6 +126,83 @@ func TestExclusiveModePreservesUserCNIChain(t *testing.T) {
 	assert.Equal(t, "169.254.20.10/32", plugins[0].Path("host_stack_cidrs").Index(0).Data())
 }
 
+func TestExclusiveModeFiltersCiliumChain(t *testing.T) {
+	tests := []struct {
+		name    string
+		chain   []string
+		want    []string
+		lingjun bool
+		shared  bool
+	}{
+		{name: "automatic cilium chain"},
+		{name: "lingjun automatic cilium chain", lingjun: true},
+		{
+			name: "explicit cilium with user plugins",
+			chain: []string{
+				`{"type":"portmap","capabilities":{"portMappings":true}}`,
+				`{"type":"cilium-cni"}`,
+				`{"type":"bandwidth","capabilities":{"bandwidth":true}}`,
+			},
+			want: []string{
+				`{"type":"portmap","capabilities":{"portMappings":true}}`,
+				`{"type":"bandwidth","capabilities":{"bandwidth":true}}`,
+			},
+		},
+		{
+			name:  "automatic cilium after user plugin",
+			chain: []string{`{"type":"portmap","capabilities":{"portMappings":true}}`},
+			want:  []string{`{"type":"portmap","capabilities":{"portMappings":true}}`},
+		},
+		{name: "shared mode keeps cilium", shared: true},
+		{name: "lingjun shared mode keeps cilium", lingjun: true, shared: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reproduce init.sh: generate the CNI chain before applying node mode.
+			configs := [][]byte{[]byte(`{"type":"terway","eniip_virtual_type":"datapathv2","network_policy_provider":"ebpf"}`)}
+			for _, plugin := range tt.chain {
+				configs = append(configs, []byte(plugin))
+			}
+			generated, err := mergeConfigList(configs, &feature{EBPF: true})
+			require.NoError(t, err)
+			require.Contains(t, generated, `"cilium-cni"`)
+
+			dir := t.TempDir()
+			cniPath := dir + "/10-terway.conflist"
+			require.NoError(t, os.WriteFile(cniPath, []byte(generated), 0644))
+			store := nodecap.NewFileNodeCapabilities(dir + "/node_capabilities")
+			labels := map[string]string{"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly"}
+			if tt.lingjun {
+				labels["alibabacloud.com/lingjun-worker"] = "true"
+			}
+			if tt.shared {
+				labels["k8s.aliyun.com/exclusive-mode-eni-type"] = "default"
+			}
+
+			// Re-running node initialization must preserve the same result.
+			for i := 0; i < 2; i++ {
+				require.NoError(t, setExclusiveMode(store, labels, cniPath))
+				content, err := os.ReadFile(cniPath)
+				require.NoError(t, err)
+				if tt.shared {
+					assert.JSONEq(t, generated, string(content))
+					continue
+				}
+				config, err := gabs.ParseJSON(content)
+				require.NoError(t, err)
+				plugins := config.Path("plugins").Children()
+				require.Len(t, plugins, 1+len(tt.want))
+				exclusive, err := gabs.ParseJSON([]byte(eniOnlyCNI))
+				require.NoError(t, err)
+				assert.JSONEq(t, exclusive.Path("plugins").Index(0).String(), plugins[0].String())
+				for j, want := range tt.want {
+					assert.JSONEq(t, want, plugins[j+1].String())
+				}
+			}
+		})
+	}
+}
+
 func TestExclusiveModeWritesCNIConfigWithAutoMTU(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "test_node_capabilities")
 	assert.NoError(t, err)
