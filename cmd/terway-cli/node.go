@@ -199,7 +199,16 @@ func setExclusiveMode(store nodecap.NodeCapabilitiesStore, labels map[string]str
 		if len(plugins) == 0 {
 			return fmt.Errorf("cni config has no plugins")
 		}
-		if _, err = generated.Set(exclusivePlugin.Data(), "plugins", "0"); err != nil {
+		filtered := []any{exclusivePlugin.Data()}
+		for _, plugin := range plugins[1:] {
+			// Exclusive ENI nodes do not run cilium-agent. Keep user chains,
+			// but remove cilium-cni, which requires the agent's socket.
+			if plugin.Path("type").Data() == pluginTypeCilium {
+				continue
+			}
+			filtered = append(filtered, plugin.Data())
+		}
+		if _, err = generated.Set(filtered, "plugins"); err != nil {
 			return err
 		}
 
