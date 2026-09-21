@@ -127,15 +127,22 @@ func TestExclusiveModePreservesUserCNIChain(t *testing.T) {
 }
 
 func TestExclusiveModeFiltersCiliumChain(t *testing.T) {
+	patchGetAllConfig := gomonkey.ApplyFunc(getAllConfig, func(base string) (*TerwayConfig, error) {
+		return &TerwayConfig{cniConfig: []byte(`{"type":"terway","auto_mtu":false}`)}, nil
+	})
+	t.Cleanup(patchGetAllConfig.Reset)
+
 	tests := []struct {
-		name    string
-		chain   []string
-		want    []string
-		lingjun bool
-		shared  bool
+		name     string
+		chain    []string
+		want     []string
+		lingjun  bool
+		shared   bool
+		noCilium bool
 	}{
 		{name: "automatic cilium chain"},
 		{name: "lingjun automatic cilium chain", lingjun: true},
+		{name: "already filtered chain clears stale capability", noCilium: true},
 		{
 			name: "explicit cilium with user plugins",
 			chain: []string{
@@ -163,14 +170,20 @@ func TestExclusiveModeFiltersCiliumChain(t *testing.T) {
 			for _, plugin := range tt.chain {
 				configs = append(configs, []byte(plugin))
 			}
-			generated, err := mergeConfigList(configs, &feature{EBPF: true})
+			generated, err := mergeConfigList(configs, &feature{EBPF: !tt.noCilium})
 			require.NoError(t, err)
-			require.Contains(t, generated, `"cilium-cni"`)
+			if tt.noCilium {
+				require.NotContains(t, generated, `"cilium-cni"`)
+			} else {
+				require.Contains(t, generated, `"cilium-cni"`)
+			}
 
 			dir := t.TempDir()
 			cniPath := dir + "/10-terway.conflist"
 			require.NoError(t, os.WriteFile(cniPath, []byte(generated), 0644))
 			store := nodecap.NewFileNodeCapabilities(dir + "/node_capabilities")
+			store.Set(nodecap.NodeCapabilityHasCiliumChainer, True)
+			require.NoError(t, store.Save())
 			labels := map[string]string{"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly"}
 			if tt.lingjun {
 				labels["alibabacloud.com/lingjun-worker"] = "true"
@@ -182,12 +195,15 @@ func TestExclusiveModeFiltersCiliumChain(t *testing.T) {
 			// Re-running node initialization must preserve the same result.
 			for i := 0; i < 2; i++ {
 				require.NoError(t, setExclusiveMode(store, labels, cniPath))
+				require.NoError(t, store.Load())
 				content, err := os.ReadFile(cniPath)
 				require.NoError(t, err)
 				if tt.shared {
+					assert.Equal(t, True, store.Get(nodecap.NodeCapabilityHasCiliumChainer))
 					assert.JSONEq(t, generated, string(content))
 					continue
 				}
+				assert.Equal(t, False, store.Get(nodecap.NodeCapabilityHasCiliumChainer))
 				config, err := gabs.ParseJSON(content)
 				require.NoError(t, err)
 				plugins := config.Path("plugins").Children()
