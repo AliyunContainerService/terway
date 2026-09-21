@@ -25,16 +25,17 @@ func (a *ECSService) DescribeNetworkInterface2(ctx context.Context, opts ...Desc
 	var result []*NetworkInterface
 	nextToken := ""
 
+	options := &DescribeNetworkInterfaceOptions{}
+	for _, opt := range opts {
+		opt.ApplyTo(options)
+	}
+
 	for {
 		err := a.RateLimiter.Wait(ctx, APIDescribeNetworkInterfaces)
 		if err != nil {
 			return nil, err
 		}
 
-		options := &DescribeNetworkInterfaceOptions{}
-		for _, opt := range opts {
-			opt.ApplyTo(options)
-		}
 		req := options.ECS()
 		req.NextToken = nextToken
 		req.MaxResults = requests.NewInteger(maxSinglePageSize)
@@ -62,6 +63,9 @@ func (a *ECSService) DescribeNetworkInterface2(ctx context.Context, opts ...Desc
 			break
 		}
 		nextToken = resp.NextToken
+	}
+	if options.Tags != nil {
+		result = filterNetworkInterfacesByTags(result, *options.Tags)
 	}
 	return result, nil
 }
