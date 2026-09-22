@@ -178,10 +178,6 @@ func GenerateHostPeerCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, tab
 	var sysctl map[string][]string
 
 	if cfg.ContainerIPNet.IPv4 != nil {
-		var src net.IP
-		if cfg.HostIPSet != nil && cfg.HostIPSet.IPv4 != nil {
-			src = cfg.HostIPSet.IPv4.IP
-		}
 		if len(cfg.ExtraRoutes) > 0 {
 			addrs = append(addrs, &netlink.Addr{
 				IPNet: LinkIPNet,
@@ -193,7 +189,6 @@ func GenerateHostPeerCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, tab
 			LinkIndex: link.Attrs().Index,
 			Scope:     netlink.SCOPE_LINK,
 			Dst:       utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv4),
-			Src:       src,
 		})
 
 		v4 := utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv4)
@@ -212,10 +207,6 @@ func GenerateHostPeerCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, tab
 	}
 
 	if cfg.ContainerIPNet.IPv6 != nil {
-		var src net.IP
-		if cfg.HostIPSet != nil && cfg.HostIPSet.IPv6 != nil {
-			src = cfg.HostIPSet.IPv6.IP
-		}
 		if len(cfg.ExtraRoutes) > 0 {
 			addrs = append(addrs, &netlink.Addr{
 				IPNet: LinkIPNetv6,
@@ -225,7 +216,6 @@ func GenerateHostPeerCfgForPolicy(cfg *types.SetupConfig, link netlink.Link, tab
 		routes = append(routes, &netlink.Route{
 			LinkIndex: link.Attrs().Index,
 			Dst:       utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv6),
-			Src:       src,
 		})
 
 		v6 := utils.NewIPNetWithMaxMask(cfg.ContainerIPNet.IPv6)
