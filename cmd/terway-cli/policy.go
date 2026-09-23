@@ -135,12 +135,26 @@ func initPolicy(cmd *cobra.Command, args []string) error {
 }
 
 func runExclusiveENI(cfg *PolicyConfig) error {
-	err := configENIOnlyMasq("iptables")
+	// The eniOnly SNAT rule rewrites same-node Service traffic back to the node
+	// address, so the node address must be resolvable. Fail hard rather than
+	// install a source-less rule: a visible crash loop beats silent no-SNAT.
+	nodeIPv4, nodeIPv6, err := resolveExclusiveNodeIP(true, cfg.IPv6)
+	if err != nil {
+		return fmt.Errorf("resolve node address for eni-only masquerade: %w", err)
+	}
+	if nodeIPv4 == "" {
+		return fmt.Errorf("resolve node IPv4 for eni-only masquerade: address unavailable")
+	}
+
+	err = configENIOnlyMasq("iptables", nodeIPv4)
 	if err != nil {
 		return err
 	}
 	if cfg.IPv6 {
-		err = configENIOnlyMasq("ip6tables")
+		if nodeIPv6 == "" {
+			return fmt.Errorf("resolve node IPv6 for eni-only masquerade: address unavailable")
+		}
+		err = configENIOnlyMasq("ip6tables", nodeIPv6)
 		if err != nil {
 			return err
 		}
@@ -356,12 +370,12 @@ func extractArgs(in string) []string {
 	})
 }
 
-func configENIOnlyMasq(ipt string) error {
+func configENIOnlyMasq(ipt, nodeIP string) error {
 	binary, err := exec.LookPath("bash")
 	if err != nil {
 		return fmt.Errorf("bash is not installed %w", err)
 	}
-	cmd := exec.Command(binary, "-cx", "source uninstall_policy.sh;masq_eni_only "+ipt)
+	cmd := exec.Command(binary, "-cx", "source uninstall_policy.sh;masq_eni_only "+ipt+" "+nodeIP)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()

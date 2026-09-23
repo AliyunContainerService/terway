@@ -1,6 +1,13 @@
 #!/bin/sh
 
 masq_eni_only() {
+  # $1 = iptables flavour (iptables or ip6tables)
+  # $2 = node address used as the SNAT source for same-node Service traffic
+  if [ -z "$2" ]; then
+    echo "masq_eni_only: missing node address argument" >&2
+    return 1
+  fi
+
   if ! "$1" -t nat -L terway-masq; then
     # Create a new chain in nat table.
     "$1" -t nat -N terway-masq || return 1
@@ -11,20 +18,41 @@ masq_eni_only() {
     "$1" -t nat -A POSTROUTING -m comment --comment "terway:masq-outgoing" ! -o lo -j terway-masq || return 1
   fi
 
-  # The host-side peer for an exclusive ENI Pod is a cali* veth with no IP
-  # address.  Do not let node-to-Pod traffic reach MASQUERADE: its address
-  # selection may otherwise fall back to an unrelated host interface.
-  # Normalize duplicate or misplaced bypass rules. Leave a correct
-  # steady-state chain untouched so there is no transient MASQUERADE window.
-  managed_rule='-A terway-masq -o cali+ -m comment --comment "terway:masq-pod-bypass" -j RETURN'
+  # On eniOnly nodes, cali* peers lead to local exclusive-ENI Pods. SNAT
+  # makes replies to same-node Service traffic return through this host.
+  # Use the node address explicitly: these peers have no address for
+  # MASQUERADE to select. No per-Pod state is needed for this rule.
+  # Preserve the bypass rule after SNAT when upgrading existing chains.
+  snat_id='--comment "terway:eni-only-snat"'
+  return_id='--comment "terway:masq-pod-bypass"'
+
   rules=$("$1" -t nat -S terway-masq 2>/dev/null) || return 1
   first_rule=$(printf '%s\n' "$rules" | sed -n '2p')
-  managed_count=$(printf '%s\n' "$rules" | grep -Fxc -- "$managed_rule")
-  if [ "$first_rule" != "$managed_rule" ] || [ "$managed_count" -ne 1 ]; then
-    while "$1" -t nat -C terway-masq -o 'cali+' -m comment --comment "terway:masq-pod-bypass" -j RETURN >/dev/null 2>&1; do
-      "$1" -t nat -D terway-masq -o 'cali+' -m comment --comment "terway:masq-pod-bypass" -j RETURN || return 1
+  second_rule=$(printf '%s\n' "$rules" | sed -n '3p')
+  snat_count=$(printf '%s\n' "$rules" | grep -c -- "$snat_id")
+  return_count=$(printf '%s\n' "$rules" | grep -c -- "$return_id")
+
+  snat_rule="-A terway-masq -o cali+ -m comment $snat_id -j SNAT --to-source $2"
+  return_rule="-A terway-masq -o cali+ -m comment $return_id -j RETURN"
+
+  if [ "$first_rule" != "$snat_rule" ] || [ "$second_rule" != "$return_rule" ] || \
+    [ "$snat_count" -ne 1 ] || [ "$return_count" -ne 1 ]; then
+    # Delete every managed rule sitting at the head (positional delete), then
+    # rebuild the ordered pair. Matching only on the comment marker self-heals
+    # a changed node address (whose rendered SNAT text differs) and clears any
+    # duplicate or misordered rule, converging to [SNAT, RETURN].
+    while :; do
+      case "$first_rule" in
+        *"$snat_id"* | *"$return_id"*) ;;
+        *) break ;;
+      esac
+      "$1" -t nat -D terway-masq 1 || return 1
+      rules=$("$1" -t nat -S terway-masq 2>/dev/null) || return 1
+      first_rule=$(printf '%s\n' "$rules" | sed -n '2p')
     done
-    "$1" -t nat -I terway-masq 1 -o 'cali+' -m comment --comment "terway:masq-pod-bypass" -j RETURN || return 1
+    "$1" -t nat -I terway-masq 1 -o 'cali+' \
+      -m comment --comment "terway:eni-only-snat" -j SNAT --to-source "$2" || return 1
+    "$1" -t nat -I terway-masq 2 -o 'cali+' -m comment --comment "terway:masq-pod-bypass" -j RETURN || return 1
   fi
 
   if ! "$1" -t nat -L terway-masq | grep -q MASQUERADE; then

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/Jeffail/gabs/v2"
 	"github.com/agiledragon/gomonkey/v2"
 	"github.com/stretchr/testify/assert"
+	ctrl "sigs.k8s.io/controller-runtime/pkg/manager/signals"
 )
 
 func Test_extractArgs(t *testing.T) {
@@ -554,144 +556,265 @@ func Test_runCalico_EnvironmentVariables(t *testing.T) {
 
 func TestMasqENIOnlyRules(t *testing.T) {
 	script := "../../policy/uninstall_policy.sh"
-	managedRule := `-A terway-masq -o cali+ -m comment --comment "terway:masq-pod-bypass" -j RETURN`
-	masqueradeRule := `-A terway-masq -j MASQUERADE`
 
-	runModel := func(chainExists bool, initialRules []string, runs int, failDelete, failInsert bool) ([]string, []string, error) {
-		flag := func(value bool) string {
-			if value {
+	retLine := `-A terway-masq -o cali+ -m comment --comment "terway:masq-pod-bypass" -j RETURN`
+	masqLine := `-A terway-masq -j MASQUERADE`
+	snatLine := func(ip string) string {
+		return `-A terway-masq -o cali+ -m comment --comment "terway:eni-only-snat" -j SNAT --to-source ` + ip
+	}
+	// insertSNATArg is the argv (unquoted comment) the script passes to iptables -I 1.
+	insertSNATArg := func(ip string) string {
+		return `-t nat -I terway-masq 1 -o cali+ -m comment --comment terway:eni-only-snat -j SNAT --to-source ` + ip
+	}
+	insertRetArg := `-t nat -I terway-masq 2 -o cali+ -m comment --comment terway:masq-pod-bypass -j RETURN`
+
+	type result struct {
+		status int
+		rules  []string
+		writes []string
+	}
+
+	// runModel emulates iptables so we can exercise masq_eni_only's
+	// ordering / idempotency logic against the real script.
+	runModel := func(t *testing.T, ipt, nodeIP string, chainExists, failDelete, failInsert bool, runs int, initial ...string) result {
+		t.Helper()
+		flag := func(v bool) string {
+			if v {
 				return "1"
 			}
 			return "0"
 		}
 		model := `
 script=$1
-runs=$2
-chain_exists=$3
-fail_delete=$4
-fail_insert=$5
-shift 5
+ipt=$2
+nodeIP=$3
+runs=$4
+chain_exists=$5
+fail_delete=$6
+fail_insert=$7
+shift 7
 chain=("$@")
 writes=()
 postrouting=1
-managed_rule='-A terway-masq -o cali+ -m comment --comment "terway:masq-pod-bypass" -j RETURN'
-masquerade_rule='-A terway-masq -j MASQUERADE'
+masq_rule='-A terway-masq -j MASQUERADE'
 
-has_rule() {
-  local want=$1 rule
-  for rule in "${chain[@]}"; do
-    [ "$rule" = "$want" ] && return 0
-  done
-  return 1
+# Convert an iptables -I argv into the canonical -S rendered form (quoted comment).
+build_stored() {
+  local a="$1"
+  a=${a#-t nat -I terway-masq }
+  a=${a#* }
+  a=${a// --comment terway:eni-only-snat / --comment \"terway:eni-only-snat\" }
+  a=${a// --comment terway:masq-pod-bypass / --comment \"terway:masq-pod-bypass\" }
+  printf '%s' "-A terway-masq $a"
 }
 
-delete_rule() {
-  local want=$1 rule removed=0
-  local next=()
-  for rule in "${chain[@]}"; do
-    if [ "$removed" -eq 0 ] && [ "$rule" = "$want" ]; then
-      removed=1
-      continue
-    fi
-    next+=("$rule")
-  done
-  chain=("${next[@]}")
-}
-
-iptables() {
+_model() {
   case "$*" in
     "-t nat -L terway-masq")
       [ "$chain_exists" -eq 1 ] || return 1
-      printf '%s\n' "${chain[@]}"
-      ;;
-    "-t nat -N terway-masq")
-      chain_exists=1
-      writes+=("$*")
-      ;;
-    "-t nat -L POSTROUTING")
-      [ "$postrouting" -eq 1 ] && printf '%s\n' terway-masq
-      ;;
-    "-t nat -A POSTROUTING "*)
-      postrouting=1
-      writes+=("$*")
-      ;;
+      if [ ${#chain[@]} -gt 0 ]; then printf '%s\n' "${chain[@]}"; fi ;;
+    "-t nat -N terway-masq") chain_exists=1; writes+=("$*") ;;
+    "-t nat -L POSTROUTING") [ "$postrouting" -eq 1 ] && printf '%s\n' terway-masq ;;
+    "-t nat -A POSTROUTING "*) postrouting=1; writes+=("$*") ;;
     "-t nat -S terway-masq")
       [ "$chain_exists" -eq 1 ] || return 1
       printf '%s\n' '-N terway-masq'
-      printf '%s\n' "${chain[@]}"
-      ;;
-    "-t nat -C terway-masq -o cali+ -m comment --comment terway:masq-pod-bypass -j RETURN") has_rule "$managed_rule" ;;
-    "-t nat -D terway-masq -o cali+ -m comment --comment terway:masq-pod-bypass -j RETURN")
+      if [ ${#chain[@]} -gt 0 ]; then printf '%s\n' "${chain[@]}"; fi ;;
+    "-t nat -D terway-masq 1")
       [ "$fail_delete" -eq 0 ] || return 4
-      delete_rule "$managed_rule"
-      writes+=("$*")
-      ;;
-    "-t nat -I terway-masq 1 -o cali+ -m comment --comment terway:masq-pod-bypass -j RETURN")
+      chain=("${chain[@]:1}"); writes+=("$*") ;;
+    "-t nat -I terway-masq 1 -o cali+ -m comment --comment terway:eni-only-snat -j SNAT --to-source "*)
       [ "$fail_insert" -eq 0 ] || return 4
-      chain=("$managed_rule" "${chain[@]}")
-      writes+=("$*")
-      ;;
-    "-t nat -A terway-masq -j MASQUERADE")
-      chain+=("$masquerade_rule")
-      writes+=("$*")
-      ;;
+      chain=("$(build_stored "$*")" "${chain[@]}"); writes+=("$*") ;;
+    "-t nat -I terway-masq 2 -o cali+ -m comment --comment terway:masq-pod-bypass -j RETURN")
+      [ "$fail_insert" -eq 0 ] || return 4
+      chain=("${chain[@]:0:1}" "$(build_stored "$*")" "${chain[@]:1}"); writes+=("$*") ;;
+    "-t nat -A terway-masq -j MASQUERADE") chain+=("$masq_rule"); writes+=("$*") ;;
     *) return 2 ;;
   esac
 }
+iptables()  { _model "$@"; }
+ip6tables() { _model "$@"; }
 
 source "$script"
 status=0
-for ((i = 0; i < runs; i++)); do
-  masq_eni_only iptables || { status=$?; break; }
+for ((i=0;i<runs;i++)); do
+  masq_eni_only "$ipt" "$nodeIP" || { status=$?; break; }
 done
-for rule in "${chain[@]}"; do printf '__RULE__%s\n' "$rule"; done
-for write in "${writes[@]}"; do printf '__WRITE__%s\n' "$write"; done
-exit "$status"
+echo "__STATUS__$status"
+for r in "${chain[@]}"; do printf '__RULE__%s\n' "$r"; done
+for w in "${writes[@]}"; do printf '__WRITE__%s\n' "$w"; done
 `
-		args := []string{"-c", model, "bash", script, fmt.Sprint(runs), flag(chainExists), flag(failDelete), flag(failInsert)}
-		args = append(args, initialRules...)
+		args := []string{"-c", model, "bash", script, ipt, nodeIP, strconv.Itoa(runs), flag(chainExists), flag(failDelete), flag(failInsert)}
+		args = append(args, initial...)
 		out, err := exec.Command("bash", args...).CombinedOutput()
-		var rules, writes []string
+		if err != nil {
+			t.Fatalf("model execution failed: %v\n%s", err, out)
+		}
+		var r result
 		for _, line := range strings.Split(string(out), "\n") {
 			switch {
+			case strings.HasPrefix(line, "__STATUS__"):
+				r.status, _ = strconv.Atoi(strings.TrimPrefix(line, "__STATUS__"))
 			case strings.HasPrefix(line, "__RULE__"):
-				rules = append(rules, strings.TrimPrefix(line, "__RULE__"))
+				r.rules = append(r.rules, strings.TrimPrefix(line, "__RULE__"))
 			case strings.HasPrefix(line, "__WRITE__"):
-				writes = append(writes, strings.TrimPrefix(line, "__WRITE__"))
+				r.writes = append(r.writes, strings.TrimPrefix(line, "__WRITE__"))
 			}
 		}
-		return rules, writes, err
+		return r
 	}
 
-	t.Run("fresh install", func(t *testing.T) {
-		rules, _, err := runModel(false, nil, 1, false, false)
-		assert.NoError(t, err)
-		assert.Equal(t, []string{managedRule, masqueradeRule}, rules)
+	t.Run("fresh install converges to SNAT,RETURN,MASQUERADE", func(t *testing.T) {
+		r := runModel(t, "iptables", "10.0.0.1", false, false, false, 1)
+		assert.Equal(t, 0, r.status)
+		assert.Equal(t, []string{snatLine("10.0.0.1"), retLine, masqLine}, r.rules)
+		assert.Equal(t, []string{
+			"-t nat -N terway-masq",
+			insertSNATArg("10.0.0.1"),
+			insertRetArg,
+			"-t nat -A terway-masq -j MASQUERADE",
+		}, r.writes)
 	})
 
-	t.Run("correct chain is unchanged across runs", func(t *testing.T) {
-		rules, writes, err := runModel(true, []string{managedRule, masqueradeRule}, 3, false, false)
-		assert.NoError(t, err)
-		assert.Equal(t, []string{managedRule, masqueradeRule}, rules)
-		assert.Empty(t, writes)
+	t.Run("correct chain is untouched across runs (no iptables churn)", func(t *testing.T) {
+		r := runModel(t, "iptables", "10.0.0.1", true, false, false, 3, snatLine("10.0.0.1"), retLine, masqLine)
+		assert.Equal(t, 0, r.status)
+		assert.Equal(t, []string{snatLine("10.0.0.1"), retLine, masqLine}, r.rules)
+		assert.Empty(t, r.writes)
 	})
 
-	t.Run("misordered and duplicate rules converge", func(t *testing.T) {
-		rules, _, err := runModel(true, []string{masqueradeRule, managedRule, managedRule}, 2, false, false)
-		assert.NoError(t, err)
-		assert.Equal(t, []string{managedRule, masqueradeRule}, rules)
+	t.Run("legacy RETURN-only chain upgrades to SNAT first", func(t *testing.T) {
+		r := runModel(t, "iptables", "10.0.0.1", true, false, false, 1, retLine, masqLine)
+		assert.Equal(t, 0, r.status)
+		assert.Equal(t, []string{snatLine("10.0.0.1"), retLine, masqLine}, r.rules)
+		assert.Equal(t, []string{"-t nat -D terway-masq 1", insertSNATArg("10.0.0.1"), insertRetArg}, r.writes)
+	})
+
+	t.Run("node address change self-heals the SNAT rule", func(t *testing.T) {
+		r := runModel(t, "iptables", "10.9.9.9", true, false, false, 1, snatLine("10.0.0.1"), retLine, masqLine)
+		assert.Equal(t, 0, r.status)
+		assert.Equal(t, []string{snatLine("10.9.9.9"), retLine, masqLine}, r.rules)
+	})
+
+	t.Run("ipset rule upgrades to stateless SNAT", func(t *testing.T) {
+		legacy := strings.Replace(snatLine("10.0.0.1"), "-m comment", "-m set --match-set terway-exclusive-local dst -m comment", 1)
+		r := runModel(t, "iptables", "10.0.0.1", true, false, false, 2, legacy, retLine, masqLine)
+		assert.Equal(t, 0, r.status)
+		assert.Equal(t, []string{snatLine("10.0.0.1"), retLine, masqLine}, r.rules)
+		assert.Equal(t, []string{"-t nat -D terway-masq 1", "-t nat -D terway-masq 1", insertSNATArg("10.0.0.1"), insertRetArg}, r.writes)
+	})
+
+	t.Run("node address prefix is not an exact match", func(t *testing.T) {
+		r := runModel(t, "iptables", "10.0.0.1", true, false, false, 1, snatLine("10.0.0.10"), retLine, masqLine)
+		assert.Equal(t, 0, r.status)
+		assert.Equal(t, []string{snatLine("10.0.0.1"), retLine, masqLine}, r.rules)
+	})
+
+	t.Run("duplicate and misordered rules converge", func(t *testing.T) {
+		r := runModel(t, "iptables", "10.0.0.1", true, false, false, 1,
+			snatLine("10.0.0.1"), snatLine("10.0.0.1"), retLine, retLine, masqLine)
+		assert.Equal(t, 0, r.status)
+		assert.Equal(t, []string{snatLine("10.0.0.1"), retLine, masqLine}, r.rules)
+
+		r = runModel(t, "iptables", "10.0.0.1", true, false, false, 1, retLine, snatLine("10.0.0.1"), masqLine)
+		assert.Equal(t, 0, r.status)
+		assert.Equal(t, []string{snatLine("10.0.0.1"), retLine, masqLine}, r.rules)
+	})
+
+	t.Run("ip6tables uses the node IPv6 address", func(t *testing.T) {
+		r := runModel(t, "ip6tables", "fd00::1", false, false, false, 1)
+		assert.Equal(t, 0, r.status)
+		assert.Equal(t, snatLine("fd00::1"), r.rules[0])
 	})
 
 	t.Run("delete failure is returned", func(t *testing.T) {
-		rules, _, err := runModel(true, []string{masqueradeRule, managedRule}, 1, true, false)
-		assert.Error(t, err)
-		assert.Equal(t, []string{masqueradeRule, managedRule}, rules)
+		r := runModel(t, "iptables", "10.0.0.1", true, true, false, 1, retLine, masqLine)
+		assert.Equal(t, 1, r.status)
+		assert.Equal(t, []string{retLine, masqLine}, r.rules)
 	})
 
 	t.Run("insert failure is returned", func(t *testing.T) {
-		rules, _, err := runModel(true, []string{masqueradeRule}, 1, false, true)
+		r := runModel(t, "iptables", "10.0.0.1", true, false, true, 1, retLine, masqLine)
+		assert.Equal(t, 1, r.status)
+	})
+
+	t.Run("missing node address fails hard before touching rules", func(t *testing.T) {
+		r := runModel(t, "iptables", "", false, false, false, 1)
+		assert.Equal(t, 1, r.status)
+		assert.Empty(t, r.writes)
+	})
+}
+
+func Test_runExclusiveENI(t *testing.T) {
+	t.Run("resolves v4 and installs iptables masq", func(t *testing.T) {
+		patches := gomonkey.NewPatches()
+		defer patches.Reset()
+		patches.ApplyFunc(resolveExclusiveNodeIP, func(ipv4, ipv6 bool) (string, string, error) {
+			assert.True(t, ipv4)
+			assert.False(t, ipv6)
+			return "10.0.0.1", "", nil
+		})
+		var got []string
+		patches.ApplyFunc(configENIOnlyMasq, func(ipt, nodeIP string) error {
+			got = append(got, ipt+"="+nodeIP)
+			return nil
+		})
+		patches.ApplyFunc(runHealthCheckServer, func(ctx context.Context, cfg *PolicyConfig) error { return nil })
+		// ctrl.SetupSignalHandler is single-shot; stub it so repeated subtests
+		// do not hit its second-call "close of closed channel" panic.
+		patches.ApplyFunc(ctrl.SetupSignalHandler, func() context.Context { return context.Background() })
+
+		err := runExclusiveENI(&PolicyConfig{ExclusiveENI: true})
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"iptables=10.0.0.1"}, got)
+	})
+
+	t.Run("dual stack installs ip6tables too", func(t *testing.T) {
+		patches := gomonkey.NewPatches()
+		defer patches.Reset()
+		patches.ApplyFunc(resolveExclusiveNodeIP, func(_, _ bool) (string, string, error) {
+			return "10.0.0.1", "fd00::1", nil
+		})
+		var got []string
+		patches.ApplyFunc(configENIOnlyMasq, func(ipt, nodeIP string) error {
+			got = append(got, ipt+"="+nodeIP)
+			return nil
+		})
+		patches.ApplyFunc(runHealthCheckServer, func(ctx context.Context, cfg *PolicyConfig) error { return nil })
+		patches.ApplyFunc(ctrl.SetupSignalHandler, func() context.Context { return context.Background() })
+
+		err := runExclusiveENI(&PolicyConfig{ExclusiveENI: true, IPv6: true})
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"iptables=10.0.0.1", "ip6tables=fd00::1"}, got)
+	})
+
+	t.Run("fails hard when node address resolution errors", func(t *testing.T) {
+		patches := gomonkey.NewPatches()
+		defer patches.Reset()
+		patches.ApplyFunc(resolveExclusiveNodeIP, func(_, _ bool) (string, string, error) {
+			return "", "", fmt.Errorf("no route")
+		})
+		var called bool
+		patches.ApplyFunc(configENIOnlyMasq, func(_, _ string) error { called = true; return nil })
+
+		err := runExclusiveENI(&PolicyConfig{ExclusiveENI: true})
 		assert.Error(t, err)
-		assert.Equal(t, []string{masqueradeRule}, rules)
+		assert.False(t, called, "masq must not run when the node address is unresolved")
+	})
+
+	t.Run("fails hard when v6 address is missing under ipv6 config", func(t *testing.T) {
+		patches := gomonkey.NewPatches()
+		defer patches.Reset()
+		patches.ApplyFunc(resolveExclusiveNodeIP, func(_, _ bool) (string, string, error) {
+			return "10.0.0.1", "", nil
+		})
+		var got []string
+		patches.ApplyFunc(configENIOnlyMasq, func(ipt, nodeIP string) error { got = append(got, ipt); return nil })
+
+		err := runExclusiveENI(&PolicyConfig{ExclusiveENI: true, IPv6: true})
+		assert.Error(t, err)
+		assert.Equal(t, []string{"iptables"}, got, "v6 masq is not attempted without a v6 address")
 	})
 }
 
