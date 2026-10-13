@@ -510,6 +510,11 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 		update.Annotations = node.Annotations
 		return nil
 	})
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	err = r.k8sAnno(ctx, k8sNode, update)
 	return reconcile.Result{}, err
 }
 
