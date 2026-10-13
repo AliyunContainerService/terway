@@ -393,22 +393,53 @@ deploy_version() {
     log_info "Terway v${version} deployed successfully"
 }
 
-# 升级版本 (仅 apply terway-eniip.yaml, 不碰 ConfigMap)
+# Add newly required operator configuration without replacing existing settings.
+ensure_cilium_operator_config() {
+    local version_dir="$1"
+    if ! grep -q '^  cilium-config.yaml: |' "${version_dir}/configmap.yaml.tmpl"; then
+        return 0
+    fi
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        log_info "[DRY-RUN] Would add missing cilium-config.yaml to terway-controlplane only"
+        return 0
+    fi
+    local configmap config patch
+    configmap=$(kubectl get configmap terway-controlplane -n kube-system -o json) || return 1
+    if jq -e '.data | has("cilium-config.yaml")' <<< "${configmap}" >/dev/null; then
+        return 0
+    fi
+    config=$(awk '/^  cilium-config.yaml: \|$/ {found=1; next} found {sub(/^    /, ""); print}' "${version_dir}/configmap.yaml.tmpl")
+    [[ -n "${config}" ]] || return 1
+    patch=$(jq -n --arg config "${config}" '{data: {"cilium-config.yaml": $config}}') || return 1
+    kubectl patch configmap terway-controlplane -n kube-system --type=merge -p "${patch}"
+}
+
+# Upgrade deployment resources while preserving eni-config.
 upgrade_version() {
     local version="$1"
     local version_dir
     version_dir="${TEMPLATE_DIR}/v$(minor_version "${version}")"
     validate_version_template "${version}" "${version_dir}"
 
-    log_step "Upgrading to terway v${version} (ConfigMap unchanged)..."
+    log_step "Upgrading to terway v${version} (eni-config unchanged)..."
+    ensure_cilium_operator_config "${version_dir}" || return 1
 
     if [[ "${DRY_RUN}" == "true" ]]; then
         log_info "[DRY-RUN] Would apply terway-eniip.yaml for v${version}"
+        if [[ "${UPGRADE_REBOOT:-false}" == "true" ]]; then
+            log_info "[DRY-RUN] Would reboot all worker nodes before waiting for rollout and PostUpgrade"
+        fi
         return
     fi
 
-    # 只 apply 目标版本的 terway-eniip.yaml (不碰 ConfigMap!)
+    # Apply the target deployment without replacing eni-config.
     kubectl apply -f "${version_dir}/terway-eniip.yaml"
+
+    # Explicit legacy IPVlan requires a node reboot before 1.18 can initialize.
+    if [[ "${UPGRADE_REBOOT:-false}" == "true" ]]; then
+        reboot_nodes || return 1
+        kubectl wait pod --all -n terway-upgrade-test --for=condition=ready --timeout=5m || return 1
+    fi
 
     # 等待滚动更新完成
     log_info "Waiting for DaemonSet rollout..."
@@ -437,6 +468,11 @@ run_e2e() {
 
     log_step "Running e2e test (phase: ${phase})..."
 
+    local restart_flag=""
+    if [[ "${phase}" == "post" && "${UPGRADE_REBOOT:-false}" == "true" ]]; then
+        restart_flag="-upgrade-node-reboot"
+    fi
+
     local test_name
     if [[ "${phase}" == "pre" ]]; then
         test_name="TestUpgrade_PreUpgrade"
@@ -456,13 +492,13 @@ run_e2e() {
     if [[ "${CONFIG}" == "B" || "${CONFIG}" == "C" ]]; then
         go test -v -count=1 -timeout 30m -tags e2e ./tests \
             -run "${test_name}" \
-            -upgrade-phase "${phase}" \
+            -upgrade-phase "${phase}" ${restart_flag} \
             -upgrade-expected-datapath unset \
             -region-id "${REGION}"
     else
         go test -v -count=1 -timeout 30m -tags e2e ./tests \
             -run "${test_name}" \
-            -upgrade-phase "${phase}" \
+            -upgrade-phase "${phase}" ${restart_flag} \
             -region-id "${REGION}"
     fi
 
@@ -533,6 +569,26 @@ run_scenario() {
         local total_hops=$((${#versions[@]} - 1))
 
         log_info "Upgrade hop ${hop_num}/${total_hops}: v${versions[$((i-1))]} → v${versions[i]}"
+
+        UPGRADE_REBOOT=false
+        if [[ "$(minor_version "${versions[i]}")" == "1.18" ]]; then
+            local virtual_type
+            if [[ "${DRY_RUN}" == "true" ]]; then
+                virtual_type=""
+                if [[ "${config}" == "A" && "$(minor_version "${versions[0]}")" == "1.7" ]]; then
+                    virtual_type="IPVlan"
+                fi
+            else
+                virtual_type=$(kubectl get configmap eni-config -n kube-system -o json | jq -er '.data["10-terway.conf"] | fromjson | .eniip_virtual_type // ""') || {
+                    result="FAIL"
+                    break
+                }
+            fi
+            if [[ "$(echo "${virtual_type}" | tr '[:upper:]' '[:lower:]')" == "ipvlan" ]]; then
+                UPGRADE_REBOOT=true
+                log_info "Explicit IPVlan: reboot all worker nodes after applying 1.18"
+            fi
+        fi
 
         if ! upgrade_version "${versions[i]}"; then
             log_error "Upgrade to v${versions[i]} failed"
