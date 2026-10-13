@@ -323,8 +323,12 @@ validate_version_template() {
         log_error "Missing version manifest: ${manifest}"
         return 1
     }
+    local image_tag="v${version}"
+    if [[ "${version}" == "1.18.0" ]]; then
+        image_tag="v1.18.0-rc.6"
+    fi
     local unexpected
-    unexpected=$(grep -E 'image: .*/(terway|terway-controlplane):' "${manifest}" | grep -v ":v${version}$" || true)
+    unexpected=$(grep -E 'image: .*/(terway|terway-controlplane):' "${manifest}" | awk -v suffix=":${image_tag}" 'substr($0, length($0) - length(suffix) + 1) != suffix' || true)
     if [[ -n "${unexpected}" ]]; then
         log_error "Version manifest contains a mismatched Terway image tag:"
         echo "${unexpected}" >&2
@@ -572,14 +576,17 @@ main() {
     local overall_status=0
 
     if [[ "${ALL:-false}" == "true" ]]; then
-        # 运行全部 6 个场景
+        # Extend both existing upgrade paths to 1.18 and test direct upgrades for A/B/C.
         SCENARIOS=(
-            "1.9.18 1.17.6 A"
-            "1.9.18 1.17.6 B"
-            "1.9.18 1.17.6 C"
-            "1.7.4 1.9.18 1.17.6 A"
-            "1.7.4 1.9.18 1.17.6 B"
-            "1.7.4 1.9.18 1.17.6 C"
+            "1.17.6 1.18.0 A"
+            "1.17.6 1.18.0 B"
+            "1.17.6 1.18.0 C"
+            "1.9.18 1.17.6 1.18.0 A"
+            "1.9.18 1.17.6 1.18.0 B"
+            "1.9.18 1.17.6 1.18.0 C"
+            "1.7.4 1.9.18 1.17.6 1.18.0 A"
+            "1.7.4 1.9.18 1.17.6 1.18.0 B"
+            "1.7.4 1.9.18 1.17.6 1.18.0 C"
         )
 
         for scenario in "${SCENARIOS[@]}"; do
