@@ -397,6 +397,65 @@ var _ = Describe("Node Controller", func() {
 			})
 		})
 
+		Context("capacity annotations", func() {
+			for _, centralized := range []bool{false, true} {
+				for _, exclusive := range []bool{false, true} {
+					It("should report LENI capacity from Spec", func() {
+						nodeName := "test-eflo-capacity"
+						defer cleanupNode(ctx, nodeName)
+
+						builder := testutil.NewK8sNodeBuilder(nodeName).
+							WithEFLO().
+							WithInstanceType("eflo.instance").
+							WithProviderID("instanceID-capacity")
+						if exclusive {
+							builder = builder.WithExclusiveENIMode()
+						}
+						k8sNode := builder.Build()
+						Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
+
+						openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).
+							Return([]*aliyunClient.NetworkInterface{}, nil).Once()
+						efloClient.On("GetNodeInfoForPod", mock.Anything, "instanceID-capacity").
+							Return(&eflo.Content{LeniQuota: 4, LeniSipQuota: 10}, nil).Once()
+
+						reconciler := createReconciler(centralized, true)
+						request := reconcile.Request{NamespacedName: types.NamespacedName{Name: nodeName}}
+						_, err := reconciler.Reconcile(ctx, request)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(k8sClient.Get(ctx, request.NamespacedName, k8sNode)).To(Succeed())
+						Expect(k8sNode.Annotations).NotTo(HaveKey(string(terwayTypes.NormalIPTypeIPs)))
+
+						// The daemon initializes the allocation Spec after the Node CR is created.
+						resource := &networkv1beta1.Node{}
+						Expect(k8sClient.Get(ctx, request.NamespacedName, resource)).To(Succeed())
+						resource.Spec.ENISpec = &networkv1beta1.ENISpec{
+							EnableIPv4:          true,
+							SecurityGroupIDs:    []string{"sg-test"},
+							VSwitchOptions:      []string{"vsw-test"},
+							VSwitchSelectPolicy: networkv1beta1.VSwitchSelectionPolicyRandom,
+						}
+						resource.Spec.Flavor = []networkv1beta1.Flavor{{
+							NetworkInterfaceType:        networkv1beta1.ENITypeSecondary,
+							NetworkInterfaceTrafficMode: networkv1beta1.NetworkInterfaceTrafficModeStandard,
+							Count:                       3,
+						}}
+						Expect(k8sClient.Update(ctx, resource)).To(Succeed())
+
+						// Existing Spec is sufficient; no further cloud API calls are expected.
+						_, err = reconciler.Reconcile(ctx, request)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(k8sClient.Get(ctx, request.NamespacedName, k8sNode)).To(Succeed())
+						expected := "30"
+						if exclusive {
+							expected = "3"
+						}
+						Expect(k8sNode.Annotations[string(terwayTypes.NormalIPTypeIPs)]).To(Equal(expected))
+					})
+				}
+			}
+		})
+
 		Context("ECS Standard ENI (APIEcs)", func() {
 			It("should create EFLO node with ECS API and NetworkCardsCount=0", func() {
 				nodeName := "test-eflo-node-ecs"
