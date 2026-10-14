@@ -190,6 +190,29 @@ func TestFromDescribeResp_InstanceIDFromAttachment(t *testing.T) {
 	}
 }
 
+func TestFromDescribeResp_NetworkCardIndex(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		index int
+	}{
+		{name: "default card", index: 0},
+		{name: "second card", index: 1},
+		{name: "third card", index: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &ecs.NetworkInterfaceSet{
+				Attachment: ecs.Attachment{
+					DeviceIndex:      3,
+					NetworkCardIndex: tt.index,
+				},
+			}
+			ni := FromDescribeResp(resp)
+			assert.Equal(t, tt.index, ni.NetworkCardIndex)
+			assert.Equal(t, 3, ni.DeviceIndex)
+		})
+	}
+}
+
 func TestFromPtr(t *testing.T) {
 	// nil pointer returns zero value
 	var nilStr *string

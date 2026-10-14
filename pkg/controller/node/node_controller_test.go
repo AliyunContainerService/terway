@@ -457,8 +457,101 @@ var _ = Describe("Node Controller", func() {
 		})
 
 		Context("ECS Standard ENI (APIEcs)", func() {
-			It("should create EFLO node with ECS API and NetworkCardsCount=0", func() {
-				nodeName := "test-eflo-node-ecs"
+			DescribeTable("should discover or refresh card capabilities", func(suffix string, specificationChanged bool, cards []networkv1beta1.NetworkCard, reported []aliyunClient.NetworkCard, expected []networkv1beta1.NetworkCard) {
+				nodeName := "test-eflo-card-refresh-" + suffix
+				defer cleanupNode(ctx, nodeName)
+				k8sNode := testutil.NewK8sNodeBuilder(nodeName).WithEFLO().WithExclusiveENIMode().WithProviderID("i-xxx").Build()
+				Expect(k8sClient.Create(ctx, k8sNode)).To(Succeed())
+
+				resource := testutil.NewNodeCRDBuilder(nodeName).WithEFLO().WithNetworkCardsCount(len(cards)).Build()
+				resource.Annotations[terwayTypes.ENOApi] = terwayTypes.APIEcs
+				resource.Spec.NodeCap.NetworkCards = cards
+				if specificationChanged {
+					resource.Spec.NodeMetadata.InstanceType = "previous-type"
+				} else {
+					resource.Finalizers = []string{finalizer}
+					Expect(resource.Spec.NodeMetadata.InstanceType).To(Equal(k8sNode.Labels[corev1.LabelInstanceTypeStable]))
+					Expect(resource.Spec.NodeMetadata.InstanceID).To(Equal(k8sNode.Spec.ProviderID))
+					Expect(resource.Spec.NodeMetadata.RegionID).To(Equal(k8sNode.Labels[corev1.LabelTopologyRegion]))
+					Expect(resource.Spec.NodeMetadata.ZoneID).To(Equal(k8sNode.Labels[corev1.LabelTopologyZone]))
+				}
+				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+				efloController := mocks.NewEFLOControl(GinkgoT())
+				openAPI.On("GetEFLOController").Return(efloController).Maybe()
+				openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
+					{NetworkInterfaceID: "eni-test", Type: aliyunClient.ENITypePrimary},
+				}, nil).Once()
+				efloController.On("DescribeNode", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeResponse{
+					NodeType: "card-refresh-type-" + suffix,
+				}, nil).Once()
+				efloController.On("DescribeNodeType", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeTypeResponse{
+					EniQuantity: 38, EniPrivateIpAddressQuantity: 10, NetworkCardQuantity: len(reported),
+					NetworkCards: reported,
+				}, nil).Once()
+
+				reconciler := createReconciler(specificationChanged, true)
+				if !specificationChanged {
+					// A persisted zero count is initialized; it must not trigger automatic discovery.
+					_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: nodeName}})
+					Expect(err).NotTo(HaveOccurred())
+					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, resource)).To(Succeed())
+					verifyNetworkCardsCount(ctx, nodeName, 0)
+					Expect(resource.Spec.NodeCap.NetworkCards).To(BeNil())
+
+					reconciler.nodeStatusCache.LoadOrStore(nodeName, ctrlStatus.NewNodeStatus(0))
+					// Normal CR deletion must evict the shared placement cache first.
+					Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+					_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: nodeName}})
+					Expect(err).NotTo(HaveOccurred())
+					_, cached := reconciler.nodeStatusCache.Get(nodeName)
+					Expect(cached).To(BeFalse())
+					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, &networkv1beta1.Node{})).To(Satisfy(k8sErr.IsNotFound))
+				}
+				previousUID := resource.UID
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: nodeName}})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, resource)).To(Succeed())
+				if !specificationChanged {
+					Expect(resource.UID).NotTo(Equal(previousUID))
+					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, k8sNode)).To(Succeed())
+				}
+				Expect(resource.Spec.NodeMetadata.ZoneID).To(Equal(k8sNode.Labels[corev1.LabelTopologyZone]))
+				Expect(resource.Spec.NodeMetadata.InstanceType).To(Equal(k8sNode.Labels[corev1.LabelInstanceTypeStable]))
+				verifyNetworkCardsCount(ctx, nodeName, len(expected))
+				Expect(resource.Spec.NodeCap.NetworkCards).To(Equal(expected))
+				limit, err := aliyunClient.GetLimitProvider().GetLimit(efloController, "card-refresh-type-"+suffix)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(limit.NetworkCards).To(Equal(reported))
+
+				// Persisted capabilities must prevent rediscovery even after recreating the reconciler.
+				reconciler = createReconciler(true, true)
+				_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: nodeName}})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, resource)).To(Succeed())
+				verifyNetworkCardsCount(ctx, nodeName, len(expected))
+				Expect(resource.Spec.NodeCap.NetworkCards).To(Equal(expected))
+			}, Entry("refresh card quantity and indices", "dual", true, []networkv1beta1.NetworkCard{{Index: 0}, {Index: 1}},
+				[]aliyunClient.NetworkCard{{Index: 2}, {Index: 0}, {Index: 1}}, []networkv1beta1.NetworkCard{{Index: 2}, {Index: 0}, {Index: 1}}),
+				Entry("enable dual-card attachment for legacy nodes on specification updates", "legacy", true, []networkv1beta1.NetworkCard(nil),
+					[]aliyunClient.NetworkCard{{Index: 0}, {Index: 1}}, []networkv1beta1.NetworkCard{{Index: 0}, {Index: 1}}),
+				Entry("upgrade a single-card node", "single", true, []networkv1beta1.NetworkCard{{Index: 0}},
+					[]aliyunClient.NetworkCard{{Index: 0}, {Index: 1}}, []networkv1beta1.NetworkCard{{Index: 0}, {Index: 1}}),
+				Entry("retain an explicit single card on specification updates", "single-update", true, []networkv1beta1.NetworkCard{{Index: 0}, {Index: 1}},
+					[]aliyunClient.NetworkCard{{Index: 0}}, []networkv1beta1.NetworkCard{{Index: 0}}),
+				Entry("clear card mapping when the specification omits card fields", "no-mapping", true, []networkv1beta1.NetworkCard{{Index: 0}, {Index: 1}},
+					[]aliyunClient.NetworkCard(nil), []networkv1beta1.NetworkCard(nil)),
+				Entry("discover dual cards for legacy nodes after recreating the Node CR", "discover-dual", false, []networkv1beta1.NetworkCard(nil),
+					[]aliyunClient.NetworkCard{{Index: 0}, {Index: 1}}, []networkv1beta1.NetworkCard{{Index: 0}, {Index: 1}}),
+				Entry("keep omitted card fields empty after recreating the Node CR", "discover-single", false, []networkv1beta1.NetworkCard(nil),
+					[]aliyunClient.NetworkCard(nil), []networkv1beta1.NetworkCard(nil)),
+				Entry("retain an explicit single card after recreating the Node CR", "discover-explicit-single", false, []networkv1beta1.NetworkCard(nil),
+					[]aliyunClient.NetworkCard{{Index: 0}}, []networkv1beta1.NetworkCard{{Index: 0}}),
+				Entry("keep zero card capabilities empty after recreating the Node CR", "discover-zero", false, []networkv1beta1.NetworkCard(nil),
+					[]aliyunClient.NetworkCard{}, []networkv1beta1.NetworkCard(nil)))
+
+			DescribeTable("should initialize EFLO ECS ENI card capabilities", func(suffix string, reported []aliyunClient.NetworkCard, expected []networkv1beta1.NetworkCard) {
+				nodeName := "test-eflo-node-ecs-" + suffix
 				defer cleanupNode(ctx, nodeName)
 
 				k8sNode := testutil.NewK8sNodeBuilder(nodeName).
@@ -473,21 +566,23 @@ var _ = Describe("Node Controller", func() {
 				openAPI.On("GetEFLOController").Return(efloController).Maybe()
 
 				efloController.On("DescribeNode", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeResponse{
-					NodeType: "test-machine-type-normal",
-				}, nil).Maybe()
+					NodeType: "test-machine-type-normal-" + suffix,
+				}, nil).Once()
 
 				efloController.On("DescribeNodeType", mock.Anything, mock.Anything).Return(&aliyunClient.DescribeNodeTypeResponse{
 					EniQuantity:                 4,
 					EniPrivateIpAddressQuantity: 10,
 					EniHighDenseQuantity:        8,
-				}, nil).Maybe()
+					NetworkCardQuantity:         len(reported),
+					NetworkCards:                reported,
+				}, nil).Once()
 
 				openAPI.On("DescribeNetworkInterfaceV2", mock.Anything, mock.Anything).Return([]*aliyunClient.NetworkInterface{
 					{
 						NetworkInterfaceID: "eni-test",
 						Type:               aliyunClient.ENITypePrimary,
 					},
-				}, nil).Maybe()
+				}, nil).Once()
 
 				reconciler := createReconciler(true, true)
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -504,8 +599,27 @@ var _ = Describe("Node Controller", func() {
 				Expect(resource.Spec.NodeCap.IPv4PerAdapter).To(Equal(10))
 				Expect(resource.Annotations[terwayTypes.ENOApi]).To(Equal(terwayTypes.APIEcs))
 				Expect(resource.Labels["k8s.aliyun.com/exclusive-mode-eni-type"]).To(Equal("eniOnly"))
-				verifyNetworkCardsCount(ctx, nodeName, 0)
-			})
+				verifyNetworkCardsCount(ctx, nodeName, len(expected))
+				Expect(resource.Spec.NodeCap.NetworkCards).To(Equal(expected))
+				// Once discovered, cards and quota are retained without a specification update.
+				resource.Spec.NodeCap.Adapters = 38
+				resource.Spec.NodeCap.TotalAdapters = 38
+				Expect(k8sClient.Update(ctx, resource)).To(Succeed())
+				reconciler.nodeStatusCache.LoadOrStore(nodeName, ctrlStatus.NewNodeStatus(0))
+				_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: nodeName}})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, resource)).To(Succeed())
+				Expect(resource.Spec.NodeCap.Adapters).To(Equal(38))
+				Expect(resource.Spec.NodeCap.TotalAdapters).To(Equal(38))
+				verifyNetworkCardsCount(ctx, nodeName, len(expected))
+				Expect(resource.Spec.NodeCap.NetworkCards).To(Equal(expected))
+				_, cached := reconciler.nodeStatusCache.Get(nodeName)
+				Expect(cached).To(BeTrue())
+
+			}, Entry("omitted single-card fields", "omitted", []aliyunClient.NetworkCard(nil), []networkv1beta1.NetworkCard(nil)),
+				Entry("zero cards", "zero", []aliyunClient.NetworkCard{}, []networkv1beta1.NetworkCard(nil)),
+				Entry("explicit single card", "single", []aliyunClient.NetworkCard{{Index: 0}}, []networkv1beta1.NetworkCard{{Index: 0}}),
+				Entry("dual cards", "dual", []aliyunClient.NetworkCard{{Index: 0}, {Index: 1}}, []networkv1beta1.NetworkCard{{Index: 0}, {Index: 1}}))
 		})
 
 		Context("ECS High Density ENI (APIEcsHDeni)", func() {
@@ -765,10 +879,13 @@ var _ = Describe("Node Controller", func() {
 
 		It("should return nil when centralizedIPAM is true", func() {
 			reconciler := createReconciler(true, false)
+			reconciler.nodeStatusCache.LoadOrStore(nodeName, ctrlStatus.NewNodeStatus(0))
 			_, err := reconciler.delete(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: nodeName},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			_, cached := reconciler.nodeStatusCache.Get(nodeName)
+			Expect(cached).To(BeFalse())
 		})
 
 		It("should handle node not found", func() {

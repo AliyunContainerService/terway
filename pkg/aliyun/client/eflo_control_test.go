@@ -7,7 +7,7 @@ import (
 	"github.com/agiledragon/gomonkey/v2"
 	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
-	eflocontroller20221215 "github.com/alibabacloud-go/eflo-controller-20221215/v2/client"
+	eflocontroller20221215 "github.com/alibabacloud-go/eflo-controller-20221215/v3/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
@@ -109,7 +109,11 @@ func TestEFLOControlService_DescribeNodeType_WithGomonkey(t *testing.T) {
 			EniPrivateIpAddressQuantity: intPtr(10),
 			EniIpv6AddressQuantity:      intPtr(10),
 			EniHighDenseQuantity:        intPtr(1),
-			RequestId:                   stringPtr("test-request-id"),
+			NetworkCardQuantity:         intPtr(2),
+			NetworkCards: []*eflocontroller20221215.DescribeNodeTypeResponseBodyNetworkCards{
+				{NetworkCardIndex: intPtr(1)}, {NetworkCardIndex: intPtr(0)},
+			},
+			RequestId: stringPtr("test-request-id"),
 		},
 	}
 
@@ -139,6 +143,8 @@ func TestEFLOControlService_DescribeNodeType_WithGomonkey(t *testing.T) {
 	assert.Equal(t, 10, result.EniPrivateIpAddressQuantity)
 	assert.Equal(t, 10, result.EniIpv6AddressQuantity)
 	assert.Equal(t, 1, result.EniHighDenseQuantity)
+	assert.Equal(t, 2, result.NetworkCardQuantity)
+	assert.Equal(t, []NetworkCard{{Index: 1}, {Index: 0}}, result.NetworkCards)
 }
 
 // Helper functions
@@ -201,4 +207,41 @@ func TestEFLOControlService_DescribeNodeType_NilBody(t *testing.T) {
 	_, err := svc.DescribeNodeType(context.Background(), WithNodeTypeID("t-1"))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "nil")
+}
+
+func TestEFLOControlService_NetworkCardResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		body    *eflocontroller20221215.DescribeNodeTypeResponseBody
+		wantErr bool
+	}{
+		{name: "legacy response", body: &eflocontroller20221215.DescribeNodeTypeResponseBody{EniQuantity: intPtr(38)}},
+		{name: "nil card", body: &eflocontroller20221215.DescribeNodeTypeResponseBody{
+			NetworkCardQuantity: intPtr(1), NetworkCards: []*eflocontroller20221215.DescribeNodeTypeResponseBodyNetworkCards{nil},
+		}, wantErr: true},
+		{name: "missing index", body: &eflocontroller20221215.DescribeNodeTypeResponseBody{
+			NetworkCardQuantity: intPtr(1), NetworkCards: []*eflocontroller20221215.DescribeNodeTypeResponseBodyNetworkCards{{}},
+		}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := createTestEFLOControlServiceForAPI()
+			patches := gomonkey.ApplyFunc((*eflocontroller20221215.Client).DescribeNodeType,
+				func(_ *eflocontroller20221215.Client, _ *eflocontroller20221215.DescribeNodeTypeRequest) (*eflocontroller20221215.DescribeNodeTypeResponse, error) {
+					return &eflocontroller20221215.DescribeNodeTypeResponse{Body: tc.body}, nil
+				})
+			defer patches.Reset()
+			result, err := svc.DescribeNodeType(context.Background(), WithNodeTypeID("test-type"))
+			if tc.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, result)
+				return
+			}
+			if !assert.NoError(t, err) {
+				return
+			}
+			assert.Zero(t, result.NetworkCardQuantity)
+			assert.Empty(t, result.NetworkCards)
+			assert.Equal(t, 38, result.EniQuantity)
+		})
+	}
 }

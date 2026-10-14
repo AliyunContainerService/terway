@@ -2,7 +2,7 @@ package client
 
 import (
 	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
-	eflocontroller20221215 "github.com/alibabacloud-go/eflo-controller-20221215/v2/client"
+	eflocontroller20221215 "github.com/alibabacloud-go/eflo-controller-20221215/v3/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"

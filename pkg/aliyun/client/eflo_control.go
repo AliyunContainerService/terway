@@ -31,6 +31,8 @@ type DescribeNodeTypeResponse struct {
 	EniIpv6AddressQuantity      int
 	EniPrivateIpAddressQuantity int
 	EniQuantity                 int
+	NetworkCardQuantity         int
+	NetworkCards                []NetworkCard
 }
 
 type EFLOControlService struct {
@@ -120,6 +122,15 @@ func (a *EFLOControlService) DescribeNodeType(ctx context.Context, opts ...Descr
 	describeNodeTypeResponse.EniIpv6AddressQuantity = int(FromPtr(resp.GetBody().EniIpv6AddressQuantity))
 	describeNodeTypeResponse.EniPrivateIpAddressQuantity = int(FromPtr(resp.GetBody().EniPrivateIpAddressQuantity))
 	describeNodeTypeResponse.EniQuantity = int(FromPtr(resp.GetBody().EniQuantity))
+	describeNodeTypeResponse.NetworkCardQuantity = int(FromPtr(resp.GetBody().NetworkCardQuantity))
+	for _, card := range resp.GetBody().NetworkCards {
+		if card == nil || card.NetworkCardIndex == nil {
+			return nil, fmt.Errorf("describe node type returned a network card without an index")
+		}
+		describeNodeTypeResponse.NetworkCards = append(describeNodeTypeResponse.NetworkCards, NetworkCard{
+			Index: int(*card.NetworkCardIndex),
+		})
+	}
 
 	l.Info("describe node type", "resp", describeNodeTypeResponse, LogFieldRequestID, resp.GetBody().RequestId)
 	return describeNodeTypeResponse, nil
