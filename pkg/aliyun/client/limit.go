@@ -193,6 +193,7 @@ func (d *Provider) GetLimit(client interface{}, instanceType string) (*Limits, e
 				TotalAdapters:     ins.EniQuantity,
 				IPv4PerAdapter:    ins.EniPrivateIpAddressQuantity,
 				HighDenseQuantity: ins.EniHighDenseQuantity,
+				NetworkCards:      ins.NetworkCards,
 			}
 			d.cache.Add(instanceType, limit, d.ttl)
 

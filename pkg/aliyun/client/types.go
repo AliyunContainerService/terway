@@ -172,6 +172,7 @@ func FromDescribeResp(in *ecs.NetworkInterfaceSet) *NetworkInterface {
 		TrunkNetworkInterfaceID:     in.Attachment.TrunkNetworkInterfaceId,
 		NetworkInterfaceTrafficMode: in.NetworkInterfaceTrafficMode,
 		DeviceIndex:                 in.Attachment.DeviceIndex,
+		NetworkCardIndex:            in.Attachment.NetworkCardIndex,
 		Type:                        in.Type,
 		CreationTime:                in.CreationTime,
 		IPv4PrefixSets: lo.Map(in.Ipv4PrefixSets.Ipv4PrefixSet, func(item ecs.Ipv4PrefixSet, _ int) Prefix {

@@ -479,6 +479,10 @@ func (r *ReconcileNode) handleEFLO(ctx context.Context, k8sNode *corev1.Node, no
 					return reconcile.Result{}, fmt.Errorf("cannot change ENOApi from %s to ecs", node.Annotations[types.ENOApi])
 				}
 				node.Annotations[types.ENOApi] = types.APIEcs
+				node.Spec.NodeCap.NetworkCards = lo.Map(limit.NetworkCards, func(card aliyunClient.NetworkCard, _ int) networkv1beta1.NetworkCard {
+					return networkv1beta1.NetworkCard{Index: card.Index}
+				})
+				node.Spec.NodeCap.NetworkCardsCount = ptr.To(len(node.Spec.NodeCap.NetworkCards))
 			}
 		} else {
 			resp, err := r.aliyun.GetEFLO().GetNodeInfoForPod(ctx, node.Spec.NodeMetadata.InstanceID)

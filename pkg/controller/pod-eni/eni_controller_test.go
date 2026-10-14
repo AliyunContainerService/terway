@@ -32,6 +32,18 @@ import (
 
 var ctx context.Context
 
+type nodeCRReadTrackingClient struct {
+	client.Client
+	nodeCRReads int
+}
+
+func (c *nodeCRReadTrackingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*networkv1beta1.Node); ok {
+		c.nodeCRReads++
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
 func createTestReconciler(openAPI *mocks.OpenAPI, trunkMode, crdMode bool) *ReconcilePodENI {
 	return &ReconcilePodENI{
 		client:          k8sClient,
@@ -1864,6 +1876,184 @@ var _ = Describe("ENI Controller Tests", func() {
 			r = createTestReconciler(openAPI, false, false)
 		})
 
+		DescribeTable("should only enable physical card placement on LingJun ECS standard ENIs", func(api string, suffix string) {
+			nodeName := "lingjun-card-path-" + suffix
+			cr := testutil.NewNodeCRDBuilder(nodeName).WithEFLO().WithNetworkCardsCount(2).Build()
+			if api != "" {
+				cr.Annotations = map[string]string{types.ENOApi: api}
+			}
+			cr.Spec.NodeCap.NetworkCards = []networkv1beta1.NetworkCard{{Index: 1}, {Index: 0}}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, cr) }()
+			count := r.getNetworkCardsCount(ctx, nodeName)
+			if api == types.APIEcs {
+				Expect(count).To(Equal(2))
+			} else {
+				Expect(count).To(Equal(0))
+			}
+		}, Entry("standard ECS ENI", types.APIEcs, "ecs"),
+			Entry("ECS HDENI", types.APIEcsHDeni, "ecs-hdeni"),
+			Entry("native HDENI", types.APIEnoHDeni, "hdeni"),
+			Entry("native LENI", "", "leni"),
+			Entry("unknown API", "unknown", "unknown"))
+
+		DescribeTable("should rebuild LingJun card capabilities after cache eviction", func(initialCount, updatedCount int) {
+			nodeName := fmt.Sprintf("lingjun-card-rebuild-%d-%d", initialCount, updatedCount)
+			podName := nodeName + "-pod"
+			node := testutil.NewK8sNodeBuilder(nodeName).WithEFLO().WithExclusiveENIMode().Build()
+			Expect(k8sClient.Create(ctx, node)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, node) }()
+			cr := testutil.NewNodeCRDBuilder(nodeName).WithEFLO().WithNetworkCardsCount(initialCount).Build()
+			cr.Annotations[types.ENOApi] = types.APIEcs
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, &networkv1beta1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}) }()
+			pod := testutil.CreateTestPod(podName, "default", nodeName)
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pod) }()
+
+			bound := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{Name: nodeName + "-bound", Namespace: "default", Labels: map[string]string{types.ENIRelatedNodeName: nodeName}},
+				Spec:       networkv1beta1.PodENISpec{Allocations: []networkv1beta1.Allocation{{ENI: networkv1beta1.ENI{ID: "eni-legacy"}}}},
+				Status: networkv1beta1.PodENIStatus{
+					Phase:    networkv1beta1.ENIPhaseBind,
+					ENIInfos: map[string]networkv1beta1.ENIInfo{"eni-legacy": {ID: "eni-legacy"}},
+				},
+			}
+			if initialCount >= 2 {
+				bound.Spec.Allocations = append(bound.Spec.Allocations, networkv1beta1.Allocation{ENI: networkv1beta1.ENI{ID: "eni-card-1"}})
+				bound.Status.ENIInfos["eni-card-1"] = networkv1beta1.ENIInfo{ID: "eni-card-1", NetworkCardIndex: ptr.To(1)}
+			}
+			Expect(testutil.CreateResource(ctx, k8sClient, bound)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, bound) }()
+
+			initialCtx := r.injectNodeStatus(ctx, "default", podName)
+			original, ok := status.MetaCtx[status.NodeStatus](initialCtx)
+			Expect(ok).To(BeTrue())
+			Expect(original.NetworkCards).To(HaveLen(initialCount))
+			tracking := &nodeCRReadTrackingClient{Client: k8sClient}
+			r.client = tracking
+			cr.Spec.NodeCap.NetworkCardsCount = ptr.To(updatedCount)
+			Expect(k8sClient.Update(ctx, cr)).To(Succeed())
+			cachedCtx := r.injectNodeStatus(ctx, "default", podName)
+			cached, ok := status.MetaCtx[status.NodeStatus](cachedCtx)
+			Expect(ok).To(BeTrue())
+			Expect(cached).To(BeIdenticalTo(original))
+			Expect(cached.NetworkCards).To(HaveLen(initialCount))
+			Expect(tracking.nodeCRReads).To(BeZero())
+
+			Expect(k8sClient.Delete(ctx, cr)).To(Succeed())
+			// Node reconciliation evicts this shared entry when it observes CR deletion.
+			r.nodeStatusCache.Delete(nodeName)
+			Expect(r.injectNodeStatus(ctx, "default", podName)).To(Equal(ctx))
+			_, found := r.nodeStatusCache.Get(nodeName)
+			Expect(found).To(BeFalse())
+			recreated := testutil.NewNodeCRDBuilder(nodeName).WithEFLO().WithNetworkCardsCount(updatedCount).Build()
+			recreated.Annotations[types.ENOApi] = types.APIEcs
+			Expect(k8sClient.Create(ctx, recreated)).To(Succeed())
+			Expect(recreated.UID).NotTo(Equal(cr.UID))
+
+			results := make(chan *status.NodeStatus, 8)
+			for i := 0; i < cap(results); i++ {
+				go func() {
+					updatedCtx := r.injectNodeStatus(ctx, "default", podName)
+					updated, _ := status.MetaCtx[status.NodeStatus](updatedCtx)
+					results <- updated
+				}()
+			}
+			updated := <-results
+			Expect(updated).NotTo(BeNil())
+			Expect(updated).NotTo(BeIdenticalTo(original))
+			for i := 1; i < cap(results); i++ {
+				Expect(<-results).To(BeIdenticalTo(updated))
+			}
+			Expect(updated.NetworkCards).To(HaveLen(updatedCount))
+			if updatedCount >= 2 {
+				Expect(updated.NetworkCards[0].NetworkInterfaces.Has("eni-legacy")).To(BeTrue())
+				if initialCount >= 2 {
+					Expect(updated.NetworkCards[1].NetworkInterfaces.Has("eni-card-1")).To(BeTrue())
+				}
+				Expect(r.getENIIndex(ctx, "default", podName, "eni-new")).To(HaveValue(Equal(updatedCount - 1)))
+			} else {
+				Expect(r.getENIIndex(ctx, "default", podName, "eni-new")).To(BeNil())
+			}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bound), bound)).To(Succeed())
+			Expect(bound.Status.ENIInfos["eni-legacy"].NetworkCardIndex).To(BeNil())
+		}, Entry("zero to single card", 0, 1),
+			Entry("zero to dual card", 0, 2),
+			Entry("single to dual card", 1, 2),
+			Entry("restore both cards before adding a third card", 2, 3))
+
+		It("should retain ECS cached capabilities without reading its Node CR", func() {
+			pod := testutil.CreateTestPod("ecs-card-cache-pod", "default", testNodeName)
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pod) }()
+			testNodeCRD.Spec.NodeCap.NetworkCardsCount = ptr.To(2)
+			Expect(k8sClient.Update(ctx, testNodeCRD)).To(Succeed())
+			initialCtx := r.injectNodeStatus(ctx, "default", pod.Name)
+			original, ok := status.MetaCtx[status.NodeStatus](initialCtx)
+			Expect(ok).To(BeTrue())
+			tracking := &nodeCRReadTrackingClient{Client: k8sClient}
+			r.client = tracking
+			testNodeCRD.Spec.NodeCap.NetworkCardsCount = ptr.To(3)
+			Expect(k8sClient.Update(ctx, testNodeCRD)).To(Succeed())
+			updatedCtx := r.injectNodeStatus(ctx, "default", pod.Name)
+			updated, ok := status.MetaCtx[status.NodeStatus](updatedCtx)
+			Expect(ok).To(BeTrue())
+			Expect(updated).To(BeIdenticalTo(original))
+			Expect(len(updated.NetworkCards)).To(Equal(2))
+			Expect(tracking.nodeCRReads).To(BeZero())
+		})
+
+		It("should preserve ECS initialization when an existing ENI has an invalid card index", func() {
+			testNodeCRD.Spec.NodeCap.NetworkCardsCount = ptr.To(2)
+			Expect(k8sClient.Update(ctx, testNodeCRD)).To(Succeed())
+			pod := testutil.CreateTestPod("ecs-card-restore-pod", "default", testNodeName)
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pod) }()
+			bound := &networkv1beta1.PodENI{
+				ObjectMeta: metav1.ObjectMeta{Name: "ecs-card-restore-bound", Namespace: "default", Labels: map[string]string{types.ENIRelatedNodeName: testNodeName}},
+				Spec:       networkv1beta1.PodENISpec{Allocations: []networkv1beta1.Allocation{{ENI: networkv1beta1.ENI{ID: "eni-valid"}}}},
+				Status: networkv1beta1.PodENIStatus{
+					Phase: networkv1beta1.ENIPhaseBind,
+					ENIInfos: map[string]networkv1beta1.ENIInfo{
+						"eni-valid":   {ID: "eni-valid", NetworkCardIndex: ptr.To(0)},
+						"eni-invalid": {ID: "eni-invalid", NetworkCardIndex: ptr.To(7)},
+					},
+				},
+			}
+			Expect(testutil.CreateResource(ctx, k8sClient, bound)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, bound) }()
+			resultCtx := r.injectNodeStatus(ctx, "default", pod.Name)
+			nodeStatus, ok := status.MetaCtx[status.NodeStatus](resultCtx)
+			Expect(ok).To(BeTrue())
+			Expect(len(nodeStatus.NetworkCards)).To(Equal(2))
+			Expect(nodeStatus.NetworkCards[0].NetworkInterfaces.Has("eni-valid")).To(BeTrue())
+		})
+
+		DescribeTable("should not read Node CR for cached LingJun non-standard ENI paths", func(api, suffix string) {
+			nodeName := "lingjun-no-refresh-" + suffix
+			pod := testutil.CreateTestPod(nodeName, "default", nodeName)
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pod) }()
+			cr := testutil.NewNodeCRDBuilder(nodeName).WithEFLO().WithNetworkCardsCount(2).Build()
+			cr.Annotations[types.ENOApi] = api
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, cr) }()
+			initialCtx := r.injectNodeStatus(ctx, "default", pod.Name)
+			original, ok := status.MetaCtx[status.NodeStatus](initialCtx)
+			Expect(ok).To(BeTrue())
+			Expect(len(original.NetworkCards)).To(BeZero())
+			tracking := &nodeCRReadTrackingClient{Client: k8sClient}
+			r.client = tracking
+			updatedCtx := r.injectNodeStatus(ctx, "default", pod.Name)
+			updated, ok := status.MetaCtx[status.NodeStatus](updatedCtx)
+			Expect(ok).To(BeTrue())
+			Expect(updated).To(BeIdenticalTo(original))
+			Expect(tracking.nodeCRReads).To(BeZero())
+		}, Entry("native LENI", "", "leni"),
+			Entry("ECS HDENI", types.APIEcsHDeni, "ecs-hdeni"),
+			Entry("native HDENI", types.APIEnoHDeni, "hdeni"))
+
 		Context("when NetworkCards count is 0", func() {
 			It("should handle LingJun node correctly", func() {
 				nodeName := "lingjun-node"
@@ -1899,7 +2089,7 @@ var _ = Describe("ENI Controller Tests", func() {
 				Expect(nodeStatus.NetworkCards).To(HaveLen(0))
 			})
 
-			It("should create empty NodeStatus when node CRD not found", func() {
+			It("should defer caching until the node CRD exists", func() {
 				nodeName := "non-existent-node"
 				podName := "test-pod-no-node"
 
@@ -1916,14 +2106,59 @@ var _ = Describe("ENI Controller Tests", func() {
 				}()
 
 				resultCtx := r.injectNodeStatus(ctx, "default", podName)
+				Expect(resultCtx).To(Equal(ctx))
+				_, cached := r.nodeStatusCache.Get(nodeName)
+				Expect(cached).To(BeFalse())
+
+				cr := testutil.NewNodeCRDBuilder(nodeName).WithEFLO().WithNetworkCardsCount(0).Build()
+				cr.Annotations[types.ENOApi] = types.APIEcs
+				Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(ctx, cr) }()
+				resultCtx = r.injectNodeStatus(ctx, "default", podName)
 				nodeStatus, ok := status.MetaCtx[status.NodeStatus](resultCtx)
 				Expect(ok).To(BeTrue())
-				Expect(nodeStatus).NotTo(BeNil())
-				Expect(nodeStatus.NetworkCards).To(HaveLen(0))
+				Expect(len(nodeStatus.NetworkCards)).To(BeZero())
 			})
 		})
 
 		Context("when NetworkCards count is 2", func() {
+			It("should distribute 38 LingJun standard ENIs across both cards", func() {
+				nodeName := "lingjun-dual-card-node"
+				podName := "lingjun-dual-card-pod"
+				node := testutil.NewK8sNodeBuilder(nodeName).WithEFLO().Build()
+				Expect(k8sClient.Create(ctx, node)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(ctx, node) }()
+				crNode := testutil.NewNodeCRDBuilder(nodeName).WithEFLO().WithNetworkCardsCount(2).Build()
+				crNode.Annotations = map[string]string{types.ENOApi: types.APIEcs}
+				crNode.Spec.NodeCap.NetworkCards = []networkv1beta1.NetworkCard{{Index: 1}, {Index: 0}}
+				Expect(k8sClient.Create(ctx, crNode)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(ctx, crNode) }()
+				pod := testutil.CreateTestPod(podName, "default", nodeName)
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(ctx, pod) }()
+
+				resultCtx := r.injectNodeStatus(ctx, "default", podName)
+				_, ok := status.MetaCtx[status.NodeStatus](resultCtx)
+				Expect(ok).To(BeTrue())
+				counts := map[int]int{}
+				for i := 0; i < 38; i++ {
+					eniID := fmt.Sprintf("eni-dual-%d", i)
+					index := r.getENIIndex(resultCtx, "default", podName, eniID)
+					Expect(index).NotTo(BeNil())
+					counts[*index]++
+					// Check the outgoing ECS request preserves the selected side.
+					opts := &aliyunClient.AttachNetworkInterfaceOptions{
+						NetworkInterfaceID: &eniID, InstanceID: ptr.To("instance-dual"), NetworkCardIndex: index,
+					}
+					req, err := opts.ECS()
+					Expect(err).NotTo(HaveOccurred())
+					card, err := req.NetworkCardIndex.GetValue()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(card).To(Equal(*index))
+				}
+				Expect(counts).To(Equal(map[int]int{0: 19, 1: 19}))
+			})
+
 			It("should balance ENIs across network cards", func() {
 				nodeName := "multi-card-node"
 				networkCardsCount := 2
@@ -1946,7 +2181,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-podeni-1",
 						Namespace: "default",
-						Labels:    map[string]string{"name": nodeName},
+						Labels:    map[string]string{types.ENIRelatedNodeName: nodeName},
 					},
 					Spec: networkv1beta1.PodENISpec{
 						Allocations: []networkv1beta1.Allocation{{ENI: networkv1beta1.ENI{ID: "eni-card-0"}}},
@@ -1967,7 +2202,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-podeni-2",
 						Namespace: "default",
-						Labels:    map[string]string{"name": nodeName},
+						Labels:    map[string]string{types.ENIRelatedNodeName: nodeName},
 					},
 					Spec: networkv1beta1.PodENISpec{
 						Allocations: []networkv1beta1.Allocation{{ENI: networkv1beta1.ENI{ID: "eni-card-1"}}},
@@ -1988,7 +2223,7 @@ var _ = Describe("ENI Controller Tests", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-podeni-3",
 						Namespace: "default",
-						Labels:    map[string]string{"name": nodeName},
+						Labels:    map[string]string{types.ENIRelatedNodeName: nodeName},
 					},
 					Spec: networkv1beta1.PodENISpec{
 						Allocations: []networkv1beta1.Allocation{{ENI: networkv1beta1.ENI{ID: "eni-card-0-2"}}},
@@ -2014,7 +2249,7 @@ var _ = Describe("ENI Controller Tests", func() {
 				Eventually(func() bool {
 					var podENIList networkv1beta1.PodENIList
 					err := k8sClient.List(ctx, &podENIList, &client.ListOptions{
-						LabelSelector: labels.SelectorFromSet(map[string]string{"name": nodeName}),
+						LabelSelector: labels.SelectorFromSet(map[string]string{types.ENIRelatedNodeName: nodeName}),
 					})
 					return err == nil && len(podENIList.Items) == 3
 				}, time.Second*5, time.Millisecond*100).Should(BeTrue())
@@ -2102,12 +2337,13 @@ var _ = Describe("ENI Controller Tests", func() {
 					_ = k8sClient.Delete(ctx, deletingNode)
 				}()
 
-				now := metav1.Now()
 				deletingNodeCRD := testutil.NewNodeCRDBuilder(nodeName).Build()
-				deletingNodeCRD.DeletionTimestamp = &now
+				deletingNodeCRD.Finalizers = []string{"test.terway.io/hold"}
 				Expect(k8sClient.Create(ctx, deletingNodeCRD)).Should(Succeed())
+				Expect(k8sClient.Delete(ctx, deletingNodeCRD)).Should(Succeed())
 				defer func() {
-					_ = k8sClient.Delete(ctx, deletingNodeCRD)
+					deletingNodeCRD.Finalizers = nil
+					_ = k8sClient.Update(ctx, deletingNodeCRD)
 				}()
 
 				pod := testutil.CreateTestPod(podName, "default", nodeName)

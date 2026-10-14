@@ -352,6 +352,8 @@ func TestProvider_GetLimit_EFLOControl_Integration(t *testing.T) {
 		EniQuantity:                 4,
 		EniPrivateIpAddressQuantity: 10,
 		EniHighDenseQuantity:        2,
+		NetworkCardQuantity:         2,
+		NetworkCards:                []client.NetworkCard{{Index: 0}, {Index: 1}},
 	}, nil)
 
 	provider := client.NewProvider()
@@ -363,6 +365,7 @@ func TestProvider_GetLimit_EFLOControl_Integration(t *testing.T) {
 	assert.Equal(t, 4, limit1.Adapters)
 	assert.Equal(t, 10, limit1.IPv4PerAdapter)
 	assert.Equal(t, 2, limit1.HighDenseQuantity)
+	assert.Equal(t, []client.NetworkCard{{Index: 0}, {Index: 1}}, limit1.NetworkCards)
 
 	// Second call, should get from cache
 	limit2, err := provider.GetLimit(mockEFLOControl, "node-type-123")
@@ -463,4 +466,44 @@ func TestGetLimitProvider(t *testing.T) {
 
 	p2 := client.GetLimitProvider()
 	assert.Equal(t, p1, p2)
+}
+
+func TestProvider_EFLONetworkCards(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		quantity int
+		cards    []client.NetworkCard
+	}{
+		{name: "omitted single-card fields"},
+		{name: "zero cards", quantity: 0, cards: []client.NetworkCard{}},
+		{name: "single card", quantity: 1, cards: []client.NetworkCard{{Index: 0}}},
+		{name: "dual card reversed", quantity: 2, cards: []client.NetworkCard{{Index: 1}, {Index: 0}}},
+		{name: "negative quantity", quantity: -1},
+		{name: "missing cards", quantity: 2},
+		{name: "missing quantity", cards: []client.NetworkCard{{Index: 0}}},
+		{name: "duplicate", quantity: 2, cards: []client.NetworkCard{{Index: 0}, {Index: 0}}},
+		{name: "non-contiguous indices", quantity: 2, cards: []client.NetworkCard{{Index: 0}, {Index: 4}}},
+		{name: "indices without zero", quantity: 2, cards: []client.NetworkCard{{Index: 4}, {Index: 1}}},
+		{name: "negative index", quantity: 1, cards: []client.NetworkCard{{Index: -1}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := mocks.NewEFLOControl(t)
+			response := &client.DescribeNodeTypeResponse{
+				EniQuantity: 38, NetworkCardQuantity: tc.quantity, NetworkCards: tc.cards,
+			}
+			api.On("DescribeNodeType", mock.Anything, mock.Anything).Return(response, nil).Once()
+			provider := client.NewProvider()
+			limit, err := provider.GetLimit(api, "test-type")
+			if !assert.NoError(t, err) {
+				return
+			}
+			assert.Equal(t, 38, limit.Adapters)
+			assert.Equal(t, tc.cards, limit.NetworkCards)
+			assert.Equal(t, tc.quantity, response.NetworkCardQuantity)
+			assert.Equal(t, tc.cards, response.NetworkCards)
+			cached, err := provider.GetLimit(api, "test-type")
+			assert.NoError(t, err)
+			assert.Equal(t, limit, cached)
+		})
+	}
 }

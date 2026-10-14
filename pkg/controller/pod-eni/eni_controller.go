@@ -1069,7 +1069,7 @@ func (m *ReconcilePodENI) injectNodeStatus(ctx context.Context, namespace, name 
 				podENIs := &v1beta1.PodENIList{}
 				err := m.client.List(ctx, podENIs, &client.ListOptions{
 					LabelSelector: labels.SelectorFromSet(map[string]string{
-						"name": nodeName,
+						types.ENIRelatedNodeName: nodeName,
 					}),
 				})
 				if err != nil {
@@ -1117,14 +1117,14 @@ func (m *ReconcilePodENI) getNetworkCardsCount(ctx context.Context, nodeName str
 		if !k8sErr.IsNotFound(err) {
 			l.Error(err, "failed to get crd node")
 		}
-		l.V(4).Info("crd node not found, ignored")
-		return 0
+		l.V(4).Info("crd node capabilities are not initialized")
+		return -1
 	}
 	if !crdNode.DeletionTimestamp.IsZero() {
 		return -1
 	}
 
-	if utils.ISLingJunNode(crdNode.Labels) {
+	if utils.ISLingJunNode(crdNode.Labels) && crdNode.Annotations[types.ENOApi] != types.APIEcs {
 		return 0
 	}
 
