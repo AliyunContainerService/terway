@@ -158,3 +158,33 @@ func LogFields(l logr.Logger, obj any) logr.Logger {
 	}
 	return r
 }
+
+// filterNetworkInterfacesByTags requires every requested tag to match. ECS can
+// return either Key/Value or TagKey/TagValue; each pair is matched independently.
+func filterNetworkInterfacesByTags(enis []*NetworkInterface, tags map[string]string) []*NetworkInterface {
+	if len(tags) == 0 {
+		return enis
+	}
+	var result []*NetworkInterface
+	for _, eni := range enis {
+		matches := true
+		for key, value := range tags {
+			found := false
+			for _, tag := range eni.Tags {
+				if (tag.Key != "" && tag.Key == key && tag.Value == value) ||
+					(tag.TagKey != "" && tag.TagKey == key && tag.TagValue == value) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			result = append(result, eni)
+		}
+	}
+	return result
+}

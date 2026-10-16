@@ -89,21 +89,10 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 	var result []*NetworkInterface
 	nextToken := ""
 
-	var ecsTags []ecs.DescribeNetworkInterfacesTag
-	for k, v := range tags {
-		ecsTags = append(ecsTags, ecs.DescribeNetworkInterfacesTag{
-			Key:   k,
-			Value: v,
-		})
-	}
-
 	for {
 		req := ecs.CreateDescribeNetworkInterfacesRequest()
 		req.NextToken = nextToken
 		req.VpcId = vpcID
-		if len(ecsTags) > 0 {
-			req.Tag = &ecsTags
-		}
 		req.NetworkInterfaceId = &eniID
 		req.InstanceId = instanceID
 		req.Type = instanceType
@@ -137,7 +126,7 @@ func (a *OpenAPI) DescribeNetworkInterface(ctx context.Context, vpcID string, en
 		}
 		nextToken = resp.NextToken
 	}
-	return result, nil
+	return filterNetworkInterfacesByTags(result, tags), nil
 }
 
 // AttachNetworkInterface attach eni
