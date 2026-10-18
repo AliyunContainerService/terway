@@ -44,6 +44,39 @@ func (c *nodeCRReadTrackingClient) Get(ctx context.Context, key client.ObjectKey
 	return c.Client.Get(ctx, key, obj, opts...)
 }
 
+type interfaceDeleteFailureClient struct {
+	client.Client
+	eniID string
+}
+
+func (c *interfaceDeleteFailureClient) Status() client.SubResourceWriter {
+	return &interfaceDeleteFailureWriter{SubResourceWriter: c.Client.Status(), eniID: c.eniID}
+}
+
+type interfaceDeleteFailureWriter struct {
+	client.SubResourceWriter
+	eniID string
+}
+
+func (w *interfaceDeleteFailureWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+	if ni, ok := obj.(*networkv1beta1.NetworkInterface); ok && ni.Name == w.eniID {
+		return fmt.Errorf("interface deletion update failed")
+	}
+	return w.SubResourceWriter.Update(ctx, obj, opts...)
+}
+
+type interfaceReadFailureClient struct {
+	client.Client
+	eniID string
+}
+
+func (c *interfaceReadFailureClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*networkv1beta1.NetworkInterface); ok && key.Name == c.eniID {
+		return fmt.Errorf("interface read failed")
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
 func createTestReconciler(openAPI *mocks.OpenAPI, trunkMode, crdMode bool) *ReconcilePodENI {
 	return &ReconcilePodENI{
 		client:          k8sClient,
@@ -585,6 +618,168 @@ var _ = Describe("ENI Controller Tests", func() {
 	// ==============================================================================
 
 	Context("PodENI Deletion Workflow", func() {
+		newDeletingPodENI := func(name string, eniIDs ...string) *networkv1beta1.PodENI {
+			pe := &networkv1beta1.PodENI{ObjectMeta: metav1.ObjectMeta{
+				Name: name, Namespace: "default", Finalizers: []string{types.FinalizerPodENIV2},
+				Labels: map[string]string{types.ENIRelatedNodeName: testNodeName},
+			}}
+			for _, id := range eniIDs {
+				pe.Spec.Allocations = append(pe.Spec.Allocations, networkv1beta1.Allocation{ENI: networkv1beta1.ENI{ID: id}})
+			}
+			Expect(k8sClient.Create(ctx, pe)).To(Succeed())
+			DeferCleanup(func() {
+				current := &networkv1beta1.PodENI{}
+				if k8sClient.Get(ctx, client.ObjectKeyFromObject(pe), current) == nil {
+					current.Finalizers = nil
+					Expect(k8sClient.Update(ctx, current)).To(Succeed())
+					_ = k8sClient.Delete(ctx, current)
+				}
+			})
+			Expect(k8sClient.Delete(ctx, pe)).To(Succeed())
+			return pe
+		}
+		counts := func(ns *status.NodeStatus) []int {
+			out := make([]int, len(ns.NetworkCards))
+			for _, card := range ns.NetworkCards {
+				out[card.CardIndex] = card.NetworkInterfaces.Len()
+			}
+			return out
+		}
+		newInterface := func(name string) *networkv1beta1.NetworkInterface {
+			ni := &networkv1beta1.NetworkInterface{ObjectMeta: metav1.ObjectMeta{Name: name}}
+			ni.Status.Phase = networkv1beta1.ENIPhaseBind
+			Expect(testutil.CreateResource(ctx, k8sClient, ni)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, ni) })
+			return ni
+		}
+
+		newPod := func(name string) {
+			pod := testutil.CreateTestPod(name, "default", testNodeName)
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, pod, client.GracePeriodSeconds(0)) })
+		}
+
+		DescribeTable("should release placement after deletion is accepted with an injected node status", func(interfaceExists bool) {
+			name := fmt.Sprintf("placement-delete-%t", interfaceExists)
+			eniID := "eni-" + name
+			pe := newDeletingPodENI(name, eniID)
+			newPod(pe.Name)
+			if interfaceExists {
+				newInterface(eniID)
+			}
+			r := createTestReconciler(openAPI, false, false)
+			ns := status.NewNodeStatus(2)
+			ns.RequestNetworkIndex(eniID, ptr.To(0), nil)
+			ns.RequestNetworkIndex("eni-survivor", ptr.To(1), nil)
+			r.nodeStatusCache.LoadOrStore(testNodeName, ns)
+			request := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pe)}
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(counts(ns)).To(Equal([]int{0, 1}))
+			if interfaceExists {
+				ni := &networkv1beta1.NetworkInterface{}
+				Expect(k8sClient.Get(ctx, client.ObjectKey{Name: eniID}, ni)).To(Succeed())
+				Expect(ni.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseDeleting)))
+			}
+			Expect(k8sErr.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(pe), &networkv1beta1.PodENI{}))).To(BeTrue())
+			_, err = r.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(counts(ns)).To(Equal([]int{0, 1}))
+		}, Entry("Interface CR is still deleting", true), Entry("Interface CR is already absent", false))
+
+		It("should retain placement and finalizers when deletion fails and release on retry", func() {
+			pe := newDeletingPodENI("placement-delete-retry", "eni-placement-delete-retry")
+			newPod(pe.Name)
+			ni := newInterface("eni-placement-delete-retry")
+			r := createTestReconciler(openAPI, false, false)
+			ns := status.NewNodeStatus(2)
+			ns.RequestNetworkIndex(ni.Name, ptr.To(0), nil)
+			r.nodeStatusCache.LoadOrStore(testNodeName, ns)
+			r.client = &interfaceDeleteFailureClient{Client: k8sClient, eniID: ni.Name}
+			request := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pe)}
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).To(MatchError("failed to update network interface status to Deleting: interface deletion update failed"))
+			Expect(counts(ns)).To(Equal([]int{1, 0}))
+			current := &networkv1beta1.PodENI{}
+			Expect(k8sClient.Get(ctx, request.NamespacedName, current)).To(Succeed())
+			Expect(current.Finalizers).To(ContainElement(types.FinalizerPodENIV2))
+			r.client = k8sClient
+			_, err = r.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(counts(ns)).To(Equal([]int{0, 0}))
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(ni), ni)).To(Succeed())
+			Expect(ni.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseDeleting)))
+		})
+
+		It("should release only completed allocations if a later deletion fails", func() {
+			pe := newDeletingPodENI("placement-partial", "eni-already-gone", "eni-read-failure")
+			newPod(pe.Name)
+			r := createTestReconciler(openAPI, false, false)
+			ns := status.NewNodeStatus(2)
+			ns.RequestNetworkIndex("eni-already-gone", ptr.To(0), nil)
+			ns.RequestNetworkIndex("eni-read-failure", ptr.To(0), nil)
+			r.nodeStatusCache.LoadOrStore(testNodeName, ns)
+			r.client = &interfaceReadFailureClient{Client: k8sClient, eniID: "eni-read-failure"}
+			request := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pe)}
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).To(HaveOccurred())
+			Expect(counts(ns)).To(Equal([]int{1, 0}))
+			r.client = k8sClient
+			_, err = r.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(counts(ns)).To(Equal([]int{0, 0}))
+		})
+
+		It("should skip placement cleanup when the original Pod is absent", func() {
+			pe := newDeletingPodENI("placement-no-pod", "eni-placement-no-pod")
+			r := createTestReconciler(openAPI, false, false)
+			ns := status.NewNodeStatus(2)
+			ns.RequestNetworkIndex("eni-placement-no-pod", ptr.To(0), nil)
+			r.nodeStatusCache.LoadOrStore(testNodeName, ns)
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pe)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(counts(ns)).To(Equal([]int{1, 0}))
+			Expect(k8sErr.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(pe), &networkv1beta1.PodENI{}))).To(BeTrue())
+		})
+
+		It("should not initialize a placement cache when the original Pod is absent", func() {
+			pe := newDeletingPodENI("placement-cold", "eni-placement-gone")
+			r := createTestReconciler(openAPI, false, false)
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pe)})
+			Expect(err).NotTo(HaveOccurred())
+			_, found := r.nodeStatusCache.Get(testNodeName)
+			Expect(found).To(BeFalse())
+		})
+
+		It("should keep selecting the least occupied card throughout 22 legacy ENI replacements", func() {
+			r := createTestReconciler(openAPI, false, false)
+			ns := status.NewNodeStatus(2)
+			ns.RequestNetworkIndex("eni-baseline", ptr.To(0), nil)
+			for i := 0; i < 22; i++ {
+				ns.RequestNetworkIndex(fmt.Sprintf("eni-old-%d", i), ptr.To(0), nil)
+			}
+			r.nodeStatusCache.LoadOrStore(testNodeName, ns)
+			pod := testutil.CreateTestPod("placement-new", "default", testNodeName)
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, pod) })
+			for i := 0; i < 22; i++ {
+				pe := newDeletingPodENI(fmt.Sprintf("placement-old-%d", i), fmt.Sprintf("eni-old-%d", i))
+				newPod(pe.Name)
+				_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pe)})
+				Expect(err).NotTo(HaveOccurred())
+				before := counts(ns)
+				Expect(before[0] + before[1]).To(Equal(22))
+				card := r.getENIIndex(ctx, pod.Namespace, pod.Name, fmt.Sprintf("eni-new-%d", i))
+				Expect(card).NotTo(BeNil())
+				Expect(before[*card]).To(Equal(min(before[0], before[1])), "replacement %d", i+1)
+				if i >= 11 {
+					after := counts(ns)
+					Expect(after[0] - after[1]).To(BeNumerically(">=", -1))
+					Expect(after[0] - after[1]).To(BeNumerically("<=", 1))
+				}
+			}
+		})
+
 		It("should handle deletion with finalizers correctly", func() {
 			podName := "test-deletion-finalizer"
 			eniID := "eni-deletion-finalizer"
@@ -592,13 +787,11 @@ var _ = Describe("ENI Controller Tests", func() {
 			pod := testutil.CreateTestPod(podName, "default", testNodeName)
 			Expect(k8sClient.Create(ctx, pod)).Should(Succeed())
 
-			now := metav1.Now()
 			podENI := &networkv1beta1.PodENI{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:              podName,
-					Namespace:         "default",
-					DeletionTimestamp: &now,
-					Finalizers:        []string{types.FinalizerPodENIV2},
+					Name:       podName,
+					Namespace:  "default",
+					Finalizers: []string{types.FinalizerPodENIV2},
 				},
 				Spec: networkv1beta1.PodENISpec{
 					Allocations: []networkv1beta1.Allocation{
