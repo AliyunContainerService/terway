@@ -418,6 +418,11 @@ func (m *ReconcilePodENI) podENIDelete(ctx context.Context, podENI *v1beta1.PodE
 		if err != nil {
 			return reconcile.Result{}, err
 		}
+
+		nodeStatus, ok := status.MetaCtx[status.NodeStatus](ctx)
+		if ok {
+			nodeStatus.DetachNetworkIndex(e.ENI.ID)
+		}
 	}
 
 	controllerutil.RemoveFinalizer(podENI, types.FinalizerPodENI)
