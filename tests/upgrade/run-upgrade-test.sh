@@ -324,9 +324,6 @@ validate_version_template() {
         return 1
     }
     local image_tag="v${version}"
-    if [[ "${version}" == "1.18.0" ]]; then
-        image_tag="v1.18.0-rc.6"
-    fi
     local unexpected
     unexpected=$(grep -E 'image: .*/(terway|terway-controlplane):' "${manifest}" | awk -v suffix=":${image_tag}" 'substr($0, length($0) - length(suffix) + 1) != suffix' || true)
     if [[ -n "${unexpected}" ]]; then

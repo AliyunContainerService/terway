@@ -279,7 +279,7 @@ spec:
       hostNetwork: true
       initContainers:
       - name: terway-init
-        image: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway:v1.18.0-rc.6
+        image: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway:v1.18.0
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
@@ -320,7 +320,7 @@ spec:
           name: eni-run
       containers:
       - name: terway
-        image: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway:v1.18.0-rc.6
+        image: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway:v1.18.0
         imagePullPolicy: IfNotPresent
         command:
         - /usr/bin/terwayd
@@ -393,7 +393,7 @@ spec:
           readOnly: true
 
       - name: policy
-        image: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway:v1.18.0-rc.6
+        image: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway:v1.18.0
         imagePullPolicy: IfNotPresent
         command: ["/bin/policyinit.sh"]
         env:
@@ -2428,7 +2428,7 @@ spec:
       - operator: "Exists"
       containers:
       - name: terway-controlplane
-        image: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway-controlplane:v1.18.0-rc.6
+        image: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway-controlplane:v1.18.0
         imagePullPolicy: IfNotPresent
         command:
         - /usr/bin/terway-controlplane
@@ -2478,7 +2478,7 @@ spec:
           mountPath: /var/addon
           readOnly: true
       - name: cilium-operator
-        image: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway-controlplane:v1.18.0-rc.6
+        image: registry-cn-hangzhou.ack.aliyuncs.com/acs/terway-controlplane:v1.18.0
         imagePullPolicy: IfNotPresent
         command:
         - /usr/bin/cilium-operator-generic
