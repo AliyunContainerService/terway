@@ -1,7 +1,7 @@
-From 5a363badf34ce4f420ac3ca1e0839d54074be485 Mon Sep 17 00:00:00 2001
+From c06fb1202e9c844260afaf578cee14c228ee9978 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Mon, 9 Mar 2026 16:11:17 +0800
-Subject: [PATCH 05/10] feat(datapath): add multi-host stack support for veth
+Subject: [PATCH 05/11] feat(datapath): add multi-host stack support for veth
  datapath- Implement host stack CIDR map and related functions - Add support
  for multiple host stack CIDRs in veth datapath mode - Update bpf_lxc to
  handle multiple host stack CIDRs - Modify daemon initialization to set up
@@ -206,10 +206,10 @@ index 789c1d14a8..69b40918dd 100644
  		0, 0x0, false, false, 0x0, node}
  }
 diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
-index e613bceafb..36a5dacd25 100644
+index 84f93179cb..97bd2b426b 100644
 --- a/pkg/datapath/linux/config/config.go
 +++ b/pkg/datapath/linux/config/config.go
-@@ -930,6 +930,19 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, devices []strin
+@@ -924,6 +924,19 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, devices []strin
  		}
  	}
  
@@ -406,7 +406,7 @@ index 0000000000..0d4de4e3ae
 +	return result, nil
 +}
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 63e1f8995a..ebea1a56f2 100644
+index 2c11ff85c6..ba6e8a330b 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -1067,6 +1067,7 @@ const (

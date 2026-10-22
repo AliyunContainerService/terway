@@ -1,7 +1,7 @@
-From 8bc28cc6fc0c890ae4489665b5fef86e1d410b2c Mon Sep 17 00:00:00 2001
+From f6d37d9e884b96e175424e13bb12c256336c5d5b Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Tue, 21 Oct 2025 15:26:32 +0800
-Subject: [PATCH 01/10] terway: cni
+Subject: [PATCH 01/11] terway: cni
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
@@ -33,7 +33,7 @@ Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
  create mode 100644 plugins/cilium-cni/chaining/terway/terway.go
 
 diff --git a/bpf/bpf_host.c b/bpf/bpf_host.c
-index b30e2e5447..6cf1b56f5e 100644
+index 3058726800..f637936274 100644
 --- a/bpf/bpf_host.c
 +++ b/bpf/bpf_host.c
 @@ -1360,7 +1360,7 @@ int cil_to_netdev(struct __ctx_buff *ctx)
@@ -249,7 +249,7 @@ index e9214303c1..4f8b3774d2 100644
  		// Probe results show that the system doesn't support BandwidthManager, so
  		// bail out.
 diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
-index 20b46c0864..25e9ce5004 100644
+index cba3ab66bd..8b8332ad1c 100644
 --- a/pkg/datapath/linux/config/config.go
 +++ b/pkg/datapath/linux/config/config.go
 @@ -351,6 +351,10 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
@@ -406,7 +406,7 @@ index 0000000000..5fe16f8e7c
 +	return int64(ep.parentIfIndex)
 +}
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index d227234ddc..1a51d90165 100644
+index d4630756cf..8223206498 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -2141,6 +2141,7 @@ func (c *DaemonConfig) TunnelingEnabled() bool {

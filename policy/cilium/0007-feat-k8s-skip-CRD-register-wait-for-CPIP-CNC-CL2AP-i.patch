@@ -1,7 +1,7 @@
-From 583f329e68109fd199ebe77bef0619a9141f721b Mon Sep 17 00:00:00 2001
+From 0c7b1eb5d0c72ab3475265f22ed8959b60962ff5 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Wed, 13 May 2026 14:10:16 +0800
-Subject: [PATCH 07/10] feat(k8s): skip CRD register/wait for CPIP, CNC, CL2AP
+Subject: [PATCH 07/11] feat(k8s): skip CRD register/wait for CPIP, CNC, CL2AP
  in Terway integration
 
 Remove unconditional registration and agent-side wait for three CRDs that
