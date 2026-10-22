@@ -1,7 +1,7 @@
-From 8036bd570ac3568ed4cd74c356afa833a6c600cf Mon Sep 17 00:00:00 2001
+From 1255d769d77a2ec6457908b2bb5f2819e4a1b0fd Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Tue, 2 Jun 2026 17:35:02 +0800
-Subject: [PATCH 09/10] lb: skip pruning proto=ANY service entries for upgrade
+Subject: [PATCH 09/11] lb: skip pruning proto=ANY service entries for upgrade
  compatibility
 
 During upgrade from cilium 1.16 (proto=ANY) to 1.18 (proto=TCP/UDP),
@@ -19,10 +19,10 @@ Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
  1 file changed, 9 insertions(+)
 
 diff --git a/pkg/loadbalancer/reconciler/bpf_reconciler.go b/pkg/loadbalancer/reconciler/bpf_reconciler.go
-index bfcbde80ad..c2da435fca 100644
+index 58569a574b..42bdb449da 100644
 --- a/pkg/loadbalancer/reconciler/bpf_reconciler.go
 +++ b/pkg/loadbalancer/reconciler/bpf_reconciler.go
-@@ -504,6 +504,15 @@ func (ops *BPFOps) pruneServiceMaps() error {
+@@ -509,6 +509,15 @@ func (ops *BPFOps) pruneServiceMaps() error {
  	svcCB := func(svcKey maps.ServiceKey, svcValue maps.ServiceValue) {
  		svcKey = svcKey.ToHost()
  		svcValue = svcValue.ToHost()

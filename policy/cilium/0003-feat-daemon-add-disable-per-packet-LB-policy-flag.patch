@@ -1,7 +1,7 @@
-From 2760408ede4851eeb463f9eb2bd7e35f576295fc Mon Sep 17 00:00:00 2001
+From 115824f612d4200cd6c88f21d3f40ad42ae2ad17 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Thu, 13 Nov 2025 15:08:54 +0800
-Subject: [PATCH 03/10] feat(daemon): add disable per-packet LB policy flag
+Subject: [PATCH 03/11] feat(daemon): add disable per-packet LB policy flag
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
@@ -45,7 +45,7 @@ index 9499317cce..0ba99bdb9b 100644
  		logging.Fatal(logger, "BindPFlags failed", logfields.Error, err)
  	}
 diff --git a/pkg/datapath/linux/config/config.go b/pkg/datapath/linux/config/config.go
-index 25e9ce5004..e613bceafb 100644
+index 8b8332ad1c..84f93179cb 100644
 --- a/pkg/datapath/linux/config/config.go
 +++ b/pkg/datapath/linux/config/config.go
 @@ -154,7 +154,9 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
@@ -60,7 +60,7 @@ index 25e9ce5004..e613bceafb 100644
  
  	cDefinesMap["UNKNOWN_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameUnknown))
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index ebeb6e5deb..63e1f8995a 100644
+index eebe3fa191..2c11ff85c6 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -1066,6 +1066,7 @@ const (

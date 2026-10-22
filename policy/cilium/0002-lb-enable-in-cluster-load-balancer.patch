@@ -1,7 +1,7 @@
-From 8392252cbbd0494e5fdfa88d85e2c5cbfd0037f1 Mon Sep 17 00:00:00 2001
+From 752212cae62b5ad6808fce9e79776e21f8eaf7a3 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Thu, 13 Nov 2025 15:02:38 +0800
-Subject: [PATCH 02/10] lb: enable in cluster load balancer
+Subject: [PATCH 02/11] lb: enable in cluster load balancer
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---
@@ -88,7 +88,7 @@ index fcaafc7241..86f6655209 100644
  		affinity := "Disabled"
  		if sr.KubeProxyReplacement.Features.SessionAffinity.Enabled {
 diff --git a/pkg/loadbalancer/config.go b/pkg/loadbalancer/config.go
-index 4ade0dddf0..2b57f45b18 100644
+index 47d512e4de..9a65510b3e 100644
 --- a/pkg/loadbalancer/config.go
 +++ b/pkg/loadbalancer/config.go
 @@ -523,6 +523,8 @@ type ExternalConfig struct {
@@ -123,7 +123,7 @@ index 65e3e71c28..03cc2cea3c 100644
  		if svc.Spec.Type == slim_corev1.ServiceTypeLoadBalancer && expType.CanExpose(slim_corev1.ServiceTypeLoadBalancer) {
  			for _, ip := range svc.Status.LoadBalancer.Ingress {
 diff --git a/pkg/option/config.go b/pkg/option/config.go
-index 1a51d90165..ebeb6e5deb 100644
+index 8223206498..eebe3fa191 100644
 --- a/pkg/option/config.go
 +++ b/pkg/option/config.go
 @@ -1063,6 +1063,9 @@ const (
