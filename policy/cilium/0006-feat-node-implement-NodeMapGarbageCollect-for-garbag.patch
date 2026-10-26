@@ -1,7 +1,7 @@
-From cad77895e200517f401f3e7977cf4a862b2c2f46 Mon Sep 17 00:00:00 2001
+From 661ce8370051ac319f9f302f107f7ef9f3eefe96 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Mon, 9 Mar 2026 16:27:19 +0800
-Subject: [PATCH 06/10] feat(node): implement NodeMapGarbageCollect for garbage
+Subject: [PATCH 06/11] feat(node): implement NodeMapGarbageCollect for garbage
  collection of stale BPF node map entries
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
@@ -49,7 +49,7 @@ index ba57bcabb4..1c4926abe8 100644
  	return ""
  }
 diff --git a/pkg/datapath/linux/node_ids.go b/pkg/datapath/linux/node_ids.go
-index 92174454c3..3498924769 100644
+index 86d97659fd..c1fc550cfb 100644
 --- a/pkg/datapath/linux/node_ids.go
 +++ b/pkg/datapath/linux/node_ids.go
 @@ -340,6 +340,90 @@ func (n *linuxNodeHandler) RestoreNodeIDs() {
@@ -279,7 +279,7 @@ index ed561dc1b5..cbb7f423b1 100644
  	past := time.Now().Add(-clientGCTimeout)
  	for k, v := range h.clients {
 diff --git a/pkg/node/neighbordiscovery/node_neighbor_discovery.go b/pkg/node/neighbordiscovery/node_neighbor_discovery.go
-index 03f10f3f26..29e60d3305 100644
+index 12bc4fe87f..f096276364 100644
 --- a/pkg/node/neighbordiscovery/node_neighbor_discovery.go
 +++ b/pkg/node/neighbordiscovery/node_neighbor_discovery.go
 @@ -190,6 +190,11 @@ func (nnh *nodeNeighborHandler) NodeValidateImplementation(node nodeTypes.Node)

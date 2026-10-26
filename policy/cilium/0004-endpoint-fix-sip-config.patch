@@ -1,7 +1,7 @@
-From 0923b9c097c078dab22377534ff3a9a62c241bff Mon Sep 17 00:00:00 2001
+From 2763edae5df9a28185f0a360397395da6b0a26a7 Mon Sep 17 00:00:00 2001
 From: l1b0k <libokang.lbk@alibaba-inc.com>
 Date: Thu, 18 Dec 2025 11:00:11 +0800
-Subject: [PATCH 04/10] endpoint: fix sip config
+Subject: [PATCH 04/11] endpoint: fix sip config
 
 Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
 ---

@@ -1,0 +1,44 @@
+From e699d5794f2fa9a20505555de3004ffc198ac69e Mon Sep 17 00:00:00 2001
+From: l1b0k <libokang.lbk@alibaba-inc.com>
+Date: Sat, 19 Sep 2026 15:06:00 +0800
+Subject: [PATCH 11/11] bpf: remove socket LB complexity test configurations
+
+Keep the IPv6 socket LB inlining workaround scoped to the runtime code by removing the two added complexity-test configurations.
+
+Signed-off-by: l1b0k <libokang.lbk@alibaba-inc.com>
+---
+ bpf/complexity-tests/510/bpf_sock/3.txt | 9 ---------
+ bpf/complexity-tests/510/bpf_sock/4.txt | 8 --------
+ 2 files changed, 17 deletions(-)
+ delete mode 100644 bpf/complexity-tests/510/bpf_sock/3.txt
+ delete mode 100644 bpf/complexity-tests/510/bpf_sock/4.txt
+
+diff --git a/bpf/complexity-tests/510/bpf_sock/3.txt b/bpf/complexity-tests/510/bpf_sock/3.txt
+deleted file mode 100644
+index d1d78e3953..0000000000
+--- a/bpf/complexity-tests/510/bpf_sock/3.txt
++++ /dev/null
+@@ -1,9 +0,0 @@
+--DSKIP_DEBUG=1
+--DENABLE_IPV4=1
+--DENABLE_IPV6=1
+--DENABLE_NODEPORT=1
+--DENABLE_SESSION_AFFINITY=1
+--DENABLE_SOCKET_LB_HOST_ONLY=1
+--DENABLE_SOCKET_LB_PEER=1
+--DENABLE_SERVICE_PROTOCOL_DIFFERENTIATION=1
+--DHOST_NETNS_COOKIE=1ULL
+diff --git a/bpf/complexity-tests/510/bpf_sock/4.txt b/bpf/complexity-tests/510/bpf_sock/4.txt
+deleted file mode 100644
+index 7affc1a2f8..0000000000
+--- a/bpf/complexity-tests/510/bpf_sock/4.txt
++++ /dev/null
+@@ -1,8 +0,0 @@
+--DSKIP_DEBUG=1
+--DENABLE_IPV4=1
+--DENABLE_IPV6=1
+--DENABLE_NODEPORT=1
+--DENABLE_SESSION_AFFINITY=1
+--DENABLE_SOCKET_LB_PEER=1
+--DENABLE_SERVICE_PROTOCOL_DIFFERENTIATION=1
+--DHOST_NETNS_COOKIE=1ULL
