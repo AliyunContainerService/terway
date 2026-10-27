@@ -199,6 +199,13 @@ func setExclusiveMode(store nodecap.NodeCapabilitiesStore, labels map[string]str
 		if len(plugins) == 0 {
 			return fmt.Errorf("cni config has no plugins")
 		}
+		// Reuse the host routes from the generated Terway config, including an
+		// explicitly empty list. Keep the template default when omitted.
+		if plugins[0].Exists("host_stack_cidrs") {
+			if _, err := exclusivePlugin.Set(plugins[0].Path("host_stack_cidrs").Data(), "host_stack_cidrs"); err != nil {
+				return err
+			}
+		}
 		filtered := []any{exclusivePlugin.Data()}
 		for _, plugin := range plugins[1:] {
 			// Exclusive ENI nodes do not run cilium-agent. Keep user chains,

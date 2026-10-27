@@ -126,6 +126,56 @@ func TestExclusiveModePreservesUserCNIChain(t *testing.T) {
 	assert.Equal(t, "169.254.20.10/32", plugins[0].Path("host_stack_cidrs").Index(0).Data())
 }
 
+func TestExclusiveModePreservesHostStackCIDRs(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		config string
+		want   []string
+	}{
+		{
+			name:   "omitted uses default",
+			config: `{"type":"terway"}`,
+			want:   []string{"169.254.20.10/32"},
+		},
+		{
+			name:   "custom routes",
+			config: `{"type":"terway","host_stack_cidrs":["169.254.20.10/32","169.254.25.10/32","fd00::/64"]}`,
+			want:   []string{"169.254.20.10/32", "169.254.25.10/32", "fd00::/64"},
+		},
+		{
+			name:   "custom routes replace default",
+			config: `{"type":"terway","host_stack_cidrs":["169.254.25.10/32"]}`,
+			want:   []string{"169.254.25.10/32"},
+		},
+		{
+			name:   "explicit empty list",
+			config: `{"type":"terway","host_stack_cidrs":[]}`,
+			want:   []string{},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cniPath := dir + "/10-terway.conflist"
+			require.NoError(t, os.WriteFile(cniPath, []byte(`{"cniVersion":"0.4.0","name":"terway-chainer","plugins":[`+tt.config+`]}`), 0644))
+			store := nodecap.NewFileNodeCapabilities(dir + "/node_capabilities")
+			// Running twice also verifies that rewriting preserves the routes.
+			for i := 0; i < 2; i++ {
+				require.NoError(t, setExclusiveMode(store, map[string]string{"k8s.aliyun.com/exclusive-mode-eni-type": "eniOnly"}, cniPath))
+				content, err := os.ReadFile(cniPath)
+				require.NoError(t, err)
+				var config struct {
+					Plugins []struct {
+						HostStackCIDRs []string `json:"host_stack_cidrs"`
+					} `json:"plugins"`
+				}
+				require.NoError(t, json.Unmarshal(content, &config))
+				require.Len(t, config.Plugins, 1)
+				assert.Equal(t, tt.want, config.Plugins[0].HostStackCIDRs)
+			}
+		})
+	}
+}
+
 func TestExclusiveModeFiltersCiliumChain(t *testing.T) {
 	patchGetAllConfig := gomonkey.ApplyFunc(getAllConfig, func(base string) (*TerwayConfig, error) {
 		return &TerwayConfig{cniConfig: []byte(`{"type":"terway","auto_mtu":false}`)}, nil
