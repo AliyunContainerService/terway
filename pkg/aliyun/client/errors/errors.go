@@ -1,6 +1,7 @@
 package errors
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -77,18 +78,7 @@ func ErrAssert(errCode string, err error) bool {
 }
 
 func ErrorCodeIs(err error, codes ...string) bool {
-	var respErr apiErr.Error
-	ok := errors.As(err, &respErr)
-	if !ok {
-		return false
-	}
-
-	for _, code := range codes {
-		if respErr.ErrorCode() == code {
-			return true
-		}
-	}
-	return false
+	return ErrorCodeIsAny(err, codes...)
 }
 
 // ErrorCodeIsAny checks if error matches any of the provided error codes.
@@ -125,6 +115,15 @@ func ErrRequestID(err error) string {
 	ok := errors.As(err, &respErr)
 	if ok {
 		return respErr.RequestId()
+	}
+	var sdkErr *tea.SDKError
+	if errors.As(err, &sdkErr) && sdkErr.Data != nil {
+		var data struct {
+			RequestID string `json:"RequestId"`
+		}
+		if json.Unmarshal([]byte(*sdkErr.Data), &data) == nil {
+			return data.RequestID
+		}
 	}
 	return ""
 }

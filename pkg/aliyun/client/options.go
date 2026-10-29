@@ -1,12 +1,14 @@
 package client
 
 import (
+	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
 	eflocontroller20221215 "github.com/alibabacloud-go/eflo-controller-20221215/v3/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/utils/ptr"
 )
 
 // NetworkInterfaceOptions represents the common options for network interface operations.
@@ -18,6 +20,7 @@ type NetworkInterfaceOptions struct {
 	ResourceGroupID       string
 	IPCount               int
 	IPv6Count             int
+	EnablePrimaryIPv6     bool
 	IPv4PrefixCount       int
 	IPv6PrefixCount       int
 	Tags                  map[string]string
@@ -74,6 +77,9 @@ func (c *CreateNetworkInterfaceOptions) ApplyCreateNetworkInterface(options *Cre
 		if c.NetworkInterfaceOptions.IPv6Count >= 1 {
 			options.NetworkInterfaceOptions.IPv6Count = c.NetworkInterfaceOptions.IPv6Count
 		}
+		if c.NetworkInterfaceOptions.EnablePrimaryIPv6 {
+			options.NetworkInterfaceOptions.EnablePrimaryIPv6 = true
+		}
 		if c.NetworkInterfaceOptions.Tags != nil {
 			options.NetworkInterfaceOptions.Tags = c.NetworkInterfaceOptions.Tags
 		}
@@ -107,7 +113,7 @@ func (c *CreateNetworkInterfaceOptions) ApplyCreateNetworkInterface(options *Cre
 	}
 }
 
-func (c *CreateNetworkInterfaceOptions) Finish(idempotentKeyGen IdempotentKeyGen) (*ecs.CreateNetworkInterfaceRequest, func(), error) {
+func (c *CreateNetworkInterfaceOptions) Finish(regionID string, idempotentKeyGen IdempotentKeyGen) (*ecs20140526.CreateNetworkInterfaceRequest, func(), error) {
 	if c.NetworkInterfaceOptions == nil ||
 		c.NetworkInterfaceOptions.VSwitchID == "" ||
 		len(c.NetworkInterfaceOptions.SecurityGroupIDs) == 0 {
@@ -120,50 +126,64 @@ func (c *CreateNetworkInterfaceOptions) Finish(idempotentKeyGen IdempotentKeyGen
 	if c.NetworkInterfaceOptions.IPv6Count > 0 && c.NetworkInterfaceOptions.IPv6PrefixCount > 0 {
 		return nil, nil, ErrInvalidArgs
 	}
+	if c.NetworkInterfaceOptions.EnablePrimaryIPv6 &&
+		(c.NetworkInterfaceOptions.IPCount > 0 || c.NetworkInterfaceOptions.IPv4PrefixCount > 0 || c.NetworkInterfaceOptions.IPv6PrefixCount > 0) {
+		return nil, nil, ErrInvalidArgs
+	}
 
-	req := ecs.CreateCreateNetworkInterfaceRequest()
-	req.VSwitchId = c.NetworkInterfaceOptions.VSwitchID
-	req.InstanceType = ENITypeSecondary
+	req := &ecs20140526.CreateNetworkInterfaceRequest{}
+	req.RegionId = ptr.To(regionID)
+	req.VSwitchId = ptr.To(c.NetworkInterfaceOptions.VSwitchID)
+	req.InstanceType = ptr.To(ENITypeSecondary)
 	if c.NetworkInterfaceOptions.Trunk {
-		req.InstanceType = ENITypeTrunk
+		req.InstanceType = ptr.To(ENITypeTrunk)
 	}
 	if c.NetworkInterfaceOptions.ERDMA {
-		req.NetworkInterfaceTrafficMode = ENITrafficModeRDMA
+		req.NetworkInterfaceTrafficMode = ptr.To(ENITrafficModeRDMA)
 	}
-	req.SecurityGroupIds = &c.NetworkInterfaceOptions.SecurityGroupIDs
-	req.ResourceGroupId = c.NetworkInterfaceOptions.ResourceGroupID
-	req.Description = eniDescription
+	for _, id := range c.NetworkInterfaceOptions.SecurityGroupIDs {
+		req.SecurityGroupIds = append(req.SecurityGroupIds, ptr.To(id))
+	}
+	if c.NetworkInterfaceOptions.ResourceGroupID != "" {
+		req.ResourceGroupId = ptr.To(c.NetworkInterfaceOptions.ResourceGroupID)
+	}
+	req.Description = ptr.To(eniDescription)
 	if c.NetworkInterfaceOptions.IPCount > 1 {
-		req.SecondaryPrivateIpAddressCount = requests.NewInteger(c.NetworkInterfaceOptions.IPCount - 1)
+		req.SecondaryPrivateIpAddressCount = ptr.To(int32(c.NetworkInterfaceOptions.IPCount - 1))
 	}
-	if c.NetworkInterfaceOptions.IPv6Count > 0 {
-		req.Ipv6AddressCount = requests.NewInteger(c.NetworkInterfaceOptions.IPv6Count)
+	if c.NetworkInterfaceOptions.EnablePrimaryIPv6 {
+		req.EnablePrimaryIPv6 = ptr.To(true)
+		if c.NetworkInterfaceOptions.IPv6Count > 1 {
+			req.Ipv6AddressCount = ptr.To(int32(c.NetworkInterfaceOptions.IPv6Count - 1))
+		}
+	} else if c.NetworkInterfaceOptions.IPv6Count > 0 {
+		req.Ipv6AddressCount = ptr.To(int32(c.NetworkInterfaceOptions.IPv6Count))
 	}
 	if c.NetworkInterfaceOptions.IPv4PrefixCount > 0 {
-		req.Ipv4PrefixCount = requests.NewInteger(c.NetworkInterfaceOptions.IPv4PrefixCount)
+		req.Ipv4PrefixCount = ptr.To(int32(c.NetworkInterfaceOptions.IPv4PrefixCount))
 	}
 	if c.NetworkInterfaceOptions.IPv6PrefixCount > 0 {
-		req.Ipv6PrefixCount = requests.NewInteger(c.NetworkInterfaceOptions.IPv6PrefixCount)
+		req.Ipv6PrefixCount = ptr.To(int32(c.NetworkInterfaceOptions.IPv6PrefixCount))
 	}
 
 	if c.NetworkInterfaceOptions.DeleteENIOnECSRelease != nil {
-		req.DeleteOnRelease = requests.NewBoolean(*c.NetworkInterfaceOptions.DeleteENIOnECSRelease)
+		req.DeleteOnRelease = c.NetworkInterfaceOptions.DeleteENIOnECSRelease
 	}
 	if c.NetworkInterfaceOptions.SourceDestCheck != nil {
-		req.SourceDestCheck = requests.NewBoolean(*c.NetworkInterfaceOptions.SourceDestCheck)
+		req.SourceDestCheck = c.NetworkInterfaceOptions.SourceDestCheck
 	}
 
-	var tags []ecs.CreateNetworkInterfaceTag
+	var tags []*ecs20140526.CreateNetworkInterfaceRequestTag
 	for k, v := range c.NetworkInterfaceOptions.Tags {
-		tags = append(tags, ecs.CreateNetworkInterfaceTag{
-			Key:   k,
-			Value: v,
+		tags = append(tags, &ecs20140526.CreateNetworkInterfaceRequestTag{
+			Key:   ptr.To(k),
+			Value: ptr.To(v),
 		})
 	}
-	req.Tag = &tags
+	req.Tag = tags
 
 	argsHash := md5Hash(req)
-	req.ClientToken = idempotentKeyGen.GenerateKey(argsHash)
+	req.ClientToken = ptr.To(idempotentKeyGen.GenerateKey(argsHash))
 
 	if c.Backoff == nil {
 		c.Backoff = &wait.Backoff{
@@ -172,7 +192,7 @@ func (c *CreateNetworkInterfaceOptions) Finish(idempotentKeyGen IdempotentKeyGen
 	}
 
 	return req, func() {
-		idempotentKeyGen.PutBack(argsHash, req.ClientToken)
+		idempotentKeyGen.PutBack(argsHash, FromPtr(req.ClientToken))
 	}, nil
 }
 

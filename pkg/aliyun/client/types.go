@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 
+	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/go-logr/logr"
 	"github.com/samber/lo"
@@ -106,34 +107,42 @@ type IPSet struct {
 	Prefix Prefix
 }
 
-func FromCreateResp(in *ecs.CreateNetworkInterfaceResponse) *NetworkInterface {
+func FromCreateResp(in *ecs20140526.CreateNetworkInterfaceResponseBody) *NetworkInterface {
 	r := &NetworkInterface{
-		Status:             in.Status,
-		MacAddress:         in.MacAddress,
-		NetworkInterfaceID: in.NetworkInterfaceId,
-		VSwitchID:          in.VSwitchId,
-		PrivateIPAddress:   in.PrivateIpAddress,
-		PrivateIPSets: lo.Map(in.PrivateIpSets.PrivateIpSet, func(item ecs.PrivateIpSet, _ int) IPSet {
+		Status:             FromPtr(in.Status),
+		MacAddress:         FromPtr(in.MacAddress),
+		NetworkInterfaceID: FromPtr(in.NetworkInterfaceId),
+		VSwitchID:          FromPtr(in.VSwitchId),
+		PrivateIPAddress:   FromPtr(in.PrivateIpAddress),
+		PrivateIPSets: lo.Map(FromPtr(in.PrivateIpSets).PrivateIpSet, func(item *ecs20140526.CreateNetworkInterfaceResponseBodyPrivateIpSetsPrivateIpSet, _ int) IPSet {
 			return IPSet{
-				IPAddress: item.PrivateIpAddress,
-				Primary:   item.Primary,
+				IPAddress: FromPtr(item.PrivateIpAddress),
+				Primary:   FromPtr(item.Primary),
 			}
 		}),
-		ZoneID:           in.ZoneId,
-		SecurityGroupIDs: in.SecurityGroupIds.SecurityGroupId,
-		IPv6Set: lo.Map(in.Ipv6Sets.Ipv6Set, func(item ecs.Ipv6Set, _ int) IPSet {
+		ZoneID: FromPtr(in.ZoneId),
+		SecurityGroupIDs: lo.Map(FromPtr(in.SecurityGroupIds).SecurityGroupId, func(item *string, _ int) string {
+			return FromPtr(item)
+		}),
+		IPv6Set: lo.Map(FromPtr(in.Ipv6Sets).Ipv6Set, func(item *ecs20140526.CreateNetworkInterfaceResponseBodyIpv6SetsIpv6Set, _ int) IPSet {
 			return IPSet{
-				IPAddress: item.Ipv6Address,
+				IPAddress: FromPtr(item.Ipv6Address),
+				Primary:   FromPtr(item.Primary),
 			}
 		}),
-		Tags:            in.Tags.Tag,
-		Type:            in.Type,
-		ResourceGroupID: in.ResourceGroupId,
-		IPv4PrefixSets: lo.Map(in.Ipv4PrefixSets.Ipv4PrefixSet, func(item ecs.Ipv4PrefixSet, _ int) Prefix {
-			return Prefix(item.Ipv4Prefix)
+		Tags: lo.Map(FromPtr(in.Tags).Tag, func(item *ecs20140526.CreateNetworkInterfaceResponseBodyTagsTag, _ int) ecs.Tag {
+			return ecs.Tag{
+				TagKey:   FromPtr(item.TagKey),
+				TagValue: FromPtr(item.TagValue),
+			}
 		}),
-		IPv6PrefixSets: lo.Map(in.Ipv6PrefixSets.Ipv6PrefixSet, func(item ecs.Ipv6PrefixSet, _ int) Prefix {
-			return Prefix(item.Ipv6Prefix)
+		Type:            FromPtr(in.Type),
+		ResourceGroupID: FromPtr(in.ResourceGroupId),
+		IPv4PrefixSets: lo.Map(FromPtr(in.Ipv4PrefixSets).Ipv4PrefixSet, func(item *ecs20140526.CreateNetworkInterfaceResponseBodyIpv4PrefixSetsIpv4PrefixSet, _ int) Prefix {
+			return Prefix(FromPtr(item.Ipv4Prefix))
+		}),
+		IPv6PrefixSets: lo.Map(FromPtr(in.Ipv6PrefixSets).Ipv6PrefixSet, func(item *ecs20140526.CreateNetworkInterfaceResponseBodyIpv6PrefixSetsIpv6PrefixSet, _ int) Prefix {
+			return Prefix(FromPtr(item.Ipv6Prefix))
 		}),
 	}
 	if r.Type == "" {
@@ -213,6 +222,9 @@ func LogFields(l logr.Logger, obj any) logr.Logger {
 
 		tagValue := field.Tag.Get("name")
 		if tagValue == "" {
+			tagValue = strings.Split(field.Tag.Get("json"), ",")[0]
+		}
+		if tagValue == "" || tagValue == "-" {
 			continue
 		}
 
