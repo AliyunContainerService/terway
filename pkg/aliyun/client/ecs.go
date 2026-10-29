@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"time"
 
+	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -39,14 +40,14 @@ func (a *ECSService) CreateNetworkInterface(ctx context.Context, opts ...CreateN
 		opt.ApplyCreateNetworkInterface(option)
 	}
 
-	req, rollBackFunc, err := option.Finish(a.IdempotentKeyGen)
+	req, rollBackFunc, err := option.Finish(a.ClientSet.RegionID(), a.IdempotentKeyGen)
 	if err != nil {
 		return nil, err
 	}
 	l := LogFields(logf.FromContext(ctx), req)
 
 	var (
-		resp     *ecs.CreateNetworkInterfaceResponse
+		resp     *ecs20140526.CreateNetworkInterfaceResponse
 		innerErr error
 	)
 
@@ -56,10 +57,10 @@ func (a *ECSService) CreateNetworkInterface(ctx context.Context, opts ...CreateN
 			return false, err
 		}
 		start := time.Now()
-		resp, innerErr = a.ClientSet.ECS().CreateNetworkInterface(req)
+		resp, innerErr = a.ClientSet.ECSV2().CreateNetworkInterface(req)
 		metric.OpenAPILatency.WithLabelValues(APICreateNetworkInterface, fmt.Sprint(innerErr != nil)).Observe(metric.MsSince(start))
 		if innerErr != nil {
-			innerErr = apiErr.WarpError(innerErr)
+			innerErr = apiErr.WarpError2(innerErr)
 			l.WithValues(LogFieldRequestID, apiErr.ErrRequestID(innerErr)).Error(innerErr, "failed")
 
 			if apiErr.ErrorIs(innerErr, apiErr.IsURLError, apiErr.WarpFn(apiErr.ErrThrottling, apiErr.ErrInternalError)) {
@@ -68,7 +69,7 @@ func (a *ECSService) CreateNetworkInterface(ctx context.Context, opts ...CreateN
 
 			return true, innerErr
 		}
-		l.WithValues(LogFieldRequestID, resp.RequestId, LogFieldENIID, resp.NetworkInterfaceId).Info("eni created")
+		l.WithValues(LogFieldRequestID, FromPtr(resp.Body.RequestId), LogFieldENIID, FromPtr(resp.Body.NetworkInterfaceId)).Info("eni created")
 		return true, nil
 	})
 
@@ -79,7 +80,7 @@ func (a *ECSService) CreateNetworkInterface(ctx context.Context, opts ...CreateN
 		return nil, err
 	}
 
-	return FromCreateResp(resp), err
+	return FromCreateResp(resp.Body), err
 }
 
 // DescribeNetworkInterface list eni

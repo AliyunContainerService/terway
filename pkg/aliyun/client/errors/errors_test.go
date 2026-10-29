@@ -86,6 +86,30 @@ func TestErrorCodeIs(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			name: "native SDK error",
+			args: args{
+				err:   &tea.SDKError{Code: tea.String("err")},
+				codes: []string{"foo", "err"},
+			},
+			want: true,
+		},
+		{
+			name: "wrapped native SDK error",
+			args: args{
+				err:   WarpError2(&tea.SDKError{Code: tea.String("err")}),
+				codes: []string{"err"},
+			},
+			want: true,
+		},
+		{
+			name: "native SDK code not match",
+			args: args{
+				err:   &tea.SDKError{Code: tea.String("err")},
+				codes: []string{"other"},
+			},
+			want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,6 +192,14 @@ func TestErrRequestID(t *testing.T) {
 	// Test with nil
 	requestID = ErrRequestID(nil)
 	assert.Equal(t, "", requestID)
+
+	sdkErr := tea.NewSDKError(map[string]interface{}{
+		"data": map[string]interface{}{"RequestId": "native-request-id"},
+	})
+	assert.Equal(t, "native-request-id", ErrRequestID(sdkErr))
+	assert.Equal(t, "native-request-id", ErrRequestID(WarpError2(sdkErr)))
+	assert.Empty(t, ErrRequestID(&tea.SDKError{Data: tea.String("invalid JSON")}))
+	assert.Empty(t, ErrRequestID(&tea.SDKError{}))
 }
 
 func TestE_Error(t *testing.T) {

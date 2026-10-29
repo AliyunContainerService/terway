@@ -4,21 +4,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"runtime"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/agiledragon/gomonkey/v2"
+	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	eflo20220530 "github.com/alibabacloud-go/eflo-20220530/v2/client"
 	eflocontroller20221215 "github.com/alibabacloud-go/eflo-controller-20221215/v3/client"
+	"github.com/alibabacloud-go/tea/tea"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/eflo"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/vpc"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/utils/ptr"
 
 	apiErr "github.com/AliyunContainerService/terway/pkg/aliyun/client/errors"
 	sdkErr "github.com/aliyun/alibaba-cloud-sdk-go/sdk/errors"
@@ -65,7 +73,7 @@ func createTestECSServiceForAPI() *ECSService {
 	return &ECSService{
 		RateLimiter:      rateLimiter,
 		Tracer:           tracer,
-		ClientSet:        &mockClientSetForAPI{ecsClient: &ecs.Client{}},
+		ClientSet:        &mockClientSetForAPI{ecsClient: &ecs.Client{}, ecsV2Client: &ecs20140526.Client{}},
 		IdempotentKeyGen: NewIdempotentKeyGenerator(),
 	}
 }
@@ -99,49 +107,49 @@ func TestECSService_CreateNetworkInterface_WithGomonkey(t *testing.T) {
 	ecsService := createTestECSServiceForAPI()
 
 	// Mock response
-	mockResponse := &ecs.CreateNetworkInterfaceResponse{
-		RequestId:          "test-request-id",
-		NetworkInterfaceId: "eni-test-001",
-		Status:             "Available",
-		MacAddress:         "02:11:22:33:44:55",
-		VSwitchId:          "vsw-test-001",
-		PrivateIpAddress:   "10.0.0.100",
-		ZoneId:             "cn-hangzhou-a",
-		SecurityGroupIds: ecs.SecurityGroupIdsInCreateNetworkInterface{
-			SecurityGroupId: []string{"sg-test-001"},
+	mockResponse := &ecs20140526.CreateNetworkInterfaceResponseBody{
+		RequestId:          ptr.To("test-request-id"),
+		NetworkInterfaceId: ptr.To("eni-test-001"),
+		Status:             ptr.To("Available"),
+		MacAddress:         ptr.To("02:11:22:33:44:55"),
+		VSwitchId:          ptr.To("vsw-test-001"),
+		PrivateIpAddress:   ptr.To("10.0.0.100"),
+		ZoneId:             ptr.To("cn-hangzhou-a"),
+		SecurityGroupIds: &ecs20140526.CreateNetworkInterfaceResponseBodySecurityGroupIds{
+			SecurityGroupId: []*string{ptr.To("sg-test-001")},
 		},
-		PrivateIpSets: ecs.PrivateIpSetsInCreateNetworkInterface{
-			PrivateIpSet: []ecs.PrivateIpSet{
+		PrivateIpSets: &ecs20140526.CreateNetworkInterfaceResponseBodyPrivateIpSets{
+			PrivateIpSet: []*ecs20140526.CreateNetworkInterfaceResponseBodyPrivateIpSetsPrivateIpSet{
 				{
-					PrivateIpAddress: "10.0.0.100",
-					Primary:          true,
+					PrivateIpAddress: ptr.To("10.0.0.100"),
+					Primary:          ptr.To(true),
 				},
 			},
 		},
-		Tags: ecs.TagsInCreateNetworkInterface{
-			Tag: []ecs.Tag{
+		Tags: &ecs20140526.CreateNetworkInterfaceResponseBodyTags{
+			Tag: []*ecs20140526.CreateNetworkInterfaceResponseBodyTagsTag{
 				{
-					Key:   "Name",
-					Value: "test-eni",
+					TagKey:   ptr.To("Name"),
+					TagValue: ptr.To("test-eni"),
 				},
 			},
 		},
-		Type:            "Secondary",
-		ResourceGroupId: "rg-test-001",
+		Type:            ptr.To("Secondary"),
+		ResourceGroupId: ptr.To("rg-test-001"),
 	}
 
 	// Mock CreateNetworkInterface method
 	patches := gomonkey.ApplyFunc(
-		(*ecs.Client).CreateNetworkInterface,
-		func(client *ecs.Client, request *ecs.CreateNetworkInterfaceRequest) (*ecs.CreateNetworkInterfaceResponse, error) {
+		(*ecs20140526.Client).CreateNetworkInterface,
+		func(client *ecs20140526.Client, request *ecs20140526.CreateNetworkInterfaceRequest) (*ecs20140526.CreateNetworkInterfaceResponse, error) {
 			// Verify request parameters
-			assert.Equal(t, "vsw-test-001", request.VSwitchId)
-			assert.Equal(t, "Secondary", request.InstanceType)
-			assert.Equal(t, 1, len(*request.SecurityGroupIds))
-			assert.Equal(t, "sg-test-001", (*request.SecurityGroupIds)[0])
-			assert.Equal(t, "rg-test-001", request.ResourceGroupId)
+			assert.Equal(t, "vsw-test-001", FromPtr(request.VSwitchId))
+			assert.Equal(t, "Secondary", FromPtr(request.InstanceType))
+			assert.Equal(t, 1, len(request.SecurityGroupIds))
+			assert.Equal(t, "sg-test-001", FromPtr(request.SecurityGroupIds[0]))
+			assert.Equal(t, "rg-test-001", FromPtr(request.ResourceGroupId))
 
-			return mockResponse, nil
+			return &ecs20140526.CreateNetworkInterfaceResponse{Body: mockResponse}, nil
 		},
 	)
 	defer patches.Reset()
@@ -172,8 +180,8 @@ func TestECSService_CreateNetworkInterface_WithGomonkey(t *testing.T) {
 	assert.Equal(t, "10.0.0.100", result.PrivateIPSets[0].IPAddress)
 	assert.True(t, result.PrivateIPSets[0].Primary)
 	assert.Len(t, result.Tags, 1)
-	assert.Equal(t, "Name", result.Tags[0].Key)
-	assert.Equal(t, "test-eni", result.Tags[0].Value)
+	assert.Equal(t, "Name", result.Tags[0].TagKey)
+	assert.Equal(t, "test-eni", result.Tags[0].TagValue)
 	assert.Equal(t, "Secondary", result.Type)
 	assert.Equal(t, "rg-test-001", result.ResourceGroupID)
 }
@@ -1326,10 +1334,10 @@ func TestECSService_CreateNetworkInterface_WithGomonkey_Error(t *testing.T) {
 	ecsService := createTestECSServiceForAPI()
 
 	// Mock CreateNetworkInterface method to return error
-	mockError := sdkErr.NewServerError(403, "{\"Code\": \"Forbidden\"}", "test-request-id")
+	mockError := &tea.SDKError{Code: ptr.To("Forbidden")}
 	patches := gomonkey.ApplyFunc(
-		(*ecs.Client).CreateNetworkInterface,
-		func(client *ecs.Client, request *ecs.CreateNetworkInterfaceRequest) (*ecs.CreateNetworkInterfaceResponse, error) {
+		(*ecs20140526.Client).CreateNetworkInterface,
+		func(client *ecs20140526.Client, request *ecs20140526.CreateNetworkInterfaceRequest) (*ecs20140526.CreateNetworkInterfaceResponse, error) {
 			return nil, mockError
 		},
 	)
@@ -1700,4 +1708,182 @@ func TestECSService_DescribeInstanceTypes_WithGomonkey_Error(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.True(t, apiErr.ErrorCodeIs(err, "Forbidden"))
+}
+
+func TestCreateNetworkInterfaceSDK(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		total             int
+		ipv4              int
+		trunk             bool
+		enablePrimaryIPv6 bool
+	}{
+		{name: "IPv4 default"},
+		{name: "IPv4 one", ipv4: 1},
+		{name: "IPv4 multiple", ipv4: 2},
+		{name: "IPv4 trunk", ipv4: 1, trunk: true},
+		{name: "dual stack", ipv4: 2, total: 2},
+		{name: "IPv6 zero", enablePrimaryIPv6: true},
+		{name: "IPv6 one", total: 1, enablePrimaryIPv6: true},
+		{name: "IPv6 multiple", total: 2, enablePrimaryIPv6: true},
+		{name: "IPv6 trunk", total: 1, trunk: true, enablePrimaryIPv6: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			tokens := make(chan string, 2)
+			ips := ""
+			ipv4Fields := `"PrivateIpAddress":"10.0.0.1","PrivateIpSets":{"PrivateIpSet":[{"PrivateIpAddress":"10.0.0.1","Primary":true}]},`
+			if tc.enablePrimaryIPv6 || tc.total > 0 {
+				ips = fmt.Sprintf(`{"Ipv6Address":"fd00::1","Primary":%t}`, tc.enablePrimaryIPv6)
+			}
+			if tc.enablePrimaryIPv6 {
+				ipv4Fields = ""
+			}
+			if tc.total > 1 {
+				ips = `{"Ipv6Address":"fd00::2","Primary":false},` + ips
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !assert.NoError(t, r.ParseForm()) {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				assert.Equal(t, APICreateNetworkInterface, r.Header.Get("x-acs-action"))
+				ipv6Count := tc.total
+				if tc.enablePrimaryIPv6 {
+					assert.Equal(t, "true", r.Form.Get("EnablePrimaryIPv6"))
+					ipv6Count = max(0, ipv6Count-1)
+				} else {
+					assert.NotContains(t, r.Form, "EnablePrimaryIPv6")
+				}
+				assert.Equal(t, "cn-hangzhou", r.Form.Get("RegionId"))
+				if ipv6Count > 0 {
+					assert.Equal(t, fmt.Sprint(ipv6Count), r.Form.Get("Ipv6AddressCount"))
+				} else {
+					assert.NotContains(t, r.Form, "Ipv6AddressCount")
+				}
+				if tc.ipv4 > 1 {
+					assert.Equal(t, fmt.Sprint(tc.ipv4-1), r.Form.Get("SecondaryPrivateIpAddressCount"))
+				} else {
+					assert.NotContains(t, r.Form, "SecondaryPrivateIpAddressCount")
+				}
+				assert.NotContains(t, r.Form, "Ipv4PrefixCount")
+				assert.NotContains(t, r.Form, "Ipv6PrefixCount")
+				assert.Empty(t, r.Form.Get("PrivateIpAddress"))
+				assert.Equal(t, "vsw-test", r.Form.Get("VSwitchId"))
+				assert.Equal(t, "sg-test", r.Form.Get("SecurityGroupIds.1"))
+				assert.Equal(t, "false", r.Form.Get("SourceDestCheck"))
+				assert.Equal(t, tc.trunk, r.Form.Get("InstanceType") == ENITypeTrunk)
+				tokens <- r.Form.Get("ClientToken")
+				w.Header().Set("Content-Type", "application/json")
+				if calls.Add(1) == 1 {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					_, _ = fmt.Fprint(w, `{"Code":"Throttling","Message":"retry","RequestId":"request-test"}`)
+					return
+				}
+				_, _ = fmt.Fprintf(w, `{%s"NetworkInterfaceId":"eni-test","MacAddress":"02:00:00:00:00:01","SecurityGroupIds":{"SecurityGroupId":["sg-test"]},"Ipv6Sets":{"Ipv6Set":[%s]},"Tags":{"Tag":[{"TagKey":"app","TagValue":"terway"}]}}`, ipv4Fields, ips)
+			}))
+			defer server.Close()
+			native, err := ecs20140526.NewClient(&openapi.Config{
+				Endpoint: ptr.To(strings.TrimPrefix(server.URL, "http://")), Protocol: ptr.To("http"),
+				AccessKeyId: ptr.To("test"), AccessKeySecret: ptr.To("test"),
+			})
+			require.NoError(t, err)
+			api := NewAPIFacade(&mockClientSetForAPI{ecsV2Client: native}, LimitConfig{})
+			eni, err := api.GetECS().CreateNetworkInterface(context.Background(),
+				&CreateNetworkInterfaceOptions{NetworkInterfaceOptions: &NetworkInterfaceOptions{Trunk: tc.trunk, EnablePrimaryIPv6: tc.enablePrimaryIPv6}},
+				&CreateNetworkInterfaceOptions{
+					NetworkInterfaceOptions: &NetworkInterfaceOptions{
+						VSwitchID: "vsw-test", SecurityGroupIDs: []string{"sg-test"}, IPCount: tc.ipv4, IPv6Count: tc.total,
+						SourceDestCheck: ptr.To(false),
+					},
+					Backoff: &wait.Backoff{Steps: 2, Duration: time.Millisecond},
+				})
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, calls.Load())
+			firstToken, retryToken := <-tokens, <-tokens
+			assert.NotEmpty(t, firstToken)
+			assert.Equal(t, firstToken, retryToken)
+			assert.Equal(t, "eni-test", eni.NetworkInterfaceID)
+			assert.Equal(t, []string{"sg-test"}, eni.SecurityGroupIDs)
+			ipv6Total := tc.total
+			if tc.enablePrimaryIPv6 {
+				ipv6Total = max(1, ipv6Total)
+			}
+			require.Len(t, eni.IPv6Set, ipv6Total)
+			if ipv6Total > 0 {
+				primary := eni.IPv6Set[len(eni.IPv6Set)-1]
+				assert.Equal(t, tc.enablePrimaryIPv6, primary.Primary)
+				assert.Equal(t, "fd00::1", primary.IPAddress)
+			}
+			if tc.total > 1 {
+				assert.False(t, eni.IPv6Set[0].Primary)
+			}
+			if tc.enablePrimaryIPv6 {
+				assert.Empty(t, eni.PrivateIPAddress)
+				assert.Empty(t, eni.PrivateIPSets)
+			} else {
+				assert.Equal(t, "10.0.0.1", eni.PrivateIPAddress)
+				require.Len(t, eni.PrivateIPSets, 1)
+				assert.Equal(t, IPSet{IPAddress: "10.0.0.1", Primary: true}, eni.PrivateIPSets[0])
+			}
+			assert.Empty(t, eni.IPv4PrefixSets)
+			assert.Empty(t, eni.IPv6PrefixSets)
+			assert.Equal(t, "terway", eni.Tags[0].TagValue)
+		})
+	}
+}
+
+func TestCreateNetworkInterfaceSDKError(t *testing.T) {
+	for _, tc := range []struct {
+		code    string
+		keepKey bool
+	}{
+		{code: apiErr.ErrForbidden},
+		{code: apiErr.InvalidVSwitchIDIPNotEnough},
+		{code: apiErr.ErrIdempotentFailed, keepKey: true},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = fmt.Fprintf(w, `{"Code":%q,"Message":"request rejected","RequestId":"request-test"}`, tc.code)
+			}))
+			defer server.Close()
+			native, err := ecs20140526.NewClient(&openapi.Config{
+				Endpoint: ptr.To(strings.TrimPrefix(server.URL, "http://")), Protocol: ptr.To("http"),
+				AccessKeyId: ptr.To("test"), AccessKeySecret: ptr.To("test"),
+			})
+			require.NoError(t, err)
+			service := createTestECSServiceForAPI()
+			keys := &MockIdempotentKeyGen{generatedKeys: map[string]string{}}
+			service.ClientSet = &mockClientSetForAPI{ecsV2Client: native}
+			service.IdempotentKeyGen = keys
+			eni, err := service.CreateNetworkInterface(context.Background(), &CreateNetworkInterfaceOptions{
+				NetworkInterfaceOptions: &NetworkInterfaceOptions{VSwitchID: "vsw-test", SecurityGroupIDs: []string{"sg-test"}, EnablePrimaryIPv6: true},
+				Backoff:                 &wait.Backoff{Steps: 2},
+			})
+			assert.Nil(t, eni)
+			assert.True(t, apiErr.ErrorCodeIs(err, tc.code))
+			assert.Equal(t, "request-test", apiErr.ErrRequestID(err))
+			assert.EqualValues(t, 1, calls.Load(), "terminal errors must not be retried")
+			assert.Equal(t, tc.keepKey, len(keys.generatedKeys) != 0)
+		})
+	}
+}
+
+func TestCreateNetworkInterfaceInvalidOptions(t *testing.T) {
+	service := createTestECSServiceForAPI()
+	_, err := service.CreateNetworkInterface(context.Background())
+	assert.ErrorIs(t, err, ErrInvalidArgs)
+	for _, opts := range []*NetworkInterfaceOptions{
+		{},
+		{VSwitchID: "vsw-test"},
+		{SecurityGroupIDs: []string{"sg-test"}},
+		{VSwitchID: "vsw-test", SecurityGroupIDs: []string{"sg-test"}, IPCount: 1, EnablePrimaryIPv6: true},
+	} {
+		_, err := service.CreateNetworkInterface(context.Background(), &CreateNetworkInterfaceOptions{NetworkInterfaceOptions: opts})
+		assert.ErrorIs(t, err, ErrInvalidArgs)
+	}
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/ptr"
 )
@@ -44,22 +45,22 @@ func TestCreateNetworkInterfaceOptions_Finish(t *testing.T) {
 	}
 
 	// Execute the function to be tested
-	req, cleanup, err := c.Finish(&MockIdempotentKeyGen{generatedKeys: map[string]string{}})
+	req, cleanup, err := c.Finish("cn-hangzhou", &MockIdempotentKeyGen{generatedKeys: map[string]string{}})
 
 	// Verify the result
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.NotNil(t, cleanup)
 
-	assert.Equal(t, niOptions.VSwitchID, req.VSwitchId)
-	assert.Equal(t, ENITypeTrunk, req.InstanceType)
-	assert.Equal(t, ENITrafficModeRDMA, req.NetworkInterfaceTrafficMode)
-	assert.Equal(t, 1, len(*req.SecurityGroupIds))
-	assert.Equal(t, niOptions.ResourceGroupID, req.ResourceGroupId)
-	assert.Equal(t, eniDescription, req.Description)
-	assert.Equal(t, "mockToken", req.ClientToken)
-	assert.Equal(t, requests.NewInteger(1), req.SecondaryPrivateIpAddressCount)
-	assert.Equal(t, requests.NewInteger(1), req.Ipv6AddressCount)
+	assert.Equal(t, niOptions.VSwitchID, FromPtr(req.VSwitchId))
+	assert.Equal(t, ENITypeTrunk, FromPtr(req.InstanceType))
+	assert.Equal(t, ENITrafficModeRDMA, FromPtr(req.NetworkInterfaceTrafficMode))
+	assert.Equal(t, 1, len(req.SecurityGroupIds))
+	assert.Equal(t, niOptions.ResourceGroupID, FromPtr(req.ResourceGroupId))
+	assert.Equal(t, eniDescription, FromPtr(req.Description))
+	assert.Equal(t, "mockToken", FromPtr(req.ClientToken))
+	assert.Equal(t, int32(1), FromPtr(req.SecondaryPrivateIpAddressCount))
+	assert.Equal(t, int32(1), FromPtr(req.Ipv6AddressCount))
 	assert.NotNil(t, c.Backoff)
 
 	// Cleanup
@@ -577,7 +578,7 @@ func TestCreateNetworkInterfaceOptions_Finish_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, cleanup, err := tt.options.Finish(keyGen)
+			req, cleanup, err := tt.options.Finish("cn-hangzhou", keyGen)
 			if tt.wantErr != nil {
 				assert.Equal(t, tt.wantErr, err)
 				assert.Nil(t, req)
@@ -841,12 +842,45 @@ func TestCreateNetworkInterfaceOptionsIPv6Only(t *testing.T) {
 	options := &CreateNetworkInterfaceOptions{NetworkInterfaceOptions: &NetworkInterfaceOptions{
 		VSwitchID: "vsw-test", SecurityGroupIDs: []string{"sg-test"}, IPv6Count: 10,
 	}}
-	req, cleanup, err := options.Finish(&MockIdempotentKeyGen{generatedKeys: map[string]string{}})
+	req, cleanup, err := options.Finish("cn-hangzhou", &MockIdempotentKeyGen{generatedKeys: map[string]string{}})
 	if !assert.NoError(t, err) {
 		return
 	}
 	defer cleanup()
 	assert.Empty(t, req.SecondaryPrivateIpAddressCount)
 	assert.Empty(t, req.PrivateIpAddress)
-	assert.Equal(t, requests.NewInteger(10), req.Ipv6AddressCount)
+	assert.Equal(t, int32(10), FromPtr(req.Ipv6AddressCount))
+}
+
+func TestCreateNetworkInterfaceOptions_PrimaryIPv6(t *testing.T) {
+	for _, trunk := range []bool{false, true} {
+		for _, tc := range []struct{ total, secondary int }{{0, 0}, {1, 0}, {2, 1}, {10, 9}} {
+			options := &CreateNetworkInterfaceOptions{NetworkInterfaceOptions: &NetworkInterfaceOptions{
+				VSwitchID: "vsw-test", SecurityGroupIDs: []string{"sg-test"},
+				IPv6Count: tc.total, Trunk: trunk, EnablePrimaryIPv6: true,
+			}}
+			req, cleanup, err := options.Finish("cn-hangzhou", NewIdempotentKeyGenerator())
+			require.NoError(t, err)
+			assert.True(t, FromPtr(req.EnablePrimaryIPv6))
+			assert.Equal(t, "cn-hangzhou", FromPtr(req.RegionId))
+			if tc.total > 1 {
+				require.NotNil(t, req.Ipv6AddressCount)
+				assert.Equal(t, int32(tc.secondary), *req.Ipv6AddressCount, "total=%d trunk=%t", tc.total, trunk)
+			} else {
+				assert.Nil(t, req.Ipv6AddressCount, "total=%d trunk=%t", tc.total, trunk)
+			}
+			assert.Nil(t, req.SecondaryPrivateIpAddressCount)
+			assert.Nil(t, req.PrivateIpAddress)
+			assert.Equal(t, trunk, FromPtr(req.InstanceType) == ENITypeTrunk)
+			cleanup()
+		}
+	}
+	for _, options := range []*NetworkInterfaceOptions{
+		{IPCount: 1}, {IPv4PrefixCount: 1}, {IPv6PrefixCount: 1},
+	} {
+		options.EnablePrimaryIPv6 = true
+		options.VSwitchID, options.SecurityGroupIDs = "vsw-test", []string{"sg-test"}
+		_, _, err := (&CreateNetworkInterfaceOptions{NetworkInterfaceOptions: options}).Finish("cn-hangzhou", NewIdempotentKeyGenerator())
+		assert.ErrorIs(t, err, ErrInvalidArgs)
+	}
 }

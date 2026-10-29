@@ -1,34 +1,38 @@
 package client
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	ecs20140526 "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/utils/ptr"
 )
 
 func TestFromCreateResp(t *testing.T) {
-	resp := &ecs.CreateNetworkInterfaceResponse{
-		Status:             "Available",
-		MacAddress:         "02:11:22:33:44:55",
-		NetworkInterfaceId: "eni-1",
-		VSwitchId:          "vsw-1",
-		PrivateIpAddress:   "10.0.0.1",
-		PrivateIpSets: ecs.PrivateIpSetsInCreateNetworkInterface{
-			PrivateIpSet: []ecs.PrivateIpSet{{PrivateIpAddress: "10.0.0.1", Primary: true}},
+	resp := &ecs20140526.CreateNetworkInterfaceResponseBody{
+		Status:             ptr.To("Available"),
+		MacAddress:         ptr.To("02:11:22:33:44:55"),
+		NetworkInterfaceId: ptr.To("eni-1"),
+		VSwitchId:          ptr.To("vsw-1"),
+		PrivateIpAddress:   ptr.To("10.0.0.1"),
+		PrivateIpSets: &ecs20140526.CreateNetworkInterfaceResponseBodyPrivateIpSets{
+			PrivateIpSet: []*ecs20140526.CreateNetworkInterfaceResponseBodyPrivateIpSetsPrivateIpSet{{PrivateIpAddress: ptr.To("10.0.0.1"), Primary: ptr.To(true)}},
 		},
-		ZoneId:           "cn-hangzhou-a",
-		SecurityGroupIds: ecs.SecurityGroupIdsInCreateNetworkInterface{SecurityGroupId: []string{"sg-1"}},
-		Ipv6Sets: ecs.Ipv6SetsInCreateNetworkInterface{
-			Ipv6Set: []ecs.Ipv6Set{{Ipv6Address: "fe80::1"}},
+		ZoneId:           ptr.To("cn-hangzhou-a"),
+		SecurityGroupIds: &ecs20140526.CreateNetworkInterfaceResponseBodySecurityGroupIds{SecurityGroupId: []*string{ptr.To("sg-1")}},
+		Ipv6Sets: &ecs20140526.CreateNetworkInterfaceResponseBodyIpv6Sets{
+			Ipv6Set: []*ecs20140526.CreateNetworkInterfaceResponseBodyIpv6SetsIpv6Set{{Ipv6Address: ptr.To("fe80::1")}},
 		},
-		Tags: ecs.TagsInCreateNetworkInterface{
-			Tag: []ecs.Tag{{Key: "k", Value: "v"}},
+		Tags: &ecs20140526.CreateNetworkInterfaceResponseBodyTags{
+			Tag: []*ecs20140526.CreateNetworkInterfaceResponseBodyTagsTag{{TagKey: ptr.To("k"), TagValue: ptr.To("v")}},
 		},
-		Type:            "Primary",
-		ResourceGroupId: "rg-1",
+		Type:            ptr.To("Primary"),
+		ResourceGroupId: ptr.To("rg-1"),
 	}
 	ni := FromCreateResp(resp)
 	if ni.Status != "Available" || ni.MacAddress != "02:11:22:33:44:55" || ni.NetworkInterfaceID != "eni-1" || ni.VSwitchID != "vsw-1" || ni.PrivateIPAddress != "10.0.0.1" {
@@ -43,7 +47,7 @@ func TestFromCreateResp(t *testing.T) {
 	if len(ni.SecurityGroupIDs) != 1 || ni.SecurityGroupIDs[0] != "sg-1" {
 		t.Errorf("unexpected SecurityGroupIDs: %+v", ni.SecurityGroupIDs)
 	}
-	if len(ni.Tags) != 1 || ni.Tags[0].Key != "k" || ni.Tags[0].Value != "v" {
+	if len(ni.Tags) != 1 || ni.Tags[0].TagKey != "k" || ni.Tags[0].TagValue != "v" {
 		t.Errorf("unexpected Tags: %+v", ni.Tags)
 	}
 	if ni.Type != "Primary" || ni.ResourceGroupID != "rg-1" {
@@ -106,24 +110,24 @@ func TestFromDescribeResp(t *testing.T) {
 }
 
 func TestFromCreateResp_WithPrefixes(t *testing.T) {
-	resp := &ecs.CreateNetworkInterfaceResponse{
-		Status:             "Available",
-		MacAddress:         "02:aa:bb:cc:dd:ee",
-		NetworkInterfaceId: "eni-prefix-create",
-		VSwitchId:          "vsw-1",
-		PrivateIpAddress:   "10.0.0.1",
-		PrivateIpSets: ecs.PrivateIpSetsInCreateNetworkInterface{
-			PrivateIpSet: []ecs.PrivateIpSet{{PrivateIpAddress: "10.0.0.1", Primary: true}},
+	resp := &ecs20140526.CreateNetworkInterfaceResponseBody{
+		Status:             ptr.To("Available"),
+		MacAddress:         ptr.To("02:aa:bb:cc:dd:ee"),
+		NetworkInterfaceId: ptr.To("eni-prefix-create"),
+		VSwitchId:          ptr.To("vsw-1"),
+		PrivateIpAddress:   ptr.To("10.0.0.1"),
+		PrivateIpSets: &ecs20140526.CreateNetworkInterfaceResponseBodyPrivateIpSets{
+			PrivateIpSet: []*ecs20140526.CreateNetworkInterfaceResponseBodyPrivateIpSetsPrivateIpSet{{PrivateIpAddress: ptr.To("10.0.0.1"), Primary: ptr.To(true)}},
 		},
-		Ipv4PrefixSets: ecs.Ipv4PrefixSetsInCreateNetworkInterface{
-			Ipv4PrefixSet: []ecs.Ipv4PrefixSet{
-				{Ipv4Prefix: "10.0.0.16/28"},
-				{Ipv4Prefix: "10.0.0.32/28"},
+		Ipv4PrefixSets: &ecs20140526.CreateNetworkInterfaceResponseBodyIpv4PrefixSets{
+			Ipv4PrefixSet: []*ecs20140526.CreateNetworkInterfaceResponseBodyIpv4PrefixSetsIpv4PrefixSet{
+				{Ipv4Prefix: ptr.To("10.0.0.16/28")},
+				{Ipv4Prefix: ptr.To("10.0.0.32/28")},
 			},
 		},
-		Ipv6PrefixSets: ecs.Ipv6PrefixSetsInCreateNetworkInterface{
-			Ipv6PrefixSet: []ecs.Ipv6PrefixSet{
-				{Ipv6Prefix: "2408:4002:10c0::/80"},
+		Ipv6PrefixSets: &ecs20140526.CreateNetworkInterfaceResponseBodyIpv6PrefixSets{
+			Ipv6PrefixSet: []*ecs20140526.CreateNetworkInterfaceResponseBodyIpv6PrefixSetsIpv6PrefixSet{
+				{Ipv6Prefix: ptr.To("2408:4002:10c0::/80")},
 			},
 		},
 	}
@@ -511,4 +515,27 @@ func TestFilterNetworkInterfacesByTags(t *testing.T) {
 		})
 	}
 	assert.Nil(t, filterNetworkInterfacesByTags(nil, nil))
+}
+
+func TestLogFieldsSDKRequests(t *testing.T) {
+	legacy := ecs.CreateCreateNetworkInterfaceRequest()
+	legacy.VSwitchId = "vsw-test"
+	native := &ecs20140526.CreateNetworkInterfaceRequest{VSwitchId: ptr.To("vsw-test")}
+	for _, tc := range []struct {
+		name string
+		req  any
+	}{
+		{name: "legacy SDK", req: legacy},
+		{name: "native SDK", req: native},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var output strings.Builder
+			logger := funcr.NewJSON(func(record string) { output.WriteString(record) }, funcr.Options{})
+			LogFields(logger, tc.req).Info("request")
+			var fields map[string]interface{}
+			require.NoError(t, json.Unmarshal([]byte(output.String()), &fields))
+			assert.Equal(t, APICreateNetworkInterface, fields[LogFieldAPI])
+			assert.Equal(t, "vsw-test", fields["VSwitchId"])
+		})
+	}
 }
