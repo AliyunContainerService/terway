@@ -6,11 +6,46 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agiledragon/gomonkey/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/AliyunContainerService/terway/pkg/utils"
 )
+
+func TestLegacyLogPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cni.log")
+	require.NoError(t, os.WriteFile(path, nil, 0666))
+	require.NoError(t, os.Chmod(path, 0666))
+	patches := gomonkey.ApplyFunc(utils.NormalizePath, func(string) string { return path })
+	defer patches.Reset()
+	newLogger(true).Info("private log")
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+}
+
+func TestLogFileFailureDoesNotBlockCNI(t *testing.T) {
+	patches := gomonkey.ApplyFunc(os.OpenFile, func(_ string, _ int, mode os.FileMode) (*os.File, error) {
+		assert.Equal(t, os.FileMode(0600), mode)
+		return nil, os.ErrPermission
+	})
+	defer patches.Reset()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer r.Close()
+	original := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = original }()
+	logger := newLogger(true)
+	logger.Info("fallback log message")
+	require.NoError(t, w.Close())
+	var buf [4096]byte
+	n, err := r.Read(buf[:])
+	require.NoError(t, err)
+	assert.Contains(t, string(buf[:n]), "using stderr")
+	assert.Contains(t, string(buf[:n]), "fallback log message")
+}
 
 func TestJSONStr(t *testing.T) {
 	tests := []struct {

@@ -125,15 +125,8 @@ func Test_mergeConfigList_ipvl(t *testing.T) {
 		EBPF: true,
 		EDT:  true,
 	})
-	assert.NoError(t, err)
-
-	g, err := gabs.ParseJSON([]byte(out))
-	assert.NoError(t, err)
-
-	assert.Equal(t, "terway", g.Path("plugins.0.type").Data())
-	assert.Equal(t, "bar", g.Path("plugins.0.foo").Data())
-	assert.Equal(t, "cilium-cni", g.Path("plugins.2.type").Data())
-	assert.Equal(t, "ipvlan", g.Path("plugins.0.eniip_virtual_type").Data())
+	assert.Empty(t, out)
+	assert.EqualError(t, err, "ipvlan is unsupported")
 }
 
 func Test_mergeConfigList_ipvl_exist(t *testing.T) {
@@ -159,16 +152,8 @@ func Test_mergeConfigList_ipvl_exist(t *testing.T) {
 		EBPF: true,
 		EDT:  true,
 	})
-	assert.NoError(t, err)
-
-	g, err := gabs.ParseJSON([]byte(out))
-	assert.NoError(t, err)
-
-	assert.Equal(t, "terway", g.Path("plugins.0.type").Data())
-	assert.Equal(t, "edt", g.Path("plugins.0.bandwidth_mode").Data())
-	assert.Equal(t, "bar", g.Path("plugins.0.foo").Data())
-	assert.Equal(t, "cilium-cni", g.Path("plugins.1.type").Data())
-	assert.Equal(t, "ipvlan", g.Path("plugins.1.datapath").Data())
+	assert.Empty(t, out)
+	assert.EqualError(t, err, "ipvlan is unsupported")
 }
 
 func Test_mergeConfigList_ipvl_unsupport(t *testing.T) {

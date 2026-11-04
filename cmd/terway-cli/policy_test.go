@@ -827,7 +827,7 @@ func Test_runCilium(t *testing.T) {
 		errorMsg    string
 	}{
 		{
-			name: "successful execution with ipvlan datapath",
+			name: "reject ipvlan datapath",
 			cfg: &PolicyConfig{
 				HasCiliumChainer:    true,
 				Datapath:            dataPathIPvlan,
@@ -868,7 +868,8 @@ func Test_runCilium(t *testing.T) {
 				})
 				return patches
 			},
-			expectError: false,
+			expectError: true,
+			errorMsg:    "ipvlan is not supported",
 		},
 		{
 			name: "no cilium chainer installed",
@@ -886,7 +887,7 @@ func Test_runCilium(t *testing.T) {
 			name: "cilium-agent not found",
 			cfg: &PolicyConfig{
 				HasCiliumChainer:    true,
-				Datapath:            dataPathIPvlan,
+				Datapath:            dataPathV2,
 				EnableNetworkPolicy: true,
 				HealthCheckPort:     "9099",
 			},

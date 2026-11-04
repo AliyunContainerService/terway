@@ -35,6 +35,26 @@ const (
 	caCertKey = "ca.crt"
 )
 
+// writeCertFile also fixes files created by older versions. Restrict access
+// before writing, while retaining existing volume ownership and permissions.
+func writeCertFile(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		return err
+	}
+	if err = f.Chmod(0600); err == nil {
+		err = f.Truncate(0)
+	}
+	if err == nil {
+		_, err = f.Write(data)
+	}
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
+}
+
 // SyncCert sync cert for webhook
 func SyncCert(ctx context.Context, c client.Client, ns, name, domain, certDir string) error {
 	secretName := fmt.Sprintf("%s-webhook-cert", name)
@@ -84,21 +104,21 @@ func SyncCert(ctx context.Context, c client.Client, ns, name, domain, certDir st
 		return fmt.Errorf("invalid cert")
 	}
 
-	err = os.MkdirAll(certDir, os.ModeDir)
+	err = os.MkdirAll(certDir, 0700)
 	if err != nil {
 		return err
 	}
 
 	// write cert to file
-	err = os.WriteFile(filepath.Join(certDir, serverCertKey), serverCertBytes, os.ModePerm)
+	err = writeCertFile(filepath.Join(certDir, serverCertKey), serverCertBytes)
 	if err != nil {
 		return fmt.Errorf("error create secret file, %w", err)
 	}
-	err = os.WriteFile(filepath.Join(certDir, serverKeyKey), serverKeyBytes, os.ModePerm)
+	err = writeCertFile(filepath.Join(certDir, serverKeyKey), serverKeyBytes)
 	if err != nil {
 		return fmt.Errorf("error create secret file, %w", err)
 	}
-	err = os.WriteFile(filepath.Join(certDir, caCertKey), caCertBytes, os.ModePerm)
+	err = writeCertFile(filepath.Join(certDir, caCertKey), caCertBytes)
 	if err != nil {
 		return fmt.Errorf("error create secret file, %w", err)
 	}

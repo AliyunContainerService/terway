@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"os/signal"
@@ -1654,8 +1655,6 @@ func TestRunDebugServer(t *testing.T) {
 	// Avoid duplicate metrics registration when tests run in same process
 	patches.ApplyFunc(registerPrometheus, func() {})
 
-	patches.ApplyMethod(http.DefaultServeMux, "Handle", func() {})
-
 	tests := []struct {
 		name              string
 		debugSocketListen string
@@ -2285,6 +2284,30 @@ func TestNewUnixListener_MkdirError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, l)
 	assert.Contains(t, err.Error(), "error create socket dir")
+}
+
+func TestDebugHandlerLimitsRemoteProfiling(t *testing.T) {
+	for _, ip := range []string{"0.0.0.0", "::", "192.0.2.1"} {
+		t.Run(ip, func(t *testing.T) {
+			addr := &net.TCPAddr{IP: net.ParseIP(ip)}
+			assert.False(t, allowProfiling(addr))
+			handler := newDebugHandler(allowProfiling(addr))
+			for _, path := range []string{"/debug/pprof/", "/debug/pprof/profile", "/debug/pprof/cmdline"} {
+				r := httptest.NewRecorder()
+				handler.ServeHTTP(r, httptest.NewRequest(http.MethodGet, path, nil))
+				assert.Equal(t, http.StatusNotFound, r.Code)
+			}
+			r := httptest.NewRecorder()
+			handler.ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+			assert.Equal(t, http.StatusOK, r.Code)
+		})
+	}
+	for _, addr := range []net.Addr{&net.UnixAddr{Name: "/var/run/eni/debug.socket", Net: "unix"}, &net.TCPAddr{IP: net.ParseIP("127.0.0.1")}, &net.TCPAddr{IP: net.ParseIP("::1")}} {
+		assert.True(t, allowProfiling(addr))
+	}
+	r := httptest.NewRecorder()
+	newDebugHandler(true).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil))
+	assert.Equal(t, http.StatusOK, r.Code)
 }
 
 func TestRunDebugServer_UnixListenError(t *testing.T) {

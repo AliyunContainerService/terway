@@ -5,10 +5,10 @@ set -o nounset
 
 # install CNIs
 cp -f /usr/bin/terway /opt/cni/bin/
-chmod +x /opt/cni/bin/terway
+chmod 0755 /opt/cni/bin/terway
 
 cp -f /usr/bin/cilium-cni /opt/cni/bin/
-chmod +x /opt/cni/bin/cilium-cni
+chmod 0755 /opt/cni/bin/cilium-cni
 
 EXTRA_FLAGS="${1:-}"
 

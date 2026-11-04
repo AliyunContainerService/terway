@@ -25,6 +25,28 @@ import (
 	"github.com/AliyunContainerService/terway/pkg/internal/testutil"
 )
 
+func TestWriteCertFilePermissions(t *testing.T) {
+	for _, mode := range []os.FileMode{0700, 0755, 0777} {
+		t.Run(mode.String(), func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.Chmod(dir, mode))
+			path := filepath.Join(dir, "tls.key")
+			for _, legacy := range []bool{false, true} {
+				if legacy {
+					require.NoError(t, os.Chmod(path, 0777))
+				}
+				require.NoError(t, writeCertFile(path, []byte("private")))
+				info, err := os.Stat(path)
+				require.NoError(t, err)
+				assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+			}
+			info, err := os.Stat(dir)
+			require.NoError(t, err)
+			assert.Equal(t, mode, info.Mode().Perm())
+		})
+	}
+}
+
 func TestGenerateCerts(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -1149,7 +1171,7 @@ func TestSyncCert_WriteFileSecondFails(t *testing.T) {
 		Build()
 
 	writeCount := 0
-	patches := gomonkey.ApplyFunc(os.WriteFile, func(fpath string, data []byte, perm os.FileMode) error {
+	patches := gomonkey.ApplyFunc(writeCertFile, func(fpath string, data []byte) error {
 		writeCount++
 		if writeCount == 2 {
 			return fmt.Errorf("injected write error")
