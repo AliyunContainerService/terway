@@ -215,10 +215,10 @@ func runDebugServer(ctx context.Context, wg *sync.WaitGroup, debugSocketListen s
 	}
 
 	registerPrometheus()
-	http.DefaultServeMux.Handle("/metrics", promhttp.Handler())
+	handler := newDebugHandler(allowProfiling(l.Addr()))
 
 	go func() {
-		err := http.Serve(l, http.DefaultServeMux)
+		err := http.Serve(l, handler)
 		if err != nil {
 			serviceLog.Error(err, "error start debug server")
 		}
@@ -233,6 +233,27 @@ func runDebugServer(ctx context.Context, wg *sync.WaitGroup, debugSocketListen s
 	}()
 
 	return nil
+}
+
+// Profiling can expose process data; retain remote metrics without exposing pprof.
+func allowProfiling(addr net.Addr) bool {
+	switch addr := addr.(type) {
+	case *net.UnixAddr:
+		return true
+	case *net.TCPAddr:
+		return addr.IP.IsLoopback()
+	default:
+		return false
+	}
+}
+
+func newDebugHandler(profiling bool) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	if profiling {
+		mux.Handle("/debug/pprof/", http.DefaultServeMux)
+	}
+	return mux
 }
 
 // RegisterPrometheus register metrics to prometheus server

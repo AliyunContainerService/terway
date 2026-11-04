@@ -6,6 +6,7 @@ package main
 import (
 	"net"
 	"os"
+	"os/exec"
 	"runtime"
 	"testing"
 
@@ -19,6 +20,15 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
+
+// Ct.unmarshal in the vendored nftables library does not decode NFTA_CT_SREG.
+// Ask nft to decode the kernel rule so the write direction is verified.
+func assertConnmarkWrite(t *testing.T, family, table string) {
+	t.Helper()
+	out, err := exec.Command("nft", "list", "chain", family, table, "prerouting").CombinedOutput()
+	require.NoError(t, err, string(out))
+	assert.Contains(t, string(out), "ct mark set", "rule must write the conntrack mark")
+}
 
 // TestNFTablesBackendCreation tests creation of nftables backend
 func TestNFTablesBackendCreation(t *testing.T) {
@@ -163,7 +173,7 @@ func TestConfigureNetworkRulesWithNFTables(t *testing.T) {
 			}
 		}
 		require.NotNil(t, chain, "prerouting chain should exist")
-		assert.Equal(t, nftables.ChainHookPrerouting, *chain.Hooknum, "Chain should be in prerouting hook")
+		assert.Equal(t, *nftables.ChainHookPrerouting, *chain.Hooknum, "Chain should be in prerouting hook")
 
 		// Verify rules exist with correct comment
 		rules, err := conn.GetRules(table, chain)
@@ -183,7 +193,8 @@ func TestConfigureNetworkRulesWithNFTables(t *testing.T) {
 			lastExpr := r1.Exprs[len(r1.Exprs)-1]
 			ctExpr, ok := lastExpr.(*expr.Ct)
 			require.True(t, ok, "Rule 1 last expr should be Ct (write ct mark)")
-			assert.True(t, ctExpr.SourceRegister, "Rule 1 last Ct must write (SourceRegister=true)")
+			assert.Equal(t, expr.CtKeyMARK, ctExpr.Key)
+			assertConnmarkWrite(t, "ip", "terway_symmetric")
 		}
 
 		// Verify Rule 2 writes to meta mark (SourceRegister=true)
@@ -331,7 +342,8 @@ func TestConfigureNetworkRulesWithNFTablesIPv6(t *testing.T) {
 			lastExpr := r1.Exprs[len(r1.Exprs)-1]
 			ctExpr, ok := lastExpr.(*expr.Ct)
 			require.True(t, ok, "IPv6 Rule 1 last expr should be Ct")
-			assert.True(t, ctExpr.SourceRegister, "IPv6 Rule 1 last Ct must write (SourceRegister=true)")
+			assert.Equal(t, expr.CtKeyMARK, ctExpr.Key)
+			assertConnmarkWrite(t, "ip6", "terway_symmetric_ipv6")
 		}
 
 		// Verify Rule 2 writes to meta mark
@@ -515,7 +527,12 @@ func TestConfigureNetworkRulesWithNFTablesDualStack(t *testing.T) {
 				lastExpr := r1.Exprs[len(r1.Exprs)-1]
 				ctExpr, ok := lastExpr.(*expr.Ct)
 				require.True(t, ok, "%s Rule 1 last expr should be Ct", label.name)
-				assert.True(t, ctExpr.SourceRegister, "%s Rule 1 must write ct mark", label.name)
+				assert.Equal(t, expr.CtKeyMARK, ctExpr.Key)
+				if label.name == "IPv4" {
+					assertConnmarkWrite(t, "ip", "terway_symmetric")
+				} else {
+					assertConnmarkWrite(t, "ip6", "terway_symmetric_ipv6")
+				}
 			}
 			if len(label.rules) >= 2 {
 				r2 := label.rules[1]
@@ -701,7 +718,7 @@ func TestNFTablesBackendEnsureConnmarkRules(t *testing.T) {
 			ctWrite, ok := r1.Exprs[4].(*expr.Ct)
 			require.True(t, ok, "Rule 1 fifth expr should be Ct")
 			assert.Equal(t, expr.CtKeyMARK, ctWrite.Key, "Rule 1 should write ct mark")
-			assert.True(t, ctWrite.SourceRegister, "Rule 1 last Ct MUST be a write (SourceRegister=true)")
+			assertConnmarkWrite(t, "ip", "terway_symmetric")
 		}
 
 		// Verify Rule 2: restore mark from conntrack

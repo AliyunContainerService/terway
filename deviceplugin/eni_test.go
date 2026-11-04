@@ -6,7 +6,7 @@ import (
 	"net"
 	"os"
 	"regexp"
-	"syscall"
+	"runtime"
 	"testing"
 	"time"
 
@@ -365,7 +365,8 @@ func TestENIDevicePlugin_cleanup_WithGomonkey(t *testing.T) {
 
 	// Test regex matching
 	assert.True(t, plugin.eniRes.re.MatchString("123-eni.sock"))
-	assert.True(t, plugin.eniRes.re.MatchString("456-member-eni.sock"))
+	assert.False(t, plugin.eniRes.re.MatchString("456-member-eni.sock"))
+	assert.False(t, plugin.eniRes.re.MatchString("123-eni.sock.backup"))
 	assert.False(t, plugin.eniRes.re.MatchString("789-other.sock"))
 
 	// Test that cleanup method exists and can be called
@@ -556,30 +557,26 @@ func TestDial_RealSocket(t *testing.T) {
 }
 
 func TestCleanup_WithMatchingFiles(t *testing.T) {
-	p := &ENIDevicePlugin{
-		eniRes: eniRes{
-			re: regexp.MustCompile(`^.*-eni\.sock`),
-		},
+	p := NewENIDevicePlugin(1, ENITypeENI)
+	dir := t.TempDir()
+	l, err := net.Listen("unix", dir+"/12345-eni.sock")
+	require.NoError(t, err)
+	defer l.Close()
+	other, err := net.Listen("unix", dir+"/12345-member-eni.sock")
+	require.NoError(t, err)
+	defer other.Close()
+	require.NoError(t, os.WriteFile(dir+"/12345-eni.sock.backup", []byte("keep"), 0600))
+	require.NoError(t, p.cleanupDir(dir))
+	_, err = os.Lstat(dir + "/12345-eni.sock")
+	require.True(t, os.IsNotExist(err))
+	for _, name := range []string{"12345-member-eni.sock", "12345-eni.sock.backup"} {
+		_, err = os.Lstat(dir + "/" + name)
+		require.NoError(t, err)
 	}
-
-	readDirPatch := gomonkey.ApplyFunc(os.ReadDir, func(name string) ([]os.DirEntry, error) {
-		return []os.DirEntry{
-			&mockDirEntry{name: "12345-eni.sock"},
-			&mockDirEntry{name: "other.txt"},
-		}, nil
-	})
-	defer readDirPatch.Reset()
-
-	unlinkCalled := false
-	unlinkPatch := gomonkey.ApplyFunc(syscall.Unlink, func(p string) error {
-		unlinkCalled = true
-		return nil
-	})
-	defer unlinkPatch.Reset()
-
-	err := p.cleanup()
-	assert.NoError(t, err)
-	assert.True(t, unlinkCalled)
+	require.NoError(t, os.WriteFile(dir+"/12345-eni.sock", []byte("keep"), 0600))
+	require.NoError(t, p.cleanupDir(dir))
+	_, err = os.Stat(dir + "/12345-eni.sock")
+	require.NoError(t, err)
 }
 
 func TestCleanup_ReadDirError(t *testing.T) {
@@ -713,7 +710,7 @@ func TestCleanUp(t *testing.T) {
 	entry := &mockDirEntry{}
 	patches := gomonkey.ApplyFunc(
 		os.ReadDir,
-		func() ([]os.DirEntry, error) {
+		func(_ string) ([]os.DirEntry, error) {
 			return []os.DirEntry{entry}, nil
 		},
 	)
@@ -736,4 +733,10 @@ func TestStart(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p.server)
 	require.NotNil(t, p.stop)
+	defer p.server.Stop()
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(p.socket)
+		require.NoError(t, err)
+		require.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	}
 }

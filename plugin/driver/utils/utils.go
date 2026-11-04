@@ -25,20 +25,32 @@ var Log = logr.Discard()
 var once sync.Once
 
 func InitLog(debug bool) logr.Logger {
-	var opts []textlogger.ConfigOption
 	once.Do(func() {
-		if debug {
-			var file, err = os.OpenFile(utils.NormalizePath("/var/log/terway.cni.log"), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-			if err != nil {
-				panic(err)
-			}
-			opts = append(opts, textlogger.Verbosity(4), textlogger.Output(io.MultiWriter(file, os.Stderr)))
-
-		}
-		Log = textlogger.NewLogger(textlogger.NewConfig(opts...))
+		Log = newLogger(debug)
 	})
 
 	return Log
+}
+
+func newLogger(debug bool) logr.Logger {
+	var opts []textlogger.ConfigOption
+	if debug {
+		opts = append(opts, textlogger.Verbosity(4))
+		file, err := os.OpenFile(utils.NormalizePath("/var/log/terway.cni.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+		if err == nil {
+			err = file.Chmod(0600)
+			if err != nil {
+				_ = file.Close()
+			}
+		}
+		if err != nil {
+			// Optional file logging must not prevent CNI ADD/DEL.
+			_, _ = fmt.Fprintf(os.Stderr, "terway: cannot open CNI log, using stderr: %v\n", err)
+		} else {
+			opts = append(opts, textlogger.Output(io.MultiWriter(file, os.Stderr)))
+		}
+	}
+	return textlogger.NewLogger(textlogger.NewConfig(opts...))
 }
 
 // JSONStr json to str

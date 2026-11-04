@@ -42,17 +42,17 @@ type eniRes struct {
 var eniMap = map[string]eniRes{
 	ENITypeENI: {
 		resName: ENIResName,
-		re:      regexp.MustCompile("^.*-eni.sock"),
+		re:      regexp.MustCompile(`^[0-9]+-eni\.sock$`),
 		sock:    pluginapi.DevicePluginPath + "%d-eni.sock",
 	},
 	ENITypeMember: {
 		resName: MemberENIResName,
-		re:      regexp.MustCompile("^.*-member-eni.sock"),
+		re:      regexp.MustCompile(`^[0-9]+-member-eni\.sock$`),
 		sock:    pluginapi.DevicePluginPath + "%d-member-eni.sock",
 	},
 	ENITypeERDMA: {
 		resName: ERDMAResName,
-		re:      regexp.MustCompile("^.*-erdma-eni.sock"),
+		re:      regexp.MustCompile(`^[0-9]+-erdma-eni\.sock$`),
 		sock:    pluginapi.DevicePluginPath + "%d-erdma-eni.sock",
 	},
 }
@@ -112,6 +112,13 @@ func (m *ENIDevicePlugin) Start() error {
 	sock, err := net.Listen("unix", m.socket)
 	if err != nil {
 		return err
+	}
+
+	if !utils.IsWindowsOS() {
+		if err := os.Chmod(m.socket, 0600); err != nil {
+			_ = sock.Close()
+			return err
+		}
 	}
 
 	m.server = grpc.NewServer([]grpc.ServerOption{}...)
@@ -252,7 +259,11 @@ func (m *ENIDevicePlugin) Allocate(ctx context.Context, r *pluginapi.AllocateReq
 }
 
 func (m *ENIDevicePlugin) cleanup() error {
-	preSocks, err := os.ReadDir(pluginapi.DevicePluginPath)
+	return m.cleanupDir(pluginapi.DevicePluginPath)
+}
+
+func (m *ENIDevicePlugin) cleanupDir(dir string) error {
+	preSocks, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
@@ -263,9 +274,12 @@ func (m *ENIDevicePlugin) cleanup() error {
 			if utils.IsWindowsOS() {
 				// NB(thxCode): treat the socket file as normal file
 				// and remove them directly.
-				err = os.Remove(path.Join(pluginapi.DevicePluginPath, preSock.Name()))
+				err = os.Remove(path.Join(dir, preSock.Name()))
 			} else {
-				err = syscall.Unlink(path.Join(pluginapi.DevicePluginPath, preSock.Name()))
+				if preSock.Type()&os.ModeSocket == 0 {
+					continue
+				}
+				err = syscall.Unlink(path.Join(dir, preSock.Name()))
 			}
 			if err != nil {
 				klog.Errorf("error on clean up previous device plugin listens, %+v", err)
