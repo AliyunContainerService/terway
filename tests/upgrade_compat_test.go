@@ -17,6 +17,7 @@ import (
 var (
 	upgradePhase            string
 	upgradeExpectedDatapath string
+	upgradeNodeReboot       bool
 )
 
 const upgradeTestNamespace = "terway-upgrade-test"
@@ -29,6 +30,7 @@ var upgradeHairpinNodeTypes = []NodeType{
 }
 
 func init() {
+	flag.BoolVar(&upgradeNodeReboot, "upgrade-node-reboot", false, "allow existing pod container restarts after a planned node reboot")
 	flag.StringVar(&upgradePhase, "upgrade-phase", "", "upgrade test phase: pre|post")
 	flag.StringVar(&upgradeExpectedDatapath, "upgrade-expected-datapath", "", "expected eniip_virtual_type: unset, IPVlan, or datapathv2")
 }
@@ -150,11 +152,11 @@ func TestUpgrade_PostUpgrade(t *testing.T) {
 			t.Fatalf("server pod not Running: phase=%s", serverPod.Status.Phase)
 		}
 		for _, cs := range serverPod.Status.ContainerStatuses {
-			if cs.RestartCount > 0 {
+			if cs.RestartCount > 0 && !upgradeNodeReboot {
 				t.Errorf("server pod restarted %d times during upgrade", cs.RestartCount)
 			}
 		}
-		t.Logf("Server pod OK: node=%s, restartCount=0", serverPod.Spec.NodeName)
+		t.Logf("Server pod OK: node=%s, plannedNodeReboot=%t", serverPod.Spec.NodeName, upgradeNodeReboot)
 
 		// Check client pod
 		clientPod := &corev1.Pod{}
@@ -165,11 +167,11 @@ func TestUpgrade_PostUpgrade(t *testing.T) {
 			t.Fatalf("client pod not Running: phase=%s", clientPod.Status.Phase)
 		}
 		for _, cs := range clientPod.Status.ContainerStatuses {
-			if cs.RestartCount > 0 {
+			if cs.RestartCount > 0 && !upgradeNodeReboot {
 				t.Errorf("client pod restarted %d times during upgrade", cs.RestartCount)
 			}
 		}
-		t.Logf("Client pod OK: node=%s, restartCount=0", clientPod.Spec.NodeName)
+		t.Logf("Client pod OK: node=%s, plannedNodeReboot=%t", clientPod.Spec.NodeName, upgradeNodeReboot)
 
 		// Verify server and client are on different nodes (cross-node)
 		if serverPod.Spec.NodeName == clientPod.Spec.NodeName {
