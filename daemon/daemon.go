@@ -14,7 +14,7 @@ import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"k8s.io/client-go/util/retry"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,8 +42,10 @@ import (
 )
 
 const (
-	gcPeriod    = 5 * time.Minute
-	listTimeout = 60 * time.Second
+	gcPeriod               = 5 * time.Minute
+	listTimeout            = 60 * time.Second
+	runtimeGCBatchSize     = 100
+	runtimeGCFlushInterval = 10 * time.Second
 
 	networkServiceName       = "default"
 	tracingKeyName           = "name"
@@ -661,56 +663,120 @@ func (n *networkService) cleanRuntimeNode(ctx context.Context, localUIDs sets.Se
 	if n.ipamType != types.IPAMTypeCRD || n.daemonMode != daemon.ModeENIMultiIP {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, listTimeout)
+	defer cancel()
+	c := n.k8s.GetClient()
 	nodeRuntime := &networkv1beta1.NodeRuntime{}
-	err := n.k8s.GetClient().Get(ctx, ctrlclient.ObjectKey{Name: n.k8s.NodeName()}, nodeRuntime)
-	if err != nil {
+	key := ctrlclient.ObjectKey{Name: n.k8s.NodeName()}
+	if err := c.Get(ctx, key, nodeRuntime); err != nil {
 		return err
 	}
+	if !nodeRuntime.DeletionTimestamp.IsZero() {
+		return nil
+	}
 	l := logf.FromContext(ctx)
-
 	if l.V(4).Enabled() {
 		l.Info("clean runtime node", "localUIDs", localUIDs, "nodeRuntime", nodeRuntime)
 	}
 
+	budget := listTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = min(budget, max(time.Duration(0), time.Until(deadline)))
+	}
+	// Stop queries early enough to save the tail batch within the shared GC
+	// deadline, even when a PodExist request consumes its entire budget.
+	saveBudget := min(runtimeGCFlushInterval, budget/2)
+	queryCtx, cancelQueries := context.WithTimeout(ctx, budget-saveBudget)
+	defer cancelQueries()
+	updates := make(map[string]*networkv1beta1.CNIStatusInfo)
+	save := func() error {
+		if len(updates) == 0 {
+			return nil
+		}
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			// Keep the traversal snapshot immutable. Response decoding and
+			// concurrent writers only affect this independent, fresh object.
+			latest := &networkv1beta1.NodeRuntime{}
+			if err := c.Get(ctx, key, latest); err != nil {
+				return err
+			}
+			if latest.UID != nodeRuntime.UID || !latest.DeletionTimestamp.IsZero() {
+				return nil
+			}
+			beforePatch := latest.DeepCopy()
+			changed := false
+			for uid, deleted := range updates {
+				before := nodeRuntime.Status.Pods[uid]
+				current := latest.Status.Pods[uid]
+				if current == nil || current.PodID != before.PodID {
+					continue
+				}
+				s, last, ok := utils.RuntimeFinalStatus(current.Status)
+				initial := before.Status[networkv1beta1.CNIStatusInitial]
+				if !ok || s != networkv1beta1.CNIStatusInitial || initial == nil || !last.LastUpdateTime.Equal(&initial.LastUpdateTime) {
+					continue
+				}
+				current.Status[networkv1beta1.CNIStatusDeleted] = deleted
+				changed = true
+			}
+			if !changed {
+				return nil
+			}
+			// Patch only checked records. The version precondition rejects
+			// writes that race after GET; retries revalidate every candidate.
+			patch := ctrlclient.MergeFromWithOptions(beforePatch, ctrlclient.MergeFromWithOptimisticLock{})
+			return c.Status().Patch(ctx, latest, patch)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to save node runtime status %w", err)
+		}
+		clear(updates)
+		return nil
+	}
+
+	checked := 0
+	lastSave := time.Now()
 	for uid, status := range nodeRuntime.Status.Pods {
-		if localUIDs.Has(uid) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if queryCtx.Err() != nil {
+			return save()
+		}
+		if status == nil || localUIDs.Has(uid) {
 			continue
 		}
-		// pod don't have record in local, need to delete it
-
 		s, last, ok := utils.RuntimeFinalStatus(status.Status)
-		if ok && s == networkv1beta1.CNIStatusInitial {
-			if time.Now().Before(last.LastUpdateTime.Add(30 * time.Second)) {
-				continue
+		if !ok || s != networkv1beta1.CNIStatusInitial || time.Now().Before(last.LastUpdateTime.Add(30*time.Second)) {
+			continue
+		}
+		list := strings.Split(status.PodID, "/")
+		if len(list) != 2 {
+			l.Info("invalid pod id format", "podID", status.PodID)
+			continue
+		}
+		exists, err := n.k8s.PodExist(queryCtx, list[0], list[1])
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if queryCtx.Err() != nil {
+			return save()
+		}
+		if err == nil && !exists {
+			l.Info("clean runtime pod", "pod", status.PodID, "uid", uid)
+			updates[uid] = &networkv1beta1.CNIStatusInfo{LastUpdateTime: metav1.Now()}
+		}
+		checked++
+		// Slow requests must not postpone all writes until the timeout.
+		if checked >= runtimeGCBatchSize || time.Since(lastSave) >= runtimeGCFlushInterval {
+			if err := save(); err != nil {
+				return err
 			}
-
-			list := strings.Split(status.PodID, "/")
-			if len(list) != 2 {
-				l.Info("invalid pod id format", "podID", status.PodID)
-				continue
-			}
-			ok, err := n.k8s.PodExist(ctx, list[0], list[1])
-			if err != nil || ok {
-				continue
-			}
-			l.Info("clean runtime pod", "pod", s, "uid", uid)
-			status.Status[networkv1beta1.CNIStatusDeleted] = &networkv1beta1.CNIStatusInfo{
-				LastUpdateTime: metav1.NewTime(time.Now()),
-			}
+			checked = 0
+			lastSave = time.Now()
 		}
 	}
-	update := nodeRuntime.DeepCopy()
-	_, err = controllerutil.CreateOrPatch(ctx, n.k8s.GetClient(), update, func() error {
-		update.Status = nodeRuntime.Status
-		update.Spec = nodeRuntime.Spec
-		update.Labels = nodeRuntime.Labels
-		update.Name = nodeRuntime.Name
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to save node runtime status %w", err)
-	}
-	return nil
+	return save()
 }
 
 // tracing

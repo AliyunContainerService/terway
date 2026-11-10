@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -532,6 +533,7 @@ func (r *CRDV2) syncNodeRuntime(ctx context.Context) error {
 		return nil
 	}
 
+	before := nodeRuntime.DeepCopy()
 	for k, pod := range r.deletedPods {
 		v, ok := nodeRuntime.Status.Pods[k]
 		if !ok {
@@ -554,7 +556,7 @@ func (r *CRDV2) syncNodeRuntime(ctx context.Context) error {
 		logf.Log.Info("report pod deleted", "pod", v)
 	}
 
-	err = saveStatus(ctx, r.client, nodeRuntime)
+	err = saveStatus(ctx, r.client, before, nodeRuntime)
 	if err != nil {
 		return err
 	}
@@ -563,21 +565,17 @@ func (r *CRDV2) syncNodeRuntime(ctx context.Context) error {
 	return nil
 }
 
-func saveStatus(ctx context.Context, c client.Client, nodeRuntime *networkv1beta1.NodeRuntime) error {
-	update := nodeRuntime.DeepCopy()
-	changed, err := controllerutil.CreateOrPatch(ctx, c, update, func() error {
-		update.Status = nodeRuntime.Status
-		update.Spec = nodeRuntime.Spec
-		update.Labels = nodeRuntime.Labels
-		update.Name = nodeRuntime.Name
+// Reject stale snapshots. Callers keep pending work and recompute it on the
+// next sync instead of replaying an old status over concurrent GC updates.
+func saveStatus(ctx context.Context, c client.Client, before, nodeRuntime *networkv1beta1.NodeRuntime) error {
+	if reflect.DeepEqual(before.Status, nodeRuntime.Status) {
 		return nil
-	})
-	if err != nil {
+	}
+	patch := client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})
+	if err := c.Status().Patch(ctx, nodeRuntime, patch); err != nil {
 		return fmt.Errorf("failed to save node runtime status %w", err)
 	}
-	if changed != controllerutil.OperationResultNone {
-		logf.Log.Info("changed node runtime status", "pods", nodeRuntime.Status.Pods)
-	}
+	logf.Log.Info("changed node runtime status", "pods", nodeRuntime.Status.Pods)
 	return nil
 }
 
@@ -599,11 +597,12 @@ func (r *CRDV2) syncDeletedPods(ctx context.Context) error {
 		return err
 	}
 
+	before := nodeRuntime.DeepCopy()
 	removeDeleted(l, nodeRuntime, inUsed)
 
 	syncBack(l, nodeRuntime, inUsed)
 
-	err = saveStatus(ctx, r.client, nodeRuntime)
+	err = saveStatus(ctx, r.client, before, nodeRuntime)
 	return err
 }
 
@@ -702,6 +701,16 @@ func (r *CRDV2) getRuntimeNode(ctx context.Context) (*networkv1beta1.NodeRuntime
 		err = controllerutil.SetOwnerReference(node, nodeRuntime, r.scheme)
 		if err != nil {
 			return nil, err
+		}
+		// Status is ignored on Create. Ensure the runtime exists before the
+		// caller patches status, and handle a concurrent creator/cache miss.
+		if err := r.client.Create(ctx, nodeRuntime); err != nil {
+			if !k8sErr.IsAlreadyExists(err) {
+				return nil, err
+			}
+			if err := r.client.Get(ctx, client.ObjectKey{Name: r.nodeName}, nodeRuntime); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return nodeRuntime, nil
