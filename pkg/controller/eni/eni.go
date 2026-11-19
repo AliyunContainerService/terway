@@ -350,10 +350,39 @@ func (r *ReconcileNetworkInterface) attach(ctx context.Context, networkInterface
 func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface *v1beta1.NetworkInterface) (reconcile.Result, error) {
 	var err error
 
-	if networkInterface.Status.InstanceID != "" {
-		backend := r.resolveBackendAPI(ctx, networkInterface)
-		ctx = aliyunClient.SetBackendAPI(ctx, backend)
+	backend := r.resolveBackendAPI(ctx, networkInterface)
+	ctx = aliyunClient.SetBackendAPI(ctx, backend)
 
+	if networkInterface.Status.InstanceID == "" {
+		if !networkInterface.DeletionTimestamp.IsZero() {
+			// Continue deletion without publishing Unbind.
+			return reconcile.Result{}, nil
+		}
+
+		resp, err := r.aliyun.DescribeNetworkInterfaceV2(ctx, &aliyunClient.DescribeNetworkInterfaceOptions{
+			NetworkInterfaceIDs: &[]string{networkInterface.Name},
+			RawStatus:           ptr.To(true),
+		})
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+
+		status := aliyunClient.ENIStatusAvailable
+		bo := r.getECSBackoff(networkInterface.Name)
+		if backend == aliyunClient.BackendAPIEFLO || backend == aliyunClient.BackendAPIEFLOHDENI {
+			status = aliyunClient.LENIStatusUnattached
+			bo = backoff.Backoff(backoff.WaitLENIStatus)
+		}
+		if len(resp) != 1 || resp[0] == nil || resp[0].Status != status {
+			du, err := r.resourceBackoff.Get(networkInterface.Name, bo)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+			return reconcile.Result{RequeueAfter: du}, nil
+		}
+	}
+
+	if networkInterface.Status.InstanceID != "" {
 		if backend == aliyunClient.BackendAPIEFLO || backend == aliyunClient.BackendAPIEFLOHDENI {
 			// EFLO path: LENI/HDENI status codes
 			resp, err := r.aliyun.DescribeNetworkInterfaceV2(ctx, &aliyunClient.DescribeNetworkInterfaceOptions{
@@ -430,25 +459,25 @@ func (r *ReconcileNetworkInterface) detach(ctx context.Context, networkInterface
 				return reconcile.Result{RequeueAfter: du}, nil
 			}
 		}
+	}
 
-		// always clean up the backoff, as we will update the cr status, so we will not go here again
-		r.resourceBackoff.Del(networkInterface.Name)
+	// always clean up the backoff, as we will update the cr status, so we will not go here again
+	r.resourceBackoff.Del(networkInterface.Name)
 
-		networkInterface.Status.ENIInfo.Status = v1beta1.ENIPhaseUnbind
-		networkInterface.Status.ENIInfo.Vid = 0
-		networkInterface.Status.ENIInfo.VfID = nil
-		networkInterface.Status.ENIInfo.NetworkCardIndex = nil
+	networkInterface.Status.ENIInfo.Status = v1beta1.ENIPhaseUnbind
+	networkInterface.Status.ENIInfo.Vid = 0
+	networkInterface.Status.ENIInfo.VfID = nil
+	networkInterface.Status.ENIInfo.NetworkCardIndex = nil
 
-		networkInterface.Status.InstanceID = ""
-		networkInterface.Status.TrunkENIID = ""
-		networkInterface.Status.NodeName = ""
-		networkInterface.Status.NetworkCardIndex = nil
-		networkInterface.Status.Phase = v1beta1.ENIPhaseUnbind
-		err = r.client.Status().Update(ctx, networkInterface)
+	networkInterface.Status.InstanceID = ""
+	networkInterface.Status.TrunkENIID = ""
+	networkInterface.Status.NodeName = ""
+	networkInterface.Status.NetworkCardIndex = nil
+	networkInterface.Status.Phase = v1beta1.ENIPhaseUnbind
+	err = r.client.Status().Update(ctx, networkInterface)
 
-		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("update network interface status to %s failed, %w", v1beta1.ENIPhaseUnbind, err)
-		}
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("update network interface status to %s failed, %w", v1beta1.ENIPhaseUnbind, err)
 	}
 
 	// remove node label

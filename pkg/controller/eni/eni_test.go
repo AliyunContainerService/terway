@@ -286,6 +286,45 @@ var _ = Describe("Eni controller", func() {
 		})
 	})
 
+	It("unbinds an available ECS ENI without an instance ID", func() {
+		ctx := context.Background()
+		eniID := "eni-detach-no-instance"
+		eni := &networkv1beta1.NetworkInterface{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   eniID,
+				Labels: map[string]string{terwayTypes.ENIRelatedNodeName: "old-node"},
+			},
+			Spec: networkv1beta1.NetworkInterfaceSpec{
+				ENI:  networkv1beta1.ENI{ID: eniID},
+				IPv4: "192.0.2.1",
+			},
+		}
+		Expect(k8sClient.Create(ctx, eni)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, eni)).To(Succeed()) })
+		eni.Status.Phase = networkv1beta1.ENIPhaseDetaching
+		Expect(k8sClient.Status().Update(ctx, eni)).To(Succeed())
+
+		aliyun := mocks.NewOpenAPI(GinkgoT())
+		aliyun.On("DescribeNetworkInterfaceV2", mock.Anything, &aliyunClient.DescribeNetworkInterfaceOptions{
+			NetworkInterfaceIDs: &[]string{eniID},
+			RawStatus:           ptr.To(true),
+		}).Return([]*aliyunClient.NetworkInterface{{
+			NetworkInterfaceID: eniID,
+			Status:             aliyunClient.ENIStatusAvailable,
+		}}, nil).Once()
+		r := &ReconcileNetworkInterface{client: k8sClient, aliyun: aliyun, resourceBackoff: NewBackoffManager()}
+
+		key := client.ObjectKeyFromObject(eni)
+		result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.IsZero()).To(BeTrue())
+		Expect(k8sClient.Get(ctx, key, eni)).To(Succeed())
+		Expect(eni.Status.Phase).To(Equal(networkv1beta1.Phase(networkv1beta1.ENIPhaseUnbind)))
+		Expect(eni.Spec.ENI.ID).To(Equal(eniID))
+		Expect(eni.Spec.IPv4).To(Equal("192.0.2.1"))
+		Expect(eni.Labels).NotTo(HaveKey(terwayTypes.ENIRelatedNodeName))
+	})
+
 	Context("attach eni test", func() {
 		eniID := "eni-attach"
 		instanceID := "i-attach"
