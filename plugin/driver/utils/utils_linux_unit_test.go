@@ -1203,3 +1203,58 @@ func countVlanFilters(filters []netlink.Filter, proto uint16, priority uint16) i
 	}
 	return n
 }
+
+// TestGetERdmaFromLink_Matching verifies candidate order and caller-owned MAC
+// preservation without requiring an RDMA device or a network namespace.
+func TestGetERdmaFromLink_Matching(t *testing.T) {
+	match := &netlink.RdmaLink{Attrs: netlink.RdmaLinkAttrs{
+		Name: "erdma-target", NodeGuid: "26:98:39:fe:ff:3e:16:02",
+	}}
+	other := &netlink.RdmaLink{Attrs: netlink.RdmaLinkAttrs{
+		Name: "erdma-other", NodeGuid: "27:98:39:fe:ff:3e:16:02",
+	}}
+	invalid := &netlink.RdmaLink{Attrs: netlink.RdmaLinkAttrs{
+		Name: "erdma-invalid", NodeGuid: "invalid",
+	}}
+	for _, tt := range []struct {
+		name    string
+		links   []*netlink.RdmaLink
+		listErr error
+		want    *netlink.RdmaLink
+		wantErr string
+	}{
+		{name: "first", links: []*netlink.RdmaLink{match, other}, want: match},
+		{name: "second", links: []*netlink.RdmaLink{other, match}, want: match},
+		{name: "third", links: []*netlink.RdmaLink{other, other, match}, want: match},
+		{name: "fourth", links: []*netlink.RdmaLink{other, other, other, match}, want: match},
+		{name: "empty", wantErr: "cannot found rdma link for eth1"},
+		{name: "no match odd", links: []*netlink.RdmaLink{other}, wantErr: "cannot found rdma link for eth1"},
+		{name: "no match even", links: []*netlink.RdmaLink{other, other}, wantErr: "cannot found rdma link for eth1"},
+		{name: "invalid guid after mismatch", links: []*netlink.RdmaLink{other, invalid}, wantErr: "invalid rdma guid: invalid"},
+		{name: "list error", listErr: fmt.Errorf("rdma unavailable"), wantErr: "error list rdma links, rdma unavailable"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			original := net.HardwareAddr{0x00, 0x16, 0x3e, 0x39, 0x98, 0x26}
+			link := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{
+				Name: "eth1", HardwareAddr: append(net.HardwareAddr(nil), original...),
+			}}
+			patches := gomonkey.ApplyFunc(netlink.RdmaLinkList, func() ([]*netlink.RdmaLink, error) {
+				return tt.links, tt.listErr
+			})
+			t.Cleanup(patches.Reset)
+
+			// Reusing the same link must yield the same result on each call.
+			for i := 0; i < 3; i++ {
+				got, err := GetERdmaFromLink(link)
+				assert.Equal(t, original, link.Attrs().HardwareAddr, "call %d changed the input MAC", i)
+				if tt.wantErr != "" {
+					require.EqualError(t, err, tt.wantErr)
+					require.Nil(t, got)
+				} else {
+					require.NoError(t, err)
+					require.Same(t, tt.want, got)
+				}
+			}
+		})
+	}
+}

@@ -905,7 +905,7 @@ func GetERdmaFromLink(link netlink.Link) (*netlink.RdmaLink, error) {
 		if err != nil {
 			return nil, err
 		}
-		linkHwAddr := link.Attrs().HardwareAddr
+		linkHwAddr := append(net.HardwareAddr(nil), link.Attrs().HardwareAddr...)
 		// erdma guid first byte is ^= 0x2
 		linkHwAddr[0] ^= 0x2
 		if rdmaHwAddr.String() == linkHwAddr.String() {
