@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eni-config
+  namespace: kube-system
+data:
+  eni_conf: |
+    {
+      "version": "1",
+      "max_pool_size": 5,
+      "min_pool_size": 0,
+      "credential_path": "/var/addon/token-config",
+      "vswitches": {{.PodVswitchId}},
+      "eni_tags": {"ack.aliyun.com":"{{.ClusterID}}"},
+      "service_cidr": "{{.ServiceCIDR}}",
+      "security_group": "{{.SecurityGroupId}}",
+      "ip_stack": "{{.IPStack}}",
+      "vswitch_selection_policy": "ordered"
+    }
+  10-terway.conf: |
+    {
+      "cniVersion": "0.4.0",
+      "name": "terway",
+      "capabilities": {"bandwidth": true},
+      "network_policy_provider": "ebpf",
+{{if .Datapath}}
+      "eniip_virtual_type": "datapathv2",
+      "host_stack_cidrs": ["169.254.20.10/32"],
+{{end}}
+      "type": "terway"
+    }
+  disable_network_policy: "{{.DisableNetworkPolicy}}"
+  in_cluster_loadbalance: "true"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: terway-controlplane
+  namespace: kube-system
+data:
+  ctrl-config.yaml: |
+    leaseLockName: "terway-controller-lock"
+    leaseLockNamespace: "kube-system"
+    controllerNamespace: "kube-system"
+    controllerName: "terway-controlplane"
+    healthzBindAddress: "0.0.0.0:8080"
+    clusterDomain: "cluster.local"
+    leaderElection: true
+    webhookPort: 0
+    disableWebhook: true
+    certDir: "/var/run/webhook-cert"
+    regionID: "{{ .RegionID }}"
+    clusterID: "{{ .ClusterID }}"
+    vpcID: "{{ .VPCID }}"
+    ipStack: "{{ .IPStack }}"
+    enableTrunk: false
+    enableTrace: false
+    metricsBindAddress: "0"
+    centralizedIPAM: true
+    controllers:
+    - pod-eni
+    - pod
+    - pod-networking
+    - node
+    - multi-ip-node
+    - multi-ip-pod
+  cilium-config.yaml: |
+    k8s-namespace: kube-system
+    identity-gc-interval: 10m
+    identity-heartbeat-timeout: 20m
+    enable-gops: false
+    ipam: delegated-plugin
+    enable-cilium-endpoint-slice: true
+    set-cilium-node-taints: false
+    set-cilium-is-up-condition: false
+    remove-cilium-node-taints: false
+    k8s-client-qps: 20
+    k8s-client-burst: 30
+    operator-api-serve-addr: 127.0.0.1:9234
+    unmanaged-pod-watcher-interval: 0
