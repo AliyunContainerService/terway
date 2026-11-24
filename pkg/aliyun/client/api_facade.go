@@ -74,6 +74,9 @@ func (a *APIFacade) DescribeNetworkInterfaceV2(ctx context.Context, opts ...Desc
 				}
 				return nil, err
 			}
+			if ni == nil {
+				return nil, nil
+			}
 			return []*NetworkInterface{ni}, nil
 		}
 		return a.ecsService.DescribeNetworkInterface2(ctx, opts...)

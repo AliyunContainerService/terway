@@ -991,6 +991,34 @@ func TestAPIFacade_DescribeNetworkInterfaceV2_ENIAttributeBasicPath(t *testing.T
 		assert.Equal(t, "eni-test-001", result[0].NetworkInterfaceID)
 	})
 
+	t.Run("ECS with ENIAttributeBasic enabled single ENI - nil response", func(t *testing.T) {
+		wasEnabled := utilfeature.DefaultFeatureGate.Enabled("ENIAttributeBasic")
+		require.NoError(t, utilfeature.DefaultMutableFeatureGate.Set("ENIAttributeBasic=true"))
+		t.Cleanup(func() {
+			require.NoError(t, utilfeature.DefaultMutableFeatureGate.Set(fmt.Sprintf("ENIAttributeBasic=%t", wasEnabled)))
+		})
+
+		calls := 0
+		patches := gomonkey.ApplyMethod(reflect.TypeOf(facade.GetECS()), "DescribeNetworkInterfaceAttribute",
+			func(_ *client.ECSService, _ context.Context, eniID string) (*client.NetworkInterface, error) {
+				calls++
+				assert.Equal(t, eniIDs[0], eniID)
+				// A successful response containing only RequestId is converted to nil, nil.
+				return nil, nil
+			})
+		t.Cleanup(patches.Reset)
+
+		rawStatus := true
+		ctx := client.SetBackendAPI(context.Background(), client.BackendAPIECS)
+		result, err := facade.DescribeNetworkInterfaceV2(ctx, &client.DescribeNetworkInterfaceOptions{
+			NetworkInterfaceIDs: &eniIDs,
+			RawStatus:           &rawStatus,
+		})
+		require.NoError(t, err)
+		assert.Empty(t, result, "a missing ENI must not produce a slice containing a nil entry")
+		assert.Equal(t, 1, calls)
+	})
+
 	t.Run("ECS with ENIAttributeBasic enabled single ENI - not found", func(t *testing.T) {
 		require.NoError(t, utilfeature.DefaultMutableFeatureGate.Set("ENIAttributeBasic=true"))
 		defer utilfeature.DefaultMutableFeatureGate.Set("ENIAttributeBasic=false")
